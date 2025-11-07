@@ -192,23 +192,9 @@ If you encounter issues during installation:
 
 For more details, see the [Setup Guide](docs/SETUP.md).
 
-## Security Considerations
-
-This framework is designed for authorized security testing and should only be deployed in controlled environments with proper authorization. Key security features include:
-
-- All communications encrypted with TLS
-- No hardcoded credentials
-- Secure random generation for all secrets
-- Comprehensive audit logging
-- Session isolation
-
-## Contributing
-
-This is a private project. Contributions are restricted to authorized team members only.
-
 ## License
 
-Proprietary - All Rights Reserved
+MIT
 
 ## Disclaimer
 
@@ -224,6 +210,6 @@ This software is provided for authorized security testing purposes only. Users a
 
 **Quick Start Command:**
 ```bash
-# One-command setup (from project root)
-cd scripts && sudo ./setup.sh
+cd scripts
+sudo ./setup.sh
 ```
