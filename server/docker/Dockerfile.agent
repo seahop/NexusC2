@@ -1,0 +1,27 @@
+# Dockerfile.agent
+
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy the pre-built binary
+COPY ./bin/agent-handler-service .
+RUN apk add --no-cache ca-certificates
+
+# Create configs directory and copy configs
+#COPY ../configs /app/configs/
+
+# Create certs directory and copy certificates
+RUN mkdir -p /app/certs
+COPY ./bin/certs/web_server.crt /app/certs/
+COPY ./bin/certs/web_server.key /app/certs/
+COPY ./bin/certs/web_server.csr /app/certs/
+COPY ./bin/certs/rpc_server.crt /app/certs/
+COPY ./bin/certs/rpc_server.key /app/certs/
+COPY ./bin/certs/rpc_server.csr /app/certs/
+COPY ./bin/config.toml /app/
+
+# Ensure the binary is executable
+RUN chmod +x agent-handler-service
+
+CMD ["./agent-handler-service"]

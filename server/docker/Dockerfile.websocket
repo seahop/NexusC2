@@ -1,0 +1,54 @@
+# Dockerfile.websocket
+
+FROM alpine:latest
+
+WORKDIR /app
+
+# Install Docker and dependencies
+RUN apk add --no-cache \
+    docker \
+    docker-cli \
+    curl \
+    bash
+
+# Install Docker Compose V2 as a Docker CLI plugin
+RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
+    curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose && \
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# Also install standalone docker-compose for compatibility
+RUN curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+    -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
+
+# Test that docker compose works
+RUN docker --version && \
+    docker-compose --version && \
+    /usr/local/lib/docker/cli-plugins/docker-compose version
+
+# Copy the pre-built binary
+COPY ./bin/websocket-service .
+
+# Create certs directory and copy certificates
+RUN mkdir -p /app/certs
+COPY ./bin/certs/ws_server.crt /app/certs/
+COPY ./bin/certs/ws_server.key /app/certs/
+COPY ./bin/certs/ws_server.csr /app/certs/
+COPY ./bin/certs/rpc_server.crt /app/certs/
+COPY ./bin/certs/rpc_server.key /app/certs/
+COPY ./bin/certs/rpc_server.csr /app/certs/
+COPY ./bin/config.toml /app/
+
+# Copy docker-compose and builder files for payload building
+COPY docker-compose.yml /app/docker-compose.yml
+COPY Dockerfile.builder /app/Dockerfile.builder
+COPY payloads /app/payloads/
+
+# Ensure the binary is executable
+RUN chmod +x websocket-service
+
+# Set the working directory to /app so docker-compose can find its files
+WORKDIR /app
+
+CMD ["./websocket-service"]

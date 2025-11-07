@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C2 System Architecture - Corrected</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #e0e0e0;
+            overflow-x: auto;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(26, 26, 46, 0.6);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+            font-size: 2.5em;
+        }
+        
+        svg {
+            width: 100%;
+            height: auto;
+            min-height: 800px;
+        }
+        
+        .component {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .component:hover .component-box {
+            filter: drop-shadow(0 0 15px rgba(0, 212, 255, 0.8));
+        }
+        
+        .connection {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+        
+        .legend {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+        }
+        
+        .legend h3 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin: 10px 20px 10px 0;
+        }
+        
+        .legend-line {
+            display: inline-block;
+            width: 40px;
+            height: 3px;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            pointer-events: none;
+            display: none;
+            z-index: 1000;
+            border: 1px solid #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 C2 System Architecture</h1>
+        
+        <svg viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <!-- Define gradients -->
+                <linearGradient id="dbGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#c92a2a;stop-opacity:1" />
+                </linearGradient>
+                
+                <linearGradient id="wsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#4dabf7;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#1864ab;stop-opacity:1" />
+                </linearGradient>
+                
+                <linearGradient id="agentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#69db7c;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#2b8a3e;stop-opacity:1" />
+                </linearGradient>
+                
+                <linearGradient id="authGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ffd43b;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#fab005;stop-opacity:1" />
+                </linearGradient>
+                
+                <linearGradient id="builderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#e599f7;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#9c36b5;stop-opacity:1" />
+                </linearGradient>
+                
+                <linearGradient id="clientGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#74c0fc;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#364fc7;stop-opacity:1" />
+                </linearGradient>
+                
+                <!-- Define arrow markers -->
+                <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#00d4ff" />
+                </marker>
+                
+                <marker id="arrow-grpc" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#69db7c" />
+                </marker>
+                
+                <marker id="arrow-db" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#ff6b6b" />
+                </marker>
+            </defs>
+            
+            <!-- Database Server -->
+            <g class="component" data-info="PostgreSQL Database - Stores all persistent data including agents, connections, tasks, user sessions, and listeners">
+                <rect class="component-box" x="500" y="50" width="200" height="80" rx="10" fill="url(#dbGradient)" />
+                <text x="600" y="85" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Database Server</text>
+                <text x="600" y="105" text-anchor="middle" fill="white" font-size="12">(PostgreSQL)</text>
+                <text x="600" y="120" text-anchor="middle" fill="white" font-size="10">Port: 5432</text>
+            </g>
+            
+            <!-- WebSocket Service -->
+            <g class="component" data-info="WebSocket Service - Handles real-time communication with Python clients, manages user sessions based on username, invokes builder, and routes commands">
+                <rect class="component-box" x="250" y="250" width="200" height="120" rx="10" fill="url(#wsGradient)" />
+                <text x="350" y="285" text-anchor="middle" fill="white" font-weight="bold" font-size="16">WebSocket Service</text>
+                <text x="350" y="305" text-anchor="middle" fill="white" font-size="12">Real-time Hub</text>
+                <text x="350" y="325" text-anchor="middle" fill="white" font-size="10">Port: 3131 (WSS/TLS)</text>
+                <text x="350" y="345" text-anchor="middle" fill="white" font-size="10">gRPC Client</text>
+                <text x="350" y="360" text-anchor="middle" fill="white" font-size="10">Builder Invoker</text>
+            </g>
+            
+            <!-- Agent Handler -->
+            <g class="component" data-info="Agent Handler - Manages agent connections, processes agent callbacks, handles tasks, runs listeners on configured ports">
+                <rect class="component-box" x="750" y="250" width="200" height="120" rx="10" fill="url(#agentGradient)" />
+                <text x="850" y="285" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Agent Handler</text>
+                <text x="850" y="305" text-anchor="middle" fill="white" font-size="12">Listener Manager</text>
+                <text x="850" y="325" text-anchor="middle" fill="white" font-size="10">gRPC Server: 50051</text>
+                <text x="850" y="345" text-anchor="middle" fill="white" font-size="10">HTTP/HTTPS Listeners</text>
+                <text x="850" y="360" text-anchor="middle" fill="white" font-size="10">Async Processor</text>
+            </g>
+            
+            <!-- Docker Builder -->
+            <g class="component" data-info="Docker Builder - Container-based payload generation system, builds agent binaries for different OS/arch combinations on demand">
+                <rect class="component-box" x="50" y="450" width="200" height="80" rx="10" fill="url(#builderGradient)" />
+                <text x="150" y="485" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Docker Builder</text>
+                <text x="150" y="505" text-anchor="middle" fill="white" font-size="12">Payload Generator</text>
+                <text x="150" y="520" text-anchor="middle" fill="white" font-size="10">On-demand builds</text>
+            </g>
+            
+            <!-- Python Client -->
+            <g class="component" data-info="Python3 Client - GUI application for operators, authenticates and connects via WebSocket for real-time command & control">
+                <rect class="component-box" x="250" y="650" width="200" height="80" rx="10" fill="url(#clientGradient)" />
+                <text x="350" y="685" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Python3 Client</text>
+                <text x="350" y="705" text-anchor="middle" fill="white" font-size="12">Operator GUI</text>
+                <text x="350" y="720" text-anchor="middle" fill="white" font-size="10">WSS Connection</text>
+            </g>
+            
+            <!-- Agents -->
+            <g class="component" data-info="Deployed Agents - Execute on target systems, communicate back to Agent Handler via HTTP/HTTPS listeners">
+                <rect class="component-box" x="750" y="650" width="200" height="80" rx="10" fill="#495057" />
+                <text x="850" y="685" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Deployed Agents</text>
+                <text x="850" y="705" text-anchor="middle" fill="white" font-size="12">Target Systems</text>
+                <text x="850" y="720" text-anchor="middle" fill="white" font-size="10">HTTP/HTTPS Callbacks</text>
+            </g>
+            
+            <!-- Connection Lines -->
+            
+            <!-- Two-way DB connections for WebSocket -->
+            <path d="M 400 250 L 550 130" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
+            <path d="M 545 135 L 395 255" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
+            <text x="475" y="185" fill="#ff6b6b" font-size="10">R/W</text>
+            
+            <!-- Two-way DB connections for Agent Handler -->
+            <path d="M 800 250 L 650 130" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
+            <path d="M 655 135 L 805 255" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
+            <text x="725" y="185" fill="#ff6b6b" font-size="10">R/W</text>
+            
+            <!-- WebSocket to Client (includes auth) -->
+            <path d="M 350 370 L 350 650" stroke="#4dabf7" stroke-width="3" marker-end="url(#arrow)" />
+            <path d="M 340 645 L 340 375" stroke="#4dabf7" stroke-width="3" marker-end="url(#arrow)" />
+            <text x="360" y="510" fill="#4dabf7" font-size="11">WSS/TLS + Username</text>
+            <text x="360" y="525" fill="#4dabf7" font-size="10">(Port 3131)</text>
+            
+            <!-- gRPC Bidirectional Connection -->
+            <path d="M 450 310 Q 600 310, 750 310" stroke="#69db7c" stroke-width="3" fill="none" marker-end="url(#arrow-grpc)" stroke-dasharray="8,4" />
+            <path d="M 745 300 Q 600 300, 455 300" stroke="#69db7c" stroke-width="3" fill="none" marker-end="url(#arrow-grpc)" stroke-dasharray="8,4" />
+            <text x="600" y="295" text-anchor="middle" fill="#69db7c" font-size="11">gRPC BiDi Stream</text>
+            <text x="600" y="310" text-anchor="middle" fill="#69db7c" font-size="10">(Port 50051)</text>
+            
+            <!-- Agent Handler to Agents (bidirectional) -->
+            <path d="M 850 370 L 850 650" stroke="#2b8a3e" stroke-width="3" marker-end="url(#arrow)" />
+            <path d="M 840 645 L 840 375" stroke="#2b8a3e" stroke-width="3" marker-end="url(#arrow)" />
+            <text x="860" y="510" fill="#2b8a3e" font-size="11">HTTP/HTTPS</text>
+            <text x="860" y="525" fill="#2b8a3e" font-size="10">Callbacks</text>
+            
+            <!-- WebSocket to Builder (one-way) -->
+            <path d="M 250 310 Q 150 380, 150 450" stroke="#e599f7" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="5,5" />
+            <text x="140" y="380" fill="#e599f7" font-size="10">Build Request</text>
+            
+
+            <!-- Message Flow Annotations -->
+            <g>
+                <text x="100" y="770" fill="#00d4ff" font-size="14" font-weight="bold">Message Flow:</text>
+                <text x="100" y="790" fill="#e0e0e0" font-size="12">1. Client → WebSocket: TLS + Username Header</text>
+                <text x="100" y="810" fill="#e0e0e0" font-size="12">2. WebSocket ↔ Database: Session/Task Management</text>
+                <text x="100" y="830" fill="#e0e0e0" font-size="12">3. WebSocket ↔ Agent Handler: Task Dispatch (gRPC)</text>
+                <text x="100" y="850" fill="#e0e0e0" font-size="12">4. Agent ↔ Agent Handler: Callbacks/Results</text>
+                <text x="100" y="870" fill="#e0e0e0" font-size="12">5. Agent Handler ↔ Database: Agent State</text>
+            </g>
+            
+            <!-- Port Information -->
+            <g>
+                <text x="600" y="770" fill="#00d4ff" font-size="14" font-weight="bold">Network Ports:</text>
+                <text x="600" y="790" fill="#e0e0e0" font-size="12">• PostgreSQL: 5432 (Internal)</text>
+                <text x="600" y="810" fill="#e0e0e0" font-size="12">• WebSocket: 3131 (WSS/TLS)</text>
+                <text x="600" y="830" fill="#e0e0e0" font-size="12">• gRPC: 50051 (Internal)</text>
+                <text x="600" y="850" fill="#e0e0e0" font-size="12">• HTTP/HTTPS Listeners: Dynamic</text>
+            </g>
+        </svg>
+        
+        <div class="legend">
+            <h3>Connection Types</h3>
+            <div class="legend-item">
+                <span class="legend-line" style="background: #ff6b6b;"></span>
+                Database Connection (Bidirectional SQL)
+            </div>
+            <div class="legend-item">
+                <span class="legend-line" style="background: #4dabf7;"></span>
+                WebSocket (WSS/TLS - Bidirectional)
+            </div>
+            <div class="legend-item">
+                <span class="legend-line" style="background: #69db7c;"></span>
+                gRPC Bidirectional Stream
+            </div>
+            <div class="legend-item">
+                <span class="legend-line" style="background: #2b8a3e;"></span>
+                HTTP/HTTPS (Bidirectional)
+            </div>
+            <div class="legend-item">
+                <span class="legend-line" style="background: #e599f7; background-image: repeating-linear-gradient(90deg, #e599f7, #e599f7 5px, transparent 5px, transparent 10px);"></span>
+                Docker Build Operations
+            </div>
+    </div>
+    
+    <div class="tooltip" id="tooltip"></div>
+    
+    <script>
+        // Add interactive tooltips
+        document.querySelectorAll('.component').forEach(component => {
+            component.addEventListener('mouseenter', (e) => {
+                const info = e.currentTarget.getAttribute('data-info');
+                const tooltip = document.getElementById('tooltip');
+                tooltip.textContent = info;
+                tooltip.style.display = 'block';
+            });
+            
+            component.addEventListener('mousemove', (e) => {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.style.left = e.pageX + 10 + 'px';
+                tooltip.style.top = e.pageY + 10 + 'px';
+            });
+            
+            component.addEventListener('mouseleave', () => {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.style.display = 'none';
+            });
+        });
+        
+        // Add animation to connection lines
+        const paths = document.querySelectorAll('line, path');
+        paths.forEach(path => {
+            if (path.tagName === 'path' && path.getAttribute('d')) {
+                const length = path.getTotalLength ? path.getTotalLength() : 1000;
+                path.style.strokeDasharray = length;
+                path.style.strokeDashoffset = length;
+                path.style.animation = `drawPath 2s ease-in-out forwards`;
+            }
+        });
+        
+        // Add CSS animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes drawPath {
+                to {
+                    stroke-dashoffset: 0;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>

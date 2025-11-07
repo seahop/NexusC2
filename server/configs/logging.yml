@@ -1,0 +1,77 @@
+# server/configs/logging.yaml
+# Configuration for command logging
+
+logging:
+  # Enable or disable command logging
+  enabled: true
+  
+  # Directory where log files will be stored
+  log_directory: "/app/logs/commands"
+  
+  # Maximum size of a single log file before rotation (in bytes)
+  # Default: 104857600 (100MB)
+  max_file_size: 104857600
+  
+  # Maximum length of command output to log (in characters)
+  # Longer outputs will be truncated
+  max_output_length: 2000
+  
+  # Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  log_level: "INFO"
+  
+  # Enable daily log rotation
+  daily_rotation: true
+  
+  # Log to stdout in addition to file (useful for development)
+  log_to_stdout: false
+  
+  # Specific command types to always log in full
+  always_log_commands:
+    - "bof"
+    - "execute-assembly"
+    - "upload"
+    - "download"
+    - "shell"
+    - "powershell"
+  
+  # Commands to never log (for sensitive operations)
+  exclude_commands:
+    - "clear"
+    - "exit"
+  
+  # Redact sensitive information
+  redaction:
+    enabled: false
+    patterns:
+      - "password"
+      - "passwd"
+      - "token"
+      - "apikey"
+      - "secret"
+  
+  # Archive settings
+  archive:
+    enabled: true
+    # Compress logs older than N days
+    compress_after_days: 7
+    # Delete logs older than N days
+    delete_after_days: 30
+    # Archive directory
+    archive_directory: "/app/logs/archive"
+
+# HTTP API endpoints for log management
+api:
+  # Enable HTTP endpoints for log access
+  enabled: true
+  
+  # Endpoints will be available at:
+  # GET  /logs/status     - Check logger status
+  # GET  /logs/files      - List available log files
+  # GET  /logs/export     - Export logs as JSON
+  # GET  /logs/search     - Search logs (if implemented)
+  
+  # Authentication for log endpoints
+  auth_required: true
+  
+  # Maximum number of log entries to return in a single request
+  max_entries: 1000

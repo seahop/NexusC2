@@ -1,0 +1,150 @@
+services:
+  database:
+    network_mode: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+      args:
+        DB_PASSWORD: ${DB_PASSWORD}
+    container_name: database
+    environment:
+      POSTGRES_DB: ops
+      POSTGRES_USER: postgres   
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    env_file:
+      - db/.secrets/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data 
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  websocket:
+    network_mode: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile.websocket
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      CONFIG_FILE: /app/config.toml
+      HOST_PAYLOADS_PATH: ${PWD}/payloads
+    env_file:
+      - db/.secrets/.env
+    volumes:
+      - /shared:/shared
+      - ./downloads:/app/downloads
+      - ./uploads:/app/uploads
+      - ./temp:/app/temp
+      - ./logs:/app/logs 
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./payloads:/app/payloads:ro
+      - ${PWD}/payloads:${PWD}/payloads:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:3131/health"] 
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agent-handler:
+    network_mode: "host"
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      CONFIG_FILE: /app/configs/agent.yaml
+    env_file:
+      - db/.secrets/.env
+    volumes:
+      - /shared:/shared
+      - ./temp:/app/temp
+      - ./downloads:/app/downloads
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  builder:
+    image: docker_builder:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
+    network_mode: "host"
+    hostname: builder
+    container_name: builder
+    volumes:
+      - /shared:/shared
+      - ./payloads/Darwin:/build/Darwin:ro
+      - ./payloads/Linux:/build/Linux:ro
+      - ./payloads/Windows:/build/Windows:ro
+      - ./payloads/shared:/build/shared:ro
+    environment:
+      - BUILD=FALSE
+      - GOPROXY=https://proxy.golang.org,direct
+      - CGO_ENABLED=0
+      - OS=linux
+      - ARCH=amd64
+      - XOR_KEY=dummy_xor_key
+      - OUTPUT_FILENAME=test_binary
+      - CLIENTID=test_client
+      - GET_ROUTE=/api/v1/myget
+      - POST_ROUTE=/api/v1/mypost
+      - GET_CLIENT_ID_NAME=client
+      - GET_CLIENT_ID_FORMAT=%CLIENTID%
+      - POST_CLIENT_ID_NAME=client
+      - POST_CLIENT_ID_FORMAT=%CLIENTID%
+      - POST_SECRET_NAME=id
+      - POST_SECRET_FORMAT=%SECRET%
+      - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+      - CONTENT_TYPE=application/json
+      - CUSTOM_HEADERS={"Accept":"*/*","Accept-Language":"en-US,en;q=0.9","Connection":"close","X-Custom-Header":"custom-value","X-Forward-For":"127.0.0.1"}
+      - SLEEP=20
+      - JITTER=10
+      - PUBLIC_KEY=dummy_public_key
+      - SECRET=dummy_secret
+      - PROTOCOL=https
+      - IP=127.0.0.1
+      - PORT=8443
+      - TOGGLE_CHECK_ENVIRONMENT=false
+      - TOGGLE_CHECK_TIME_DISCREPANCY=false
+      - TOGGLE_CHECK_MEMORY_PATTERNS=false
+      - TOGGLE_CHECK_PARENT_PROCESS=false
+      - TOGGLE_CHECK_LOADED_LIBRARIES=false
+      - TOGGLE_CHECK_DOCKER_CONTAINER=false
+      - TOGGLE_CHECK_PROCESS_LIST=false
+    privileged: true
+    restart: "no"
+    
+volumes:
+  shared:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /shared
+  postgres_data:
+    name: ops_db_data
+    driver: local
