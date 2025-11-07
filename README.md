@@ -137,16 +137,17 @@ python main.py
 │   └── gen_default_certs.sh
 ├── docs/
 │   ├── SETUP.md           # Detailed installation guide
+│   ├── LOGVIEWER.md       # Details for logviewer executable
 │   └── c2-architecture.html
 ├── server/
 │   ├── cmd/               # Service entry points
-│   ├── internal/          # Core business logic
+│   ├── internal/          # Core C2 services logic
 │   ├── docker/            # Docker configurations
+│   │    └── payloads/     # Agent source code
 │   └── configs/           # Service configurations
 ├── client/
 │   ├── src/               # Python GUI source
 │   └── certs/             # Client certificates
-└── payloads/              # Agent source code
 ```
 
 ## Services
