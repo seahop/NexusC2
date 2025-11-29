@@ -1,13 +1,46 @@
 # widgets/downloads.py
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget,
                            QTableWidgetItem, QHeaderView, QMenu, QMessageBox,
                            QFileDialog)
-from PyQt6.QtCore import pyqtSlot, Qt
+from PyQt6.QtCore import pyqtSlot, Qt, QThread, pyqtSignal
 from datetime import datetime
 import os
 import json
 import base64
 import asyncio
+
+
+class FileAssemblyWorker(QThread):
+    """Worker thread for assembling downloaded files without blocking GUI."""
+    finished = pyqtSignal(str, bool, str)  # filename, success, message
+
+    def __init__(self, filename, chunks, folder):
+        super().__init__()
+        self.filename = filename
+        self.chunks = chunks
+        self.folder = folder
+
+    def run(self):
+        """Assemble file in background thread with streaming base64 decode."""
+        try:
+            sorted_chunks = sorted(self.chunks, key=lambda x: x[0])
+            filepath = os.path.join(self.folder, self.filename)
+
+            # Stream decode and write chunks to avoid memory spike
+            with open(filepath, 'wb') as f:
+                for _, chunk_data in sorted_chunks:
+                    # Decode each chunk individually instead of holding all in memory
+                    decoded_chunk = base64.b64decode(chunk_data)
+                    f.write(decoded_chunk)
+                    # Clear reference to allow GC
+                    del decoded_chunk
+
+            self.finished.emit(self.filename, True,
+                             f"File downloaded successfully to {filepath}")
+        except Exception as e:
+            self.finished.emit(self.filename, False,
+                             f"Failed to save file: {str(e)}")
+
 
 class DownloadsWidget(QWidget):
     def __init__(self, ws_thread=None):
@@ -22,7 +55,8 @@ class DownloadsWidget(QWidget):
         
         # Track current downloads
         self.current_downloads = {}
-        self.download_folder = None  
+        self.download_folder = None
+        self.assembly_workers = {}  # Track active worker threads  
 
     def initUI(self):
         layout = QVBoxLayout()
@@ -164,25 +198,26 @@ class DownloadsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error handling file chunk: {e}")
 
-            
     def assemble_file(self, filename, download, folder):
-        try:
-            sorted_chunks = sorted(download['chunks'], key=lambda x: x[0])
-            filepath = os.path.join(folder, filename)
-            
-            with open(filepath, 'wb') as f:
-                for _, chunk_data in sorted_chunks:
-                    f.write(base64.b64decode(chunk_data))
-            
-            QMessageBox.information(self, "Success", 
-                f"File downloaded successfully to {filepath}")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", 
-                f"Failed to save file: {str(e)}")
-        finally:
-            # Clean up tracking data
+        """Start file assembly in worker thread."""
+        # Create worker thread for file assembly
+        worker = FileAssemblyWorker(filename, download['chunks'], folder)
+        worker.finished.connect(self.on_assembly_complete)
+        self.assembly_workers[filename] = worker
+        worker.start()
+
+    def on_assembly_complete(self, filename, success, message):
+        """Handle completion of file assembly from worker thread."""
+        if success:
+            QMessageBox.information(self, "Success", message)
+        else:
+            QMessageBox.critical(self, "Error", message)
+
+        # Clean up
+        if filename in self.current_downloads:
             del self.current_downloads[filename]
+        if filename in self.assembly_workers:
+            del self.assembly_workers[filename]
 
     def set_ws_thread(self, ws_thread):
         """Update websocket thread reference"""

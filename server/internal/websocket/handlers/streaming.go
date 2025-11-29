@@ -2,6 +2,8 @@
 package handlers
 
 import (
+	"bytes"
+	"c2/internal/websocket/pool"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,9 +53,15 @@ func (h *WSHandler) streamChunkedOutput(resultData map[string]interface{}, outpu
 	startMsg.Data.Timestamp = timestamp
 	startMsg.Data.Status = status
 
-	if startJSON, err := json.Marshal(startMsg); err == nil {
+	// Use buffer pool for JSON encoding
+	bufPool := pool.GetBufferPool()
+	buf := bufPool.Get(4096)
+	defer bufPool.Put(buf)
+
+	encoder := json.NewEncoder(bytes.NewBuffer((*buf)[:0]))
+	if err := encoder.Encode(startMsg); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		h.hub.BroadcastToAll(ctx, startJSON)
+		h.hub.BroadcastToAll(ctx, *buf)
 		cancel()
 	}
 
@@ -71,6 +79,9 @@ func (h *WSHandler) streamChunksWithRateLimit(sessionID, agentID, jobID, output 
 	// Rate limiter - max 100 chunks per second
 	rateLimiter := time.NewTicker(10 * time.Millisecond)
 	defer rateLimiter.Stop()
+
+	// Get buffer pool for JSON encoding
+	bufPool := pool.GetBufferPool()
 
 	totalSize := len(output)
 
@@ -140,11 +151,15 @@ func (h *WSHandler) streamChunksWithRateLimit(sessionID, agentID, jobID, output 
 			chunkMsg = msg
 		}
 
-		if chunkJSON, err := json.Marshal(chunkMsg); err == nil {
+		// Use buffer pool for encoding
+		buf := bufPool.Get(16384) // 16KB buffer for chunk messages
+		encoder := json.NewEncoder(bytes.NewBuffer((*buf)[:0]))
+		if err := encoder.Encode(chunkMsg); err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			h.hub.BroadcastToAll(ctx, chunkJSON)
+			h.hub.BroadcastToAll(ctx, *buf)
 			cancel()
 		}
+		bufPool.Put(buf)
 
 		// Log progress every 10 chunks
 		if (i+1)%10 == 0 || i == totalChunks-1 {

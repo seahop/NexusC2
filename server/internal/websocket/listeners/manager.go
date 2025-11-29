@@ -334,11 +334,20 @@ func (lm *Manager) IsPortInUse(port int) bool {
 		}
 	}
 
+	// For privileged ports (<1024), we can't reliably test if they're in use
+	// when running as non-root, even with CAP_NET_BIND_SERVICE in some configurations.
+	// Skip the bind test for privileged ports - the agent-handler will handle the actual bind.
+	if port < 1024 {
+		log.Printf("[IsPortInUse] Skipping bind test for privileged port %d (agent-handler will handle bind)", port)
+		return false
+	}
+
 	// Then try to actually bind to the port to check if it's really in use
 	addr := fmt.Sprintf(":%d", port)
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		// Port is in use
+		log.Printf("[IsPortInUse] Port %d appears to be in use: %v", port, err)
 		return true
 	}
 	// Port is free

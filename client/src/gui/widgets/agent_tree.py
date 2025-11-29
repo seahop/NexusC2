@@ -22,11 +22,13 @@ class AgentTreeWidget(QWidget):
         self.agent_data = []
         self.listener_data = []
         self.agent_items = {}  # Store references to tree items
+        self.last_seen_items = {}  # Cache "Last Seen" child items for O(1) lookup
 
         # Setup timer for updating "Last Seen" timestamps
+        # Keep at 1 second for accurate last-seen counter
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_last_seen)
-        self.update_timer.start(1000)  # Update every second
+        self.update_timer.start(1000)  # Update every second for accurate counters
 
         self.setLayout(layout)
         self.current_view = 'agents'
@@ -42,36 +44,67 @@ class AgentTreeWidget(QWidget):
             self.last_seen_timer.stop()
 
     def update_last_seen(self):
-        if self.current_view == 'agents':
-            current_time = QDateTime.currentDateTime()
-            for agent in self.agent_data:
-                if agent.get('deleted'):
-                    continue  # Skip deleted agents
-                if agent['name'] in self.agent_items:
-                    last_seen_time = agent.get('last_seen_timestamp')
-                    if last_seen_time:
-                        seconds = last_seen_time.secsTo(current_time)
+        """Optimized last-seen update using cached child items."""
+        if self.current_view != 'agents':
+            return
 
-                        # Find and update only the "Last Seen" item
-                        tree_item = self.agent_items[agent['name']]
-                        for i in range(tree_item.childCount()):
-                            child = tree_item.child(i)
-                            if child.text(0).startswith('Last Seen:'):
-                                if seconds < 60:
-                                    child.setText(0, f'Last Seen: {seconds} seconds ago')
-                                elif seconds < 3600:
-                                    minutes = seconds // 60
-                                    remaining_seconds = seconds % 60
-                                    child.setText(0, f'Last Seen: {minutes}m {remaining_seconds}s ago')
-                                elif seconds < 86400:  # Less than 24 hours
-                                    hours = seconds // 3600
-                                    minutes = (seconds % 3600) // 60
-                                    child.setText(0, f'Last Seen: {hours}h {minutes}m ago')
-                                else:
-                                    days = seconds // 86400
-                                    hours = (seconds % 86400) // 3600
-                                    child.setText(0, f'Last Seen: {days}d {hours}h ago')
-                                break
+        current_time = QDateTime.currentDateTime()
+
+        # Only update visible, expanded, non-deleted agents
+        for agent in self.agent_data:
+            if agent.get('deleted'):
+                continue
+
+            agent_name = agent['name']
+            if agent_name not in self.agent_items:
+                continue
+
+            tree_item = self.agent_items[agent_name]
+
+            # Skip if item is not expanded (user can't see the Last Seen anyway)
+            if not tree_item.isExpanded():
+                continue
+
+            last_seen_time = agent.get('last_seen_timestamp')
+            if not last_seen_time:
+                continue
+
+            seconds = last_seen_time.secsTo(current_time)
+
+            # Use cached "Last Seen" child item for O(1) access
+            if agent_name in self.last_seen_items:
+                child = self.last_seen_items[agent_name]
+            else:
+                # Cache miss - find and cache it
+                child = None
+                for i in range(tree_item.childCount()):
+                    c = tree_item.child(i)
+                    if c.text(0).startswith('Last Seen:'):
+                        child = c
+                        self.last_seen_items[agent_name] = child
+                        break
+                if not child:
+                    continue
+
+            # Update text (only if changed to avoid unnecessary redraws)
+            if seconds < 60:
+                new_text = f'Last Seen: {seconds} seconds ago'
+            elif seconds < 3600:
+                minutes = seconds // 60
+                remaining_seconds = seconds % 60
+                new_text = f'Last Seen: {minutes}m {remaining_seconds}s ago'
+            elif seconds < 86400:
+                hours = seconds // 3600
+                minutes = (seconds % 3600) // 60
+                new_text = f'Last Seen: {hours}h {minutes}m ago'
+            else:
+                days = seconds // 86400
+                hours = (seconds % 86400) // 3600
+                new_text = f'Last Seen: {days}d {hours}h ago'
+
+            # Only update if text actually changed
+            if child.text(0) != new_text:
+                child.setText(0, new_text)
 
     @pyqtSlot(dict)
     def handle_new_connection(self, conn_data):
@@ -173,12 +206,15 @@ class AgentTreeWidget(QWidget):
         print(f"AgentTreeWidget: show_agents called with {len(self.agent_data)} agents")
         self.tree.clear()
         self.tree.setHeaderLabels(['Agents'])
-        
+
+        # Clear cache since tree is being rebuilt
+        self.last_seen_items.clear()
+
         for agent in self.agent_data:
             print(f"AgentTreeWidget: Processing agent {agent['name']} for display")
             print(f"AgentTreeWidget: Agent details: {agent}")
             self.add_agent_to_tree(agent)
-                
+
         self.current_view = 'agents'
         self.tree.update()
         print("AgentTreeWidget: show_agents complete")

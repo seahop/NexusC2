@@ -44,7 +44,8 @@ type Manager struct {
 	downloadTracker   *DownloadTracker
 	uploadTracker     *UploadTracker
 	socksRoutes       *SocksRoutes
-	asyncEnabled      bool // Add this flag for async processing
+	asyncEnabled      bool              // Add this flag for async processing
+	heartbeatBatcher  *HeartbeatBatcher // Batches lastSEEN updates to reduce DB load
 }
 
 // NewManagerWithOptions creates a manager with optional configurations
@@ -71,7 +72,12 @@ func NewManagerWithOptions(
 		uploadTracker:     NewUploadTracker("/app/temp", "/app/uploads"),
 		socksRoutes:       NewSocksRoutes(),
 		asyncEnabled:      false,
+		heartbeatBatcher:  NewHeartbeatBatcher(db, 5*time.Second), // Batch every 5 seconds
 	}
+
+	// Start the heartbeat batcher background process
+	m.heartbeatBatcher.Start()
+	log.Println("[Manager] Heartbeat batcher started (DB load optimization)")
 
 	// Load existing init data from database
 	if err := m.loadInitDataFromDB(); err != nil {
@@ -415,6 +421,12 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	// Stop all listeners first
 	m.StopAll()
 
+	// Stop heartbeat batcher and flush remaining updates
+	if m.heartbeatBatcher != nil {
+		log.Println("[Manager] Stopping heartbeat batcher...")
+		m.heartbeatBatcher.Stop()
+	}
+
 	// If async is enabled, shutdown the async handler
 	if m.asyncEnabled {
 		if asyncHandler, ok := m.handler.(*AsyncHandler); ok {
@@ -435,6 +447,11 @@ func (m *Manager) GetMetrics() map[string]interface{} {
 	metrics["listeners"] = len(m.listeners)
 	metrics["active_connections"] = len(m.activeConnections.connections)
 	metrics["init_data_count"] = len(m.initData)
+
+	// Add heartbeat batcher metrics
+	if m.heartbeatBatcher != nil {
+		metrics["heartbeat_batcher"] = m.heartbeatBatcher.GetMetrics()
+	}
 
 	if m.asyncEnabled {
 		if asyncHandler, ok := m.handler.(*AsyncHandler); ok {

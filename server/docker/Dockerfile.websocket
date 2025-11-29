@@ -1,54 +1,95 @@
-# Dockerfile.websocket
+# ==============================================================================
+# Stage 1: Docker/Docker-Compose Installer
+# ==============================================================================
+FROM alpine:3.20 AS docker-installer
 
-FROM alpine:latest
+# Install only what's needed to download Docker Compose
+RUN apk add --no-cache curl ca-certificates
+
+# Download Docker Compose plugin and standalone binary
+RUN COMPOSE_VERSION=$(curl -sL https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name"' | cut -d'"' -f4) && \
+    mkdir -p /tmp/docker-cli-plugins && \
+    curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+        -o /tmp/docker-cli-plugins/docker-compose && \
+    chmod +x /tmp/docker-cli-plugins/docker-compose && \
+    cp /tmp/docker-cli-plugins/docker-compose /tmp/docker-compose-standalone
+
+# ==============================================================================
+# Stage 2: Runtime Image
+# ==============================================================================
+FROM alpine:3.20
+
+# Metadata
+LABEL maintainer="NexusC2"
+LABEL description="WebSocket service for NexusC2 C2 framework"
 
 WORKDIR /app
 
-# Install Docker and dependencies
+# Install minimal runtime dependencies in a single layer
+# - docker-cli: For Docker SDK operations
+# - curl: For health checks only
+# - ca-certificates: For TLS validation
 RUN apk add --no-cache \
-    docker \
     docker-cli \
     curl \
-    bash
+    ca-certificates && \
+    # Create docker group with GID 124 (matches host docker group)
+    addgroup -g 124 docker && \
+    # Create non-root user for security
+    addgroup -g 1000 nexus && \
+    adduser -D -u 1000 -G nexus nexus && \
+    # Add nexus user to docker group for Docker socket access
+    adduser nexus docker && \
+    # Create necessary directories
+    mkdir -p /app/certs /app/downloads /app/uploads /app/temp /app/logs /app/payloads && \
+    # Set ownership
+    chown -R nexus:nexus /app && \
+    # Remove apk cache
+    rm -rf /var/cache/apk/*
 
-# Install Docker Compose V2 as a Docker CLI plugin
-RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
-    curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
-    -o /usr/local/lib/docker/cli-plugins/docker-compose && \
-    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+# Copy Docker Compose binaries from installer stage
+COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-compose-standalone /usr/local/bin/docker-compose
 
-# Also install standalone docker-compose for compatibility
-RUN curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
-    -o /usr/local/bin/docker-compose && \
-    chmod +x /usr/local/bin/docker-compose
+# Copy pre-built binary
+COPY --chown=nexus:nexus ./bin/websocket-service /app/websocket-service
 
-# Test that docker compose works
-RUN docker --version && \
-    docker-compose --version && \
-    /usr/local/lib/docker/cli-plugins/docker-compose version
+# Copy certificates (combine into single layer)
+COPY --chown=nexus:nexus ./bin/certs/ws_server.crt \
+                          ./bin/certs/ws_server.key \
+                          ./bin/certs/rpc_server.crt \
+                          ./bin/certs/rpc_server.key \
+                          /app/certs/
 
-# Copy the pre-built binary
-COPY ./bin/websocket-service .
-
-# Create certs directory and copy certificates
-RUN mkdir -p /app/certs
-COPY ./bin/certs/ws_server.crt /app/certs/
-COPY ./bin/certs/ws_server.key /app/certs/
-COPY ./bin/certs/ws_server.csr /app/certs/
-COPY ./bin/certs/rpc_server.crt /app/certs/
-COPY ./bin/certs/rpc_server.key /app/certs/
-COPY ./bin/certs/rpc_server.csr /app/certs/
-COPY ./bin/config.toml /app/
+# Copy configuration
+COPY --chown=nexus:nexus ./bin/config.toml /app/config.toml
 
 # Copy docker-compose and builder files for payload building
-COPY docker-compose.yml /app/docker-compose.yml
-COPY Dockerfile.builder /app/Dockerfile.builder
-COPY payloads /app/payloads/
+COPY --chown=nexus:nexus docker-compose.yml /app/docker-compose.yml
+COPY --chown=nexus:nexus Dockerfile.builder /app/Dockerfile.builder
+COPY --chown=nexus:nexus payloads /app/payloads/
 
-# Ensure the binary is executable
-RUN chmod +x websocket-service
+# Ensure binary is executable
+RUN chmod +x /app/websocket-service
 
-# Set the working directory to /app so docker-compose can find its files
+# Grant capability to bind to privileged ports (< 1024) as non-root
+# This allows the port availability check to test privileged ports without running as root
+RUN apk add --no-cache libcap && \
+    setcap 'cap_net_bind_service=+ep' /app/websocket-service && \
+    apk del libcap
+
+# Switch to non-root user
+USER nexus
+
+# Health check (more efficient than external curl)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fk https://localhost:3131/health || exit 1
+
+# Expose WebSocket port (documentation only)
+EXPOSE 3131
+
+# Set working directory
 WORKDIR /app
 
-CMD ["./websocket-service"]
+# Use exec form to ensure proper signal handling
+CMD ["/app/websocket-service"]

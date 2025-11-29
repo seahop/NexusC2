@@ -140,8 +140,11 @@ func main() {
 		}
 
 		// Configure connection pool
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(10)
+		// Increased from 25 to 50 to prevent connection exhaustion under load
+		// With agent-handler using 50-100 connections, total is 100-150
+		// Ensure PostgreSQL max_connections >= 200
+		db.SetMaxOpenConns(50)
+		db.SetMaxIdleConns(25)
 		db.SetConnMaxLifetime(5 * time.Minute)
 		db.SetConnMaxIdleTime(10 * time.Minute)
 

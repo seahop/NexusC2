@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -30,23 +31,43 @@ type WSHandler struct {
 	workerWg      sync.WaitGroup
 	// Stream manager for auto-reconnection
 	streamManager *reconnect.StreamManager
+	// Dynamic worker pool management
+	minWorkers    int
+	maxWorkers    int
+	currentWorkers int
+	workerMu      sync.Mutex
 }
 
 // NewWSHandler creates a new WebSocket handler
 func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client) (*WSHandler, error) {
-	handler := &WSHandler{
-		hub:           h,
-		db:            db,
-		agentClient:   agentClient,
-		resultWorkers: make(chan messageJob, 100), // Buffer up to 100 jobs
+	// Dynamic worker pool configuration
+	minWorkers := 3
+	maxWorkers := runtime.NumCPU() * 2
+	if maxWorkers < 5 {
+		maxWorkers = 5
 	}
 
-	// Start worker pool for processing large messages
-	workerCount := 5 // 5 workers to process messages
-	for i := 0; i < workerCount; i++ {
+	handler := &WSHandler{
+		hub:            h,
+		db:             db,
+		agentClient:    agentClient,
+		resultWorkers:  make(chan messageJob, 100), // Buffer up to 100 jobs
+		minWorkers:     minWorkers,
+		maxWorkers:     maxWorkers,
+		currentWorkers: minWorkers,
+	}
+
+	// Start minimum worker pool for processing large messages
+	for i := 0; i < minWorkers; i++ {
 		handler.workerWg.Add(1)
 		go handler.messageWorker()
 	}
+
+	// Start worker pool scaler
+	go handler.scaleWorkerPool()
+
+	log.Printf("Started dynamic worker pool: min=%d, max=%d, initial=%d",
+		minWorkers, maxWorkers, minWorkers)
 
 	// If no agent client provided, we'll rely on the stream manager
 	if agentClient == nil {
@@ -104,6 +125,40 @@ func (h *WSHandler) SetAgentClient(client *agent.Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.agentClient = client
+}
+
+// scaleWorkerPool dynamically adjusts worker pool size based on queue depth
+func (h *WSHandler) scaleWorkerPool() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		queueDepth := len(h.resultWorkers)
+		queueCapacity := cap(h.resultWorkers)
+		utilization := float64(queueDepth) / float64(queueCapacity)
+
+		h.workerMu.Lock()
+		current := h.currentWorkers
+
+		// Scale up if queue is >70% full and we're below max
+		if utilization > 0.7 && current < h.maxWorkers {
+			h.currentWorkers++
+			h.workerWg.Add(1)
+			go h.messageWorker()
+			log.Printf("Scaled up worker pool: %d -> %d (utilization: %.1f%%)",
+				current, h.currentWorkers, utilization*100)
+		}
+
+		// Scale down if queue is <20% full and we're above min
+		if utilization < 0.2 && current > h.minWorkers {
+			// Worker will exit naturally when it sees currentWorkers decreased
+			h.currentWorkers--
+			log.Printf("Scaled down worker pool: %d -> %d (utilization: %.1f%%)",
+				current, h.currentWorkers, utilization*100)
+		}
+
+		h.workerMu.Unlock()
+	}
 }
 
 // HandleWebSocket handles incoming WebSocket connections

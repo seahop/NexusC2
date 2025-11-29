@@ -401,9 +401,28 @@ class TerminalWidget(QWidget):
     
     def add_agent_tab(self, agent_name, agent_guid=None):
         """Create or activate an agent terminal tab"""
-        if agent_guid not in self.agent_terminals:
-            print(f"TerminalWidget: Adding tab for agent_name: {agent_name}, agent_guid: {agent_guid}")
-            
+        # Check if terminal already exists (even if tab was closed)
+        if agent_guid in self.agent_terminals:
+            # Terminal exists - check if it's already in a tab
+            existing_terminal = self.agent_terminals[agent_guid]
+            tab_exists = False
+
+            for i in range(self.tabs.count()):
+                if self.tabs.widget(i) == existing_terminal:
+                    # Tab already open, just switch to it
+                    self.tabs.setCurrentIndex(i)
+                    tab_exists = True
+                    break
+
+            if not tab_exists:
+                # Terminal exists but tab was closed - re-add the tab
+                print(f"TerminalWidget: Reopening existing terminal for {agent_name} (restoring history)")
+                index = self.tabs.addTab(existing_terminal, f"Agent: {agent_name}")
+                self.tabs.setCurrentIndex(index)
+        else:
+            # Create new terminal
+            print(f"TerminalWidget: Creating new tab for agent_name: {agent_name}, agent_guid: {agent_guid}")
+
             # Get agent OS from agent tree
             agent_os = None
             if self.agent_tree:
@@ -411,21 +430,21 @@ class TerminalWidget(QWidget):
                 if agent:
                     # First try to get OS from dedicated field
                     agent_os = agent.get('os', None)
-                    
+
                     # Fallback to extracting from details if not found
                     if not agent_os:
                         for detail in agent.get('details', []):
                             if detail.startswith('OS:'):
                                 agent_os = detail.replace('OS:', '').strip()
                                 break
-                    
+
                     print(f"TerminalWidget: Agent OS detected as: {agent_os}")
-            
+
             # Pass OS to AgentTerminal
             agent_terminal = AgentTerminal(agent_name, agent_guid, self.ws_thread, agent_os)
             self.agent_terminals[agent_guid] = agent_terminal
             index = self.tabs.addTab(agent_terminal, f"Agent: {agent_name}")
-            
+
             # Initialize with any stored command history for this agent
             if hasattr(self, 'command_history'):
                 agent_commands = [cmd for cmd in self.command_history if cmd[2] == agent_guid]
@@ -434,17 +453,17 @@ class TerminalWidget(QWidget):
                     username = command[1]
                     command_text = command[3]
                     timestamp = command[4]
-                    
+
                     # Add command to terminal's history for navigation
                     agent_terminal.command_history.add_command(command_text)
-                    
+
                     # Add command to buffer
                     formatted_command = {
                         "timestamp": timestamp,
                         "output": f"[{timestamp}] {username} > {command_text}"
                     }
                     agent_terminal.command_buffer.add_output(formatted_command)
-                    
+
                     # Add corresponding outputs
                     command_outputs = self.outputs_by_command.get(command_id, [])
                     for output in command_outputs:
@@ -453,36 +472,33 @@ class TerminalWidget(QWidget):
                             "output": output[2]
                         }
                         agent_terminal.command_buffer.add_output(formatted_output)
-                
+
                 agent_terminal.update_display()
-            
+
             self.tabs.setCurrentIndex(index)
-        else:
-            # If terminal exists, just switch to its tab
-            for i in range(self.tabs.count()):
-                if self.tabs.widget(i) == self.agent_terminals[agent_guid]:
-                    self.tabs.setCurrentIndex(i)
-                    break
 
     def close_tab(self, index):
-        """Close a terminal tab"""
+        """Close a terminal tab (hides it but preserves history)"""
         widget = self.tabs.widget(index)
-        
+
         # Don't close Terminal or Logs tabs
         if widget == self.general_terminal or widget == self.logs:
             return
-        
-        # Handle agent terminals
+
+        # Handle agent terminals - just remove from tabs but keep in memory
+        agent_guid = None
         agent_name = None
-        for name, terminal in self.agent_terminals.items():
+        for guid, terminal in self.agent_terminals.items():
             if terminal == widget:
-                agent_name = name
+                agent_guid = guid
+                agent_name = terminal.agent_name
                 break
-        
-        if agent_name:
-            del self.agent_terminals[agent_name]
+
+        if agent_guid:
+            # Remove from tabs but DON'T delete from agent_terminals
+            # This preserves command history when the tab is reopened
             self.tabs.removeTab(index)
-            self.log_message(f"Closed terminal for {agent_name}")
+            self.log_message(f"Closed terminal for {agent_name} (history preserved)")
         else:
             # Handle other closeable tabs
             self.tabs.removeTab(index)

@@ -1,27 +1,60 @@
-# Dockerfile.agent
+# ==============================================================================
+# Optimized Agent Handler Dockerfile
+# ==============================================================================
+FROM alpine:3.20
 
-FROM alpine:latest
+# Metadata
+LABEL maintainer="NexusC2"
+LABEL description="Agent handler service for NexusC2 C2 framework"
 
 WORKDIR /app
 
-# Copy the pre-built binary
-COPY ./bin/agent-handler-service .
-RUN apk add --no-cache ca-certificates
+# Install minimal runtime dependencies and create non-root user
+RUN apk add --no-cache \
+    ca-certificates && \
+    # Create non-root user for security
+    addgroup -g 1001 nexus && \
+    adduser -D -u 1001 -G nexus nexus && \
+    # Create necessary directories
+    mkdir -p /app/certs /app/downloads /app/uploads /app/temp /app/logs && \
+    # Set ownership
+    chown -R nexus:nexus /app && \
+    # Remove apk cache
+    rm -rf /var/cache/apk/*
 
-# Create configs directory and copy configs
-#COPY ../configs /app/configs/
+# Copy pre-built binary and configuration (combined into single layer)
+COPY --chown=nexus:nexus ./bin/agent-handler-service /app/agent-handler-service
+COPY --chown=nexus:nexus ./bin/config.toml /app/config.toml
 
-# Create certs directory and copy certificates
-RUN mkdir -p /app/certs
-COPY ./bin/certs/web_server.crt /app/certs/
-COPY ./bin/certs/web_server.key /app/certs/
-COPY ./bin/certs/web_server.csr /app/certs/
-COPY ./bin/certs/rpc_server.crt /app/certs/
-COPY ./bin/certs/rpc_server.key /app/certs/
-COPY ./bin/certs/rpc_server.csr /app/certs/
-COPY ./bin/config.toml /app/
+# Copy certificates (combined into single layer)
+COPY --chown=nexus:nexus ./bin/certs/web_server.crt \
+                          ./bin/certs/web_server.key \
+                          ./bin/certs/rpc_server.crt \
+                          ./bin/certs/rpc_server.key \
+                          /app/certs/
 
-# Ensure the binary is executable
-RUN chmod +x agent-handler-service
+# Ensure binary is executable
+RUN chmod +x /app/agent-handler-service
 
-CMD ["./agent-handler-service"]
+# Grant capability to bind to privileged ports (< 1024) as non-root
+# This allows binding to ports like 443, 80, etc. without running as root
+RUN apk add --no-cache libcap && \
+    setcap 'cap_net_bind_service=+ep' /app/agent-handler-service && \
+    apk del libcap
+
+# Switch to non-root user
+USER nexus
+
+# Health check for gRPC service (nc = netcat)
+# Note: netcat is not available in non-root Alpine by default
+# Alternative: Use gRPC health check or TCP probe externally
+# For now, rely on docker-compose health check with nc installed separately or use external probe
+
+# Expose gRPC port (documentation only)
+EXPOSE 50051
+
+# Set working directory
+WORKDIR /app
+
+# Use exec form to ensure proper signal handling
+CMD ["/app/agent-handler-service"]

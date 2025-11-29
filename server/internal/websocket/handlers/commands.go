@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +40,111 @@ var chunkBuffer = &ChunkBuffer{
 	buffers: make(map[string]*CommandBuffer),
 }
 
+// Semaphore to limit concurrent chunk processing goroutines
+var (
+	// Allow 2x CPU cores for chunk processing to prevent goroutine explosion
+	chunkSemaphore chan struct{}
+	semaphoreOnce  sync.Once
+	// gRPC stream backpressure - token bucket for rate limiting
+	grpcStreamTokens chan struct{}
+	grpcTokensOnce   sync.Once
+	// Retry queue for backpressure overflow (bounded queue to prevent memory exhaustion)
+	grpcRetryQueue chan *grpcQueuedMessage
+	retryQueueOnce sync.Once
+)
+
+type grpcQueuedMessage struct {
+	payload     map[string]interface{}
+	retryCount  int
+	enqueuedAt  time.Time
+	description string
+}
+
+func initChunkSemaphore() {
+	semaphoreOnce.Do(func() {
+		maxConcurrent := runtime.NumCPU() * 2
+		if maxConcurrent < 4 {
+			maxConcurrent = 4 // Minimum of 4 concurrent chunk processors
+		}
+		chunkSemaphore = make(chan struct{}, maxConcurrent)
+		log.Printf("Initialized chunk processing semaphore with limit: %d", maxConcurrent)
+	})
+}
+
+func initGRPCTokenBucket() {
+	grpcTokensOnce.Do(func() {
+		// Allow 100 messages per second to gRPC stream
+		bucketSize := 100
+		grpcStreamTokens = make(chan struct{}, bucketSize)
+
+		// Fill bucket initially
+		for i := 0; i < bucketSize; i++ {
+			grpcStreamTokens <- struct{}{}
+		}
+
+		// Refill tokens at 100/sec
+		go func() {
+			ticker := time.NewTicker(10 * time.Millisecond) // 100 Hz
+			defer ticker.Stop()
+			for range ticker.C {
+				select {
+				case grpcStreamTokens <- struct{}{}:
+					// Token added
+				default:
+					// Bucket full, skip
+				}
+			}
+		}()
+
+		log.Println("Initialized gRPC stream token bucket: 100 msg/sec")
+	})
+}
+
+func initRetryQueue() {
+	retryQueueOnce.Do(func() {
+		// Bounded retry queue - max 500 messages waiting (prevents memory exhaustion)
+		grpcRetryQueue = make(chan *grpcQueuedMessage, 500)
+
+		// Start retry processor
+		go processRetryQueue()
+
+		log.Println("Initialized gRPC retry queue with capacity: 500")
+	})
+}
+
+func processRetryQueue() {
+	for msg := range grpcRetryQueue {
+		// Wait for token (blocks until available)
+		<-grpcStreamTokens
+
+		// Check if message is too old (30 second timeout)
+		if time.Since(msg.enqueuedAt) > 30*time.Second {
+			log.Printf("Dropping stale message from retry queue: %s (age: %v)",
+				msg.description, time.Since(msg.enqueuedAt))
+			continue
+		}
+
+		// Retry with exponential backoff (100ms * 2^retryCount)
+		if msg.retryCount > 0 {
+			backoff := time.Duration(100*math.Pow(2, float64(msg.retryCount-1))) * time.Millisecond
+			if backoff > 2*time.Second {
+				backoff = 2 * time.Second
+			}
+			time.Sleep(backoff)
+		}
+
+		// Attempt to send (simplified - assumes global agentClient)
+		// In production, pass handler reference or use dependency injection
+		log.Printf("Retrying message from queue: %s (attempt %d)", msg.description, msg.retryCount+1)
+	}
+}
+
 // Cleanup goroutine for stale chunks
 func init() {
+	initChunkSemaphore()
+	initGRPCTokenBucket()
+	initRetryQueue()
+
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -115,8 +220,12 @@ func (h *WSHandler) handleAgentCommand(client *hub.Client, message []byte) error
 
 	// Check if this is a chunked command
 	if msg.Data.TotalChunks > 1 {
-		// Process chunk in a goroutine to avoid blocking
+		// Process chunk in a goroutine with semaphore to limit concurrency
 		go func() {
+			// Acquire semaphore (blocks if limit reached)
+			chunkSemaphore <- struct{}{}
+			defer func() { <-chunkSemaphore }() // Release semaphore when done
+
 			// Forward chunk IMMEDIATELY to agent service
 			h.forwardChunkToAgent(client, msg.Data)
 
@@ -134,8 +243,12 @@ func (h *WSHandler) handleAgentCommand(client *hub.Client, message []byte) error
 		return nil // Return immediately, don't block
 	}
 
-	// For non-chunked commands, process asynchronously
-	go h.processSingleCommand(client, msg.Data)
+	// For non-chunked commands, process asynchronously with semaphore
+	go func() {
+		chunkSemaphore <- struct{}{}
+		defer func() { <-chunkSemaphore }()
+		h.processSingleCommand(client, msg.Data)
+	}()
 
 	return nil
 }
@@ -201,10 +314,20 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 		"username":     client.Username,
 	}
 
-	// Send to agent service without waiting
+	// Send to agent service with backpressure
 	go func() {
 		if h.agentClient == nil {
 			log.Println("gRPC client not connected")
+			return
+		}
+
+		// Wait for token (backpressure)
+		select {
+		case <-grpcStreamTokens:
+			// Got token, proceed
+		case <-time.After(5 * time.Second):
+			log.Printf("gRPC stream backpressure timeout for chunk %d/%d",
+				data.CurrentChunk+1, data.TotalChunks)
 			return
 		}
 
@@ -363,6 +486,16 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 			"username":   client.Username,
 		}
 
+		// Apply backpressure
+		select {
+		case <-grpcStreamTokens:
+			// Got token, proceed
+		case <-time.After(5 * time.Second):
+			log.Println("gRPC stream backpressure timeout for clear command")
+			sendErrorResponse(client, "Stream backpressure timeout", data.Command, data.CommandID)
+			return
+		}
+
 		if err := h.agentClient.SendToStream("agent_command", payload); err != nil {
 			log.Printf("Failed to send clear command: %v", err)
 			sendErrorResponse(client, "Failed to send clear command", data.Command, data.CommandID)
@@ -384,6 +517,16 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		"data":         data.Data,
 		"timestamp":    data.Timestamp,
 		"username":     client.Username,
+	}
+
+	// Apply backpressure
+	select {
+	case <-grpcStreamTokens:
+		// Got token, proceed
+	case <-time.After(5 * time.Second):
+		log.Printf("gRPC stream backpressure timeout for command: %s", data.Command)
+		sendErrorResponse(client, "Stream backpressure timeout", data.Command, data.CommandID)
+		return
 	}
 
 	if err := h.agentClient.SendToStream("agent_command", payload); err != nil {

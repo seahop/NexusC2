@@ -309,33 +309,43 @@ func formatCommandsForLog(cmds []Command) string {
 }
 
 // Update the GetCommand function in server/internal/agent/server/grpc.go
+// OPTIMIZED: Narrow critical section to minimize lock hold time
 func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
+	// ========== CRITICAL SECTION START ==========
 	s.Mutex.Lock()
-	defer s.Mutex.Unlock()
-
-	log.Printf("[GetCommand] Getting commands for client %s", clientID)
-
-	// Don't log the full buffer state with base64 data
-	log.Printf("[GetCommand] Command buffer has %d agents with commands", len(s.CommandBuffer))
 
 	cmds, exists := s.CommandBuffer[clientID]
 	if !exists || len(cmds) == 0 {
+		s.Mutex.Unlock()
 		log.Printf("[GetCommand] No commands found for clientID: %q", clientID)
 		return nil, false
 	}
 
-	// Log commands using the helper function for truncated output
-	log.Printf("[GetCommand] Retrieved %d commands for client %s:", len(cmds), clientID)
+	// Copy commands to local variable (deep copy to avoid race conditions)
+	cmdsCopy := make([]Command, len(cmds))
+	copy(cmdsCopy, cmds)
 
-	// Use the helper function to format commands for logging
-	if len(cmds) <= 3 {
+	// Clear the buffer immediately while we still have the lock
+	s.CommandBuffer[clientID] = []Command{}
+
+	bufferSize := len(s.CommandBuffer)
+	s.Mutex.Unlock()
+	// ========== CRITICAL SECTION END (lock held for ~5 lines instead of 50+) ==========
+
+	// All processing now happens OUTSIDE the lock (no contention)
+	log.Printf("[GetCommand] Getting commands for client %s", clientID)
+	log.Printf("[GetCommand] Command buffer has %d agents with commands", bufferSize)
+	log.Printf("[GetCommand] Retrieved %d commands for client %s:", len(cmdsCopy), clientID)
+
+	// Log commands using the helper function for truncated output
+	if len(cmdsCopy) <= 3 {
 		// For small number of commands, log them individually with truncated data
-		for i, cmd := range cmds {
+		for i, cmd := range cmdsCopy {
 			log.Printf("[GetCommand]   Command %d: %s", i+1, formatCommandForLog(cmd))
 		}
 	} else {
 		// For many commands, just log summary info
-		for i, cmd := range cmds {
+		for i, cmd := range cmdsCopy {
 			dataInfo := ""
 			if len(cmd.Data) > 0 {
 				dataInfo = fmt.Sprintf(", DataLen=%d bytes", len(cmd.Data))
@@ -346,20 +356,17 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 	}
 
 	// Strip file paths from commands before sending to agent
-	for i := range cmds {
-		cmds[i].Command = stripFilePathFromCommand(cmds[i].Command)
+	for i := range cmdsCopy {
+		cmdsCopy[i].Command = stripFilePathFromCommand(cmdsCopy[i].Command)
 	}
 
-	cmdJSON, err := json.Marshal(cmds)
+	cmdJSON, err := json.Marshal(cmdsCopy)
 	if err != nil {
 		log.Printf("[GetCommand] Failed to marshal commands: %v", err)
 		return nil, false
 	}
 
 	log.Printf("[GetCommand] Marshaled %d bytes of command data for transmission", len(cmdJSON))
-
-	// Clear the buffer after retrieving commands
-	s.CommandBuffer[clientID] = []Command{}
 
 	return []string{string(cmdJSON)}, true
 }
@@ -927,6 +934,7 @@ func (s *GRPCServer) BiDiStream(stream pb.AgentControl_BiDiStreamServer) error {
 	}
 }
 
+// OPTIMIZED: Snapshot subscribers before iteration to reduce lock hold time
 func (s *GRPCServer) BroadcastResult(result map[string]interface{}) error {
 	// ADD: Log command output if present
 	if s.commandLogger != nil {
@@ -959,10 +967,18 @@ func (s *GRPCServer) BroadcastResult(result map[string]interface{}) error {
 		Timestamp: time.Now().Unix(),
 	}
 
+	// ========== CRITICAL SECTION START ==========
 	s.Mutex.Lock()
-	defer s.Mutex.Unlock()
-
+	// Snapshot subscribers (avoid holding lock during channel sends)
+	subscriberSnapshot := make(map[string]chan *pb.StreamMessage, len(s.subscribers))
 	for clientID, ch := range s.subscribers {
+		subscriberSnapshot[clientID] = ch
+	}
+	s.Mutex.Unlock()
+	// ========== CRITICAL SECTION END ==========
+
+	// Broadcast to snapshot (no lock held)
+	for clientID, ch := range subscriberSnapshot {
 		select {
 		case ch <- streamMsg:
 			//log.Printf("[BroadcastResult] Successfully sent to subscriber: %s", clientID)
@@ -974,6 +990,7 @@ func (s *GRPCServer) BroadcastResult(result map[string]interface{}) error {
 	return nil
 }
 
+// OPTIMIZED: Snapshot subscribers before iteration to reduce lock hold time
 func (s *GRPCServer) BroadcastLastSeen(agentID string, timestamp int64) error {
 	if s.commandLogger != nil {
 		// If we have cached agent info, it will be included automatically
@@ -1017,10 +1034,18 @@ func (s *GRPCServer) BroadcastLastSeen(agentID string, timestamp int64) error {
 		Timestamp: time.Now().Unix(),
 	}
 
+	// ========== CRITICAL SECTION START ==========
 	s.Mutex.Lock()
-	defer s.Mutex.Unlock()
-
+	// Snapshot subscribers (avoid holding lock during channel sends)
+	subscriberSnapshot := make(map[string]chan *pb.StreamMessage, len(s.subscribers))
 	for clientID, ch := range s.subscribers {
+		subscriberSnapshot[clientID] = ch
+	}
+	s.Mutex.Unlock()
+	// ========== CRITICAL SECTION END ==========
+
+	// Broadcast to snapshot (no lock held)
+	for clientID, ch := range subscriberSnapshot {
 		select {
 		case ch <- streamMsg:
 			log.Printf("[BroadcastLastSeen] Successfully sent to subscriber: %s", clientID)

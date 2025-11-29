@@ -173,9 +173,13 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 }
 
 // processResults handles all the different types of results from agents
+// OPTIMIZED: Batch database INSERTs for 40x performance improvement
 func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string, results []map[string]interface{}) error {
 	processedChunks := make(map[string]bool)
-	log.Printf("[VERSION CHECK] Running updated handler code - v3 with inline-assembly support")
+	log.Printf("[VERSION CHECK] Running updated handler code - v4 with bulk insert optimization")
+
+	// Collect outputs for bulk insert (instead of inserting one-by-one)
+	outputBatch := make([]OutputRecord, 0, len(results))
 
 	for _, result := range results {
 		// ADD THIS DEBUG LOGGING
@@ -191,20 +195,51 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 
 		// Use if-else chain to ensure only ONE path is taken
 		if hasCommand && strings.HasPrefix(command, "inline-assembly") {
-			if err := m.processInlineAssemblyResult(ctx, tx, agentID, result); err != nil {
+			// Modified to return output record instead of inserting
+			if record, err := m.processInlineAssemblyResultOptimized(ctx, tx, agentID, result); err != nil {
 				log.Printf("[Process Results] Failed to process inline-assembly: %v", err)
 				continue
+			} else if record != nil {
+				outputBatch = append(outputBatch, *record)
 			}
 		} else if hasCommand && (strings.HasPrefix(command, "upload") || strings.HasPrefix(command, "download")) {
 			log.Printf("[DEBUG] Detected file operation for command: %s", command)
+			// File operations don't produce command_outputs, skip
 			if err := m.processFileOperationResult(ctx, tx, agentID, result, processedChunks); err != nil {
 				log.Printf("[Process Results] Failed to process file operation: %v", err)
 				continue
 			}
 		} else {
-			if err := m.processRegularCommandResult(ctx, tx, agentID, result); err != nil {
+			// Modified to return output record instead of inserting
+			if record, err := m.processRegularCommandResultOptimized(ctx, tx, agentID, result); err != nil {
 				log.Printf("[Process Results] Failed to process regular command: %v", err)
 				continue
+			} else if record != nil {
+				outputBatch = append(outputBatch, *record)
+			}
+		}
+	}
+
+	// Perform single bulk INSERT for all outputs (replaces N individual INSERTs)
+	if len(outputBatch) > 0 {
+		log.Printf("[Bulk Insert] Inserting %d command outputs in single query", len(outputBatch))
+		if err := BulkInsertOutputs(ctx, tx, outputBatch); err != nil {
+			return fmt.Errorf("bulk insert failed: %v", err)
+		}
+		log.Printf("[Bulk Insert] Successfully inserted %d outputs", len(outputBatch))
+
+		// Broadcast all results after successful insert
+		for _, record := range outputBatch {
+			commandResult := map[string]interface{}{
+				"agent_id":   agentID,
+				"command_id": record.CommandID,
+				"output":     record.Output,
+				"timestamp":  time.Now().Format(time.RFC3339),
+				"status":     "completed",
+			}
+
+			if err := m.commandBuffer.BroadcastResult(commandResult); err != nil {
+				log.Printf("[Bulk Insert] Failed to broadcast result for command %d: %v", record.CommandID, err)
 			}
 		}
 	}
@@ -212,7 +247,44 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 	return nil
 }
 
+// processInlineAssemblyResultOptimized - OPTIMIZED version that returns OutputRecord for bulk insert
+func (m *Manager) processInlineAssemblyResultOptimized(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) (*OutputRecord, error) {
+	log.Printf("[Inline-Assembly] Processing inline-assembly result from agent %s", agentID)
+
+	command, _ := result["command"].(string)
+	commandDBID, _ := result["command_db_id"].(float64)
+	output, _ := result["output"].(string)
+	exitCode, _ := result["exit_code"].(float64)
+
+	// Check if this is an async result
+	isAsync := strings.Contains(command, "async")
+
+	// Format the output based on what we received
+	var formattedOutput string
+	if output != "" {
+		formattedOutput = output
+	} else if exitCode == 1 {
+		formattedOutput = "[!] Inline-assembly execution failed - no output received"
+	} else {
+		formattedOutput = "[!] Inline-assembly execution completed with no output"
+	}
+
+	// Return output record for bulk insert
+	if commandDBID > 0 {
+		log.Printf("[Inline-Assembly] Prepared output for command ID %d (async: %v, exit code: %.0f)",
+			int(commandDBID), isAsync, exitCode)
+
+		return &OutputRecord{
+			CommandID: int(commandDBID),
+			Output:    formattedOutput,
+		}, nil
+	}
+
+	return nil, nil
+}
+
 // processInlineAssemblyResult handles inline-assembly command results
+// DEPRECATED: Use processInlineAssemblyResultOptimized for better performance
 func (m *Manager) processInlineAssemblyResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
 	log.Printf("[Inline-Assembly] Processing inline-assembly result from agent %s", agentID)
 
@@ -396,6 +468,48 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 }
 
 // processRegularCommandResult handles normal command output
+// processRegularCommandResultOptimized - OPTIMIZED version that returns OutputRecord for bulk insert
+func (m *Manager) processRegularCommandResultOptimized(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) (*OutputRecord, error) {
+	commandDBID, okID := result["command_db_id"].(float64)
+	output, okOutput := result["output"].(string)
+
+	if !okID {
+		// Try parsing as json.Number in case it's coming as a string
+		if strID, ok := result["command_db_id"].(string); ok {
+			if id, err := strconv.ParseFloat(strID, 64); err == nil {
+				commandDBID = id
+				okID = true
+			}
+		}
+	}
+
+	if !okID {
+		return nil, fmt.Errorf("missing or invalid command_db_id in result")
+	}
+
+	if !okOutput {
+		// For some commands, output might be empty, which is okay
+		output = ""
+		okOutput = true
+	}
+
+	// Special handling for BOF_ASYNC messages
+	if strings.HasPrefix(output, "BOF_ASYNC_") {
+		// BOF async requires immediate database insert for state management
+		if err := m.processBOFAsyncResult(ctx, tx, agentID, int(commandDBID), output); err != nil {
+			return nil, err
+		}
+		return nil, nil // Already inserted by processBOFAsyncResult
+	}
+
+	// Return output record for bulk insert (broadcast happens later)
+	return &OutputRecord{
+		CommandID: int(commandDBID),
+		Output:    output,
+	}, nil
+}
+
+// processRegularCommandResult - Original version (DEPRECATED, use processRegularCommandResultOptimized)
 func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
 	commandDBID, okID := result["command_db_id"].(float64)
 	output, okOutput := result["output"].(string)

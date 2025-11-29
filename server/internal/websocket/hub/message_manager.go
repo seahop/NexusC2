@@ -131,25 +131,25 @@ func (mm *MessageManager) sendToClient(client *Client, data []byte) error {
 }
 
 func (mm *MessageManager) broadcast(data []byte) error {
+	// Copy client list under lock, then iterate without lock to reduce contention
 	mm.mu.RLock()
 	clientCount := len(mm.clients)
-	mm.mu.RUnlock()
+	if clientCount == 0 {
+		mm.mu.RUnlock()
+		log.Printf("[WARN] broadcast: No clients registered to receive broadcast")
+		return nil
+	}
 
-	//log.Printf("[DEBUG] broadcast: Starting broadcast to %d clients", clientCount)
-
-	// Debug print current clients
-	mm.mu.RLock()
+	// Create a snapshot of clients to send to
+	clientSnapshot := make([]*Client, 0, clientCount)
 	for client := range mm.clients {
+		clientSnapshot = append(clientSnapshot, client)
 		log.Printf("[DEBUG] broadcast: Registered client: ID=%s, Username=%s",
 			client.ID, client.Username)
 	}
 	mm.mu.RUnlock()
 
-	if clientCount == 0 {
-		log.Printf("[WARN] broadcast: No clients registered to receive broadcast")
-		return nil // Or return an error if you prefer
-	}
-
+	// Debug log message type (optional, remove in production)
 	var msgData map[string]interface{}
 	if err := json.Unmarshal(data, &msgData); err != nil {
 		log.Printf("[DEBUG] broadcast: Failed to unmarshal message for debug: %v", err)
@@ -157,11 +157,9 @@ func (mm *MessageManager) broadcast(data []byte) error {
 		log.Printf("[DEBUG] broadcast: Broadcasting message type: %v", msgData["type"])
 	}
 
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-
+	// Now broadcast without holding the lock
 	var failed int
-	for client := range mm.clients {
+	for _, client := range clientSnapshot {
 		log.Printf("[DEBUG] broadcast: Attempting send to client: %s (ID: %s)",
 			client.Username, client.ID)
 

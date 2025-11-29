@@ -383,17 +383,17 @@ build_server_binaries() {
     print_info "============================================================"
     print_status "Building Server Binaries"
     print_info "============================================================"
-    
+
     SERVER_BUILD_SCRIPT="$SCRIPT_DIR/../server/build.sh"
     SERVER_DIR="$SCRIPT_DIR/../server"
-    
+
     if [ -f "$SERVER_BUILD_SCRIPT" ] && [ -d "$SERVER_DIR" ]; then
         print_status "Found build script, compiling server binaries..."
         # Change to server directory and run build as the actual user
         cd "$SERVER_DIR"
         # Run the build script (ignore exit code, we'll check for binaries instead)
         sudo -u $ACTUAL_USER bash build.sh || true
-        
+
         # Check if binaries were actually created (this is more reliable than exit code)
         if [ -f "docker/bin/websocket-service" ] && [ -f "docker/bin/agent-handler-service" ]; then
             print_status "Server binaries built successfully!"
@@ -407,6 +407,37 @@ build_server_binaries() {
     else
         print_error "Server build script not found at: $SERVER_BUILD_SCRIPT"
         print_warning "Skipping binary build."
+        return 1
+    fi
+}
+
+setup_docker_permissions() {
+    print_info "============================================================"
+    print_status "Setting Docker Volume Permissions"
+    print_info "============================================================"
+
+    DOCKER_DIR="$SCRIPT_DIR/../server/docker"
+
+    if [ -d "$DOCKER_DIR" ]; then
+        cd "$DOCKER_DIR"
+
+        # Create directories if they don't exist
+        print_status "Creating Docker volume directories..."
+        mkdir -p downloads uploads temp logs
+
+        # Set ownership for agent-handler (UID 1001)
+        # These directories are mounted as volumes in docker-compose.yml
+        print_status "Setting ownership for agent-handler volumes (UID 1001)..."
+        chown -R 1001:1001 downloads uploads temp logs
+
+        print_status "Docker volume permissions set successfully!"
+        print_info "  - downloads, uploads, temp, logs: 1001:1001 (agent-handler)"
+
+        cd "$SCRIPT_DIR"
+        return 0
+    else
+        print_error "Docker directory not found at: $DOCKER_DIR"
+        print_warning "Skipping permission setup."
         return 1
     fi
 }
@@ -501,7 +532,10 @@ if [ "$RUN_ALL" = true ]; then
         SUMMARY_ITEMS+=("⚠ Server binaries not built (may need manual build)")
     fi
     echo ""
-    
+
+    setup_docker_permissions && SUMMARY_ITEMS+=("✓ Docker volume permissions set") || SUMMARY_ITEMS+=("✗ Docker permissions setup failed")
+    echo ""
+
     if setup_python_client; then
         SUMMARY_ITEMS+=("✓ Python client virtual environment created")
     fi

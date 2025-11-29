@@ -65,8 +65,18 @@ class StateDatabase:
                         port TEXT NOT NULL,
                         ip TEXT NOT NULL
                     );
+
+                    -- Performance indexes
+                    CREATE INDEX IF NOT EXISTS idx_connections_newclient_id ON connections(newclient_id);
+                    CREATE INDEX IF NOT EXISTS idx_connections_deleted_at ON connections(deleted_at);
+                    CREATE INDEX IF NOT EXISTS idx_connections_lastSEEN ON connections(lastSEEN DESC);
+                    CREATE INDEX IF NOT EXISTS idx_connections_deleted_lastseen ON connections(deleted_at, lastSEEN DESC);
+                    CREATE INDEX IF NOT EXISTS idx_commands_guid ON commands(guid);
+                    CREATE INDEX IF NOT EXISTS idx_commands_timestamp ON commands(timestamp DESC);
+                    CREATE INDEX IF NOT EXISTS idx_command_outputs_command_id ON command_outputs(command_id);
+                    CREATE INDEX IF NOT EXISTS idx_command_outputs_timestamp ON command_outputs(timestamp);
                 """)
-                
+
                 # Debug: Print current table contents after initialization
                 print("\nDEBUG: Checking database tables after initialization:")
                 for table in ['connections', 'commands', 'command_outputs', 'listeners']:
@@ -81,37 +91,33 @@ class StateDatabase:
 
 
     def store_state(self, state_data):
-            """Store state data with thread safety."""
+            """Store state data with thread safety using UPSERT for efficiency."""
             with self._db_lock:
                 with self._get_connection() as conn:
                     # Start transaction
                     conn.execute("BEGIN TRANSACTION")
                     try:
-                        # Clear existing data
-                        conn.executescript("""
-                            DELETE FROM connections;
-                            DELETE FROM commands;
-                            DELETE FROM command_outputs;
-                            DELETE FROM listeners;
-                        """)
+                        # Use UPSERT (INSERT OR REPLACE) instead of DELETE then INSERT
+                        # This is much more efficient for incremental updates
 
-                        # Store listeners
+                        # Store listeners using UPSERT
                         if state_data.get("listeners"):
-                            print("Storing listeners in database")
+                            print("Upserting listeners in database")
                             conn.executemany(
-                                "INSERT INTO listeners (id, name, protocol, port, ip) VALUES (?,?,?,?,?)",
-                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"]) 
+                                """INSERT OR REPLACE INTO listeners (id, name, protocol, port, ip)
+                                   VALUES (?,?,?,?,?)""",
+                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"])
                                 for l in state_data["listeners"] if l is not None]
                             )
-                            print(f"Stored {len(state_data['listeners'])} listeners")
+                            print(f"Upserted {len(state_data['listeners'])} listeners")
 
-                        # Store connections
+                        # Store connections using UPSERT
                         if state_data.get("connections"):
-                            print("Storing connections in database")
+                            print("Upserting connections in database")
                             conn.executemany(
-                                """INSERT INTO connections (
-                                    newclient_id, client_id, protocol, extIP, intIP, 
-                                    username, hostname, note, process, pid, 
+                                """INSERT OR REPLACE INTO connections (
+                                    newclient_id, client_id, protocol, extIP, intIP,
+                                    username, hostname, note, process, pid,
                                     arch, lastSEEN, os, proto, deleted_at, alias
                                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                 [(
@@ -130,16 +136,16 @@ class StateDatabase:
                                     c["os"],
                                     c["proto"],
                                     c.get("deleted_at", {}).get("Time") if isinstance(c.get("deleted_at"), dict) else None,
-                                    c.get("alias") 
+                                    c.get("alias")
                                 ) for c in state_data["connections"] if c is not None]
                             )
-                            print(f"Stored {len(state_data['connections'])} connections")
+                            print(f"Upserted {len(state_data['connections'])} connections")
 
-                        # Store commands
+                        # Store commands using UPSERT
                         if state_data.get("commands"):
-                            print("Storing commands in database")
+                            print("Upserting commands in database")
                             conn.executemany(
-                                """INSERT INTO commands (
+                                """INSERT OR REPLACE INTO commands (
                                     id, username, guid, command, timestamp
                                 ) VALUES (?,?,?,?,?)""",
                                 [(
@@ -150,13 +156,13 @@ class StateDatabase:
                                     cmd["timestamp"]
                                 ) for cmd in state_data["commands"] if cmd is not None]
                             )
-                            print(f"Stored {len(state_data['commands'])} commands")
+                            print(f"Upserted {len(state_data['commands'])} commands")
 
-                        # Store command outputs
+                        # Store command outputs using UPSERT
                         if state_data.get("command_outputs"):
-                            print("Storing command outputs in database")
+                            print("Upserting command outputs in database")
                             conn.executemany(
-                                """INSERT INTO command_outputs (
+                                """INSERT OR REPLACE INTO command_outputs (
                                     id, command_id, output, timestamp
                                 ) VALUES (?,?,?,?)""",
                                 [(
@@ -166,7 +172,7 @@ class StateDatabase:
                                     output["timestamp"]
                                 ) for output in state_data["command_outputs"] if output is not None]
                             )
-                            print(f"Stored {len(state_data['command_outputs'])} command outputs")
+                            print(f"Upserted {len(state_data['command_outputs'])} command outputs")
 
                         # Commit transaction
                         conn.commit()

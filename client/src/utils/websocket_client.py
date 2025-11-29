@@ -33,6 +33,11 @@ class WebSocketClient:
         # ADD THIS FOR COMMAND OUTPUT CHUNKS:
         self.output_chunks = {}  # session_id -> chunk data for command outputs
 
+        # Message batching configuration
+        self.batch_size = 10  # Max messages per batch
+        self.batch_timeout = 0.05  # 50ms max wait before sending batch
+        self.high_priority_types = {'agent_command', 'bof', 'inline-assembly'}  # Skip batching for these
+
     async def connect(self, username, host, port):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.load_verify_locations(self.cert_path)
@@ -179,7 +184,10 @@ class WebSocketClient:
         print(f"WebSocketClient: Message queued. Queue size: {len(self.message_queue)}")
 
     async def process_message_queue(self):
-        """Process queued messages with chunked transfer awareness"""
+        """Process queued messages with batching and prioritization."""
+        batch = []
+        last_send_time = asyncio.get_event_loop().time()
+
         while self.running and self.connected:
             try:
                 # Add backpressure handling
@@ -187,30 +195,86 @@ class WebSocketClient:
                     await asyncio.sleep(1)  # Back off when queue is full
                     continue
 
+                current_time = asyncio.get_event_loop().time()
+                time_since_last_send = current_time - last_send_time
+
                 if len(self.message_queue) > 0:
                     message = self.message_queue.popleft()
-                    async with self.send_lock:
-                        if self.websocket and self.connected:
-                            try:
-                                await asyncio.wait_for(
-                                    self.websocket.send(message),
-                                    timeout=self.SEND_TIMEOUT
-                                )
-                                await self._handle_message_sent(message)
-                            except asyncio.TimeoutError:
-                                self.message_queue.appendleft(message)
-                                await self._handle_send_timeout()
-                            except Exception as e:
-                                self.message_queue.appendleft(message)
-                                await self._handle_send_error(e)
-                
-                # Add adaptive sleep based on queue size
-                sleep_time = min(0.1 * (1 + len(self.message_queue) / 100), 1.0)
+
+                    # Check if this is a high-priority message (skip batching)
+                    try:
+                        msg_data = json.loads(message)
+                        msg_type = msg_data.get('type', '')
+                        is_high_priority = msg_type in self.high_priority_types
+                    except:
+                        is_high_priority = False
+
+                    if is_high_priority:
+                        # Send immediately without batching
+                        async with self.send_lock:
+                            if self.websocket and self.connected:
+                                try:
+                                    await asyncio.wait_for(
+                                        self.websocket.send(message),
+                                        timeout=self.SEND_TIMEOUT
+                                    )
+                                    await self._handle_message_sent(message)
+                                    last_send_time = asyncio.get_event_loop().time()
+                                except asyncio.TimeoutError:
+                                    self.message_queue.appendleft(message)
+                                    await self._handle_send_timeout()
+                                except Exception as e:
+                                    self.message_queue.appendleft(message)
+                                    await self._handle_send_error(e)
+                    else:
+                        # Add to batch
+                        batch.append(message)
+
+                        # Send batch if full or timeout reached
+                        should_send = (
+                            len(batch) >= self.batch_size or
+                            time_since_last_send >= self.batch_timeout
+                        )
+
+                        if should_send and batch:
+                            await self._send_batch(batch)
+                            batch.clear()
+                            last_send_time = asyncio.get_event_loop().time()
+
+                # Send pending batch if timeout reached
+                elif batch and time_since_last_send >= self.batch_timeout:
+                    await self._send_batch(batch)
+                    batch.clear()
+                    last_send_time = asyncio.get_event_loop().time()
+
+                # Adaptive sleep
+                sleep_time = 0.01 if batch else min(0.1 * (1 + len(self.message_queue) / 100), 1.0)
                 await asyncio.sleep(sleep_time)
-                
+
             except Exception as e:
                 await self._handle_queue_error(e)
                 await asyncio.sleep(1)
+
+    async def _send_batch(self, batch):
+        """Send a batch of messages together."""
+        if not batch:
+            return
+
+        async with self.send_lock:
+            if self.websocket and self.connected:
+                for message in batch:
+                    try:
+                        await asyncio.wait_for(
+                            self.websocket.send(message),
+                            timeout=self.SEND_TIMEOUT
+                        )
+                        await self._handle_message_sent(message)
+                    except asyncio.TimeoutError:
+                        self.message_queue.appendleft(message)
+                        await self._handle_send_timeout()
+                    except Exception as e:
+                        self.message_queue.appendleft(message)
+                        await self._handle_send_error(e)
 
     async def send_message(self, message):
         """Public method to send messages - adds to queue instead of sending directly."""

@@ -36,21 +36,27 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 		return
 	}
 
-	// Update the lastSEEN field in database with context timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err = m.db.ExecContext(ctx, `
-        UPDATE connections 
-        SET lastSEEN = CURRENT_TIMESTAMP 
-        WHERE newclientID = $1`,
-		clientID,
-	)
-	if err != nil {
-		log.Printf("[GetRequest] Failed to update lastSEEN in database: %v", err)
-		// Continue since this isn't critical
+	// Record heartbeat for batched database update (async, non-blocking)
+	// This replaces the synchronous UPDATE that was causing DB contention
+	if m.heartbeatBatcher != nil {
+		m.heartbeatBatcher.RecordHeartbeat(clientID)
+		log.Printf("[GetRequest] Recorded heartbeat for agent %s (batched)", clientID)
 	} else {
-		log.Printf("[GetRequest] Successfully updated lastSEEN in database for agent %s", clientID)
+		// Fallback to synchronous update if batcher not initialized
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err = m.db.ExecContext(ctx, `
+			UPDATE connections
+			SET lastSEEN = CURRENT_TIMESTAMP
+			WHERE newclientID = $1`,
+			clientID,
+		)
+		if err != nil {
+			log.Printf("[GetRequest] Failed to update lastSEEN in database: %v", err)
+		} else {
+			log.Printf("[GetRequest] Successfully updated lastSEEN in database for agent %s", clientID)
+		}
 	}
 
 	// Broadcast last seen update via WebSocket

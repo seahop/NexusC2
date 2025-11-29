@@ -127,19 +127,27 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 		logMessage(LOG_VERBOSE, "Exported command: ID=%d, Command=%s", cmd.ID, cmd.Command)
 	}
 
-	// 4. Query command outputs
+	// 4. Query command outputs using parameterized query
 	if len(export.Commands) > 0 {
-		cmdIDs := make([]string, len(export.Commands))
+		cmdIDs := make([]interface{}, len(export.Commands))
 		for i, cmd := range export.Commands {
-			cmdIDs[i] = fmt.Sprintf("%d", cmd.ID)
+			cmdIDs[i] = cmd.ID
 		}
 
-		rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
-            SELECT id, command_id, output, timestamp 
-            FROM command_outputs 
+		// Build parameterized query with $1, $2, $3, etc.
+		placeholders := make([]string, len(cmdIDs))
+		for i := range placeholders {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+
+		query := fmt.Sprintf(`
+            SELECT id, command_id, output, timestamp
+            FROM command_outputs
             WHERE command_id IN (%s)
             ORDER BY timestamp ASC`,
-			strings.Join(cmdIDs, ",")))
+			strings.Join(placeholders, ","))
+
+		rows, err = tx.QueryContext(ctx, query, cmdIDs...)
 
 		if err != nil {
 			return nil, &DBOperationError{

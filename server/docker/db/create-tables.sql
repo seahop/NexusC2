@@ -73,8 +73,59 @@ CREATE TABLE IF NOT EXISTS link_routes (
     hop_count INTEGER NOT NULL,
     route_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_used TIMESTAMP,
-    status VARCHAR(50) DEFAULT 'active',
-    FOREIGN KEY (source_guid) REFERENCES connections(GUID),
-    FOREIGN KEY (destination_guid) REFERENCES links(GUID),
-    FOREIGN KEY (next_hop_guid) REFERENCES links(GUID)
+    status VARCHAR(50) DEFAULT 'active'
+    -- Note: Foreign keys commented out - links table doesn't exist
+    -- FOREIGN KEY (source_guid) REFERENCES connections(GUID),
+    -- FOREIGN KEY (destination_guid) REFERENCES links(GUID),
+    -- FOREIGN KEY (next_hop_guid) REFERENCES links(GUID)
 );
+
+-- ============================================================================
+-- PERFORMANCE INDEXES
+-- ============================================================================
+
+-- Connections table indexes (hot path for agent management)
+CREATE INDEX IF NOT EXISTS idx_connections_lastseen
+    ON connections(lastSEEN DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connections_deleted
+    ON connections(deleted_at)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_connections_deleted_lastseen
+    ON connections(deleted_at, lastSEEN DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connections_clientid
+    ON connections(clientID);
+
+-- Commands table indexes (audit log queries)
+CREATE INDEX IF NOT EXISTS idx_commands_guid_timestamp
+    ON commands(guid, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_commands_timestamp
+    ON commands(timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_commands_username
+    ON commands(username);
+
+-- Command outputs indexes (result retrieval)
+CREATE INDEX IF NOT EXISTS idx_command_outputs_command_id
+    ON command_outputs(command_id);
+
+CREATE INDEX IF NOT EXISTS idx_command_outputs_timestamp
+    ON command_outputs(timestamp DESC);
+
+-- Agent aliases index
+CREATE INDEX IF NOT EXISTS idx_agent_aliases_guid
+    ON agent_aliases(guid);
+
+-- User sessions index
+CREATE INDEX IF NOT EXISTS idx_user_sessions_username
+    ON user_sessions(username);
+
+-- Link routes indexes (if link functionality is implemented)
+CREATE INDEX IF NOT EXISTS idx_link_routes_source
+    ON link_routes(source_guid);
+
+CREATE INDEX IF NOT EXISTS idx_link_routes_destination
+    ON link_routes(destination_guid);
