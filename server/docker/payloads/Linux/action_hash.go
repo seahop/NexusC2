@@ -27,20 +27,7 @@ func (h *HashCommand) Name() string {
 func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: hash <file_path> [algorithm]
-       hash <file_path> md5
-       hash <file_path> sha256
-       hash <file_path> all
-
-Algorithms:
-  md5     - Calculate MD5 hash
-  sha256  - Calculate SHA256 hash (default)
-  all     - Calculate both MD5 and SHA256
-
-Examples:
-  hash /etc/passwd
-  hash C:\Windows\System32\notepad.exe md5
-  hash ./document.pdf all`,
+			Output: "Usage: hash <file_path> [algorithm]",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -213,11 +200,7 @@ func (h *HashDirCommand) Name() string {
 func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: hashdir <directory_path> [algorithm] [pattern]
-       hashdir /path/to/dir sha256 *.exe
-       hashdir C:\Windows\System32 md5 *.dll
-
-Recursively hash all files matching pattern in directory.`,
+			Output: "Usage: hashdir <directory_path> [algorithm] [pattern]",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

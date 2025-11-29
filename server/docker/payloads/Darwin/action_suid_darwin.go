@@ -25,17 +25,7 @@ func (c *SUIDEnumCommand) Name() string {
 func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: suid-enum <action> [options]
-Actions:
-  find     - Find all SUID/SGID binaries
-  check    - Check specific binary for SUID exploitation
-  exploit  - Attempt to exploit known SUID binaries
-
-Examples:
-  suid-enum find
-  suid-enum find --path /usr/local
-  suid-enum check /usr/bin/sudo
-  suid-enum exploit --binary <path> --method <method>`,
+			Output: "Usage: suid-enum <action> [options]",
 			ExitCode: 1,
 		}
 	}

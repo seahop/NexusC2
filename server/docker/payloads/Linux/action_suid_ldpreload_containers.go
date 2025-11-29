@@ -46,18 +46,7 @@ func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandRes
 			}
 		case "--help":
 			return CommandResult{
-				Output: `Usage: suid-enum [--check-exploits] [--output <file>] [--path <dir>]
-Options:
-  --check-exploits  Check against known exploitable binaries
-  --output <file>   Save results to file
-  --path <dir>      Add custom directory to search (can use multiple times)
-
-Examples:
-  suid-enum
-  suid-enum --check-exploits
-  suid-enum --path /home --path /var/www
-  suid-enum --output /tmp/suid.txt --check-exploits
-  suid-enum --path /opt/custom/bin --check-exploits`,
+				Output: "Usage: suid-enum [--check-exploits] [--output <file>] [--path <dir>]",
 				ExitCode: 0,
 			}
 		}
@@ -523,16 +512,7 @@ func (c *LDPreloadCommand) Name() string {
 func (c *LDPreloadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: ld-preload <action> [options]
-Actions:
-  generate <output.so> [--hook <function>] - Generate hooking library
-  inject <target> <library.so>             - Run target with LD_PRELOAD
-  persist <library.so> [--user]            - Add to /etc/ld.so.preload
-  
-Examples:
-  ld-preload generate /tmp/hook.so --hook open
-  ld-preload inject /usr/bin/id /tmp/hook.so
-  ld-preload persist /tmp/hook.so --user`,
+			Output: "Usage: ld-preload <action> [options]",
 			ExitCode: 1,
 		}
 	}

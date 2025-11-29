@@ -24,20 +24,7 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Check if no arguments provided
 	if len(args) == 0 {
 		return CommandResult{
-			Output: `Usage: rm [options] <file/directory>...
-Options:
-  -r, -R, --recursive  Remove directories and their contents recursively
-  -f, --force         Ignore nonexistent files, never prompt
-  -rf, -fr            Combine recursive and force options
-  
-Examples:
-  rm file.txt              # Remove a single file
-  rm file1.txt file2.txt   # Remove multiple files
-  rm -r directory          # Remove directory and its contents
-  rm -rf directory         # Force remove directory without prompts
-  rm -f nonexistent.txt    # Don't error if file doesn't exist
-  
-Note: Directories are always removed recursively when -r is specified.`,
+			Output: "Usage: rm [options] <file/directory>...",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

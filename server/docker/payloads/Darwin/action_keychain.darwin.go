@@ -26,25 +26,7 @@ func (c *KeychainCommand) Name() string {
 func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: keychain <action> [options]
-Actions:
-  list      - List available keychains
-  dump      - Dump keychain items (passwords, keys, certificates)
-  search    - Search for specific items
-  add       - Add item to keychain
-  delete    - Delete item from keychain
-  export    - Export keychain to file
-  unlock    - Unlock a keychain
-
-Examples:
-  keychain list
-  keychain dump --keychain login.keychain-db
-  keychain search --service gmail
-  keychain search --account user@example.com
-  keychain add --service myapp --account user --password pass123
-  keychain delete --service myapp --account user
-  keychain export --keychain login.keychain-db --output /tmp/keychain.plist
-  keychain unlock --keychain login.keychain-db --password mypass`,
+			Output: "Usage: keychain <action> [options]",
 			ExitCode: 1,
 		}
 	}

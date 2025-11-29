@@ -93,3 +93,4 @@ server/docker/downloads/*
 !server/docker/downloads/downloads.json
 server/docker/uploads/*
 !server/docker/uploads/.gitkeep
+*.bak

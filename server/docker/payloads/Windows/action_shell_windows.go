@@ -25,18 +25,7 @@ func (c *ShellCommand) Name() string {
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: `Error: No command specified
-Usage: 
-  shell [--timeout <seconds>] <command> [arguments...]
-
-Examples:
-  shell whoami
-  shell dir C:\
-  shell dir "C:\Program Files"
-  shell netstat -an
-  shell --timeout 5 ping 8.8.8.8
-
-Note: Commands execute with the current impersonated token if active`,
+			Output: "",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

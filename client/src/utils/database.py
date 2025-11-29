@@ -90,15 +90,25 @@ class StateDatabase:
                             print(row)
 
 
-    def store_state(self, state_data):
-            """Store state data with thread safety using UPSERT for efficiency."""
+    def store_state(self, state_data, is_initial_state=False):
+            """Store state data with thread safety using UPSERT for efficiency.
+
+            Args:
+                state_data: Dictionary containing state data (listeners, connections, commands, etc.)
+                is_initial_state: If True, clears existing data before storing (for server reconnect/wipe)
+            """
             with self._db_lock:
                 with self._get_connection() as conn:
                     # Start transaction
                     conn.execute("BEGIN TRANSACTION")
                     try:
-                        # Use UPSERT (INSERT OR REPLACE) instead of DELETE then INSERT
-                        # This is much more efficient for incremental updates
+                        # If this is initial state (e.g., after server wipe), clear existing cached data
+                        if is_initial_state:
+                            print("StateDatabase: Clearing stale cache data (initial_state received)")
+                            conn.execute("DELETE FROM listeners")
+                            conn.execute("DELETE FROM connections")
+                            # Don't clear commands/command_outputs - preserve terminal history
+                            print("StateDatabase: Cleared listeners and connections")
 
                         # Store listeners using UPSERT
                         if state_data.get("listeners"):
@@ -110,6 +120,9 @@ class StateDatabase:
                                 for l in state_data["listeners"] if l is not None]
                             )
                             print(f"Upserted {len(state_data['listeners'])} listeners")
+                        elif is_initial_state:
+                            # Server sent empty listeners list - already cleared above
+                            print("StateDatabase: No listeners in initial state (cache cleared)")
 
                         # Store connections using UPSERT
                         if state_data.get("connections"):
@@ -140,6 +153,9 @@ class StateDatabase:
                                 ) for c in state_data["connections"] if c is not None]
                             )
                             print(f"Upserted {len(state_data['connections'])} connections")
+                        elif is_initial_state:
+                            # Server sent empty connections list - already cleared above
+                            print("StateDatabase: No connections in initial state (cache cleared)")
 
                         # Store commands using UPSERT
                         if state_data.get("commands"):

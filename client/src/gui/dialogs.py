@@ -414,9 +414,10 @@ class WebSocketThread(QThread):
 
             elif message_type == 'initial_state':
                 print("WebSocketThread: Processing initial state")
-                if self.db.store_state(message_data.get("data", {})):
+                # Pass is_initial_state=True to clear stale cached data
+                if self.db.store_state(message_data.get("data", {}), is_initial_state=True):
                     print("WebSocketThread: Successfully stored initial state data")
-                    self.db.verify_database_state()  # Add this line
+                    self.db.verify_database_state()
                     self.state_received.emit()
 
             elif message_type == 'agent_checkin':

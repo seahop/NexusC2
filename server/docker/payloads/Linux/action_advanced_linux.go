@@ -42,14 +42,7 @@ func (c *ProcessInjectionCommand) Name() string {
 func (c *ProcessInjectionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 2 {
 		return CommandResult{
-			Output: `Usage: inject <pid> <shellcode_file|--cmd command> [--force]
-Examples:
-  inject 1234 /tmp/shellcode.bin
-  inject 1234 /tmp/shellcode.bin --force
-  inject 1234 --cmd "/bin/bash -c 'echo test > /tmp/proof'" --force
-  
-WARNING: Process injection can crash the target process.
-Add --force flag to confirm you understand the risks.`,
+			Output: "Usage: inject <pid> <shellcode_file|--cmd command> [--force]",
 			ExitCode: 1,
 		}
 	}
@@ -393,11 +386,7 @@ func (c *MemoryDumpCommand) Name() string {
 func (c *MemoryDumpCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: memdump <pid> [--output file] [--search pattern]
-Examples:
-  memdump 1234
-  memdump 1234 --output /tmp/dump.bin
-  memdump 1234 --search "password"`,
+			Output: "Usage: memdump <pid> [--output file] [--search pattern]",
 			ExitCode: 1,
 		}
 	}
@@ -641,16 +630,7 @@ func (c *CapabilityCommand) Name() string {
 func (c *CapabilityCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: capabilities <action> [options]
-Actions:
-  list              - List current process capabilities
-  enum              - Find files with capabilities
-  add <cap> <file> --confirm  - Add capability to file (requires CAP_SETFCAP)
-  
-Examples:
-  capabilities list
-  capabilities enum
-  capabilities add cap_net_raw /usr/bin/ping --confirm`,
+			Output: "Usage: capabilities <action> [options]",
 			ExitCode: 1,
 		}
 	}
@@ -1047,11 +1027,7 @@ func (c *SELinuxCommand) Name() string {
 func (c *SELinuxCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: selinux <action>
-Actions:
-  status    - Check SELinux status
-  context   - Show current context
-  disable   - Attempt to disable (requires root)`,
+			Output: "Usage: selinux <action>",
 			ExitCode: 1,
 		}
 	}

@@ -27,17 +27,7 @@ func (c *PersistenceCommand) Name() string {
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: persist <method> [options]
-Methods:
-  bashrc [--user <username>] [--command <cmd>]  - Add backdoor to .bashrc/.profile
-  systemd [--name <service>] [--user]           - Install systemd service
-  cron [--user <username>] [--interval <time>]  - Add cron job
-  remove <method> [--name <name>]               - Remove persistence
-
-Examples:
-  persist bashrc --command "/tmp/.hidden/agent"
-  persist systemd --name system-update --user
-  persist remove bashrc`,
+			Output: "Usage: persist <method> [options]",
 			ExitCode: 1,
 		}
 	}

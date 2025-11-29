@@ -19,25 +19,7 @@ func (c *SudoSessionCommand) Name() string {
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: `Sudo Session Manager
-Usage:
-  sudo-session start <password> [username]  - Start a sudo session (default: root)
-  sudo-session exec <command>              - Execute command in active session
-  sudo-session exec-stateful <command>     - Execute with state persistence
-  sudo-session enable-stateful             - Enable stateful mode for exec commands
-  sudo-session disable-stateful            - Disable stateful mode (default)
-  sudo-session status                      - Show session status
-  sudo-session stop                        - Terminate the session
-  
-Examples:
-  sudo-session start mypassword           # Switch to root
-  sudo-session start mypassword postgres  # Switch to postgres user
-  sudo-session exec whoami                # Stateless execution (default)
-  sudo-session enable-stateful            # Enable state persistence
-  sudo-session exec cd /tmp               # Now maintains state
-  sudo-session exec pwd                   # Shows /tmp
-  sudo-session disable-stateful           # Back to stateless
-  sudo-session stop`,
+			Output: "",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -247,14 +229,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 		}
 
 		return CommandResult{
-			Output: `Stateful mode enabled successfully!
-Commands will now maintain state (cd, environment variables, etc.)
-Example:
-  sudo-session exec cd /tmp
-  sudo-session exec pwd        # Will show /tmp
-  
-Note: Stateful mode may be less reliable than stateless mode.
-Use 'sudo-session disable-stateful' to return to stateless mode.`,
+			Output: "",
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

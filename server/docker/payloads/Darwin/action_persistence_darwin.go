@@ -27,18 +27,7 @@ func (c *PersistenceCommand) Name() string {
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: persist <method> [options]
-Methods:
-  rc        - Add to shell RC files (.zshrc, .bash_profile, etc.)
-  launch    - Install LaunchAgent/LaunchDaemon
-  login     - Add Login Item
-  periodic  - Add to periodic scripts
-
-Examples:
-  persist rc --user <username> --command <cmd> [--files .zshrc,.bash_profile]
-  persist launch --name <service> --command <cmd> [--user|--system] [--interval <seconds>]
-  persist login --name <name> --path <app_path>
-  persist periodic --command <cmd> --frequency <daily|weekly|monthly>`,
+			Output: "Usage: persist <method> [options]",
 			ExitCode: 1,
 		}
 	}

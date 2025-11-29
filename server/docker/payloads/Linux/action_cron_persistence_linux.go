@@ -27,26 +27,7 @@ func (c *CronPersistenceCommand) Name() string {
 func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: persist-cron <action> [options]
-Actions:
-  add [--method <method>] [--user <user>] [--interval <time>] [--command <cmd>]
-  remove [--method <method>] [--user <user>]
-  list
-
-Methods:
-  spool     - User crontab in /var/spool/cron/
-  crond     - System-wide /etc/cron.d/ file
-  periodic  - Cron directories (/etc/cron.hourly, daily, etc.)
-  anacron   - Anacron for systems not always on
-  all       - Try all methods (default)
-
-Examples:
-  persist-cron add --method spool --interval @hourly
-  persist-cron add --method crond --interval "*/15 * * * *"
-  persist-cron add --method periodic --interval @daily
-  persist-cron add --method all --command "/tmp/.daemon"
-  persist-cron remove --method spool
-  persist-cron remove --method all`,
+			Output: "Usage: persist-cron <action> [options]",
 			ExitCode: 1,
 		}
 	}

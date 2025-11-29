@@ -54,16 +54,7 @@ func getUnixShell() string {
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: `Error: No command specified
-Usage: 
-  shell [--timeout <seconds>] <command> [arguments...]
-  shell --sudo <password> [--timeout <seconds>] <command> [arguments...]
-
-Examples:
-  shell whoami
-  shell --timeout 5 ping 8.8.8.8
-  shell --sudo mypass apt update
-  shell --sudo mypass --timeout 60 apt upgrade`,
+			Output: "",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
