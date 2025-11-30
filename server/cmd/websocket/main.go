@@ -182,7 +182,11 @@ func main() {
 
 	// Create stream manager for auto-reconnection
 	clientID := "websocket_service"
-	grpcAddress := "localhost:50051"
+	// Use agent-handler service name in Docker, localhost for local development
+	grpcAddress := os.Getenv("GRPC_ADDRESS")
+	if grpcAddress == "" {
+		grpcAddress = "agent-handler:50051" // Default to Docker service name
+	}
 	log.Printf("Creating stream manager for gRPC connection to %s", grpcAddress)
 	streamManager := reconnect.NewStreamManager(grpcAddress, clientID, h)
 

@@ -404,13 +404,18 @@ func (s *GRPCServer) Start(port string) error {
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(s.server, healthServer)
 
-	lis, err := net.Listen("tcp", ":"+port)
+	// Support both "port" and "address:port" formats
+	address := port
+	if !strings.Contains(port, ":") {
+		address = ":" + port
+	}
+	lis, err := net.Listen("tcp", address)
 	if err != nil {
-		return fmt.Errorf("[gRPC Start] failed to listen on port %s: %v", port, err)
+		return fmt.Errorf("[gRPC Start] failed to listen on %s: %v", address, err)
 	}
 
 	// Signal that we're ready to accept connections
-	log.Printf("[gRPC Start] gRPC server ready at localhost:%s", port)
+	log.Printf("[gRPC Start] gRPC server ready at %s", address)
 
 	// Create a channel to signal startup completion
 	ready := make(chan struct{})

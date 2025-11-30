@@ -442,6 +442,35 @@ setup_docker_permissions() {
     fi
 }
 
+setup_firewall_rules() {
+    print_info "============================================================"
+    print_status "Setting Up Firewall Rules for gRPC Security"
+    print_info "============================================================"
+
+    FIREWALL_SCRIPT="$SCRIPT_DIR/../server/docker/setup-firewall.sh"
+
+    if [ -f "$FIREWALL_SCRIPT" ]; then
+        print_status "Applying firewall rules to secure gRPC port 50051..."
+        bash "$FIREWALL_SCRIPT"
+
+        if [ $? -eq 0 ]; then
+            print_status "Firewall rules applied successfully!"
+            print_info "  - Port 50051: Blocked from external networks"
+            print_info "  - Port 50051: Accessible from localhost and Docker containers"
+            return 0
+        else
+            print_error "Failed to apply firewall rules"
+            print_warning "gRPC port 50051 may be exposed to external networks!"
+            return 1
+        fi
+    else
+        print_warning "Firewall script not found at: $FIREWALL_SCRIPT"
+        print_warning "Skipping firewall setup. Run manually with:"
+        print_warning "  cd $SCRIPT_DIR/../server/docker && sudo ./setup-firewall.sh"
+        return 1
+    fi
+}
+
 setup_python_client() {
     print_info "============================================================"
     print_status "Setting up Python Client"
@@ -534,6 +563,9 @@ if [ "$RUN_ALL" = true ]; then
     echo ""
 
     setup_docker_permissions && SUMMARY_ITEMS+=("✓ Docker volume permissions set") || SUMMARY_ITEMS+=("✗ Docker permissions setup failed")
+    echo ""
+
+    setup_firewall_rules && SUMMARY_ITEMS+=("✓ Firewall rules applied (gRPC secured)") || SUMMARY_ITEMS+=("⚠ Firewall rules not applied (manual setup required)")
     echo ""
 
     if setup_python_client; then

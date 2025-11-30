@@ -187,9 +187,13 @@ func main() {
 
 	// Start gRPC server
 	grpcReady := make(chan bool, 1)
+	grpcBindAddress := os.Getenv("GRPC_BIND_ADDRESS")
+	if grpcBindAddress == "" {
+		grpcBindAddress = "0.0.0.0:50051" // Default to all interfaces
+	}
 	go func() {
-		log.Printf("Starting gRPC server on 50051...")
-		if err := grpcServer.Start("50051"); err != nil {
+		log.Printf("Starting gRPC server on %s...", grpcBindAddress)
+		if err := grpcServer.Start(grpcBindAddress); err != nil {
 			log.Fatalf("Failed to start gRPC server: %v", err)
 		}
 	}()

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -374,8 +375,15 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 	log.Printf("Listener created successfully with ID: %s", l.ID)
 	h.ListenerManager.DumpState()
 
+	// Use host.docker.internal for agent-handler running on host network
+	// Falls back to localhost for local development
+	grpcAddress := os.Getenv("GRPC_ADDRESS")
+	if grpcAddress == "" {
+		grpcAddress = "localhost:50051"
+	}
+
 	clientID := "websocket_hub"
-	agentClient, err := agent.NewClient("localhost:50051", clientID)
+	agentClient, err := agent.NewClient(grpcAddress, clientID)
 	if err != nil {
 		log.Printf("Failed to create agent gRPC client: %v", err)
 		return err

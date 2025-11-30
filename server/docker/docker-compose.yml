@@ -1,12 +1,23 @@
+networks:
+  c2_internal:
+    driver: bridge
+    internal: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+
 services:
   database:
-    network_mode: "host"
     build:
       context: .
       dockerfile: Dockerfile.db
       args:
         DB_PASSWORD: ${DB_PASSWORD}
     container_name: database
+    networks:
+      c2_internal:
+        ipv4_address: 172.28.0.2
     environment:
       POSTGRES_DB: ops
       POSTGRES_USER: postgres
@@ -31,18 +42,24 @@ services:
       - "effective_cache_size=1GB"
       - "-c"
       - "work_mem=16MB"
+    # No ports exposed - internal only
 
   websocket:
-    network_mode: "host"
     build:
       context: .
       dockerfile: Dockerfile.websocket
+    networks:
+      c2_internal:
+        ipv4_address: 172.28.0.3
     depends_on:
       database:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allow accessing host network
     environment:
       CONFIG_FILE: /app/config.toml
       HOST_PAYLOADS_PATH: ${PWD}/payloads
+      GRPC_ADDRESS: host.docker.internal:50051  # Connect to agent-handler on host network
     env_file:
       - db/.secrets/.env
     volumes:
@@ -50,13 +67,15 @@ services:
       - ./downloads:/app/downloads
       - ./uploads:/app/uploads
       - ./temp:/app/temp
-      - ./logs:/app/logs 
+      - ./logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ./payloads:/app/payloads:ro
       - ${PWD}/payloads:${PWD}/payloads:ro
+    ports:
+      - "3131:3131"  # Expose WebSocket for clients
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-k", "-f", "https://localhost:3131/health"] 
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:3131/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,15 +86,18 @@ services:
         max-file: "3"
 
   agent-handler:
-    network_mode: "host"
     build:
       context: .
       dockerfile: Dockerfile.agent
+    network_mode: host
     depends_on:
       database:
         condition: service_healthy
     environment:
       CONFIG_FILE: /app/configs/agent.yaml
+      # Connect to database via host's docker bridge IP
+      DB_HOST: 172.28.0.2
+      GRPC_BIND_ADDRESS: 0.0.0.0:50051  # Bind to all interfaces, firewall handles security
     env_file:
       - db/.secrets/.env
     volumes:
@@ -86,7 +108,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50051"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,7 +124,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.builder
-    network_mode: "host"
+    networks:
+      c2_internal:
+        ipv4_address: 172.28.0.5
     hostname: builder
     container_name: builder
     volumes:
@@ -147,7 +171,7 @@ services:
       - TOGGLE_CHECK_PROCESS_LIST=false
     privileged: true
     restart: "no"
-    
+
 volumes:
   shared:
     driver: local

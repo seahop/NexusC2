@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>C2 System Architecture - Corrected</title>
+    <title>NexusC2 System Architecture - Updated with Host Networking</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -11,317 +12,346 @@
             background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: #e0e0e0;
-            overflow-x: auto;
         }
-        
+
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
-            background: rgba(26, 26, 46, 0.6);
+            background: rgba(26, 26, 46, 0.8);
             border-radius: 15px;
-            padding: 30px;
+            padding: 40px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(10px);
         }
-        
+
         h1 {
             text-align: center;
             color: #00d4ff;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
             font-size: 2.5em;
         }
-        
-        svg {
-            width: 100%;
-            height: auto;
-            min-height: 800px;
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 40px;
+            font-size: 1.1em;
         }
-        
-        .component {
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .component:hover .component-box {
-            filter: drop-shadow(0 0 15px rgba(0, 212, 255, 0.8));
-        }
-        
-        .connection {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 0.7; }
-            50% { opacity: 1; }
-        }
-        
-        .legend {
-            margin-top: 30px;
+
+        .diagram-container {
+            background: white;
+            border-radius: 10px;
             padding: 20px;
+            margin: 20px 0;
+        }
+
+        .legend {
             background: rgba(0, 0, 0, 0.3);
             border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
         }
-        
+
         .legend h3 {
             color: #00d4ff;
-            margin-bottom: 15px;
+            margin-top: 0;
         }
-        
+
         .legend-item {
-            display: inline-block;
-            margin: 10px 20px 10px 0;
-        }
-        
-        .legend-line {
-            display: inline-block;
-            width: 40px;
-            height: 3px;
-            margin-right: 10px;
-            vertical-align: middle;
-        }
-        
-        .tooltip {
-            position: absolute;
-            background: rgba(0, 0, 0, 0.9);
-            color: #fff;
-            padding: 10px;
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 5px;
-            font-size: 14px;
-            pointer-events: none;
-            display: none;
-            z-index: 1000;
-            border: 1px solid #00d4ff;
+        }
+
+        .legend-item strong {
+            color: #00d4ff;
+        }
+
+        .network-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+
+        .badge-bridge {
+            background: #4a90e2;
+            color: white;
+        }
+
+        .badge-host {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .badge-external {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .security-note {
+            background: rgba(231, 76, 60, 0.1);
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .security-note h4 {
+            margin-top: 0;
+            color: #e74c3c;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔐 C2 System Architecture</h1>
-        
-        <svg viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                <!-- Define gradients -->
-                <linearGradient id="dbGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#c92a2a;stop-opacity:1" />
-                </linearGradient>
-                
-                <linearGradient id="wsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#4dabf7;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#1864ab;stop-opacity:1" />
-                </linearGradient>
-                
-                <linearGradient id="agentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#69db7c;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#2b8a3e;stop-opacity:1" />
-                </linearGradient>
-                
-                <linearGradient id="authGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#ffd43b;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#fab005;stop-opacity:1" />
-                </linearGradient>
-                
-                <linearGradient id="builderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#e599f7;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#9c36b5;stop-opacity:1" />
-                </linearGradient>
-                
-                <linearGradient id="clientGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#74c0fc;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#364fc7;stop-opacity:1" />
-                </linearGradient>
-                
-                <!-- Define arrow markers -->
-                <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-                    <path d="M0,0 L0,6 L9,3 z" fill="#00d4ff" />
-                </marker>
-                
-                <marker id="arrow-grpc" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-                    <path d="M0,0 L0,6 L9,3 z" fill="#69db7c" />
-                </marker>
-                
-                <marker id="arrow-db" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-                    <path d="M0,0 L0,6 L9,3 z" fill="#ff6b6b" />
-                </marker>
-            </defs>
-            
-            <!-- Database Server -->
-            <g class="component" data-info="PostgreSQL Database - Stores all persistent data including agents, connections, tasks, user sessions, and listeners">
-                <rect class="component-box" x="500" y="50" width="200" height="80" rx="10" fill="url(#dbGradient)" />
-                <text x="600" y="85" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Database Server</text>
-                <text x="600" y="105" text-anchor="middle" fill="white" font-size="12">(PostgreSQL)</text>
-                <text x="600" y="120" text-anchor="middle" fill="white" font-size="10">Port: 5432</text>
-            </g>
-            
-            <!-- WebSocket Service -->
-            <g class="component" data-info="WebSocket Service - Handles real-time communication with Python clients, manages user sessions based on username, invokes builder, and routes commands">
-                <rect class="component-box" x="250" y="250" width="200" height="120" rx="10" fill="url(#wsGradient)" />
-                <text x="350" y="285" text-anchor="middle" fill="white" font-weight="bold" font-size="16">WebSocket Service</text>
-                <text x="350" y="305" text-anchor="middle" fill="white" font-size="12">Real-time Hub</text>
-                <text x="350" y="325" text-anchor="middle" fill="white" font-size="10">Port: 3131 (WSS/TLS)</text>
-                <text x="350" y="345" text-anchor="middle" fill="white" font-size="10">gRPC Client</text>
-                <text x="350" y="360" text-anchor="middle" fill="white" font-size="10">Builder Invoker</text>
-            </g>
-            
-            <!-- Agent Handler -->
-            <g class="component" data-info="Agent Handler - Manages agent connections, processes agent callbacks, handles tasks, runs listeners on configured ports">
-                <rect class="component-box" x="750" y="250" width="200" height="120" rx="10" fill="url(#agentGradient)" />
-                <text x="850" y="285" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Agent Handler</text>
-                <text x="850" y="305" text-anchor="middle" fill="white" font-size="12">Listener Manager</text>
-                <text x="850" y="325" text-anchor="middle" fill="white" font-size="10">gRPC Server: 50051</text>
-                <text x="850" y="345" text-anchor="middle" fill="white" font-size="10">HTTP/HTTPS Listeners</text>
-                <text x="850" y="360" text-anchor="middle" fill="white" font-size="10">Async Processor</text>
-            </g>
-            
-            <!-- Docker Builder -->
-            <g class="component" data-info="Docker Builder - Container-based payload generation system, builds agent binaries for different OS/arch combinations on demand">
-                <rect class="component-box" x="50" y="450" width="200" height="80" rx="10" fill="url(#builderGradient)" />
-                <text x="150" y="485" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Docker Builder</text>
-                <text x="150" y="505" text-anchor="middle" fill="white" font-size="12">Payload Generator</text>
-                <text x="150" y="520" text-anchor="middle" fill="white" font-size="10">On-demand builds</text>
-            </g>
-            
-            <!-- Python Client -->
-            <g class="component" data-info="Python3 Client - GUI application for operators, authenticates and connects via WebSocket for real-time command & control">
-                <rect class="component-box" x="250" y="650" width="200" height="80" rx="10" fill="url(#clientGradient)" />
-                <text x="350" y="685" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Python3 Client</text>
-                <text x="350" y="705" text-anchor="middle" fill="white" font-size="12">Operator GUI</text>
-                <text x="350" y="720" text-anchor="middle" fill="white" font-size="10">WSS Connection</text>
-            </g>
-            
-            <!-- Agents -->
-            <g class="component" data-info="Deployed Agents - Execute on target systems, communicate back to Agent Handler via HTTP/HTTPS listeners">
-                <rect class="component-box" x="750" y="650" width="200" height="80" rx="10" fill="#495057" />
-                <text x="850" y="685" text-anchor="middle" fill="white" font-weight="bold" font-size="16">Deployed Agents</text>
-                <text x="850" y="705" text-anchor="middle" fill="white" font-size="12">Target Systems</text>
-                <text x="850" y="720" text-anchor="middle" fill="white" font-size="10">HTTP/HTTPS Callbacks</text>
-            </g>
-            
-            <!-- Connection Lines -->
-            
-            <!-- Two-way DB connections for WebSocket -->
-            <path d="M 400 250 L 550 130" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
-            <path d="M 545 135 L 395 255" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
-            <text x="475" y="185" fill="#ff6b6b" font-size="10">R/W</text>
-            
-            <!-- Two-way DB connections for Agent Handler -->
-            <path d="M 800 250 L 650 130" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
-            <path d="M 655 135 L 805 255" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arrow-db)" />
-            <text x="725" y="185" fill="#ff6b6b" font-size="10">R/W</text>
-            
-            <!-- WebSocket to Client (includes auth) -->
-            <path d="M 350 370 L 350 650" stroke="#4dabf7" stroke-width="3" marker-end="url(#arrow)" />
-            <path d="M 340 645 L 340 375" stroke="#4dabf7" stroke-width="3" marker-end="url(#arrow)" />
-            <text x="360" y="510" fill="#4dabf7" font-size="11">WSS/TLS + Username</text>
-            <text x="360" y="525" fill="#4dabf7" font-size="10">(Port 3131)</text>
-            
-            <!-- gRPC Bidirectional Connection -->
-            <path d="M 450 310 Q 600 310, 750 310" stroke="#69db7c" stroke-width="3" fill="none" marker-end="url(#arrow-grpc)" stroke-dasharray="8,4" />
-            <path d="M 745 300 Q 600 300, 455 300" stroke="#69db7c" stroke-width="3" fill="none" marker-end="url(#arrow-grpc)" stroke-dasharray="8,4" />
-            <text x="600" y="295" text-anchor="middle" fill="#69db7c" font-size="11">gRPC BiDi Stream</text>
-            <text x="600" y="310" text-anchor="middle" fill="#69db7c" font-size="10">(Port 50051)</text>
-            
-            <!-- Agent Handler to Agents (bidirectional) -->
-            <path d="M 850 370 L 850 650" stroke="#2b8a3e" stroke-width="3" marker-end="url(#arrow)" />
-            <path d="M 840 645 L 840 375" stroke="#2b8a3e" stroke-width="3" marker-end="url(#arrow)" />
-            <text x="860" y="510" fill="#2b8a3e" font-size="11">HTTP/HTTPS</text>
-            <text x="860" y="525" fill="#2b8a3e" font-size="10">Callbacks</text>
-            
-            <!-- WebSocket to Builder (one-way) -->
-            <path d="M 250 310 Q 150 380, 150 450" stroke="#e599f7" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="5,5" />
-            <text x="140" y="380" fill="#e599f7" font-size="10">Build Request</text>
-            
+        <h1>🎯 NexusC2 System Architecture</h1>
+        <div class="subtitle">Updated with Host Networking & Dynamic Port Management</div>
 
-            <!-- Message Flow Annotations -->
-            <g>
-                <text x="100" y="770" fill="#00d4ff" font-size="14" font-weight="bold">Message Flow:</text>
-                <text x="100" y="790" fill="#e0e0e0" font-size="12">1. Client → WebSocket: TLS + Username Header</text>
-                <text x="100" y="810" fill="#e0e0e0" font-size="12">2. WebSocket ↔ Database: Session/Task Management</text>
-                <text x="100" y="830" fill="#e0e0e0" font-size="12">3. WebSocket ↔ Agent Handler: Task Dispatch (gRPC)</text>
-                <text x="100" y="850" fill="#e0e0e0" font-size="12">4. Agent ↔ Agent Handler: Callbacks/Results</text>
-                <text x="100" y="870" fill="#e0e0e0" font-size="12">5. Agent Handler ↔ Database: Agent State</text>
-            </g>
-            
-            <!-- Port Information -->
-            <g>
-                <text x="600" y="770" fill="#00d4ff" font-size="14" font-weight="bold">Network Ports:</text>
-                <text x="600" y="790" fill="#e0e0e0" font-size="12">• PostgreSQL: 5432 (Internal)</text>
-                <text x="600" y="810" fill="#e0e0e0" font-size="12">• WebSocket: 3131 (WSS/TLS)</text>
-                <text x="600" y="830" fill="#e0e0e0" font-size="12">• gRPC: 50051 (Internal)</text>
-                <text x="600" y="850" fill="#e0e0e0" font-size="12">• HTTP/HTTPS Listeners: Dynamic</text>
-            </g>
-        </svg>
-        
+        <div class="diagram-container">
+            <div class="mermaid">
+graph TB
+    subgraph External["🌐 External Network"]
+        Agent["💻 Compromised Agent<br/>(Implant on Target)"]
+        Client["👤 Operator Client<br/>(Web Browser)"]
+    end
+
+    subgraph HostSystem["🖥️ Host System (Docker Host)"]
+        subgraph FirewallLayer["🛡️ Firewall Layer (iptables)"]
+            FW_Allow["✅ Allow: 127.0.0.1<br/>✅ Allow: 172.28.0.0/16<br/>❌ Block: External → :50051"]
+        end
+
+        subgraph HostNetwork["🔴 Host Network Mode"]
+            AgentHandler["⚡ Agent-Handler<br/>network_mode: host<br/>gRPC: 0.0.0.0:50051<br/>Listeners: Any Port"]
+        end
+
+        subgraph DockerBridge["🔵 Docker Bridge Network (172.28.0.0/16)"]
+            Database["🗄️ PostgreSQL<br/>172.28.0.2:5432<br/>(Internal Only)"]
+            Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131<br/>(Public)"]
+            Builder["🔨 Builder Service<br/>172.28.0.5<br/>(On-Demand)"]
+        end
+    end
+
+    %% External Connections
+    Agent -->|"HTTPS/HTTP<br/>Dynamic Ports"| AgentHandler
+    Client -->|"WSS :3131"| Websocket
+
+    %% Internal Docker Bridge Network
+    Websocket -->|"gRPC :50051<br/>via host.docker.internal"| AgentHandler
+    Websocket -->|"PostgreSQL :5432"| Database
+    AgentHandler -->|"PostgreSQL :5432<br/>via 172.28.0.2"| Database
+    Builder -->|"PostgreSQL :5432"| Database
+
+    %% Firewall Protection
+    FW_Allow -.->|"Protects"| AgentHandler
+
+    %% Agent Handler to Agents
+    AgentHandler -->|"Commands & Tasks"| Agent
+
+    %% Websocket to Clients
+    Websocket -->|"Real-time Updates"| Client
+
+    %% Styling
+    classDef hostNet fill:#e74c3c,stroke:#c0392b,stroke-width:3px,color:#fff
+    classDef bridgeNet fill:#4a90e2,stroke:#2980b9,stroke-width:2px,color:#fff
+    classDef external fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
+    classDef firewall fill:#f39c12,stroke:#e67e22,stroke-width:3px,color:#000
+
+    class AgentHandler hostNet
+    class Database,Websocket,Builder bridgeNet
+    class Agent,Client external
+    class FW_Allow firewall
+            </div>
+        </div>
+
+        <div class="security-note">
+            <h4>🔒 Security Architecture</h4>
+            <p><strong>Firewall Protection:</strong> iptables rules secure gRPC port 50051 from external access while allowing internal Docker container communication via the bridge network (172.28.0.0/16).</p>
+            <p><strong>Dynamic Ports:</strong> Agent-handler runs on host network, enabling dynamic listener port creation without container restarts or docker-compose.yml modifications.</p>
+        </div>
+
         <div class="legend">
-            <h3>Connection Types</h3>
+            <h3>📋 Component Details</h3>
+
             <div class="legend-item">
-                <span class="legend-line" style="background: #ff6b6b;"></span>
-                Database Connection (Bidirectional SQL)
+                <strong>🔴 Agent-Handler (Host Network)</strong>
+                <span class="network-badge badge-host">HOST</span>
+                <ul>
+                    <li>Runs with <code>network_mode: host</code> for direct host network access</li>
+                    <li>gRPC server binds to <code>0.0.0.0:50051</code> (secured by firewall)</li>
+                    <li>Can bind listeners to ANY port dynamically (80, 443, 8080, etc.)</li>
+                    <li>Connects to PostgreSQL via bridge IP <code>172.28.0.2</code></li>
+                    <li>Handles all agent communications and command execution</li>
+                </ul>
             </div>
+
             <div class="legend-item">
-                <span class="legend-line" style="background: #4dabf7;"></span>
-                WebSocket (WSS/TLS - Bidirectional)
+                <strong>🔵 WebSocket Server (Bridge Network)</strong>
+                <span class="network-badge badge-bridge">BRIDGE</span>
+                <ul>
+                    <li>IP: <code>172.28.0.3</code> on bridge network</li>
+                    <li>Exposed port: <code>3131</code> for operator clients</li>
+                    <li>Connects to agent-handler gRPC via <code>host.docker.internal:50051</code></li>
+                    <li>Provides real-time web interface for operators</li>
+                    <li>Manages payload building via builder service</li>
+                </ul>
             </div>
+
             <div class="legend-item">
-                <span class="legend-line" style="background: #69db7c;"></span>
-                gRPC Bidirectional Stream
+                <strong>🔵 PostgreSQL Database (Bridge Network)</strong>
+                <span class="network-badge badge-bridge">BRIDGE</span>
+                <ul>
+                    <li>IP: <code>172.28.0.2</code> on bridge network</li>
+                    <li><strong>Not exposed</strong> to host - internal only</li>
+                    <li>Stores: agents, listeners, commands, results, logs</li>
+                    <li>Accessed by all services via bridge network</li>
+                </ul>
             </div>
+
             <div class="legend-item">
-                <span class="legend-line" style="background: #2b8a3e;"></span>
-                HTTP/HTTPS (Bidirectional)
+                <strong>🔵 Builder Service (Bridge Network)</strong>
+                <span class="network-badge badge-bridge">BRIDGE</span>
+                <ul>
+                    <li>IP: <code>172.28.0.5</code> on bridge network</li>
+                    <li>On-demand payload compilation service</li>
+                    <li>Supports: Windows, Linux, macOS payloads</li>
+                    <li>Compiles with custom configurations (obfuscation, encryption)</li>
+                </ul>
             </div>
+
             <div class="legend-item">
-                <span class="legend-line" style="background: #e599f7; background-image: repeating-linear-gradient(90deg, #e599f7, #e599f7 5px, transparent 5px, transparent 10px);"></span>
-                Docker Build Operations
+                <strong>🛡️ Firewall Rules (iptables)</strong>
+                <ul>
+                    <li>Chain: <code>NEXUSC2_GRPC</code></li>
+                    <li>✅ Allow: <code>127.0.0.1</code> → port 50051 (localhost)</li>
+                    <li>✅ Allow: <code>172.28.0.0/16</code> → port 50051 (Docker containers)</li>
+                    <li>❌ Drop: All other sources → port 50051 (external networks)</li>
+                    <li>Applied automatically during setup via <code>setup-firewall.sh</code></li>
+                </ul>
             </div>
+
+            <div class="legend-item">
+                <strong>🌐 External Components</strong>
+                <span class="network-badge badge-external">EXTERNAL</span>
+                <ul>
+                    <li><strong>Agents:</strong> Connect to agent-handler via HTTP/HTTPS on dynamic ports</li>
+                    <li><strong>Operator Clients:</strong> Connect to websocket server via WSS on port 3131</li>
+                    <li>All external connections are encrypted (TLS/SSL)</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="legend">
+            <h3>🔄 Communication Flow</h3>
+
+            <div class="legend-item">
+                <strong>1. Operator → System</strong>
+                <ol>
+                    <li>Operator connects to WebSocket server (<code>wss://server:3131</code>)</li>
+                    <li>WebSocket authenticates and establishes session</li>
+                    <li>Operator sends commands via web interface</li>
+                </ol>
+            </div>
+
+            <div class="legend-item">
+                <strong>2. Command Execution Flow</strong>
+                <ol>
+                    <li>WebSocket receives command from operator</li>
+                    <li>WebSocket calls agent-handler gRPC API (<code>host.docker.internal:50051</code>)</li>
+                    <li>Agent-handler stores command in PostgreSQL</li>
+                    <li>Agent checks in and retrieves pending commands</li>
+                    <li>Agent executes command and sends results</li>
+                    <li>Agent-handler stores results in PostgreSQL</li>
+                    <li>Agent-handler streams results to WebSocket via gRPC bidirectional stream</li>
+                    <li>WebSocket pushes results to operator in real-time</li>
+                </ol>
+            </div>
+
+            <div class="legend-item">
+                <strong>3. Dynamic Listener Creation</strong>
+                <ol>
+                    <li>Operator requests listener creation (e.g., HTTPS on port 443)</li>
+                    <li>WebSocket sends request to agent-handler via gRPC</li>
+                    <li>Agent-handler binds to requested port on host network</li>
+                    <li>Listener details stored in PostgreSQL</li>
+                    <li><strong>No docker-compose.yml modification needed!</strong></li>
+                    <li><strong>No container restart needed!</strong></li>
+                </ol>
+            </div>
+
+            <div class="legend-item">
+                <strong>4. Payload Building</strong>
+                <ol>
+                    <li>Operator requests payload via WebSocket</li>
+                    <li>WebSocket triggers builder service via Docker API</li>
+                    <li>Builder compiles payload with custom config</li>
+                    <li>Compiled payload saved to shared volume</li>
+                    <li>Operator downloads via WebSocket</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="legend">
+            <h3>🎯 Key Advantages of This Architecture</h3>
+
+            <div class="legend-item">
+                <strong>✅ Dynamic Port Management</strong>
+                <p>Agent-handler can bind to any port without editing configuration files or restarting containers. Create listeners on ports 80, 443, 8080, 9001, or any other port on the fly.</p>
+            </div>
+
+            <div class="legend-item">
+                <strong>🔒 Security Isolation</strong>
+                <p>gRPC port 50051 is protected by firewall rules, blocking external access while allowing internal Docker containers to communicate. Database is completely internal with no external exposure.</p>
+            </div>
+
+            <div class="legend-item">
+                <strong>⚡ High Performance</strong>
+                <p>Host networking eliminates Docker bridge network overhead for agent-handler, providing near-native network performance for handling large numbers of agents.</p>
+            </div>
+
+            <div class="legend-item">
+                <strong>🔄 Auto-Reconnection</strong>
+                <p>Stream manager handles automatic reconnection between WebSocket and agent-handler services. gRPC bidirectional streams provide real-time command and result flow.</p>
+            </div>
+
+            <div class="legend-item">
+                <strong>📦 Service Isolation</strong>
+                <p>Internet-facing WebSocket service has no Docker socket access. Builder service runs in isolated container with minimal privileges. Defense in depth security model.</p>
+            </div>
+        </div>
+
+        <div class="legend">
+            <h3>🚀 Deployment</h3>
+            <pre style="background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; overflow-x: auto;">
+# Initial setup (includes firewall rules)
+sudo ./scripts/setup.sh
+
+# Start services
+cd server/docker
+docker compose up -d
+
+# Verify firewall rules
+sudo iptables -L NEXUSC2_GRPC -n -v
+
+# Check services
+docker compose ps
+            </pre>
+        </div>
     </div>
-    
-    <div class="tooltip" id="tooltip"></div>
-    
+
     <script>
-        // Add interactive tooltips
-        document.querySelectorAll('.component').forEach(component => {
-            component.addEventListener('mouseenter', (e) => {
-                const info = e.currentTarget.getAttribute('data-info');
-                const tooltip = document.getElementById('tooltip');
-                tooltip.textContent = info;
-                tooltip.style.display = 'block';
-            });
-            
-            component.addEventListener('mousemove', (e) => {
-                const tooltip = document.getElementById('tooltip');
-                tooltip.style.left = e.pageX + 10 + 'px';
-                tooltip.style.top = e.pageY + 10 + 'px';
-            });
-            
-            component.addEventListener('mouseleave', () => {
-                const tooltip = document.getElementById('tooltip');
-                tooltip.style.display = 'none';
-            });
-        });
-        
-        // Add animation to connection lines
-        const paths = document.querySelectorAll('line, path');
-        paths.forEach(path => {
-            if (path.tagName === 'path' && path.getAttribute('d')) {
-                const length = path.getTotalLength ? path.getTotalLength() : 1000;
-                path.style.strokeDasharray = length;
-                path.style.strokeDashoffset = length;
-                path.style.animation = `drawPath 2s ease-in-out forwards`;
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            flowchart: {
+                curve: 'basis',
+                padding: 20
             }
         });
-        
-        // Add CSS animation
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes drawPath {
-                to {
-                    stroke-dashoffset: 0;
-                }
-            }
-        `;
-        document.head.appendChild(style);
     </script>
 </body>
 </html>
