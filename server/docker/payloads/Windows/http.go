@@ -68,7 +68,6 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf("failed to marshal post data: %v", err)
 	}
 
-
 	// Create the request with custom method
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -139,8 +138,6 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature); err != nil {
 		return "", fmt.Errorf("server signature verification failed: %v", err)
 	}
-
-	fmt.Println("Server signature verified successfully!")
 
 	// Return the new client ID if everything is verified
 	if signedResponse.NewClientID == "" {

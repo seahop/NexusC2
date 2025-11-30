@@ -7,7 +7,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 )
 
 type HandshakeManager struct {
@@ -69,10 +68,10 @@ func (hm *HandshakeManager) PerformHandshake() error {
 		return fmt.Errorf("failed to send handshake: %v", err)
 	}
 
-	log.Printf("Handshake successful - New Client ID: %s", newClientID)
+	//log.Printf("Handshake successful - New Client ID: %s", newClientID)
 
 	// Step 6: Store old client ID in case we need to revert
-	oldClientID := hm.currentClientID
+	//oldClientID := hm.currentClientID
 
 	// Step 7: Update current client ID (but keep initial ID the same)
 	hm.currentClientID = newClientID
@@ -92,12 +91,12 @@ func (hm *HandshakeManager) PerformHandshake() error {
 		newClientID,
 	)
 
-	log.Printf("Updated URLs with new client ID:")
-	log.Printf("Initial Client ID: %s", hm.initialClientID)
-	log.Printf("Previous Client ID: %s", oldClientID)
-	log.Printf("New Client ID: %s", newClientID)
-	log.Printf("New GET URL: %s", hm.getURL)
-	log.Printf("New POST URL: %s", hm.postURL)
+	//log.Printf("Updated URLs with new client ID:")
+	//log.Printf("Initial Client ID: %s", hm.initialClientID)
+	//log.Printf("Previous Client ID: %s", oldClientID)
+	//log.Printf("New Client ID: %s", newClientID)
+	//log.Printf("New GET URL: %s", hm.getURL)
+	//log.Printf("New POST URL: %s", hm.postURL)
 
 	// Step 9: Initialize SecureComms with initial secret and new seed
 	hm.secureComms = NewSecureComms(
@@ -115,7 +114,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 }
 
 func (hm *HandshakeManager) RefreshHandshake() error {
-	log.Println("Starting refresh handshake...")
+	//log.Println("Starting refresh handshake...")
 	oldClientID := hm.currentClientID
 
 	err := hm.PerformHandshake()
