@@ -27,62 +27,71 @@ This C2 framework provides a robust platform for managing remote agents through 
 
 ### System Architecture Diagram
 
-<details>
-<summary>Click to expand architecture diagram</summary>
+```mermaid
+graph TB
+    subgraph "Data Layer"
+        DB[(Database Server<br/>PostgreSQL<br/>Port: 5432)]
+    end
 
+    subgraph "Service Layer"
+        WS[WebSocket Service<br/>Real-time Hub<br/>Port: 3131 WSS/TLS<br/>Builder Invoker]
+        AH[Agent Handler<br/>Listener Manager<br/>gRPC Server: 50051<br/>HTTP/HTTPS Listeners]
+    end
+
+    subgraph "Build Layer"
+        Builder[Docker Builder<br/>Payload Generator<br/>On-demand builds]
+    end
+
+    subgraph "Client Layer"
+        Client[Python3 Client<br/>Operator GUI<br/>WSS Connection]
+    end
+
+    subgraph "Agent Layer"
+        Agents[Deployed Agents<br/>Target Systems<br/>HTTP/HTTPS Callbacks]
+    end
+
+    %% Database connections
+    DB <-->|R/W SQL| WS
+    DB <-->|R/W SQL| AH
+
+    %% Service layer communication
+    WS <-->|gRPC BiDi Stream<br/>Port 50051| AH
+
+    %% Client connections
+    Client <-->|WSS/TLS + Username<br/>Port 3131| WS
+
+    %% Builder invocation
+    WS -.->|Build Request| Builder
+
+    %% Agent callbacks
+    Agents <-->|HTTP/HTTPS<br/>Encrypted Callbacks| AH
+
+    %% Styling
+    classDef database fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:#fff
+    classDef service fill:#4dabf7,stroke:#1864ab,stroke-width:2px,color:#fff
+    classDef agent fill:#69db7c,stroke:#2b8a3e,stroke-width:2px,color:#fff
+    classDef builder fill:#e599f7,stroke:#9c36b5,stroke-width:2px,color:#fff
+    classDef client fill:#74c0fc,stroke:#364fc7,stroke-width:2px,color:#fff
+
+    class DB database
+    class WS,AH service
+    class Agents agent
+    class Builder builder
+    class Client client
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          C2 System Architecture                             │
-└─────────────────────────────────────────────────────────────────────────────┘
 
-                         ┌─────────────────────┐
-                         │  Database Server    │
-                         │   (PostgreSQL)      │
-                         │    Port: 5432       │
-                         └──────────┬──────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    │                               │
-                    │ R/W                           │ R/W
-                    ▼                               ▼
-        ┌──────────────────────┐      ┌──────────────────────┐
-        │  WebSocket Service   │◄────►│   Agent Handler      │
-        │   Real-time Hub      │      │  Listener Manager    │
-        │  Port: 3131 (WSS)    │      │  gRPC Server: 50051  │
-        │  Builder Invoker     │      │  HTTP/HTTPS Listeners│
-        └──────────┬───────────┘      └──────────┬───────────┘
-                   │                              │
-                   │ gRPC BiDi (50051)            │
-                   │◄────────────────────────────►│
-                   │                              │
-        ┌──────────▼───────────┐      ┌──────────▼───────────┐
-        │   Docker Builder     │      │  Deployed Agents     │
-        │  Payload Generator   │      │   Target Systems     │
-        │  On-demand builds    │      │  HTTP/HTTPS Callbacks│
-        └──────────────────────┘      └──────────────────────┘
-                   ▲                              ▲
-                   │                              │
-        ┌──────────┴───────────┐                 │
-        │   Python3 Client     │                 │
-        │    Operator GUI      │                 │
-        │   WSS Connection     │─────────────────┘
-        └──────────────────────┘
-
-Network Ports:
-• PostgreSQL: 5432 (Internal)
-• WebSocket: 3131 (WSS/TLS)
-• gRPC: 50051 (Internal)
-• HTTP/HTTPS Listeners: Dynamic
-
-Message Flow:
+**Message Flow:**
 1. Client → WebSocket: TLS + Username Header
 2. WebSocket ↔ Database: Session/Task Management
 3. WebSocket ↔ Agent Handler: Task Dispatch (gRPC)
 4. Agent ↔ Agent Handler: Callbacks/Results
 5. Agent Handler ↔ Database: Agent State
-```
 
-</details>
+**Network Ports:**
+- PostgreSQL: 5432 (Internal)
+- WebSocket: 3131 (WSS/TLS)
+- gRPC: 50051 (Internal)
+- HTTP/HTTPS Listeners: Dynamic
 
 ## Key Features
 
