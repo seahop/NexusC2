@@ -36,7 +36,6 @@ func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	// Check and cleanup downloads
 	if download, exists := commandQueue.activeDownloads[filename]; exists {
-		fmt.Printf("[DEBUG] Killing active download for file: %s\n", filename)
 		download.InProgress = false
 		delete(commandQueue.activeDownloads, filename)
 		foundJob = true
@@ -44,7 +43,6 @@ func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	// Check and cleanup uploads
 	if upload, exists := commandQueue.activeUploads[filename]; exists {
-		fmt.Printf("[DEBUG] Killing active upload for file: %s\n", filename)
 		upload.Chunks = nil
 		delete(commandQueue.activeUploads, filename)
 		foundJob = true

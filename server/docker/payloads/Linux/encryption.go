@@ -53,14 +53,11 @@ func EncryptAES(data []byte, key []byte) (string, error) {
 
 // DecryptAES decrypts data using AES-256-GCM
 func DecryptAES(combined string, key []byte) (string, error) {
-	fmt.Println("Starting DecryptAES...")
-
 	// Step 1: Base64 Decode
 	allBytes, err := base64.StdEncoding.DecodeString(combined)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %v", err)
 	}
-	fmt.Printf("Decoded base64, length: %d\n", len(allBytes))
 
 	// Step 2: Extract Nonce and Ciphertext
 	block, err := aes.NewCipher(key)
@@ -80,8 +77,6 @@ func DecryptAES(combined string, key []byte) (string, error) {
 
 	nonce := allBytes[:nonceSize]
 	ciphertext := allBytes[nonceSize:]
-	fmt.Printf("Nonce: %x\n", nonce)
-	fmt.Printf("Ciphertext length: %d\n", len(ciphertext))
 
 	// Step 3: Decrypt
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
@@ -89,7 +84,6 @@ func DecryptAES(combined string, key []byte) (string, error) {
 		return "", fmt.Errorf("decryption failed: %v", err)
 	}
 
-	fmt.Println("Decryption successful!")
 	return string(plaintext), nil
 }
 

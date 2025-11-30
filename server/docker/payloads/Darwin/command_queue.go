@@ -75,13 +75,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&KeychainCommand{})      // Keychain access and manipulation
 	queue.RegisterCommand(&DYLDInjectionCommand{}) // DYLD library injection
 
-	// Print all registered commands
-	fmt.Printf("DEBUG: Registered commands: ")
-	for name := range queue.cmdRegistry {
-		fmt.Printf("%s ", name)
-	}
-	fmt.Println()
-
 	return queue
 }
 
@@ -118,8 +111,6 @@ func (cq *CommandQueue) AddCommands(jsonData string) error {
 	/*
 		// Debug: print details of each command
 		for i, cmd := range commands {
-			fmt.Printf("  Command %d: Type=%s, Data length=%d, Filename=%s\n",
-				i, cmd.Command, len(cmd.Data), cmd.Filename)
 		}
 	*/
 	return nil

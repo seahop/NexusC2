@@ -33,10 +33,6 @@ func NewSecureComms(initialSecret, seed string) *SecureComms {
 	h2.Write([]byte(sc.secret2))
 	sc.secret1 = fmt.Sprintf("%x", h2.Sum(nil))
 
-	fmt.Printf("[SecureComms Init] Initial Secret: %s\n", initialSecret)
-	fmt.Printf("[SecureComms Init] Seed: %s\n", seed)
-	fmt.Printf("[SecureComms Init] Generated secret2: %s\n", sc.secret2)
-	fmt.Printf("[SecureComms Init] Generated secret1: %s\n", sc.secret1)
 	return sc
 }
 
@@ -44,18 +40,12 @@ func (sc *SecureComms) RotateSecret() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
-	fmt.Printf("[SecureComms Rotate] Current secret1: %s\n", sc.secret1)
-	fmt.Printf("[SecureComms Rotate] Current secret2: %s\n", sc.secret2)
-
 	h := hmac.New(sha256.New, []byte(sc.secret2))
 	h.Write([]byte(sc.secret1))
 	newSecret := fmt.Sprintf("%x", h.Sum(nil))
 
 	sc.secret2 = sc.secret1
 	sc.secret1 = newSecret
-
-	fmt.Printf("[SecureComms Rotate] New secret1: %s\n", sc.secret1)
-	fmt.Printf("[SecureComms Rotate] New secret2: %s\n", sc.secret2)
 }
 
 func (sc *SecureComms) GetDecryptionSecret() string {

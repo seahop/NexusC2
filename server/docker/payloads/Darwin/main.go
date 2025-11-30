@@ -177,50 +177,7 @@ func refreshHandshake() error {
 }
 
 // debugSafetyChecks is a helper function for testing safety checks during development
-// You can call this function if needed to see what checks are configured and their results
+// Stripped in production builds
 func debugSafetyChecks() {
-	fmt.Println("=== Safety Check Debug Information ===")
-	fmt.Printf("Hostname Check: %s\n", safetyHostname)
-	fmt.Printf("Username Check: %s\n", safetyUsername)
-	fmt.Printf("Domain Check: %s\n", safetyDomain)
-	fmt.Printf("File Path: %s (must exist: %s)\n", safetyFilePath, safetyFileMustExist)
-	fmt.Printf("Process Check: %s\n", safetyProcess)
-	fmt.Printf("Kill Date: %s\n", safetyKillDate)
-	fmt.Printf("Working Hours: %s - %s\n", safetyWorkHoursStart, safetyWorkHoursEnd)
-	fmt.Println("=====================================")
-
-	// Test individual checks
-	if safetyHostname != "" {
-		hostname, _ := os.Hostname()
-		fmt.Printf("Current Hostname: %s, Check Result: %v\n", hostname, checkHostname(safetyHostname))
-	}
-
-	if safetyUsername != "" {
-		username := os.Getenv("USER")
-		fmt.Printf("Current Username: %s, Check Result: %v\n", username, checkUsername(safetyUsername))
-	}
-
-	if safetyDomain != "" {
-		fmt.Printf("Domain Check Result: %v\n", checkDomain(safetyDomain))
-	}
-
-	if safetyFilePath != "" {
-		mustExist := safetyFileMustExist == "true"
-		fmt.Printf("File Check Result: %v\n", checkFile(safetyFilePath, mustExist))
-	}
-
-	if safetyProcess != "" {
-		fmt.Printf("Process Check Result: %v\n", checkProcess(safetyProcess))
-	}
-
-	if safetyKillDate != "" {
-		fmt.Printf("Kill Date Check Result: %v\n", checkKillDate(safetyKillDate))
-	}
-
-	if safetyWorkHoursStart != "" && safetyWorkHoursEnd != "" {
-		fmt.Printf("Working Hours Check Result: %v\n",
-			checkWorkingHours(safetyWorkHoursStart, safetyWorkHoursEnd))
-	}
-
-	fmt.Println("=== End Debug Information ===")
+	// Debug output removed for production
 }

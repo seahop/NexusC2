@@ -42,7 +42,6 @@ func cleanupBOFJobs() {
 			bofJobManager.mu.Unlock()
 
 			if cleaned > 0 {
-				fmt.Printf("[BOF Cleanup] Removed %d old completed job(s)\n", cleaned)
 			}
 		}
 	}

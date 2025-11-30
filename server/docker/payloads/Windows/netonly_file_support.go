@@ -102,7 +102,6 @@ func WrapNetworkFileOperation(path string, operation func() error) error {
 			// Apply impersonation for this operation
 			err := ImpersonateLoggedOnUser(netOnlyHandle)
 			if err != nil {
-				fmt.Printf("[!] Failed to apply netonly token: %v\n", err)
 				// Try to execute anyway
 				return operation()
 			}
@@ -137,7 +136,6 @@ func NetworkAwareStatFile(path string) (os.FileInfo, error) {
 			// Apply impersonation for this specific operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for stat: %v\n", impErr)
 				// Try without impersonation
 				return os.Stat(path)
 			}
@@ -171,7 +169,6 @@ func NetworkAwareReadDir(path string) ([]os.DirEntry, error) {
 			// Apply impersonation for this specific operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for readdir: %v\n", impErr)
 				// Try without impersonation
 				return os.ReadDir(path)
 			}
@@ -205,7 +202,6 @@ func NetworkAwareOpenFile(path string, flag int, perm os.FileMode) (*os.File, er
 			// Apply impersonation for this specific operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for open: %v\n", impErr)
 				// Try without impersonation
 				return os.OpenFile(path, flag, perm)
 			}
@@ -260,7 +256,6 @@ func NetworkAwareReadFile(path string) ([]byte, error) {
 			// Apply impersonation for this specific operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for read: %v\n", impErr)
 				// Try without impersonation
 				return os.ReadFile(path)
 			}
@@ -294,7 +289,6 @@ func NetworkAwareWriteFile(path string, data []byte, perm os.FileMode) error {
 			// Apply impersonation for this specific operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for write: %v\n", impErr)
 				// Try without impersonation
 				return os.WriteFile(path, data, perm)
 			}
@@ -332,7 +326,6 @@ func NetworkAwareCopyFile(src, dst string) error {
 			// Apply impersonation for this operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for copy: %v\n", impErr)
 				// Try without impersonation
 			} else {
 				// Make sure to revert after the operation
@@ -377,7 +370,6 @@ func NetworkAwareMoveFile(src, dst string) error {
 			// Apply impersonation for this operation
 			impErr := ImpersonateLoggedOnUser(netOnlyHandle)
 			if impErr != nil {
-				fmt.Printf("[!] Failed to apply netonly token for move: %v\n", impErr)
 				// Try without impersonation
 			} else {
 				// Make sure to revert after the operation

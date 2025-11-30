@@ -346,7 +346,6 @@ func (ajm *AssemblyJobManager) CleanupOldJobs(maxAge time.Duration) {
 		if job.Status != "running" && job.EndTime != nil {
 			if now.Sub(*job.EndTime) > maxAge {
 				delete(ajm.jobs, id)
-				fmt.Printf("[Assembly Jobs] Cleaned up old job: %s\n", id)
 			}
 		}
 	}
@@ -362,7 +361,6 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 		if job.Status != "running" {
 			delete(ajm.jobs, id)
 			cleaned++
-			fmt.Printf("[Assembly Jobs] Cleaned job: %s (status: %s)\n", id, job.Status)
 		}
 	}
 

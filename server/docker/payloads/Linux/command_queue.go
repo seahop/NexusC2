@@ -80,13 +80,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&ContainerDetectCommand{})
 	queue.RegisterCommand(&LDPreloadCommand{})
 
-	// Print all registered commands
-	fmt.Printf("DEBUG: Registered commands: ")
-	for name := range queue.cmdRegistry {
-		fmt.Printf("%s ", name)
-	}
-	fmt.Println()
-
 	return queue
 }
 

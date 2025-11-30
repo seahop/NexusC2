@@ -104,30 +104,25 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 		case "FindFirstFileA":
 			hModule, err := syscall.LoadLibrary("kernel32.dll")
 			if err != nil {
-				fmt.Printf("[BOF] Failed to load kernel32.dll: %v\n", err)
 				return 0
 			}
 
 			addr, err := syscall.GetProcAddress(hModule, "FindFirstFileA")
 			if err != nil {
-				fmt.Printf("[BOF] Failed to get FindFirstFileA: %v\n", err)
 				return 0
 			}
 
 			// Wrap the function to add debugging
 			return windows.NewCallback(func(lpFileName, lpFindFileData uintptr) uintptr {
-				path := ReadCStringFromPtr(lpFileName)
-				fmt.Printf("[DEBUG FindFirstFileA] Called with path: '%s'\n", path)
+				_ = ReadCStringFromPtr(lpFileName)
 
 				// Call the real FindFirstFileA
-				ret, _, err := syscall.SyscallN(addr, lpFileName, lpFindFileData)
+				ret, _, _ := syscall.SyscallN(addr, lpFileName, lpFindFileData)
 
 				if ret == 0xFFFFFFFFFFFFFFFF { // INVALID_HANDLE_VALUE
 					// Get last error
-					errCode := syscall.GetLastError()
-					fmt.Printf("[DEBUG FindFirstFileA] Failed with error: %v (code: %d)\n", err, errCode)
+					_ = syscall.GetLastError()
 				} else {
-					fmt.Printf("[DEBUG FindFirstFileA] Success, handle: 0x%x\n", ret)
 				}
 
 				return ret
@@ -145,11 +140,9 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			}
 
 			return windows.NewCallback(func(hFindFile, lpFindFileData uintptr) uintptr {
-				fmt.Printf("[DEBUG FindNextFileA] Called with handle: 0x%x\n", hFindFile)
 				ret, _, _ := syscall.SyscallN(addr, hFindFile, lpFindFileData)
 				if ret == 0 {
-					errCode := syscall.GetLastError()
-					fmt.Printf("[DEBUG FindNextFileA] Failed with error code: %d\n", errCode)
+					_ = syscall.GetLastError()
 				}
 				return ret
 			})
@@ -166,7 +159,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			}
 
 			return windows.NewCallback(func(hFindFile uintptr) uintptr {
-				fmt.Printf("[DEBUG FindClose] Called with handle: 0x%x\n", hFindFile)
 				ret, _, _ := syscall.SyscallN(addr, hFindFile)
 				return ret
 			})
@@ -177,7 +169,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 
 			return windows.NewCallback(func() uintptr {
 				ret, _, _ := procGetLastError.Call()
-				fmt.Printf("[DEBUG GetLastError] Returning error code: %d\n", ret)
 				return ret
 			})
 
@@ -405,15 +396,9 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					}
 					dstLen++
 					if dstLen > 65536 {
-						fmt.Printf("[DEBUG strcat] Warning: dst string too long\n")
 						return dst
 					}
 				}
-
-				// Debug output
-				dstStr := ReadCStringFromPtr(dst)
-				srcStr := ReadCStringFromPtr(src)
-				fmt.Printf("[DEBUG strcat] Concatenating '%s' + '%s' at position %d\n", dstStr, srcStr, dstLen)
 
 				// Copy src to end of dst
 				i := 0
@@ -425,16 +410,12 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					}
 					i++
 					if i > 65536 {
-						fmt.Printf("[DEBUG strcat] Warning: src string too long\n")
 						*(*byte)(unsafe.Pointer(dst + uintptr(dstLen+i))) = 0
 						break
 					}
 				}
 
 				// Debug: show result
-				resultStr := ReadCStringFromPtr(dst)
-				fmt.Printf("[DEBUG strcat] Result: '%s'\n", resultStr)
-
 				return dst
 			})
 
@@ -547,7 +528,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					*(*byte)(unsafe.Pointer(ptr + i)) = 0
 				}
 
-				fmt.Printf("[DEBUG calloc] Allocated %d bytes at %p\n", totalSize, unsafe.Pointer(ptr))
 				return ptr
 			})
 
@@ -564,7 +544,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				allocatedMemory[ptr] = mem
 				allocMutex.Unlock()
 
-				fmt.Printf("[DEBUG malloc] Allocated %d bytes at %p\n", size, unsafe.Pointer(ptr))
 				return ptr
 			})
 
@@ -577,7 +556,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				allocMutex.Lock()
 				if _, exists := allocatedMemory[ptr]; exists {
 					delete(allocatedMemory, ptr)
-					fmt.Printf("[DEBUG free] Freed memory at %p\n", unsafe.Pointer(ptr))
 				}
 				allocMutex.Unlock()
 
@@ -636,8 +614,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				allocatedMemory[newPtr] = newMem
 				allocMutex.Unlock()
 
-				fmt.Printf("[DEBUG realloc] Reallocated from %p to %p (%d bytes)\n",
-					unsafe.Pointer(ptr), unsafe.Pointer(newPtr), size)
 				return newPtr
 			})
 
@@ -712,14 +688,12 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 		case "vsnprintf", "_vsnprintf":
 			// Simplified vsnprintf - just return 0 for now
 			return windows.NewCallback(func(buffer, size, format, args uintptr) uintptr {
-				fmt.Printf("[DEBUG vsnprintf] Called (stub implementation)\n")
 				return 0
 			})
 
 		case "sprintf":
 			// Simplified sprintf
 			return windows.NewCallback(func(buffer, format, arg0, arg1, arg2, arg3, arg4 uintptr) uintptr {
-				fmt.Printf("[DEBUG sprintf] Called (stub implementation)\n")
 				return 0
 			})
 
@@ -753,8 +727,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				p.length = uint32(size)
 				p.size = uint32(size)
 
-				fmt.Printf("[DEBUG DataParse] Initialized parser at %p with buffer=%p, size=%d\n",
-					unsafe.Pointer(parser), unsafe.Pointer(buffer), size)
 				return 0
 			})
 
@@ -770,22 +742,18 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
-				fmt.Printf("[DEBUG DataShort] Called, remaining length=%d\n", p.length)
 
 				if p.length < 2 {
-					fmt.Printf("[DEBUG DataShort] Not enough data for length prefix\n")
 					return 0
 				}
 
 				// Read 2-byte length prefix
-				lenPrefix := *(*uint16)(unsafe.Pointer(p.buffer))
+				_ = *(*uint16)(unsafe.Pointer(p.buffer))
 				p.buffer += 2
 				p.length -= 2
 
-				fmt.Printf("[DEBUG DataShort] Length prefix: %d\n", lenPrefix)
 
 				if p.length < 2 {
-					fmt.Printf("[DEBUG DataShort] Not enough data for short value\n")
 					return 0
 				}
 
@@ -794,7 +762,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				p.buffer += 2
 				p.length -= 2
 
-				fmt.Printf("[DEBUG DataShort] Extracted short: %d\n", value)
 				return uintptr(value)
 			})
 
@@ -808,10 +775,8 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(func(parser uintptr, sizePtr uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
-				fmt.Printf("[DEBUG DataExtract] Called, remaining length=%d\n", p.length)
 
 				if p.length < 2 {
-					fmt.Printf("[DEBUG DataExtract] Not enough data for length prefix\n")
 					if sizePtr != 0 {
 						*(*uint32)(unsafe.Pointer(sizePtr)) = 0
 					}
@@ -823,10 +788,8 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				p.buffer += 2
 				p.length -= 2
 
-				fmt.Printf("[DEBUG DataExtract] Binary length: %d\n", binLen)
 
 				if uint32(binLen) > p.length {
-					fmt.Printf("[DEBUG DataExtract] Not enough data (need %d, have %d)\n", binLen, p.length)
 					if sizePtr != 0 {
 						*(*uint32)(unsafe.Pointer(sizePtr)) = 0
 					}
@@ -855,7 +818,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					if len(extractedStr) > 0 && extractedStr[len(extractedStr)-1] == 0 {
 						extractedStr = extractedStr[:len(extractedStr)-1]
 					}
-					fmt.Printf("[DEBUG DataExtract] Extracted string: '%s'\n", extractedStr)
 				}
 
 				// Return the pointer directly from the buffer
@@ -909,7 +871,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(Utf16ToUtf8)
 
 		default:
-			fmt.Printf("[BOF] Warning: Unknown symbol: %s\n", procName)
 			return 0
 		}
 	}
@@ -917,13 +878,11 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 	if libName != "" && procName != "" {
 		hModule, err := syscall.LoadLibrary(libName)
 		if err != nil {
-			fmt.Printf("[BOF] Failed to load library %s: %v\n", libName, err)
 			return 0
 		}
 
 		addr, err := syscall.GetProcAddress(hModule, procName)
 		if err != nil {
-			fmt.Printf("[BOF] Failed to get proc address for %s!%s: %v\n", libName, procName, err)
 			return 0
 		}
 
@@ -962,7 +921,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	// Add panic recovery for the entire load process
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[BOF] Panic during load: %v\n%s\n", r, debug.Stack())
 		}
 	}()
 
@@ -1087,7 +1045,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 		for _, reloc := range section.Relocations() {
 			if reloc.SymbolTableIndex >= uint32(len(parsedCoff.Symbols)) {
-				fmt.Printf("[BOF] Invalid symbol table index: %d\n", reloc.SymbolTableIndex)
 				continue
 			}
 
@@ -1111,7 +1068,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					} else {
 						externalAddress := resolveExternalAddress(symbolName, output)
 						if externalAddress == 0 {
-							fmt.Printf("[BOF] Warning: Failed to resolve external symbol: %s\n", symbolName)
 							continue
 						}
 
@@ -1142,7 +1098,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				// Regular symbol pointing to a section
 				targetSectionAddr := sectionAddresses[symbol.SectionNumber-1]
 				if targetSectionAddr == 0 {
-					fmt.Printf("[BOF] Section %d not allocated for symbol %s\n", symbol.SectionNumber, symbol.NameString())
 					continue
 				}
 				symbolDefAddress = targetSectionAddr + uintptr(symbol.Value)
@@ -1153,7 +1108,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 			// Apply relocation
 			err := applyRelocation(sectionAddress, reloc, symbolDefAddress, section.RawData())
 			if err != nil {
-				fmt.Printf("[BOF] Failed to apply relocation at 0x%x: %v\n", reloc.VirtualAddress, err)
 				continue
 			}
 		}
@@ -1168,13 +1122,11 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				uintptr(unsafe.Pointer(&oldProtect)),
 			)
 			if !errors.Is(err, syscall.Errno(0)) {
-				fmt.Printf("[BOF] Warning: VirtualProtect failed: %v\n", err)
 			}
 		}
 	}
 
 	// Execute entry point
-	startTime := time.Now()
 	go func() {
 		defer close(output)
 		defer func() {
@@ -1190,7 +1142,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				procVirtualFree.Call(addr, 0, 0x8000) // MEM_RELEASE
 			}
 			// Log execution time
-			fmt.Printf("[BOF] Execution completed in %v\n", time.Since(startTime))
 		}()
 
 		// Find entry point
@@ -1205,7 +1156,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				entryPoint := sectionAddresses[symbol.SectionNumber-1] + uintptr(symbol.Value)
 
 				// Log entry point for debugging
-				fmt.Printf("[BOF] Entry point '%s' found at 0x%x\n", method, entryPoint)
 
 				// Prepare arguments
 				var argPtr uintptr
@@ -1235,14 +1185,12 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 						// Track this allocation for cleanup
 						allocatedMemory = append(allocatedMemory, argAddr)
 
-						fmt.Printf("[BOF] Arguments allocated at 0x%x (%d bytes)\n", argAddr, argLen)
 					} else {
 						// Fallback: pin the Go slice
 						pinnedArgBytes = make([]byte, argLen)
 						copy(pinnedArgBytes, argBytes)
 						argPtr = uintptr(unsafe.Pointer(&pinnedArgBytes[0]))
 
-						fmt.Printf("[BOF] Arguments pinned at 0x%x (%d bytes)\n", argPtr, argLen)
 					}
 				} else {
 					// Pass empty buffer
@@ -1253,15 +1201,11 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				}
 
 				// Call entry point
-				fmt.Printf("[BOF] Calling entry point with args: ptr=0x%x, len=%d\n", argPtr, argLen)
 
 				// Debug: Print the first few bytes of the argument buffer
 				if argLen > 0 && argLen < 100 {
-					fmt.Printf("[BOF] Argument bytes: ")
 					for i := 0; i < argLen && i < 32; i++ {
-						fmt.Printf("%02x ", *(*byte)(unsafe.Pointer(argPtr + uintptr(i))))
 					}
-					fmt.Printf("\n")
 				}
 
 				// Set timeout for BOF execution based on parameter
@@ -1275,7 +1219,6 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					if !errors.Is(err, syscall.Errno(0)) {
 						output <- fmt.Sprintf("[BOF] Entry point returned with error: %v (return: 0x%x)", err, ret)
 					} else {
-						fmt.Printf("[BOF] Entry point executed successfully (return: 0x%x)\n", ret)
 					}
 					done <- true
 				}()
@@ -1320,8 +1263,6 @@ func applyRelocation(sectionAddress uintptr, reloc windef.Relocation, symbolAddr
 	if reloc.VirtualAddress >= uint32(len(sectionData)) && len(sectionData) > 0 {
 		// Some relocations might point beyond section data for BSS references
 		// Don't fail, just warn
-		fmt.Printf("[BOF] Warning: Relocation offset 0x%x exceeds section data size %d\n",
-			reloc.VirtualAddress, len(sectionData))
 	}
 
 	// Read existing value at relocation site for REL32 relocations
@@ -1405,15 +1346,12 @@ func printOutput(flush int) {
 // Internal printf function for BOFs
 func GetInternalPrintfForChannel(channel chan<- interface{}) func(uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr) uintptr {
 	return func(format uintptr, arg0 uintptr, arg1 uintptr, arg2 uintptr, arg3 uintptr, arg4 uintptr, arg5 uintptr, arg6 uintptr, arg7 uintptr, arg8 uintptr, arg9 uintptr) uintptr {
-		fmt.Printf("[DEBUG internal_printf] Called\n")
 
 		if format == 0 {
-			fmt.Printf("[DEBUG internal_printf] Format pointer is null\n")
 			return 0
 		}
 
 		formatStr := ReadCStringFromPtr(format)
-		fmt.Printf("[DEBUG internal_printf] Format string: %s\n", formatStr)
 
 		// Count actual format specifiers (skip %%)
 		numArgs := 0
@@ -1427,7 +1365,6 @@ func GetInternalPrintfForChannel(channel chan<- interface{}) func(uintptr, uintp
 			}
 		}
 
-		fmt.Printf("[DEBUG internal_printf] Number of args detected: %d\n", numArgs)
 
 		args := []uintptr{arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9}
 
@@ -1534,19 +1471,14 @@ func GetInternalPrintfForChannel(channel chan<- interface{}) func(uintptr, uintp
 		outputBytes := []byte(output)
 		bofOutputMutex.Lock()
 		bofOutputBuffer = append(bofOutputBuffer, outputBytes...)
-		currentBufferSize := len(bofOutputBuffer)
+		_ = len(bofOutputBuffer)
 		bofOutputMutex.Unlock()
-
-		fmt.Printf("[DEBUG internal_printf] Added %d bytes to global buffer (total: %d bytes)\n",
-			len(outputBytes), currentBufferSize)
 
 		// Also send to channel if provided (for non-async BOFs)
 		if channel != nil {
 			select {
 			case channel <- output:
-				fmt.Printf("[DEBUG internal_printf] Also sent to channel\n")
 			default:
-				fmt.Printf("[DEBUG internal_printf] Channel full, skipped channel send\n")
 			}
 		}
 
@@ -1556,7 +1488,6 @@ func GetInternalPrintfForChannel(channel chan<- interface{}) func(uintptr, uintp
 
 // Memory management functions
 func intAlloc(size int) uintptr {
-	fmt.Printf("[DEBUG intAlloc] Allocating %d bytes\n", size)
 	if size <= 0 {
 		return 0
 	}
@@ -1568,7 +1499,7 @@ func intAlloc(size int) uintptr {
 	defer bofAllocMutex.Unlock()
 
 	// Allocate memory using VirtualAlloc to ensure it's not garbage collected
-	addr, _, err := procVirtualAlloc.Call(
+	addr, _, _ := procVirtualAlloc.Call(
 		0,
 		uintptr(alignedSize),
 		MEM_COMMIT|MEM_RESERVE,
@@ -1576,7 +1507,6 @@ func intAlloc(size int) uintptr {
 	)
 
 	if addr == 0 {
-		fmt.Printf("[DEBUG intAlloc] VirtualAlloc failed: %v\n", err)
 		// Fallback to Go allocation
 		mem := make([]byte, alignedSize)
 		ptr := uintptr(unsafe.Pointer(&mem[0]))
@@ -1588,7 +1518,6 @@ func intAlloc(size int) uintptr {
 			mem[i] = 0
 		}
 
-		fmt.Printf("[DEBUG intAlloc] Allocated (Go) at %p\n", unsafe.Pointer(ptr))
 		return ptr
 	}
 
@@ -1601,15 +1530,12 @@ func intAlloc(size int) uintptr {
 	}
 
 	// Verify the memory is zeroed
-	firstByte := *(*byte)(unsafe.Pointer(addr))
-	fmt.Printf("[DEBUG intAlloc] Allocated (VirtualAlloc) at %p, first byte after zeroing: %02x\n",
-		unsafe.Pointer(addr), firstByte)
+	_ = *(*byte)(unsafe.Pointer(addr))
 
 	return addr
 }
 
 func intFree(ptr uintptr) uintptr {
-	fmt.Printf("[DEBUG intFree] Freeing memory at %p\n", unsafe.Pointer(ptr))
 
 	if ptr == 0 {
 		return 0
@@ -1636,7 +1562,6 @@ func intFree(ptr uintptr) uintptr {
 }
 
 func intRealloc(ptr uintptr, size int) uintptr {
-	fmt.Printf("[DEBUG intRealloc] Reallocating %p to %d bytes\n", unsafe.Pointer(ptr), size)
 
 	if size <= 0 {
 		intFree(ptr)
@@ -1668,7 +1593,6 @@ func intRealloc(ptr uintptr, size int) uintptr {
 }
 
 func intMemcpy(dst uintptr, src uintptr, size int) uintptr {
-	fmt.Printf("[DEBUG intMemcpy] Copying %d bytes from %p to %p\n", size, unsafe.Pointer(src), unsafe.Pointer(dst))
 	for i := 0; i < size; i++ {
 		*(*byte)(unsafe.Pointer(dst + uintptr(i))) = *(*byte)(unsafe.Pointer(src + uintptr(i)))
 	}
@@ -1676,7 +1600,6 @@ func intMemcpy(dst uintptr, src uintptr, size int) uintptr {
 }
 
 func intMemset(ptr uintptr, value int, size int) uintptr {
-	fmt.Printf("[DEBUG intMemset] Setting %d bytes at %p to value %d\n", size, unsafe.Pointer(ptr), value)
 	for i := 0; i < size; i++ {
 		*(*byte)(unsafe.Pointer(ptr + uintptr(i))) = byte(value)
 	}
@@ -1789,7 +1712,6 @@ func intStrncat(dst uintptr, src uintptr, n int) uintptr {
 
 // Wide char conversion functions
 func toWideChar(str uintptr, wide uintptr, size int) int {
-	fmt.Printf("[DEBUG toWideChar] Called\n")
 	if str == 0 || wide == 0 {
 		return 0
 	}
@@ -1820,7 +1742,6 @@ func Utf8ToUtf16(str uintptr, wide uintptr, size int) int {
 }
 
 func Utf16ToUtf8(wide uintptr, str uintptr, size int) int {
-	fmt.Printf("[DEBUG Utf16ToUtf8] Called\n")
 	if wide == 0 || str == 0 {
 		return 0
 	}
@@ -1899,7 +1820,6 @@ func cleanupBOFAllocations() {
 
 func verifyMemory(ptr uintptr, expectedContent string) {
 	if ptr == 0 {
-		fmt.Printf("[DEBUG verifyMemory] Pointer is null\n")
 		return
 	}
 
@@ -1913,7 +1833,5 @@ func verifyMemory(ptr uintptr, expectedContent string) {
 		}
 	}
 
-	actual := string(bytes[:len(bytes)-1]) // Remove null terminator
-	fmt.Printf("[DEBUG verifyMemory] Memory at %p: expected='%s', actual='%s', bytes=%x\n",
-		unsafe.Pointer(ptr), expectedContent, actual, bytes)
+	_ = string(bytes[:len(bytes)-1]) // Remove null terminator
 }

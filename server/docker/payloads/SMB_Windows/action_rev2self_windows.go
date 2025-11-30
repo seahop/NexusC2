@@ -85,14 +85,12 @@ func (nrt *NetworkResourceTracker) TrackNetworkResource(path string) {
 		resource := "\\\\" + parts[0] + "\\" + parts[1]
 		if !nrt.resources[resource] {
 			nrt.resources[resource] = true
-			fmt.Printf("[Network Tracker] Tracked resource: %s\n", resource)
 		}
 	} else if len(parts) >= 1 {
 		// Just server, track IPC$ connection
 		resource := "\\\\" + parts[0] + "\\IPC$"
 		if !nrt.resources[resource] {
 			nrt.resources[resource] = true
-			fmt.Printf("[Network Tracker] Tracked IPC$ resource: %s\n", resource)
 		}
 	}
 }
@@ -221,7 +219,6 @@ func DisconnectTrackedNetworkResources() []string {
 		err := WNetCancelConnection2(resource, 0, true)
 		if err == nil {
 			disconnected = append(disconnected, resource)
-			fmt.Printf("[Rev2Self] Disconnected: %s\n", resource)
 			continue
 		}
 
@@ -229,7 +226,6 @@ func DisconnectTrackedNetworkResources() []string {
 		err = WNetCancelConnection2(resource, 1, true)
 		if err == nil {
 			disconnected = append(disconnected, resource)
-			fmt.Printf("[Rev2Self] Disconnected (update profile): %s\n", resource)
 			continue
 		}
 
@@ -241,7 +237,6 @@ func DisconnectTrackedNetworkResources() []string {
 				ipcPath := server + "\\IPC$"
 				err = WNetCancelConnection2(ipcPath, 0, true)
 				if err == nil {
-					fmt.Printf("[Rev2Self] Disconnected IPC$: %s\n", ipcPath)
 				}
 			}
 		}
@@ -298,7 +293,6 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	// If we had a network-only token, disconnect network connections
 	if hadNetOnlyToken {
-		fmt.Printf("[Rev2Self] Clearing network connections for netonly token...\n")
 
 		// Try to disconnect tracked resources first
 		disconnectedShares = DisconnectTrackedNetworkResources()

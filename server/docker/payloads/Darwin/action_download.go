@@ -42,7 +42,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Remove any surrounding quotes if present (should already be done by parser)
 	targetPath = strings.Trim(targetPath, "\"'")
 
-	fmt.Printf("[DEBUG] Download command received path: %s\n", targetPath)
 
 	// Handle path resolution for both local and UNC paths
 	if !filepath.IsAbs(targetPath) {
@@ -93,7 +92,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		displayPath = strings.ReplaceAll(targetPath, "/", "\\")
 	}
 
-	fmt.Printf("[DEBUG] Attempting to open file: %s\n", targetPath)
 
 	// Use NetworkAwareOpenFile to support network shares
 	// This handles network authentication properly
@@ -200,11 +198,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		},
 	}
 
-	fmt.Printf("[DEBUG Download] Created result with:\n")
-	fmt.Printf("  Filename: %s\n", result.Command.Filename)
-	fmt.Printf("  CurrentChunk: %d\n", result.Command.CurrentChunk)
-	fmt.Printf("  TotalChunks: %d\n", result.Command.TotalChunks)
-	fmt.Printf("  Data length: %d bytes (base64)\n", len(result.Command.Data))
 
 	return result
 }
@@ -215,9 +208,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 // GetNextFileChunk continues downloading a file from a specific chunk
 func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*CommandResult, error) {
-	fmt.Printf("[DEBUG GetNextFileChunk] Request for chunk %d of file %s (total chunks: %d)\n",
-		chunkNumber, filePath, originalCmd.TotalChunks)
-
 	// Use NetworkAwareOpenFile for network authentication support
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 
@@ -272,9 +262,6 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 			Timestamp:    originalCmd.Timestamp,
 		},
 	}
-
-	fmt.Printf("[DEBUG GetNextFileChunk] Sending chunk %d with %d bytes (base64: %d bytes)\n",
-		chunkNumber, n, len(encodedData))
 
 	return result, nil
 }

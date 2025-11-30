@@ -41,7 +41,6 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		fmt.Println("[*] Restoring original exit methods before termination...")
 		// Call RestoreAll directly - it will be a no-op on non-Windows
 		if err := exitPrevention.RestoreAll(); err != nil {
-			fmt.Printf("[!] Warning: Some methods may not have been restored: %v\n", err)
 		}
 		exitMethodsPatched = false
 		fmt.Println("[+] Exit methods restored, proceeding with graceful exit")

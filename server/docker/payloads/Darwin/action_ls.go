@@ -413,8 +413,6 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Special handling for root directory listing
 	if (filepath.Clean(targetDir) == "/" || filepath.Clean(targetDir) == "C:\\") && opts.recursive && opts.maxDepth == -1 {
 		// Warn about potentially problematic operation
-		fmt.Printf("Warning: Recursive listing of root directory without depth limit may take a very long time.\n")
-		fmt.Printf("Consider using --max-depth to limit recursion (e.g., --max-depth=3)\n\n")
 	}
 
 	// Initialize stats if counting

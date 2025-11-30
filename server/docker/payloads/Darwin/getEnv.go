@@ -52,7 +52,6 @@ func decryptAllValues() map[string]string {
 	for k, v := range toDecrypt {
 		decryptedValue, err := xorDecrypt(v, xorKey)
 		if err != nil {
-			fmt.Printf("Failed to decrypt %s: %v\n", k, err)
 			decrypted[k] = "DECRYPTION_FAILED"
 		} else {
 			decrypted[k] = decryptedValue
@@ -70,8 +69,6 @@ func decryptAllValues() map[string]string {
 	}
 
 	// Log the HTTP methods being used
-	fmt.Printf("HTTP Methods configured: GET=%s, POST=%s\n",
-		decrypted["GET Method"], decrypted["POST Method"])
 
 	return decrypted
 }

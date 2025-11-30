@@ -101,7 +101,6 @@ func captureCurrentTokenContext() *TokenContext {
 // This ensures each async BOF gets its own token handle that can be safely managed
 func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), syscall.Handle) {
 	if tokenContext == nil || globalTokenStore == nil {
-		fmt.Printf("[BOF Async Token] No token context to apply\n")
 		return func() {}, 0 // No-op cleanup
 	}
 
@@ -110,8 +109,6 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 
 	// Priority: Network-only token > Regular impersonation
 	if tokenContext.NetOnlyHandle != 0 {
-		fmt.Printf("[BOF Async Token] Attempting to duplicate network-only token '%s' (handle: 0x%x)\n",
-			tokenContext.NetOnlyToken, tokenContext.NetOnlyHandle)
 
 		// First verify the source handle is still valid
 		globalTokenStore.mu.RLock()
@@ -119,7 +116,6 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 		globalTokenStore.mu.RUnlock()
 
 		if currentNetOnlyHandle == 0 {
-			fmt.Printf("[BOF Async Token] ERROR: Network-only token handle is no longer valid in global store\n")
 			return func() {}, 0
 		}
 
@@ -135,7 +131,6 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 		)
 
 		if err != nil {
-			fmt.Printf("[BOF Async Token] Failed to duplicate network-only token: %v (error code: %v)\n", err, err)
 
 			// Try with different access rights
 			err2 := DuplicateTokenEx(
@@ -148,26 +143,20 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 			)
 
 			if err2 != nil {
-				fmt.Printf("[BOF Async Token] Second attempt to duplicate also failed: %v\n", err2)
 				// As last resort, try to use the original handle directly
 				// This is risky but better than nothing
 				duplicatedToken = currentNetOnlyHandle
 				cleanupFunc = func() {
 					// Don't close the original handle
-					fmt.Printf("[BOF Async Token] Using original handle - no cleanup needed\n")
 				}
 			} else {
-				fmt.Printf("[BOF Async Token] Successfully duplicated token on second attempt\n")
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
-					fmt.Printf("[BOF Async Token] Closed duplicated network-only token\n")
 				}
 			}
 		} else {
-			fmt.Printf("[BOF Async Token] Successfully duplicated network-only token (new handle: 0x%x)\n", duplicatedToken)
 			cleanupFunc = func() {
 				CloseHandle(duplicatedToken)
-				fmt.Printf("[BOF Async Token] Closed duplicated network-only token\n")
 			}
 		}
 
@@ -180,7 +169,6 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 		globalTokenStore.mu.RUnlock()
 
 		if exists {
-			fmt.Printf("[BOF Async Token] Duplicating impersonation token '%s' for async BOF\n", tokenContext.ActiveToken)
 
 			// Duplicate the token for this specific async operation
 			err := DuplicateTokenEx(
@@ -193,18 +181,14 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 			)
 
 			if err != nil {
-				fmt.Printf("[BOF Async Token] Failed to duplicate impersonation token: %v\n", err)
 				// Fall back to using the original handle
 				duplicatedToken = token
 				cleanupFunc = func() {
 					// Don't close the original handle
-					fmt.Printf("[BOF Async Token] Using original handle - no cleanup needed\n")
 				}
 			} else {
-				fmt.Printf("[BOF Async Token] Successfully duplicated impersonation token\n")
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
-					fmt.Printf("[BOF Async Token] Closed duplicated impersonation token\n")
 				}
 			}
 
@@ -296,14 +280,11 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 	lastChunkTime := time.Now()
 	accumulatedBytes := 0
 
-	fmt.Printf("[BOF Async] Starting job %s for %s\n", job.ID, job.Name)
 
 	// Log token context
 	if job.TokenContext != nil {
 		if job.TokenContext.NetOnlyHandle != 0 {
-			fmt.Printf("[BOF Async] Job will use network-only token: %s\n", job.TokenContext.NetOnlyToken)
 		} else if job.TokenContext.IsImpersonating {
-			fmt.Printf("[BOF Async] Job will use impersonation token: %s\n", job.TokenContext.ActiveToken)
 		}
 	}
 
@@ -327,10 +308,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 					capturedOutput = string(bofOutputBuffer)
 					bofOutputBuffer = nil // Clear global buffer
 					accumulatedBytes += len(capturedOutput)
-					if DEBUG_BOF_ASYNC {
-						fmt.Printf("[BOF Async Monitor] Captured %d bytes (total accumulated: %d)\n",
-							len(capturedOutput), accumulatedBytes)
-					}
 				}
 				bofOutputMutex.Unlock()
 
@@ -357,11 +334,8 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 
 					if currentSize >= MAX_OUTPUT_CHUNK_SIZE {
 						shouldChunk = true
-						fmt.Printf("[BOF Async] Size threshold reached: %d bytes\n", currentSize)
 					} else if currentSize >= MIN_OUTPUT_SIZE && timeSinceLastChunk >= MIN_SEND_INTERVAL {
 						shouldChunk = true
-						fmt.Printf("[BOF Async] Time+size threshold: %d bytes after %v\n",
-							currentSize, timeSinceLastChunk)
 					}
 
 					if shouldChunk && job.Status == "running" {
@@ -387,7 +361,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 					job.Output.Reset()
 					job.OutputMutex.Unlock()
 
-					fmt.Printf("[BOF Async] Timer flush - queuing %d bytes\n", size)
 
 					// Queue the chunk through ResultManager
 					bjm.queueOutputChunk(job, chunk, false)
@@ -399,7 +372,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 
 			case <-bofDone:
 				// BOF finished
-				fmt.Printf("[BOF Async Monitor] BOF execution done, doing final capture\n")
 
 				// Give it a moment for final output
 				time.Sleep(500 * time.Millisecond)
@@ -417,7 +389,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 					}
 					job.OutputMutex.Unlock()
 
-					fmt.Printf("[BOF Async Monitor] Final capture: %d bytes\n", len(finalCapture))
 				} else {
 					bofOutputMutex.Unlock()
 				}
@@ -440,7 +411,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		cleanupToken, duplicatedTokenHandle := applyTokenContextWithDuplication(job.TokenContext)
 		defer cleanupToken()
 
-		fmt.Printf("[BOF Async] Starting BOF execution for job %s\n", job.ID)
 
 		// Clear output buffer before execution
 		bofOutputMutex.Lock()
@@ -455,7 +425,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 				networkPath := parseBOFNetworkPath(job.Args)
 				if networkPath != "" {
 					// Only log that we're using network path
-					fmt.Printf("[BOF Async] Network path detected: %s\n", networkPath)
 
 					// Track this resource for later cleanup (but don't disconnect now)
 					if networkResourceTracker != nil {
@@ -468,10 +437,8 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			// This needs to happen IMMEDIATELY before LoadWithTimeout
 			err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
 			if err != nil {
-				fmt.Printf("[BOF Async] Failed to impersonate duplicated token: %v\n", err)
 				// Try to continue anyway - the token might still work
 			} else {
-				fmt.Printf("[BOF Async] Successfully applied duplicated token impersonation\n")
 			}
 		}
 
@@ -482,7 +449,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		// Revert impersonation AFTER BOF execution completes
 		if duplicatedTokenHandle != 0 {
 			RevertToSelf()
-			fmt.Printf("[BOF Async] Reverted impersonation after BOF execution\n")
 		}
 
 		fmt.Printf("[BOF Async] BOF execution completed for job %s, direct output length: %d\n",
@@ -530,11 +496,8 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		// Queue final chunk through ResultManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 
-		fmt.Printf("[BOF Async] Job %s completed. Total: %d bytes, %d chunks queued\n",
-			job.ID, job.TotalBytesSent+len(finalOutput), job.QueuedChunks)
 
 	case <-job.CancelChan:
-		fmt.Printf("[BOF Async] Job %s cancelled by user\n", job.ID)
 		close(bofDone)
 		<-outputDone
 
@@ -550,7 +513,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		bjm.queueOutputChunk(job, finalOutput, true)
 
 	case <-time.After(30 * time.Minute):
-		fmt.Printf("[BOF Async] Job %s timed out after 30 minutes\n", job.ID)
 		close(bofDone)
 		<-outputDone
 
@@ -566,7 +528,6 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		bjm.queueOutputChunk(job, finalOutput, true)
 	}
 
-	fmt.Printf("[BOF Async] executeBOFAsync completed for job %s\n", job.ID)
 }
 
 // queueOutputChunk adds chunks to the regular ResultManager with batching
@@ -631,9 +592,7 @@ func (bjm *BOFJobManager) queueOutputChunk(job *BOFJob, output string, isFinal b
 
 			// Add to ResultManager
 			if err := resultManager.AddResult(result); err != nil {
-				fmt.Printf("[BOF Async] Error queueing batch to ResultManager: %v\n", err)
 			} else {
-				fmt.Printf("[BOF Async] Queued batch of %d chunks to ResultManager\n", len(batchedChunks))
 			}
 
 			// Clear batch
@@ -827,7 +786,6 @@ func (bjm *BOFJobManager) CleanupOldJobs(maxAge time.Duration) {
 		if job.Status != "running" && job.EndTime != nil {
 			if now.Sub(*job.EndTime) > maxAge {
 				delete(bjm.jobs, id)
-				fmt.Printf("[BOF Async] Cleaned up old job: %s\n", id)
 			}
 		}
 	}

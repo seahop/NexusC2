@@ -95,14 +95,12 @@ func GetCoffOutputForChannel(channel chan<- interface{}) func(int, uintptr, int)
 
 func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr, uintptr) uintptr {
 	return func(beaconType int, format uintptr, arg0 uintptr, arg1 uintptr, arg2 uintptr, arg3 uintptr, arg4 uintptr, arg5 uintptr, arg6 uintptr, arg7 uintptr, arg8 uintptr, arg9 uintptr) uintptr {
-		fmt.Printf("[DEBUG BeaconPrintf] Called with type=%d\n", beaconType)
 
 		if format == 0 {
 			return 0
 		}
 
 		formatStr := ReadCStringFromPtr(format)
-		fmt.Printf("[DEBUG BeaconPrintf] Format string: %s\n", formatStr)
 
 		// Count format specifiers properly (skip %%)
 		numArgs := 0
@@ -117,7 +115,6 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 			}
 		}
 
-		fmt.Printf("[DEBUG BeaconPrintf] Number of format specifiers: %d\n", numArgs)
 
 		args := []uintptr{arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9}
 
@@ -149,8 +146,6 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 				}
 
 				// Debug the argument we're about to process
-				fmt.Printf("[DEBUG BeaconPrintf] Processing format %%%c with arg[%d]=0x%x\n",
-					d, argOffset, args[argOffset])
 
 				switch d {
 				case 's':
@@ -167,10 +162,8 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 								break
 							}
 						}
-						fmt.Printf("[DEBUG BeaconPrintf] First bytes at string pointer: %x\n", firstBytes)
 
 						s := ReadCStringFromPtr(argPtr)
-						fmt.Printf("[DEBUG BeaconPrintf] Read string: '%s' (len=%d)\n", s, len(s))
 						fString += s
 					}
 				case 'S': // Wide string
@@ -224,19 +217,13 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 		outputBytes := []byte(fString)
 		bofOutputMutex.Lock()
 		bofOutputBuffer = append(bofOutputBuffer, outputBytes...)
-		currentBufferSize := len(bofOutputBuffer)
 		bofOutputMutex.Unlock()
-
-		fmt.Printf("[DEBUG BeaconPrintf] Added %d bytes to global buffer (total: %d bytes)\n",
-			len(outputBytes), currentBufferSize)
 
 		// Also send to channel if provided (for non-async BOFs)
 		if channel != nil {
 			select {
 			case channel <- fString:
-				fmt.Printf("[DEBUG BeaconPrintf] Also sent to channel\n")
 			default:
-				fmt.Printf("[DEBUG BeaconPrintf] Channel full, skipped channel send\n")
 			}
 		}
 
@@ -253,21 +240,17 @@ type DataParser struct {
 }
 
 func DataExtract(datap *DataParser, size *uint32) uintptr {
-	fmt.Printf("[DEBUG DataExtract] Called, remaining length=%d\n", datap.length)
 
 	if datap.length <= 0 {
-		fmt.Printf("[DEBUG DataExtract] No data remaining\n")
 		return 0
 	}
 
 	binaryLength := *(*uint32)(unsafe.Pointer(datap.buffer))
-	fmt.Printf("[DEBUG DataExtract] Binary length from buffer: %d\n", binaryLength)
 
 	datap.buffer += uintptr(4)
 	datap.length -= 4
 
 	if datap.length < binaryLength {
-		fmt.Printf("[DEBUG DataExtract] Not enough data remaining (need %d, have %d)\n", binaryLength, datap.length)
 		return 0
 	}
 
@@ -283,30 +266,25 @@ func DataExtract(datap *DataParser, size *uint32) uintptr {
 
 	// Log extracted string for debugging
 	if binaryLength > 0 && binaryLength < 1000 {
-		extractedStr := string(out[:binaryLength-1]) // -1 to exclude null terminator if present
-		fmt.Printf("[DEBUG DataExtract] Extracted string: '%s'\n", extractedStr)
+		_ = string(out[:binaryLength-1]) // -1 to exclude null terminator if present
 	}
 
 	return uintptr(unsafe.Pointer(&out[0]))
 }
 
 func DataInt(datap *DataParser, size *uint32) uintptr {
-	fmt.Printf("[DEBUG DataInt] Called, remaining length=%d\n", datap.length)
 
 	if datap.length < 4 {
-		fmt.Printf("[DEBUG DataInt] Not enough data for int (need 4, have %d)\n", datap.length)
 		return 0
 	}
 
 	// Read length prefix first
-	lengthPrefix := *(*uint32)(unsafe.Pointer(datap.buffer))
+	_ = *(*uint32)(unsafe.Pointer(datap.buffer))
 	datap.buffer += uintptr(4)
 	datap.length -= 4
 
-	fmt.Printf("[DEBUG DataInt] Length prefix: %d\n", lengthPrefix)
 
 	if datap.length < 4 {
-		fmt.Printf("[DEBUG DataInt] Not enough data for int value\n")
 		return 0
 	}
 
@@ -314,20 +292,16 @@ func DataInt(datap *DataParser, size *uint32) uintptr {
 	datap.buffer += uintptr(4)
 	datap.length -= 4
 
-	fmt.Printf("[DEBUG DataInt] Extracted int: %d\n", value)
 	return uintptr(value)
 }
 
 func DataLength(datap *DataParser) uintptr {
-	fmt.Printf("[DEBUG DataLength] Returning length: %d\n", datap.length)
 	return uintptr(datap.length)
 }
 
 func DataParse(datap *DataParser, buff uintptr, size uint32) uintptr {
-	fmt.Printf("[DEBUG DataParse] Called with buffer=%p, size=%d\n", unsafe.Pointer(buff), size)
 
 	if size <= 0 {
-		fmt.Printf("[DEBUG DataParse] Size is zero or negative\n")
 		return 0
 	}
 
@@ -336,27 +310,22 @@ func DataParse(datap *DataParser, buff uintptr, size uint32) uintptr {
 	datap.length = size
 	datap.size = size
 
-	fmt.Printf("[DEBUG DataParse] Parser initialized\n")
 	return 1
 }
 
 func DataShort(datap *DataParser) uintptr {
-	fmt.Printf("[DEBUG DataShort] Called, remaining length=%d\n", datap.length)
 
 	if datap.length < 4 {
-		fmt.Printf("[DEBUG DataShort] Not enough data for length prefix (need 4, have %d)\n", datap.length)
 		return 0
 	}
 
 	// Read length prefix first
-	lengthPrefix := *(*uint32)(unsafe.Pointer(datap.buffer))
+	_ = *(*uint32)(unsafe.Pointer(datap.buffer))
 	datap.buffer += uintptr(4)
 	datap.length -= 4
 
-	fmt.Printf("[DEBUG DataShort] Length prefix: %d\n", lengthPrefix)
 
 	if datap.length < 2 {
-		fmt.Printf("[DEBUG DataShort] Not enough data for short value (need 2, have %d)\n", datap.length)
 		return 0
 	}
 
@@ -364,7 +333,6 @@ func DataShort(datap *DataParser) uintptr {
 	datap.buffer += uintptr(2)
 	datap.length -= 2
 
-	fmt.Printf("[DEBUG DataShort] Extracted short: %d\n", value)
 	return uintptr(value)
 }
 
@@ -506,7 +474,6 @@ func PackShortString(s string) ([]byte, error) {
 }
 
 func PackString(data string) ([]byte, error) {
-	fmt.Printf("[DEBUG PackString] Input: '%s' (len=%d)\n", data, len(data))
 
 	// FIX: Convert patterns to Windows format
 	if data == "." {

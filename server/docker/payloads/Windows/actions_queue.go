@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -44,15 +43,10 @@ func (rm *ResultManager) GetPendingResults() []CommandResponse {
 	}
 
 	// ADD DEBUG LOGGING HERE
-	fmt.Printf("[DEBUG ResultManager] Converting %d results to responses\n", len(rm.results))
 
 	responses := make([]CommandResponse, len(rm.results))
 	for i, result := range rm.results {
 		// ADD DEBUG FOR EACH RESULT
-		fmt.Printf("[DEBUG ResultManager] Result %d: cmd=%s, filename=%s, chunk=%d/%d, data_len=%d\n",
-			i, result.Command.Command, result.Command.Filename,
-			result.Command.CurrentChunk, result.Command.TotalChunks,
-			len(result.Command.Data))
 
 		responses[i] = CommandResponse{
 			Command:      result.Command.Command,

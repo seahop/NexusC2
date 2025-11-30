@@ -136,8 +136,6 @@ type SudoSession struct {
 
 // StartSudoSessionAsUser creates a new sudo session
 func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSession, error) {
-	fmt.Printf("[DEBUG] StartSudoSessionAsUser called: user=%s, dir=%s\n", targetUser, workingDir)
-
 	var cmd *exec.Cmd
 	if targetUser == "root" || targetUser == "" {
 		cmd = exec.Command("sudo", "-S", "su", "-")
@@ -185,7 +183,6 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 		}
 
 		output := string(buf[:n])
-		fmt.Printf("[DEBUG] Initial output: %s\n", output)
 
 		// Send password if prompted
 		if strings.Contains(output, "Password:") || strings.Contains(output, "password") {
@@ -221,10 +218,9 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 			return nil, err
 		}
 	case <-time.After(3 * time.Second):
-		fmt.Printf("[DEBUG] Authentication timeout - continuing anyway\n")
+		// Authentication timeout - continuing anyway
 	}
 
-	fmt.Printf("[DEBUG] Session created successfully\n")
 	return session, nil
 }
 
@@ -252,7 +248,6 @@ func (s *SudoSession) EnableStatefulMode() error {
 	output, _, err := helper.ExecuteWithSudo(s.password, "pwd", s.workingDir)
 	if err == nil && output != "" {
 		s.currentDir = strings.TrimSpace(output)
-		fmt.Printf("[DEBUG] Initial directory: %s\n", s.currentDir)
 	}
 
 	return nil
@@ -310,7 +305,6 @@ func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Dura
 		if err == nil && exitCode == 0 && output != "" {
 			// Update current directory
 			s.currentDir = strings.TrimSpace(output)
-			fmt.Printf("[DEBUG] Changed directory to: %s\n", s.currentDir)
 			return "", 0, nil // cd typically has no output
 		}
 
@@ -325,7 +319,6 @@ func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Dura
 			varName := strings.TrimSpace(parts[0])
 			varValue := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
 			s.environment[varName] = varValue
-			fmt.Printf("[DEBUG] Set environment variable: %s=%s\n", varName, varValue)
 			return "", 0, nil // export typically has no output
 		}
 	}

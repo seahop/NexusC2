@@ -31,7 +31,6 @@ func InitializeExitPrevention() {
 		exitPrevention = NewCLRExitPrevention()
 
 		if err := exitPrevention.PatchAllExitMethods(); err != nil {
-			fmt.Printf("[!] Warning: Failed to patch all exit methods: %v\n", err)
 		} else {
 			exitMethodsPatched = true
 			fmt.Println("[+] Exit prevention initialized successfully")
@@ -377,17 +376,12 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 
 		// Send the result back through the result manager
 		if resultManager != nil {
-			fmt.Printf("[Inline Assembly Async] Job %s completed, adding to result queue\n", jobID)
 			if err := resultManager.AddResult(&finalResult); err != nil {
-				fmt.Printf("[Inline Assembly Async] Error queueing result: %v\n", err)
 			} else {
-				fmt.Printf("[Inline Assembly Async] Successfully queued result for job %s\n", jobID)
 			}
 		} else {
-			fmt.Printf("[Inline Assembly Async] ERROR: resultManager is nil, cannot send results!\n")
 		}
 
-		fmt.Printf("[Inline Assembly Async] Job %s completed with status: %s\n", jobID, job.Status)
 	}()
 
 	return CommandResult{

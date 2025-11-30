@@ -35,7 +35,6 @@ func (c *CLRExitPrevention) PatchAllExitMethods() error {
 
 	// Patch Environment.Exit
 	if err := c.PatchEnvironmentExit(); err != nil {
-		fmt.Printf("[!] Failed to patch Environment.Exit: %v\n", err)
 	} else {
 		fmt.Println("[+] Successfully patched Environment.Exit")
 	}
@@ -43,33 +42,28 @@ func (c *CLRExitPrevention) PatchAllExitMethods() error {
 	// Patch Application.Exit (Windows Forms)
 	if err := c.PatchApplicationExit(); err != nil {
 		// This might fail if Windows.Forms isn't loaded, which is fine
-		fmt.Printf("[*] Application.Exit patch skipped (Windows.Forms not loaded): %v\n", err)
 	} else {
 		fmt.Println("[+] Successfully patched Application.Exit")
 	}
 
 	// Patch Process.GetCurrentProcess().Kill()
 	if err := c.PatchProcessKill(); err != nil {
-		fmt.Printf("[!] Failed to patch Process.Kill: %v\n", err)
 	} else {
 		fmt.Println("[+] Successfully patched Process.Kill")
 	}
 
 	// Patch ExitProcess directly in kernel32
 	if err := c.PatchExitProcess(); err != nil {
-		fmt.Printf("[!] Failed to patch ExitProcess: %v\n", err)
 	} else {
 		fmt.Println("[+] Successfully patched ExitProcess")
 	}
 
 	// Patch TerminateProcess
 	if err := c.PatchTerminateProcess(); err != nil {
-		fmt.Printf("[!] Failed to patch TerminateProcess: %v\n", err)
 	} else {
 		fmt.Println("[+] Successfully patched TerminateProcess")
 	}
 
-	fmt.Printf("[*] Patching complete. Protected against %d exit methods\n", len(c.patchedMethods))
 	return nil
 }
 
@@ -352,7 +346,6 @@ func (c *CLRExitPrevention) RestoreAll() error {
 		)
 
 		delete(c.patchedMethods, methodName)
-		fmt.Printf("[+] Restored %s to original state\n", methodName)
 	}
 
 	// Clear the maps

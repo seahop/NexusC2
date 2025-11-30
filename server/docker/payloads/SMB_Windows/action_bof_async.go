@@ -131,7 +131,6 @@ func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 		if argString != "" {
 			parsedArgs, err := parseBOFArguments(argString)
 			if err != nil {
-				fmt.Printf("[BOF Async] Warning: Failed to parse arguments: %v\n", err)
 			} else {
 				bofArgs = parsedArgs
 			}

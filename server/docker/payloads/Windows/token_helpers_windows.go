@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"syscall"
 )
 
@@ -203,7 +202,6 @@ func EnsureNetworkTokenForUpload(remotePath string) {
 		err := ImpersonateLoggedOnUser(netOnlyHandle)
 		if err != nil {
 			// Log warning but don't fail the operation
-			fmt.Printf("[!] Warning: Failed to re-apply netonly token for upload: %v\n", err)
 		} else {
 			// Only log this in debug/verbose mode to avoid cluttering output
 			// fmt.Printf("[*] Re-applied netonly token for upload to: %s\n", remotePath)

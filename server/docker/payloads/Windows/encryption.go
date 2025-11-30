@@ -59,7 +59,6 @@ func DecryptAES(combined string, key []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %v", err)
 	}
-	fmt.Printf("Decoded base64, length: %d\n", len(allBytes))
 
 	// Step 2: Extract Nonce and Ciphertext
 	block, err := aes.NewCipher(key)
@@ -79,8 +78,6 @@ func DecryptAES(combined string, key []byte) (string, error) {
 
 	nonce := allBytes[:nonceSize]
 	ciphertext := allBytes[nonceSize:]
-	fmt.Printf("Nonce: %x\n", nonce)
-	fmt.Printf("Ciphertext length: %d\n", len(ciphertext))
 
 	// Step 3: Decrypt
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
