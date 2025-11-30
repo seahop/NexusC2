@@ -8,10 +8,12 @@ This C2 framework provides a robust platform for managing remote agents through 
 
 ## Architecture
 
+**[View Interactive Architecture Diagram →](docs/c2-architecture.html)**
+
 ### Core Components
 
 - **WebSocket Service** - Real-time communication hub for operator clients
-- **Agent Handler** - Manages agent connections and HTTP/HTTPS listeners  
+- **Agent Handler** - Manages agent connections and HTTP/HTTPS listeners
 - **PostgreSQL Database** - Persistent storage for all operational data
 - **Docker Builder** - On-demand payload generation for multiple platforms
 - **Python GUI Client** - Feature-rich operator interface
@@ -22,6 +24,65 @@ This C2 framework provides a robust platform for managing remote agents through 
 2. Commands are routed through a gRPC bidirectional stream to the Agent Handler
 3. Agents callback to HTTP/HTTPS listeners managed by the Agent Handler
 4. Results flow back through the system to operators in real-time
+
+### System Architecture Diagram
+
+<details>
+<summary>Click to expand architecture diagram</summary>
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          C2 System Architecture                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                         ┌─────────────────────┐
+                         │  Database Server    │
+                         │   (PostgreSQL)      │
+                         │    Port: 5432       │
+                         └──────────┬──────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    │ R/W                           │ R/W
+                    ▼                               ▼
+        ┌──────────────────────┐      ┌──────────────────────┐
+        │  WebSocket Service   │◄────►│   Agent Handler      │
+        │   Real-time Hub      │      │  Listener Manager    │
+        │  Port: 3131 (WSS)    │      │  gRPC Server: 50051  │
+        │  Builder Invoker     │      │  HTTP/HTTPS Listeners│
+        └──────────┬───────────┘      └──────────┬───────────┘
+                   │                              │
+                   │ gRPC BiDi (50051)            │
+                   │◄────────────────────────────►│
+                   │                              │
+        ┌──────────▼───────────┐      ┌──────────▼───────────┐
+        │   Docker Builder     │      │  Deployed Agents     │
+        │  Payload Generator   │      │   Target Systems     │
+        │  On-demand builds    │      │  HTTP/HTTPS Callbacks│
+        └──────────────────────┘      └──────────────────────┘
+                   ▲                              ▲
+                   │                              │
+        ┌──────────┴───────────┐                 │
+        │   Python3 Client     │                 │
+        │    Operator GUI      │                 │
+        │   WSS Connection     │─────────────────┘
+        └──────────────────────┘
+
+Network Ports:
+• PostgreSQL: 5432 (Internal)
+• WebSocket: 3131 (WSS/TLS)
+• gRPC: 50051 (Internal)
+• HTTP/HTTPS Listeners: Dynamic
+
+Message Flow:
+1. Client → WebSocket: TLS + Username Header
+2. WebSocket ↔ Database: Session/Task Management
+3. WebSocket ↔ Agent Handler: Task Dispatch (gRPC)
+4. Agent ↔ Agent Handler: Callbacks/Results
+5. Agent Handler ↔ Database: Agent State
+```
+
+</details>
 
 ## Key Features
 
