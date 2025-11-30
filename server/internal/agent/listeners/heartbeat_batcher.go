@@ -137,7 +137,7 @@ func (hb *HeartbeatBatcher) flushBatch(updates map[string]time.Time) error {
 		SET lastSEEN = u.seen
 		FROM (
 			SELECT
-				unnest($1::text[]) as id,
+				unnest($1::uuid[]) as id,
 				unnest($2::timestamp[]) as seen
 		) as u
 		WHERE newclientID = u.id
