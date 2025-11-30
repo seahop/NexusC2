@@ -8,7 +8,7 @@ This C2 framework provides a robust platform for managing remote agents through 
 
 ## Architecture
 
-**[View Interactive Architecture Diagram →](docs/c2-architecture.html)**
+> **📊 Interactive Diagram**: For a detailed interactive version of this architecture diagram with comprehensive documentation, download and open [docs/c2-architecture.html](docs/c2-architecture.html) in your browser.
 
 ### Core Components
 
