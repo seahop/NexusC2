@@ -29,69 +29,75 @@ This C2 framework provides a robust platform for managing remote agents through 
 
 ```mermaid
 graph TB
-    subgraph "Data Layer"
-        DB[(Database Server<br/>PostgreSQL<br/>Port: 5432)]
+    subgraph External["🌐 External Network"]
+        direction LR
+        Agent["💻 Compromised Agent<br/>(Implant on Target)"]
+        Spacer[" "]
+        Client["👤 Operator Client<br/>(Web Browser)"]
     end
 
-    subgraph "Service Layer"
-        WS[WebSocket Service<br/>Real-time Hub<br/>Port: 3131 WSS/TLS<br/>Builder Invoker]
-        AH[Agent Handler<br/>Listener Manager<br/>gRPC Server: 50051<br/>HTTP/HTTPS Listeners]
+    subgraph HostSystem["🖥️ Host System (Docker Host)"]
+        subgraph FirewallLayer["🛡️ Firewall Layer (iptables)"]
+            FW_Allow["✅ Allow: 127.0.0.1<br/>✅ Allow: 172.28.0.0/16<br/>❌ Block: External → :50051"]
+        end
+
+        subgraph HostNetwork["🔴 Host Network Mode"]
+            AgentHandler["⚡ Agent-Handler<br/>network_mode: host<br/>gRPC: 0.0.0.0:50051<br/>Listeners: Any Port"]
+        end
+
+        subgraph DockerBridge["🔵 Docker Bridge Network (172.28.0.0/16)"]
+            Database["🗄️ PostgreSQL<br/>172.28.0.2:5432<br/>(Internal Only)"]
+            Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131<br/>(Public)"]
+            Builder["🔨 Builder Service<br/>172.28.0.5<br/>(On-Demand)"]
+        end
     end
 
-    subgraph "Build Layer"
-        Builder[Docker Builder<br/>Payload Generator<br/>On-demand builds]
-    end
+    %% External Connections - Separated paths
+    Agent <-->|"HTTPS/HTTP<br/>Dynamic Ports"| AgentHandler
+    Client <-->|"WSS :3131"| Websocket
 
-    subgraph "Client Layer"
-        Client[Python3 Client<br/>Operator GUI<br/>WSS Connection]
-    end
+    %% Internal Docker Bridge Network
+    Websocket <-->|"gRPC :50051<br/>via host.docker.internal"| AgentHandler
+    Websocket -->|"PostgreSQL :5432"| Database
+    AgentHandler -->|"PostgreSQL :5432<br/>via 172.28.0.2"| Database
+    Websocket -.->|"Docker API<br/>Trigger Build"| Builder
 
-    subgraph "Agent Layer"
-        Agents[Deployed Agents<br/>Target Systems<br/>HTTP/HTTPS Callbacks]
-    end
-
-    %% Database connections
-    DB <-->|R/W SQL| WS
-    DB <-->|R/W SQL| AH
-
-    %% Service layer communication
-    WS <-->|gRPC BiDi Stream<br/>Port 50051| AH
-
-    %% Client connections
-    Client <-->|WSS/TLS + Username<br/>Port 3131| WS
-
-    %% Builder invocation
-    WS -.->|Build Request| Builder
-
-    %% Agent callbacks
-    Agents <-->|HTTP/HTTPS<br/>Encrypted Callbacks| AH
+    %% Firewall Protection
+    FW_Allow -.->|"Protects"| AgentHandler
 
     %% Styling
-    classDef database fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:#fff
-    classDef service fill:#4dabf7,stroke:#1864ab,stroke-width:2px,color:#fff
-    classDef agent fill:#69db7c,stroke:#2b8a3e,stroke-width:2px,color:#fff
-    classDef builder fill:#e599f7,stroke:#9c36b5,stroke-width:2px,color:#fff
-    classDef client fill:#74c0fc,stroke:#364fc7,stroke-width:2px,color:#fff
+    classDef hostNet fill:#e74c3c,stroke:#c0392b,stroke-width:3px,color:#fff
+    classDef bridgeNet fill:#4a90e2,stroke:#2980b9,stroke-width:2px,color:#fff
+    classDef external fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
+    classDef firewall fill:#f39c12,stroke:#e67e22,stroke-width:3px,color:#000
+    classDef spacer fill:none,stroke:none,color:transparent
 
-    class DB database
-    class WS,AH service
-    class Agents agent
-    class Builder builder
-    class Client client
+    class AgentHandler hostNet
+    class Database,Websocket,Builder bridgeNet
+    class Agent,Client external
+    class FW_Allow firewall
+    class Spacer spacer
 ```
 
 **Message Flow:**
-1. Client → WebSocket: TLS + Username Header
-2. WebSocket ↔ Database: Session/Task Management
-3. WebSocket ↔ Agent Handler: Task Dispatch (gRPC)
-4. Agent ↔ Agent Handler: Callbacks/Results
-5. Agent Handler ↔ Database: Agent State
+1. Operator Client → WebSocket: WSS connection on port 3131
+2. WebSocket ↔ Agent Handler: gRPC bidirectional stream via host.docker.internal:50051
+3. Agent ↔ Agent Handler: HTTPS/HTTP callbacks on dynamic ports
+4. Agent Handler → Database: Agent state and results via 172.28.0.2:5432
+5. WebSocket → Database: Session management and task storage
+6. WebSocket → Builder: Docker API triggers for payload compilation
+
+**Network Architecture:**
+- **Host Network Mode**: Agent-handler runs with `network_mode: host` for dynamic port binding
+- **Firewall Protection**: iptables rules secure gRPC port 50051 from external access
+- **Bridge Network**: Database, WebSocket, and Builder on isolated Docker network (172.28.0.0/16)
+- **Dynamic Listeners**: Agent-handler can bind to any port (80, 443, 8080, etc.) without container restart
 
 **Network Ports:**
-- PostgreSQL: 5432 (Internal)
-- WebSocket: 3131 (WSS/TLS)
-- gRPC: 50051 (Internal)
-- HTTP/HTTPS Listeners: Dynamic
+- PostgreSQL: 5432 (Internal bridge network only - 172.28.0.2)
+- WebSocket: 3131 (Public - WSS/TLS)
+- gRPC: 50051 (Secured by firewall - localhost and Docker containers only)
+- HTTP/HTTPS Listeners: Dynamic (managed by agent-handler on host network)
 
 ## Key Features
 
