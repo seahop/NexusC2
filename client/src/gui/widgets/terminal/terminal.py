@@ -1,9 +1,10 @@
 # client/src/gui/widgets/terminal/terminal.py
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                             QTextEdit, QLineEdit, QPushButton, QTabWidget,
-                            QTabBar, QApplication)
+                            QTabBar, QApplication, QLabel)
 from PyQt6.QtCore import Qt, pyqtSlot, QEvent
+from PyQt6.QtGui import QTextCursor, QTextDocument
 import os
 
 # Import refactored components
@@ -102,7 +103,35 @@ class AgentTerminal(QWidget):
     def _setup_ui(self):
         """Setup the UI components"""
         layout = QVBoxLayout()
-        
+
+        # Search bar (initially hidden)
+        self.search_widget = QWidget()
+        search_layout = QHBoxLayout(self.search_widget)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+
+        search_label = QLabel("Find:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search terminal output...")
+        self.search_input.textChanged.connect(self.search_terminal)
+        self.search_input.returnPressed.connect(self.find_next)
+        self.search_input.setClearButtonEnabled(True)
+
+        self.find_prev_button = QPushButton("◀ Previous")
+        self.find_prev_button.clicked.connect(self.find_previous)
+        self.find_next_button = QPushButton("Next ▶")
+        self.find_next_button.clicked.connect(self.find_next)
+        self.close_search_button = QPushButton("✕")
+        self.close_search_button.clicked.connect(self.hide_search)
+
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.find_prev_button)
+        search_layout.addWidget(self.find_next_button)
+        search_layout.addWidget(self.close_search_button)
+
+        self.search_widget.setVisible(False)  # Hidden by default
+        layout.addWidget(self.search_widget)
+
         # Terminal output area
         self.terminal_output = VirtualTerminal()
         self.terminal_output.setReadOnly(True)
@@ -263,14 +292,83 @@ class AgentTerminal(QWidget):
         command = self.command_input.text()
         if not command:
             return
-        
+
         # Add to history
         self.command_history.add_command(command)
-        
+
         # Use command handler to process and send
         if self.command_handler.send_command(command):
             self.command_input.clear()
-    
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts"""
+        # Ctrl+F to show search
+        if event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.show_search()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def show_search(self):
+        """Show the search bar and focus it"""
+        self.search_widget.setVisible(True)
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def hide_search(self):
+        """Hide the search bar and clear highlights"""
+        self.search_widget.setVisible(False)
+        self.search_input.clear()
+        # Clear any highlights
+        cursor = self.terminal_output.text_widget.textCursor()
+        cursor.clearSelection()
+        self.terminal_output.text_widget.setTextCursor(cursor)
+
+    def search_terminal(self, search_text):
+        """Search the terminal output and highlight first match"""
+        if not search_text:
+            # Clear highlights when search is empty
+            cursor = self.terminal_output.text_widget.textCursor()
+            cursor.clearSelection()
+            self.terminal_output.text_widget.setTextCursor(cursor)
+            return
+
+        # Move cursor to start and search
+        cursor = self.terminal_output.text_widget.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        self.terminal_output.text_widget.setTextCursor(cursor)
+
+        # Find first occurrence
+        self.terminal_output.text_widget.find(search_text)
+
+    def find_next(self):
+        """Find next occurrence of search text"""
+        search_text = self.search_input.text()
+        if not search_text:
+            return
+
+        # Search forward
+        if not self.terminal_output.text_widget.find(search_text):
+            # Not found forward, wrap to beginning
+            cursor = self.terminal_output.text_widget.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.terminal_output.text_widget.setTextCursor(cursor)
+            self.terminal_output.text_widget.find(search_text)
+
+    def find_previous(self):
+        """Find previous occurrence of search text"""
+        search_text = self.search_input.text()
+        if not search_text:
+            return
+
+        # Search backward
+        if not self.terminal_output.text_widget.find(search_text, QTextDocument.FindFlag.FindBackward):
+            # Not found backward, wrap to end
+            cursor = self.terminal_output.text_widget.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.terminal_output.text_widget.setTextCursor(cursor)
+            self.terminal_output.text_widget.find(search_text, QTextDocument.FindFlag.FindBackward)
+
     def update_display(self, incremental=False):
         """Update the terminal display with current buffer content
 

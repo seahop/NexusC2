@@ -1,5 +1,6 @@
 #agent_tree.py
-from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout, QMessageBox, QMenu, QInputDialog
+from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout,
+                              QMessageBox, QMenu, QInputDialog, QLineEdit, QHBoxLayout, QLabel)
 from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot
 import json
 import asyncio
@@ -12,12 +13,27 @@ class AgentTreeWidget(QWidget):
         super().__init__()
         self.terminal_widget = terminal_widget
         layout = QVBoxLayout()
-        self.is_state_loaded = False 
+        self.is_state_loaded = False
+
+        # Add search bar at the top
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Filter:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search agents (name, GUID, OS, hostname...)")
+        self.search_input.textChanged.connect(self.filter_agents)
+        self.search_input.setClearButtonEnabled(True)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(['Agents'])
         self.tree.itemClicked.connect(self.on_item_clicked)
         layout.addWidget(self.tree)
         self.show_deleted = False
+
+        # Track current filter
+        self.current_filter = ""
 
         # Store data and tree items
         self.agent_data = []
@@ -38,7 +54,24 @@ class AgentTreeWidget(QWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
         self.ws_thread = None  # We'll set this from the main window
-        self.agent_aliases = {} 
+        self.agent_aliases = {}
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts"""
+        # Ctrl+F to focus search
+        if event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+            event.accept()
+        # Escape to clear search
+        elif event.key() == Qt.Key.Key_Escape:
+            if self.search_input.text():
+                self.search_input.clear()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        else:
+            super().keyPressEvent(event) 
         
     def __del__(self):
         """Destructor to ensure timer is stopped"""
@@ -69,6 +102,46 @@ class AgentTreeWidget(QWidget):
             self.update_timer.stop()
             self._timer_active = False
             print("AgentTreeWidget: Explicit cleanup - timer stopped")
+
+    def filter_agents(self, filter_text):
+        """Filter agents based on search text with fuzzy matching"""
+        self.current_filter = filter_text.lower().strip()
+
+        # If no filter, show all agents
+        if not self.current_filter:
+            for agent_name, tree_item in self.agent_items.items():
+                tree_item.setHidden(False)
+            return
+
+        # Apply filter to each agent
+        for agent_name, tree_item in self.agent_items.items():
+            # Get agent data for this tree item
+            agent = self.agent_by_guid.get(tree_item.data(0, Qt.ItemDataRole.UserRole))
+            if not agent:
+                # Fallback: try to match by name
+                agent = next((a for a in self.agent_data if a['name'] == agent_name), None)
+
+            if agent:
+                # Build searchable text from all agent fields
+                searchable_fields = [
+                    agent.get('name', ''),
+                    agent.get('guid', ''),
+                    agent.get('hostname', ''),
+                    agent.get('os', ''),
+                    agent.get('username', ''),
+                    agent.get('ip', ''),
+                    self.agent_aliases.get(agent.get('guid', ''), '')  # Include alias
+                ]
+                searchable_text = ' '.join(str(f).lower() for f in searchable_fields if f)
+
+                # Simple substring match (can be enhanced with fuzzy matching later)
+                if self.current_filter in searchable_text:
+                    tree_item.setHidden(False)
+                else:
+                    tree_item.setHidden(True)
+            else:
+                # If we can't find agent data, hide by default when filtering
+                tree_item.setHidden(True)
 
     def update_last_seen(self):
         """Optimized last-seen update using cached child items."""
@@ -209,15 +282,40 @@ class AgentTreeWidget(QWidget):
     def add_agent_to_tree(self, agent):
         """Add a single agent to the tree view."""
         print(f"AgentTreeWidget: add_agent_to_tree called for {agent['name']}")
-        
-        # Use alias if available, otherwise use truncated GUID
-        display_name = self.agent_aliases.get(agent['guid'], agent['name'])
+
+        # Build display name: prioritize alias, then show more context
+        alias = self.agent_aliases.get(agent['guid'])
+        if alias:
+            # If aliased, show "alias (first 16 chars of GUID)"
+            display_name = f"{alias} ({agent['guid'][:16]}...)"
+        else:
+            # No alias: show first 16 characters instead of 8 for better distinction
+            display_name = f"{agent['guid'][:16]}..."
+
         agent['display_name'] = display_name
-        
+
         tree_item = QTreeWidgetItem([display_name])
+        # Store GUID in item data for filtering and lookups
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, agent['guid'])
+
+        # Build comprehensive tooltip with all agent info
+        tooltip_parts = [
+            f"Full GUID: {agent['guid']}",
+            f"Hostname: {agent.get('hostname', 'N/A')}",
+            f"OS: {agent.get('os', 'N/A')}",
+            f"Username: {agent.get('username', 'N/A')}",
+            f"IP: {agent.get('ip', 'N/A')}",
+        ]
+        if alias:
+            tooltip_parts.insert(0, f"Alias: {alias}")
+        if agent.get('last_seen'):
+            tooltip_parts.append(f"Last Seen: {agent['last_seen']}")
+
+        tree_item.setToolTip(0, '\n'.join(tooltip_parts))
+
         for detail in agent['details']:
             tree_item.addChild(QTreeWidgetItem([detail]))
-                
+
         self.tree.addTopLevelItem(tree_item)
         self.agent_items[agent['name']] = tree_item
         
@@ -353,13 +451,30 @@ class AgentTreeWidget(QWidget):
                 self.delete_listener(item.text(0))
                 
         elif self.current_view == 'agents' and not item.parent():
+            copy_guid_action = menu.addAction("Copy GUID")
+            menu.addSeparator()
             rename_action = menu.addAction("Rename Agent")
             remove_action = menu.addAction("Remove Agent")
             action = menu.exec(self.tree.viewport().mapToGlobal(position))
-            if action == rename_action:
+            if action == copy_guid_action:
+                self.copy_agent_guid(item)
+            elif action == rename_action:
                 self.rename_agent(item)
             elif action == remove_action:
                 self.remove_agent(item)
+
+    def copy_agent_guid(self, item):
+        """Copy agent GUID to clipboard"""
+        from PyQt6.QtWidgets import QApplication
+
+        # Get GUID from item data
+        guid = item.data(0, Qt.ItemDataRole.UserRole)
+        if guid:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(guid)
+            print(f"Copied GUID to clipboard: {guid}")
+        else:
+            QMessageBox.warning(self, "Error", "Could not retrieve agent GUID")
 
     def rename_agent(self, item):
         """Rename an agent (sends to server for persistence)"""
