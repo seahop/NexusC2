@@ -12,8 +12,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
+
+// Buffer pool for download chunks to reduce allocations
+var downloadBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 512*1024) // 512KB chunks
+		return &buf
+	},
+}
 
 type DownloadCommand struct{}
 
@@ -40,7 +49,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	// Remove any surrounding quotes if present (should already be done by parser)
 	targetPath = strings.Trim(targetPath, "\"'")
-
 
 	// Handle path resolution for both local and UNC paths
 	if !filepath.IsAbs(targetPath) {
@@ -91,7 +99,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		displayPath = strings.ReplaceAll(targetPath, "/", "\\")
 	}
 
-
 	// Use NetworkAwareOpenFile to support network shares
 	// This handles network authentication properly
 	file, err := NetworkAwareOpenFile(targetPath, os.O_RDONLY, 0)
@@ -137,9 +144,11 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		fileInfo.Size(),
 		fileInfo.ModTime().Format("2006-01-02 15:04:05"))
 
-	// Read first chunk
+	// Read first chunk using buffer pool
 	const chunkSize = 512 * 1024 // 512KB chunks
-	chunk := make([]byte, chunkSize)
+	bufPtr := downloadBufferPool.Get().(*[]byte)
+	defer downloadBufferPool.Put(bufPtr)
+	chunk := *bufPtr
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
 		return CommandResult{
@@ -197,7 +206,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		},
 	}
 
-
 	return result
 }
 
@@ -207,7 +215,6 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 // GetNextFileChunk continues downloading a file from a specific chunk
 func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*CommandResult, error) {
-
 	// Use NetworkAwareOpenFile for network authentication support
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 
@@ -231,8 +238,10 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 		return nil, fmt.Errorf("failed to seek to position %d: %w", offset, err)
 	}
 
-	// Read the chunk
-	chunk := make([]byte, chunkSize)
+	// Read the chunk using buffer pool
+	bufPtr := downloadBufferPool.Get().(*[]byte)
+	defer downloadBufferPool.Put(bufPtr)
+	chunk := *bufPtr
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("failed to read chunk: %w", err)

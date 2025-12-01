@@ -99,18 +99,22 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 	// Get or create upload info
 	commandQueue.mu.Lock()
 	uploadInfo, exists := commandQueue.activeUploads[cmd.Filename]
+	now := time.Now()
 	if !exists {
 		uploadInfo = &UploadInfo{
 			Chunks:      make(map[int][]byte),
 			TotalChunks: cmd.TotalChunks,
 			RemotePath:  cmd.RemotePath,
 			Filename:    cmd.Filename,
+			StartTime:   now,
+			LastUpdate:  now,
 		}
 		commandQueue.activeUploads[cmd.Filename] = uploadInfo
 	}
 
-	// Store chunk in memory
+	// Store chunk in memory and update last activity time
 	uploadInfo.Chunks[cmd.CurrentChunk] = chunkData
+	uploadInfo.LastUpdate = now
 	commandQueue.mu.Unlock()
 
 	// Check if this was the last chunk

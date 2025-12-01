@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 )
 
@@ -47,12 +49,12 @@ func NewCommandQueue() *CommandQueue {
 	}
 
 	queue := &CommandQueue{
-		commands:        make([]Command, 0),
-		cmdRegistry:     make(map[string]CommandInterface),
+		commands:        make([]Command, 0, 10),                // Pre-allocate for typical queue depth
+		cmdRegistry:     make(map[string]CommandInterface, 32), // Pre-allocate for all commands
 		cmdContext:      ctx,
-		activeDownloads: make(map[string]*DownloadInfo),
-		activeJobs:      make(map[string]JobInfo),
-		activeUploads:   make(map[string]*UploadInfo),
+		activeDownloads: make(map[string]*DownloadInfo, 4),   // Pre-allocate for concurrent downloads
+		activeJobs:      make(map[string]JobInfo, 8),         // Pre-allocate for concurrent jobs
+		activeUploads:   make(map[string]*UploadInfo, 4),     // Pre-allocate for concurrent uploads
 	}
 
 	// Register all core commands
@@ -92,6 +94,9 @@ func NewCommandQueue() *CommandQueue {
 	// Print all registered commands
 	fmt.Println()
 
+	// Start cleanup goroutine for stale transfers
+	go queue.cleanupStaleTransfers()
+
 	return queue
 }
 
@@ -103,11 +108,96 @@ func (cq *CommandQueue) RegisterCommand(cmd CommandInterface) {
 // Helper function to apply session environment before executing any command
 func (cq *CommandQueue) applySessionEnvironment() {
 	cq.cmdContext.mu.RLock()
+	// Quick check without iteration - most commands have no session env
+	if len(cq.cmdContext.SessionEnv) == 0 {
+		cq.cmdContext.mu.RUnlock()
+		return
+	}
 	defer cq.cmdContext.mu.RUnlock()
 
 	for key, value := range cq.cmdContext.SessionEnv {
 		os.Setenv(key, value)
 	}
+}
+
+// cleanupStaleTransfers periodically removes stale upload/download operations
+// Uses dynamic timeouts based on current sleep/jitter to account for mid-transfer changes
+func (cq *CommandQueue) cleanupStaleTransfers() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+
+		// Calculate dynamic timeout based on current sleep/jitter values
+		// This handles cases where sleep is changed mid-transfer
+		uploadTimeout := calculateTransferTimeout(false)
+		downloadTimeout := calculateTransferTimeout(true)
+
+		cq.mu.Lock()
+
+		// Cleanup stale uploads with dynamic timeout
+		for filename, info := range cq.activeUploads {
+			if now.Sub(info.LastUpdate) > uploadTimeout {
+				// Free memory from stored chunks
+				info.Chunks = nil
+				delete(cq.activeUploads, filename)
+			}
+		}
+
+		// Cleanup stale downloads with dynamic timeout
+		for filename, info := range cq.activeDownloads {
+			if now.Sub(info.LastUpdate) > downloadTimeout {
+				delete(cq.activeDownloads, filename)
+			}
+		}
+
+		cq.mu.Unlock()
+	}
+}
+
+// calculateTransferTimeout computes appropriate timeout based on current sleep/jitter
+// Accounts for the fact that sleep can be changed mid-transfer via the sleep command
+func calculateTransferTimeout(isDownload bool) time.Duration {
+	// Parse current sleep value (global var, can change during runtime)
+	sleepSeconds := 60 // Default fallback
+	if parsedSleep, err := strconv.Atoi(sleep); err == nil && parsedSleep > 0 {
+		sleepSeconds = parsedSleep
+	}
+
+	// Parse current jitter value (global var, can change during runtime)
+	jitterPercent := 10 // Default fallback
+	if parsedJitter, err := strconv.Atoi(jitter); err == nil && parsedJitter >= 0 {
+		jitterPercent = parsedJitter
+	}
+
+	// Calculate max delay between chunks accounting for jitter
+	// Max delay = sleep * (1 + jitter/100)
+	maxDelay := float64(sleepSeconds) * (1.0 + float64(jitterPercent)/100.0)
+
+	// Safety multiplier: allow for 10 consecutive max-jitter polling cycles with no chunk
+	// This is conservative but prevents false positives from network issues/queuing
+	safetyMultiplier := 10.0
+	if isDownload {
+		// Downloads may need more time due to server-side processing
+		safetyMultiplier = 15.0
+	}
+
+	timeout := time.Duration(maxDelay*safetyMultiplier) * time.Second
+
+	// Enforce minimum timeout of 10 minutes to prevent premature cleanup
+	minTimeout := 10 * time.Minute
+	if timeout < minTimeout {
+		timeout = minTimeout
+	}
+
+	// Enforce maximum timeout of 2 hours to prevent unbounded memory retention
+	maxTimeout := 2 * time.Hour
+	if timeout > maxTimeout {
+		timeout = maxTimeout
+	}
+
+	return timeout
 }
 
 // AddCommands parses and adds commands to the queue
@@ -186,16 +276,14 @@ func (cq *CommandQueue) executeExternalCommand(cmd Command, cmdType string, args
 // parseCommandLine properly handles quoted arguments and spaces in paths
 // It supports both single and double quotes
 func parseCommandLine(cmdLine string) []string {
-	var args []string
+	args := make([]string, 0, 8) // Pre-allocate for typical command with ~8 args
 	var current strings.Builder
+	current.Grow(64) // Pre-allocate builder buffer
 	var inQuote rune
 	var escaped bool
 
-	runes := []rune(cmdLine)
-
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-
+	// Iterate directly over string as runes (no intermediate allocation)
+	for _, r := range cmdLine {
 		// Handle escape sequences
 		if escaped {
 			current.WriteRune(r)
@@ -204,10 +292,9 @@ func parseCommandLine(cmdLine string) []string {
 		}
 
 		// Check for escape character
-		if r == '\\' && i+1 < len(runes) {
-			next := runes[i+1]
+		if r == '\\' {
 			// Only escape quotes and backslashes within quotes
-			if inQuote != 0 && (next == '"' || next == '\'' || next == '\\') {
+			if inQuote != 0 {
 				escaped = true
 				continue
 			}

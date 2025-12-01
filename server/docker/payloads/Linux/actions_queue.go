@@ -9,6 +9,8 @@ import (
 	"sync"
 )
 
+const maxResultQueueSize = 1000 // Prevent unbounded memory growth during network outages
+
 type ResultManager struct {
 	mu      sync.Mutex
 	results []*CommandResult
@@ -16,13 +18,25 @@ type ResultManager struct {
 
 func NewResultManager() *ResultManager {
 	return &ResultManager{
-		results: make([]*CommandResult, 0),
+		results: make([]*CommandResult, 0, 100), // Pre-allocate reasonable capacity
 	}
 }
 
 func (rm *ResultManager) AddResult(result *CommandResult) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
+
+	// If queue is full, drop oldest results (FIFO)
+	// This prevents memory exhaustion during prolonged network outages
+	// while preserving most recent command outputs
+	if len(rm.results) >= maxResultQueueSize {
+		// Drop oldest 10% to avoid frequent single-item drops
+		dropCount := maxResultQueueSize / 10
+		if dropCount < 1 {
+			dropCount = 1
+		}
+		rm.results = rm.results[dropCount:]
+	}
 
 	rm.results = append(rm.results, result)
 	return nil

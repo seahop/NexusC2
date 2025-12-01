@@ -88,6 +88,8 @@ type UploadInfo struct {
 	TotalChunks int
 	RemotePath  string
 	Filename    string
+	LastUpdate  time.Time // Track last chunk received time
+	StartTime   time.Time // Track when upload started
 }
 
 // DownloadInfo tracks active download operations
