@@ -357,17 +357,18 @@ class TerminalWidget(QWidget):
         self.command_history = {"commands": [], "outputs": []}
         self.outputs_by_command = {}
         self.agent_tree = None
-        
+        self.agent_aliases = {}  # Track agent renames (agent_guid -> display_name)
+
         layout = QVBoxLayout()
-        
+
         # Connect signals if WebSocket thread is available
         if ws_thread:
             ws_thread.command_response.connect(self.handle_command_output)
             ws_thread.command_result.connect(self.handle_command_result)
-            
+
             if hasattr(ws_thread, 'bof_response'):
                 ws_thread.bof_response.connect(self.handle_bof_response)
-            
+
             if hasattr(ws_thread, 'inline_assembly_response'):
                 ws_thread.inline_assembly_response.connect(self.handle_inline_assembly_response)
         
@@ -401,6 +402,9 @@ class TerminalWidget(QWidget):
     
     def add_agent_tab(self, agent_name, agent_guid=None):
         """Create or activate an agent terminal tab"""
+        # Check if agent has been renamed
+        display_name = self.agent_aliases.get(agent_guid, agent_name)
+
         # Check if terminal already exists (even if tab was closed)
         if agent_guid in self.agent_terminals:
             # Terminal exists - check if it's already in a tab
@@ -416,8 +420,9 @@ class TerminalWidget(QWidget):
 
             if not tab_exists:
                 # Terminal exists but tab was closed - re-add the tab
-                print(f"TerminalWidget: Reopening existing terminal for {agent_name} (restoring history)")
-                index = self.tabs.addTab(existing_terminal, f"Agent: {agent_name}")
+                print(f"TerminalWidget: Reopening existing terminal for {display_name} (restoring history)")
+                # Use display_name (which could be the alias) instead of agent_name
+                index = self.tabs.addTab(existing_terminal, f"Agent: {display_name}")
                 self.tabs.setCurrentIndex(index)
         else:
             # Create new terminal
@@ -443,7 +448,8 @@ class TerminalWidget(QWidget):
             # Pass OS to AgentTerminal
             agent_terminal = AgentTerminal(agent_name, agent_guid, self.ws_thread, agent_os)
             self.agent_terminals[agent_guid] = agent_terminal
-            index = self.tabs.addTab(agent_terminal, f"Agent: {agent_name}")
+            # Use display_name (which could be the alias) instead of agent_name
+            index = self.tabs.addTab(agent_terminal, f"Agent: {display_name}")
 
             # Initialize with any stored command history for this agent
             if hasattr(self, 'command_history'):
@@ -476,6 +482,26 @@ class TerminalWidget(QWidget):
                 agent_terminal.update_display()
 
             self.tabs.setCurrentIndex(index)
+
+    def handle_agent_renamed(self, data):
+        """Handle agent rename notification and update tab title"""
+        agent_id = data.get('agent_id')
+        new_name = data.get('new_name')
+
+        # Update local alias cache
+        self.agent_aliases[agent_id] = new_name
+
+        # Update tab title if the terminal is currently open in a tab
+        if agent_id in self.agent_terminals:
+            terminal = self.agent_terminals[agent_id]
+
+            # Find the tab with this terminal
+            for i in range(self.tabs.count()):
+                if self.tabs.widget(i) == terminal:
+                    # Update the tab title with the new name
+                    self.tabs.setTabText(i, f"Agent: {new_name}")
+                    self.log_message(f"Agent {agent_id[:8]} renamed to '{new_name}'")
+                    break
 
     def close_tab(self, index):
         """Close a terminal tab (hides it but preserves history)"""

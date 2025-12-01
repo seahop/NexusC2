@@ -707,14 +707,19 @@ class C2ClientGUI(QMainWindow):
     def loadInitialState(self):
         print("\nMainWindow: Loading initial state")
         self.agent_tree.ws_thread = self.ws_thread
-        
+
         # Set view to agents by default
         self.agent_tree.current_view = 'agents'
-        
+
         # Load the state
         self.agent_tree.loadStateFromDatabase()
         self.sync_with_database()
-        
+
+        # Sync agent aliases from agent_tree to terminal widget
+        if hasattr(self.agent_tree, 'agent_aliases'):
+            self.terminal.agent_aliases = self.agent_tree.agent_aliases.copy()
+            print(f"MainWindow: Synced {len(self.terminal.agent_aliases)} agent aliases to terminal widget")
+
         # Emit the state loaded signal
         self.state_loaded.emit()
 

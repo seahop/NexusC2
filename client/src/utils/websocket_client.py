@@ -10,6 +10,13 @@ from collections import deque
 from .database import StateDatabase
 from gui.widgets import AgentTreeWidget
 from .logger import get_logger
+from .constants import (
+    WEBSOCKET_MAX_SIZE, WEBSOCKET_READ_LIMIT, WEBSOCKET_WRITE_LIMIT,
+    WEBSOCKET_MAX_QUEUE, WEBSOCKET_SEND_TIMEOUT, WEBSOCKET_DISCONNECT_TIMEOUT,
+    MESSAGE_QUEUE_MAX_SIZE, MESSAGE_BATCH_SIZE, MESSAGE_BATCH_TIMEOUT,
+    MESSAGE_QUEUE_BACKOFF_DELAY, MAX_RETRIES, INITIAL_RETRY_DELAY,
+    MAX_RETRY_DELAY, HIGH_PRIORITY_MESSAGE_TYPES
+)
 
 logger = get_logger('websocket')
 
@@ -24,22 +31,24 @@ class WebSocketClient:
         self.terminal_widget = None
         self.loop = None
         self.agent_tree_widget = None
-        self.MAX_QUEUE_SIZE = 40 
-        self.SEND_TIMEOUT = 30 
-        self.MAX_RETRIES = 3
-        self.retry_delay = 1  # Start with 1 second delay
+
+        # Use constants for configuration
+        self.MAX_QUEUE_SIZE = MESSAGE_QUEUE_MAX_SIZE
+        self.SEND_TIMEOUT = WEBSOCKET_SEND_TIMEOUT
+        self.MAX_RETRIES = MAX_RETRIES
+        self.retry_delay = INITIAL_RETRY_DELAY
         self.queue_task = None
 
-        # Track chunked transfers
+        # Track chunked transfers (thread-safe with asyncio.Lock)
         self.active_chunks = {}  # track_id -> chunk_info
         self.chunk_buffers = {}  # For storing incomplete chunks
-        # ADD THIS FOR COMMAND OUTPUT CHUNKS:
         self.output_chunks = {}  # session_id -> chunk data for command outputs
+        self.chunks_lock = asyncio.Lock()  # Protect chunk dictionaries
 
         # Message batching configuration
-        self.batch_size = 10  # Max messages per batch
-        self.batch_timeout = 0.05  # 50ms max wait before sending batch
-        self.high_priority_types = {'agent_command', 'bof', 'inline-assembly'}  # Skip batching for these
+        self.batch_size = MESSAGE_BATCH_SIZE
+        self.batch_timeout = MESSAGE_BATCH_TIMEOUT
+        self.high_priority_types = HIGH_PRIORITY_MESSAGE_TYPES
 
     async def connect(self, username, host, port):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -53,10 +62,10 @@ class WebSocketClient:
                 uri,
                 ssl=ssl_context,
                 extra_headers={'Username': username},
-                max_size=10 * 1024 * 1024,
-                read_limit=10 * 1024 * 1024,
-                write_limit=10 * 1024 * 1024,
-                max_queue=100
+                max_size=WEBSOCKET_MAX_SIZE,
+                read_limit=WEBSOCKET_READ_LIMIT,
+                write_limit=WEBSOCKET_WRITE_LIMIT,
+                max_queue=WEBSOCKET_MAX_QUEUE
             )
             self.connected = True
             self.running = True
@@ -90,7 +99,7 @@ class WebSocketClient:
         if self.websocket:
             try:
                 # Use wait_for to prevent hanging
-                await asyncio.wait_for(self.websocket.close(), timeout=2.0)
+                await asyncio.wait_for(self.websocket.close(), timeout=WEBSOCKET_DISCONNECT_TIMEOUT)
                 logger.info("WebSocket closed successfully")
             except asyncio.TimeoutError:
                 logger.warning("WebSocket close timed out")
@@ -100,10 +109,11 @@ class WebSocketClient:
             except Exception as e:
                 logger.error(f"Error closing websocket: {e}")
         
-        # Clear all data
-        self.active_chunks.clear()
-        self.chunk_buffers.clear()
-        self.output_chunks.clear()
+        # Clear all data (thread-safe)
+        async with self.chunks_lock:
+            self.active_chunks.clear()
+            self.chunk_buffers.clear()
+            self.output_chunks.clear()
         self.websocket = None
 
         logger.info("Disconnected from server")
@@ -135,14 +145,14 @@ class WebSocketClient:
         """Handle timeout when sending message"""
         if self.terminal_widget:
             self.terminal_widget.log_message("Message send timeout, will retry")
-        self.retry_delay = min(self.retry_delay * 2, 10)  # Exponential backoff
+        self.retry_delay = min(self.retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
         await asyncio.sleep(self.retry_delay)
         
     async def _handle_send_error(self, error):
         """Handle general send errors"""
         if self.terminal_widget:
             self.terminal_widget.log_message(f"Error sending message: {str(error)}")
-        self.retry_delay = min(self.retry_delay * 2, 10)  # Exponential backoff
+        self.retry_delay = min(self.retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
         await asyncio.sleep(self.retry_delay)
         
     async def _handle_queue_error(self, error):
@@ -216,7 +226,7 @@ class WebSocketClient:
                         self.terminal_widget.log_message(
                             f"Warning: Dropped {dropped_count} messages due to queue overflow"
                         )
-                    await asyncio.sleep(0.5)  # Back off when queue is full
+                    await asyncio.sleep(MESSAGE_QUEUE_BACKOFF_DELAY)  # Back off when queue is full
                     continue
 
                 current_time = asyncio.get_event_loop().time()
@@ -336,11 +346,17 @@ class WebSocketClient:
                         return None  # Don't return yet, still assembling
                     elif message_type == "agent_renamed":
                         print("WebSocketClient: Handling agent rename broadcast.")
+                        rename_data = message_data.get("data", {})
+
                         if self.agent_tree_widget:
-                            rename_data = message_data.get("data", {})
                             self.agent_tree_widget.handle_agent_renamed(rename_data)
                         else:
                             print("WebSocketClient: No agent_tree_widget linked.")
+
+                        if self.terminal_widget:
+                            self.terminal_widget.handle_agent_renamed(rename_data)
+                        else:
+                            print("WebSocketClient: No terminal_widget linked.")
                     elif message_type == 'command_output_chunk_complete':
                         return self._handle_command_output_chunk_complete(message_data)
                     elif message_type == 'binary_chunk':
@@ -369,14 +385,15 @@ class WebSocketClient:
                         
         except Exception as e:
             self.connected = False
-            # Clear chunking state on connection errors
-            self.active_chunks.clear()
-            self.chunk_buffers.clear()
-            self.output_chunks.clear()
+            # Clear chunking state on connection errors (async-safe)
+            async with self.chunks_lock:
+                self.active_chunks.clear()
+                self.chunk_buffers.clear()
+                self.output_chunks.clear()
             return {"type": "error", "message": f"Error receiving message: {str(e)}"}
 
-    def _handle_chunk_progress(self, message_data):
-        """Handle chunk progress updates from server"""
+    async def _handle_chunk_progress(self, message_data):
+        """Handle chunk progress updates from server (thread-safe)"""
         data = message_data.get('data', {})
         agent_id = data.get('agent_id')
         command_id = data.get('command_id')
@@ -384,22 +401,23 @@ class WebSocketClient:
         current_chunk = data.get('current_chunk')
         total_chunks = data.get('total_chunks')
         progress = data.get('progress', 0)
-        
-        # Update tracking
+
+        # Update tracking (thread-safe)
         track_id = f"{agent_id}_{command_id}"
-        self.active_chunks[track_id] = {
-            'filename': filename,
-            'current': current_chunk,
-            'total': total_chunks,
-            'progress': progress
-        }
-        
+        async with self.chunks_lock:
+            self.active_chunks[track_id] = {
+                'filename': filename,
+                'current': current_chunk,
+                'total': total_chunks,
+                'progress': progress
+            }
+
         # Log progress
         if self.terminal_widget:
             self.terminal_widget.log_message(
                 f"BOF Transfer: {filename} - {current_chunk}/{total_chunks} ({progress:.1f}%)"
             )
-        
+
         logger.debug(f"Chunk progress - {filename}: {current_chunk}/{total_chunks} ({progress:.1f}%)")
 
     def _handle_chunk_received(self, message_data):
@@ -414,30 +432,31 @@ class WebSocketClient:
                 f"Server acknowledged chunk {current_chunk}/{total_chunks} for {filename}"
             )
 
-    def _handle_command_assembled(self, message_data):
-        """Handle command assembled notification from server"""
+    async def _handle_command_assembled(self, message_data):
+        """Handle command assembled notification from server (thread-safe)"""
         data = message_data.get('data', {})
         command_id = data.get('command_id')
         agent_id = data.get('agent_id')
         filename = data.get('filename')
         total_chunks = data.get('total_chunks')
         duration = data.get('duration', 0)
-        
-        # Remove from tracking
+
+        # Remove from tracking (thread-safe)
         track_id = f"{agent_id}_{command_id}"
-        if track_id in self.active_chunks:
-            del self.active_chunks[track_id]
-        
+        async with self.chunks_lock:
+            if track_id in self.active_chunks:
+                del self.active_chunks[track_id]
+
         if self.terminal_widget:
             self.terminal_widget.log_message(
                 f"✓ {filename} assembled ({total_chunks} chunks in {duration:.2f}s) and sent to agent"
             )
-        
+
         logger.debug(f"Command assembled - {filename} ({total_chunks} chunks in {duration:.2f}s)")
 
     # NEW METHODS FOR COMMAND OUTPUT CHUNKING:
-    def _handle_command_output_chunk_start(self, message_data):
-        """Handle the start of a chunked command output"""
+    async def _handle_command_output_chunk_start(self, message_data):
+        """Handle the start of a chunked command output (thread-safe)"""
         data = message_data.get('data', {})
         session_id = data.get('session_id')
         agent_id = data.get('agent_id')
@@ -446,116 +465,119 @@ class WebSocketClient:
         total_size = data.get('total_size')
         timestamp = data.get('timestamp')
         status = data.get('status')
-        
-        # Initialize tracking for this session
-        self.output_chunks[session_id] = {
-            'agent_id': agent_id,
-            'command_id': command_id,
-            'total_chunks': total_chunks,
-            'total_size': total_size,
-            'timestamp': timestamp,
-            'status': status,
-            'chunks': {},
-            'start_time': datetime.now()
-        }
-        
+
+        # Initialize tracking for this session (thread-safe)
+        async with self.chunks_lock:
+            self.output_chunks[session_id] = {
+                'agent_id': agent_id,
+                'command_id': command_id,
+                'total_chunks': total_chunks,
+                'total_size': total_size,
+                'timestamp': timestamp,
+                'status': status,
+                'chunks': {},
+                'start_time': datetime.now()
+            }
+
         if self.terminal_widget:
             self.terminal_widget.log_message(
                 f"Receiving large command output: {total_chunks} chunks, {total_size} bytes"
             )
-        
+
         logger.debug(f"Started receiving chunked output session {session_id}")
 
-    def _handle_command_output_chunk(self, message_data):
-        """Handle individual chunks of command output"""
+    async def _handle_command_output_chunk(self, message_data):
+        """Handle individual chunks of command output (thread-safe)"""
         data = message_data.get('data', {})
         session_id = data.get('session_id')
         chunk_number = data.get('chunk_number')
         chunk_data = data.get('chunk_data')
         total_chunks = data.get('total_chunks')
-        
-        if session_id not in self.output_chunks:
-            logger.debug(f"Unknown session {session_id}")
-            return
-        
-        # Store the chunk
-        self.output_chunks[session_id]['chunks'][chunk_number] = chunk_data
-        
-        # Calculate and display progress
-        received = len(self.output_chunks[session_id]['chunks'])
-        progress = (received / total_chunks * 100) if total_chunks > 0 else 0
-        
+
+        async with self.chunks_lock:
+            if session_id not in self.output_chunks:
+                logger.debug(f"Unknown session {session_id}")
+                return
+
+            # Store the chunk
+            self.output_chunks[session_id]['chunks'][chunk_number] = chunk_data
+
+            # Calculate and display progress
+            received = len(self.output_chunks[session_id]['chunks'])
+            progress = (received / total_chunks * 100) if total_chunks > 0 else 0
+
         # Log progress every 10 chunks or at the end
         if chunk_number % 10 == 0 or chunk_number == total_chunks - 1:
             if self.terminal_widget:
                 self.terminal_widget.log_message(
                     f"Output progress: {received}/{total_chunks} chunks ({progress:.1f}%)"
                 )
-        
+
         logger.debug(f"Chunk {chunk_number + 1}/{total_chunks} received for session {session_id}")
 
-    def _handle_command_output_chunk_complete(self, message_data):
-        """Reassemble and return the complete command output"""
+    async def _handle_command_output_chunk_complete(self, message_data):
+        """Reassemble and return the complete command output (thread-safe)"""
         data = message_data.get('data', {})
         session_id = data.get('session_id')
-        
-        if session_id not in self.output_chunks:
-            logger.debug(f"Unknown session {session_id} at completion")
-            return None
-        
-        session = self.output_chunks[session_id]
-        chunks = session['chunks']
-        total_chunks = session['total_chunks']
-        
-        # Verify we have all chunks
-        missing_chunks = []
-        for i in range(total_chunks):
-            if i not in chunks:
-                missing_chunks.append(i)
-        
-        if missing_chunks:
-            logger.debug(f"Missing {len(missing_chunks)} chunks for session {session_id}")
-            logger.debug(f"Missing chunk numbers: {missing_chunks[:10]}...")
+
+        async with self.chunks_lock:
+            if session_id not in self.output_chunks:
+                logger.debug(f"Unknown session {session_id} at completion")
+                return None
+
+            session = self.output_chunks[session_id]
+            chunks = session['chunks']
+            total_chunks = session['total_chunks']
+
+            # Verify we have all chunks
+            missing_chunks = []
+            for i in range(total_chunks):
+                if i not in chunks:
+                    missing_chunks.append(i)
+
+            if missing_chunks:
+                logger.debug(f"Missing {len(missing_chunks)} chunks for session {session_id}")
+                logger.debug(f"Missing chunk numbers: {missing_chunks[:10]}...")
+                if self.terminal_widget:
+                    self.terminal_widget.log_message(
+                        f"Warning: Missing {len(missing_chunks)} chunks in output"
+                    )
+
+            # Reassemble the output
+            output_parts = []
+            for i in range(total_chunks):
+                if i in chunks:
+                    output_parts.append(chunks[i])
+                else:
+                    output_parts.append(f"[MISSING CHUNK {i}]")
+
+            complete_output = ''.join(output_parts)
+
+            # Calculate duration
+            duration = (datetime.now() - session['start_time']).total_seconds()
+
             if self.terminal_widget:
                 self.terminal_widget.log_message(
-                    f"Warning: Missing {len(missing_chunks)} chunks in output"
+                    f"✓ Command output assembled: {total_chunks} chunks in {duration:.2f}s"
                 )
-        
-        # Reassemble the output
-        output_parts = []
-        for i in range(total_chunks):
-            if i in chunks:
-                output_parts.append(chunks[i])
-            else:
-                output_parts.append(f"[MISSING CHUNK {i}]")
-        
-        complete_output = ''.join(output_parts)
-        
-        # Calculate duration
-        duration = (datetime.now() - session['start_time']).total_seconds()
-        
-        if self.terminal_widget:
-            self.terminal_widget.log_message(
-                f"✓ Command output assembled: {total_chunks} chunks in {duration:.2f}s"
-            )
-        
-        # Create the final command_result message
-        final_message = {
-            'type': 'command_result',
-            'data': {
-                'output': complete_output,
-                'agent_id': session['agent_id'],
-                'command_id': session['command_id'],
-                'timestamp': session['timestamp'],
-                'status': session['status']
+
+            # Create the final command_result message
+            final_message = {
+                'type': 'command_result',
+                'data': {
+                    'output': complete_output,
+                    'agent_id': session['agent_id'],
+                    'command_id': session['command_id'],
+                    'timestamp': session['timestamp'],
+                    'status': session['status']
+                }
             }
-        }
-        
-        # Clean up session data
-        del self.output_chunks[session_id]
-        
+
+            # Clean up session data
+            del self.output_chunks[session_id]
+
         logger.debug(f"Successfully reassembled output for session {session_id}")
-        
+
         return final_message
 
     def set_terminal_widget(self, widget):
@@ -611,19 +633,21 @@ class WebSocketClient:
                         
             except websockets.exceptions.ConnectionClosed:
                 self.connected = False
-                # Clear chunking state on connection close
-                self.active_chunks.clear()
-                self.chunk_buffers.clear()
-                self.output_chunks.clear()
+                # Clear chunking state on connection close (thread-safe)
+                async with self.chunks_lock:
+                    self.active_chunks.clear()
+                    self.chunk_buffers.clear()
+                    self.output_chunks.clear()
                 if self.terminal_widget:
                     self.terminal_widget.log_message("Connection closed by server.")
                 break
             except Exception as e:
                 self.connected = False
-                # Clear chunking state on error
-                self.active_chunks.clear()
-                self.chunk_buffers.clear()
-                self.output_chunks.clear()
+                # Clear chunking state on error (thread-safe)
+                async with self.chunks_lock:
+                    self.active_chunks.clear()
+                    self.chunk_buffers.clear()
+                    self.output_chunks.clear()
                 if self.terminal_widget:
                     self.terminal_widget.log_message(f"Error receiving message: {e}")
                 break
@@ -663,11 +687,17 @@ class WebSocketClient:
 
                 elif message_type == "agent_renamed":
                     print("WebSocketClient: Handling agent rename broadcast.")
+                    rename_data = message_data.get("data", {})
+
                     if self.agent_tree_widget:
-                        rename_data = message_data.get("data", {})
                         self.agent_tree_widget.handle_agent_renamed(rename_data)
                     else:
                         print("WebSocketClient: No agent_tree_widget linked.")
+
+                    if self.terminal_widget:
+                        self.terminal_widget.handle_agent_renamed(rename_data)
+                    else:
+                        print("WebSocketClient: No terminal_widget linked.")
 
                 elif message_type == "new_connection":
                     print("WebSocketClient: Handling new connection.")
@@ -718,17 +748,19 @@ class WebSocketClient:
                 logger.debug(f"Failed to decode JSON: {e}")
             except websockets.exceptions.ConnectionClosed:
                 self.connected = False
-                # Clear chunking state on connection close
-                self.active_chunks.clear()
-                self.chunk_buffers.clear()
-                self.output_chunks.clear()
+                # Clear chunking state on connection close (thread-safe)
+                async with self.chunks_lock:
+                    self.active_chunks.clear()
+                    self.chunk_buffers.clear()
+                    self.output_chunks.clear()
                 logger.debug("Connection closed by server.")
                 break
             except Exception as e:
-                # Clear chunking state on error
-                self.active_chunks.clear()
-                self.chunk_buffers.clear()
-                self.output_chunks.clear()
+                # Clear chunking state on error (thread-safe)
+                async with self.chunks_lock:
+                    self.active_chunks.clear()
+                    self.chunk_buffers.clear()
+                    self.output_chunks.clear()
                 logger.debug(f"Error in handle_messages: {e}")
                 break
 
@@ -749,5 +781,10 @@ class WebSocketClient:
             self.agent_tree_widget.handle_new_connection(connection_data)
     
     def get_active_chunks(self):
-        """Get information about active chunk transfers"""
+        """Get information about active chunk transfers
+
+        Note: This is a synchronous method that accesses shared state.
+        For thread-safe access, consider using an async version with chunks_lock.
+        """
+        # TODO: Make async if this causes race conditions in practice
         return self.active_chunks.copy()

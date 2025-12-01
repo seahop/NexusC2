@@ -1,10 +1,11 @@
 #agent_tree.py
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout, QMessageBox, QMenu, QInputDialog
-from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot 
+from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot
 import json
 import asyncio
 import sqlite3
 import traceback
+from utils.constants import AGENT_TREE_UPDATE_INTERVAL
 
 class AgentTreeWidget(QWidget):
     def __init__(self, terminal_widget):
@@ -25,10 +26,9 @@ class AgentTreeWidget(QWidget):
         self.last_seen_items = {}  # Cache "Last Seen" child items for O(1) lookup
 
         # Setup timer for updating "Last Seen" timestamps
-        # Keep at 1 second for accurate last-seen counter
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_last_seen)
-        self.update_timer.start(1000)  # Update every second for accurate counters
+        self.update_timer.start(AGENT_TREE_UPDATE_INTERVAL)
 
         self.setLayout(layout)
         self.current_view = 'agents'
