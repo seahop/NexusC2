@@ -8,7 +8,6 @@ from PyQt6.QtGui import QPalette, QColor
 from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog
 from .widgets import AgentTreeWidget, TerminalWidget
 from utils.database import StateDatabase
-from .widgets import AgentTreeWidget, TerminalWidget
 from .widgets.downloads import DownloadsWidget
 from .widgets.floating_status_indicator import FloatingStatusIndicator
 import json
@@ -17,12 +16,9 @@ import base64
 
 class C2ClientGUI(QMainWindow):
     state_loaded = pyqtSignal()
-    #loadInitialState = pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        QMainWindow.__init__(self)
-        QObject.__init__(self)
         self.initUI()
         self.ws_thread = None
         self.is_connected = False

@@ -40,8 +40,8 @@ class AgentTreeWidget(QWidget):
         
     def __del__(self):
         """Destructor to ensure timer is stopped"""
-        if hasattr(self, 'last_seen_timer'):
-            self.last_seen_timer.stop()
+        if hasattr(self, 'update_timer'):
+            self.update_timer.stop()
 
     def update_last_seen(self):
         """Optimized last-seen update using cached child items."""
@@ -164,7 +164,6 @@ class AgentTreeWidget(QWidget):
         if self.current_view == 'agents':
             print(f"AgentTreeWidget: Current view is agents, adding to tree")
             self.add_agent_to_tree(new_agent)
-            self.tree.update()
             print(f"AgentTreeWidget: Added agent {agent_name} to tree view")
         else:
             print(f"AgentTreeWidget: Agent {agent_name} added to data but not to tree (current view is {self.current_view})")
@@ -216,7 +215,6 @@ class AgentTreeWidget(QWidget):
             self.add_agent_to_tree(agent)
 
         self.current_view = 'agents'
-        self.tree.update()
         print("AgentTreeWidget: show_agents complete")
 
     def on_item_clicked(self, item, column):
@@ -262,10 +260,9 @@ class AgentTreeWidget(QWidget):
             self.agent_items[listener['name']] = tree_item
             tree_item.setExpanded(True)
             print(f"AgentTreeWidget: Added listener '{listener['name']}' to tree")
-        
+
         self.current_view = 'listeners'
         print("AgentTreeWidget: show_listeners complete")
-        self.tree.update()
 
     def get_agent_by_guid(self, guid):
         """Get agent data using the GUID"""
@@ -776,7 +773,6 @@ class AgentTreeWidget(QWidget):
                 else:
                     # If somehow the item isn't in the tree, add it
                     self.add_agent_to_tree(agent)
-                self.tree.update()
 
             self.terminal_widget.log_message(f"Agent {agent['name']} reactivated")
 

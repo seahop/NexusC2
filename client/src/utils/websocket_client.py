@@ -9,6 +9,9 @@ from datetime import datetime
 from collections import deque
 from .database import StateDatabase
 from gui.widgets import AgentTreeWidget
+from .logger import get_logger
+
+logger = get_logger('websocket')
 
 class WebSocketClient:
     def __init__(self):
@@ -45,7 +48,7 @@ class WebSocketClient:
 
         uri = f"wss://{host}:{port}"
         try:
-            print(f"WebSocketClient: Attempting to connect to {uri}")
+            logger.info(f"Attempting to connect to {uri}")
             self.websocket = await websockets.connect(
                 uri,
                 ssl=ssl_context,
@@ -57,53 +60,53 @@ class WebSocketClient:
             )
             self.connected = True
             self.running = True
-            print("WebSocketClient: Connection successful")
+            logger.info("Connection successful")
             
             # Store the task reference so we can cancel it later
             self.queue_task = asyncio.create_task(self.process_message_queue())
             
         except Exception as e:
-            print(f"WebSocketClient: Connection failed: {str(e)}")
+            logger.error(f"Connection failed: {str(e)}")
             self.connected = False
 
     async def disconnect(self):
         """Disconnect cleanly from the server"""
-        print("WebSocketClient: Starting disconnect")
+        logger.info("Starting disconnect")
         self.running = False
         self.connected = False  # Mark as disconnected immediately
-        
+
         # Cancel the queue processing task if it exists
         if self.queue_task and not self.queue_task.done():
-            print("WebSocketClient: Cancelling queue processing task")
+            logger.debug("Cancelling queue processing task")
             self.queue_task.cancel()
             try:
                 await self.queue_task
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"WebSocketClient: Error cancelling queue task: {e}")
+                logger.error(f"Error cancelling queue task: {e}")
         
         # Close the websocket connection
         if self.websocket:
             try:
                 # Use wait_for to prevent hanging
                 await asyncio.wait_for(self.websocket.close(), timeout=2.0)
-                print("WebSocketClient: WebSocket closed successfully")
+                logger.info("WebSocket closed successfully")
             except asyncio.TimeoutError:
-                print("WebSocketClient: WebSocket close timed out")
+                logger.warning("WebSocket close timed out")
                 # Force close the transport if it's still open
                 if self.websocket.transport:
                     self.websocket.transport.close()
             except Exception as e:
-                print(f"WebSocketClient: Error closing websocket: {e}")
+                logger.error(f"Error closing websocket: {e}")
         
         # Clear all data
         self.active_chunks.clear()
         self.chunk_buffers.clear()
         self.output_chunks.clear()
         self.websocket = None
-        
-        print("WebSocketClient: Disconnected from server")
+
+        logger.info("Disconnected from server")
 
     async def _handle_message_sent(self, message):
         """Handle successful message sending"""
@@ -146,17 +149,17 @@ class WebSocketClient:
         """Handle queue processing errors"""
         if self.terminal_widget:
             self.terminal_widget.log_message(f"Queue processing error: {str(error)}")
-        print(f"WebSocketClient: Queue processing error: {error}")
+        logger.debug(f"Queue processing error: {error}")
         await asyncio.sleep(self.retry_delay)
         
     def connect_sync(self, username, host, port):
-        print("WebSocketClient: Starting synchronous connection attempt...")
+        logger.debug("Starting synchronous connection attempt...")
         self.loop = asyncio.get_event_loop()
         try:
             asyncio.run_coroutine_threadsafe(self.connect(username, host, port), self.loop).result()
-            print("WebSocketClient: Completed synchronous connection attempt")
+            logger.debug("Completed synchronous connection attempt")
         except Exception as e:
-            print(f"WebSocketClient: Synchronous connection failed: {str(e)}")
+            logger.debug(f"Synchronous connection failed: {str(e)}")
 
     def queue_message(self, message):
         """Queue a message for sending"""
@@ -181,7 +184,7 @@ class WebSocketClient:
             if self.terminal_widget:
                 self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
         
-        print(f"WebSocketClient: Message queued. Queue size: {len(self.message_queue)}")
+        logger.debug(f"Message queued. Queue size: {len(self.message_queue)}")
 
     async def process_message_queue(self):
         """Process queued messages with batching and prioritization."""
@@ -190,9 +193,30 @@ class WebSocketClient:
 
         while self.running and self.connected:
             try:
-                # Add backpressure handling
+                # Add backpressure handling with message dropping
                 if len(self.message_queue) > self.MAX_QUEUE_SIZE:
-                    await asyncio.sleep(1)  # Back off when queue is full
+                    # Drop oldest low-priority messages to prevent memory exhaustion
+                    dropped_count = 0
+                    while len(self.message_queue) > self.MAX_QUEUE_SIZE:
+                        if self.message_queue:
+                            dropped_msg = self.message_queue.popleft()
+                            # Try to determine if it's low priority
+                            try:
+                                msg_data = json.loads(dropped_msg)
+                                if msg_data.get('type') not in self.high_priority_types:
+                                    dropped_count += 1
+                                else:
+                                    # Put high-priority back at front
+                                    self.message_queue.appendleft(dropped_msg)
+                                    break
+                            except:
+                                dropped_count += 1
+
+                    if dropped_count > 0 and self.terminal_widget:
+                        self.terminal_widget.log_message(
+                            f"Warning: Dropped {dropped_count} messages due to queue overflow"
+                        )
+                    await asyncio.sleep(0.5)  # Back off when queue is full
                     continue
 
                 current_time = asyncio.get_event_loop().time()
@@ -324,7 +348,7 @@ class WebSocketClient:
                         chunk_num = message_data.get('chunk_num')
                         total_chunks = message_data.get('total_chunks')
                         file_name = message_data.get('file_name')
-                        print(f"WebSocketClient: Received binary chunk {chunk_num}/{total_chunks} for {file_name}")
+                        logger.debug(f"Received binary chunk {chunk_num}/{total_chunks} for {file_name}")
                     else:
                         # Log other message types
                         if self.terminal_widget:
@@ -339,12 +363,16 @@ class WebSocketClient:
                     return message_data
                     
                 except json.JSONDecodeError as e:
-                    print(f"WebSocketClient: Failed to decode message as JSON: {e}")
+                    logger.debug(f"Failed to decode message as JSON: {e}")
                     if self.terminal_widget:
                         self.terminal_widget.log_message(f"Failed to decode message as JSON: {message[:100]}...")
                         
         except Exception as e:
             self.connected = False
+            # Clear chunking state on connection errors
+            self.active_chunks.clear()
+            self.chunk_buffers.clear()
+            self.output_chunks.clear()
             return {"type": "error", "message": f"Error receiving message: {str(e)}"}
 
     def _handle_chunk_progress(self, message_data):
@@ -372,7 +400,7 @@ class WebSocketClient:
                 f"BOF Transfer: {filename} - {current_chunk}/{total_chunks} ({progress:.1f}%)"
             )
         
-        print(f"WebSocketClient: Chunk progress - {filename}: {current_chunk}/{total_chunks} ({progress:.1f}%)")
+        logger.debug(f"Chunk progress - {filename}: {current_chunk}/{total_chunks} ({progress:.1f}%)")
 
     def _handle_chunk_received(self, message_data):
         """Handle chunk received acknowledgment from server"""
@@ -405,7 +433,7 @@ class WebSocketClient:
                 f"✓ {filename} assembled ({total_chunks} chunks in {duration:.2f}s) and sent to agent"
             )
         
-        print(f"WebSocketClient: Command assembled - {filename} ({total_chunks} chunks in {duration:.2f}s)")
+        logger.debug(f"Command assembled - {filename} ({total_chunks} chunks in {duration:.2f}s)")
 
     # NEW METHODS FOR COMMAND OUTPUT CHUNKING:
     def _handle_command_output_chunk_start(self, message_data):
@@ -436,7 +464,7 @@ class WebSocketClient:
                 f"Receiving large command output: {total_chunks} chunks, {total_size} bytes"
             )
         
-        print(f"WebSocketClient: Started receiving chunked output session {session_id}")
+        logger.debug(f"Started receiving chunked output session {session_id}")
 
     def _handle_command_output_chunk(self, message_data):
         """Handle individual chunks of command output"""
@@ -447,7 +475,7 @@ class WebSocketClient:
         total_chunks = data.get('total_chunks')
         
         if session_id not in self.output_chunks:
-            print(f"WebSocketClient: Unknown session {session_id}")
+            logger.debug(f"Unknown session {session_id}")
             return
         
         # Store the chunk
@@ -464,7 +492,7 @@ class WebSocketClient:
                     f"Output progress: {received}/{total_chunks} chunks ({progress:.1f}%)"
                 )
         
-        print(f"WebSocketClient: Chunk {chunk_number + 1}/{total_chunks} received for session {session_id}")
+        logger.debug(f"Chunk {chunk_number + 1}/{total_chunks} received for session {session_id}")
 
     def _handle_command_output_chunk_complete(self, message_data):
         """Reassemble and return the complete command output"""
@@ -472,7 +500,7 @@ class WebSocketClient:
         session_id = data.get('session_id')
         
         if session_id not in self.output_chunks:
-            print(f"WebSocketClient: Unknown session {session_id} at completion")
+            logger.debug(f"Unknown session {session_id} at completion")
             return None
         
         session = self.output_chunks[session_id]
@@ -486,8 +514,8 @@ class WebSocketClient:
                 missing_chunks.append(i)
         
         if missing_chunks:
-            print(f"WebSocketClient: Missing {len(missing_chunks)} chunks for session {session_id}")
-            print(f"WebSocketClient: Missing chunk numbers: {missing_chunks[:10]}...")
+            logger.debug(f"Missing {len(missing_chunks)} chunks for session {session_id}")
+            logger.debug(f"Missing chunk numbers: {missing_chunks[:10]}...")
             if self.terminal_widget:
                 self.terminal_widget.log_message(
                     f"Warning: Missing {len(missing_chunks)} chunks in output"
@@ -526,7 +554,7 @@ class WebSocketClient:
         # Clean up session data
         del self.output_chunks[session_id]
         
-        print(f"WebSocketClient: Successfully reassembled output for session {session_id}")
+        logger.debug(f"Successfully reassembled output for session {session_id}")
         
         return final_message
 
@@ -541,7 +569,7 @@ class WebSocketClient:
             except Exception as e:
                 if self.terminal_widget:
                     self.terminal_widget.log_message(f"Error during synchronous disconnection: {e}")
-                print(f"WebSocketClient: Error during synchronous disconnection: {e}")
+                logger.debug(f"Error during synchronous disconnection: {e}")
 
     def receive_messages_sync(self):
         """Synchronously processes incoming messages."""
@@ -551,7 +579,7 @@ class WebSocketClient:
         except Exception as e:
             if self.terminal_widget:
                 self.terminal_widget.log_message(f"Error during synchronous message receiving: {e}")
-            print(f"WebSocketClient: Error during synchronous message receiving: {e}")
+            logger.debug(f"Error during synchronous message receiving: {e}")
 
     async def receive_async(self):
         while self.connected:
@@ -583,11 +611,19 @@ class WebSocketClient:
                         
             except websockets.exceptions.ConnectionClosed:
                 self.connected = False
+                # Clear chunking state on connection close
+                self.active_chunks.clear()
+                self.chunk_buffers.clear()
+                self.output_chunks.clear()
                 if self.terminal_widget:
                     self.terminal_widget.log_message("Connection closed by server.")
                 break
             except Exception as e:
                 self.connected = False
+                # Clear chunking state on error
+                self.active_chunks.clear()
+                self.chunk_buffers.clear()
+                self.output_chunks.clear()
                 if self.terminal_widget:
                     self.terminal_widget.log_message(f"Error receiving message: {e}")
                 break
@@ -606,22 +642,22 @@ class WebSocketClient:
                 if message_type not in ['chunk_progress', 'chunk_received', 'binary_chunk', 
                                        'command_output_chunk_start', 'command_output_chunk', 
                                        'command_output_chunk_complete', 'command_queued']:
-                    print(f"WebSocketClient: Received message: {json.dumps(message_data, indent=4)[:500]}...")
+                    logger.debug(f"Received message: {json.dumps(message_data, indent=4)[:500]}...")
 
                 if message_type == 'initial_state':
-                    print("WebSocketThread: Processing initial state")
+                    logger.debug("Processing initial state")
                     state_data = message_data.get("data", {})
                     
                     # DEBUG: Log what we received
-                    print(f"DEBUG: Initial state has {len(state_data.get('connections', []))} connections")
-                    print(f"DEBUG: Initial state has {len(state_data.get('listeners', []))} listeners")
+                    logger.debug(f"Initial state has {len(state_data.get('connections', []))} connections")
+                    logger.debug(f"Initial state has {len(state_data.get('listeners', []))} listeners")
                     
                     # DEBUG: Check for aliases in connections
                     for conn in state_data.get('connections', []):
-                        print(f"DEBUG: Connection {conn.get('newclient_id')[:8]}... has alias: {conn.get('alias', 'NONE')}")
+                        logger.debug(f"Connection {conn.get('newclient_id')[:8]}... has alias: {conn.get('alias', 'NONE')}")
                     
                     if self.db.store_state(state_data):
-                        print("WebSocketThread: Successfully stored initial state data")
+                        logger.debug("Successfully stored initial state data")
                         self.db.verify_database_state()
                         self.state_received.emit()
 
@@ -639,7 +675,7 @@ class WebSocketClient:
                         connection_data = message_data.get("content")
                         # Check if alias is included
                         if connection_data and 'alias' in connection_data:
-                            print(f"WebSocketClient: New connection includes alias: {connection_data['alias']}")
+                            logger.debug(f"New connection includes alias: {connection_data['alias']}")
                         self.agent_tree_widget.handle_new_connection(connection_data)
                     else:
                         print("WebSocketClient: No agent_tree_widget linked.")
@@ -676,26 +712,34 @@ class WebSocketClient:
                         
                 else:
                     if message_type not in ['binary_chunk', 'command_queued']:
-                        print(f"WebSocketClient: Unhandled message type: {message_type}")
+                        logger.debug(f"Unhandled message type: {message_type}")
 
             except json.JSONDecodeError as e:
-                print(f"WebSocketClient: Failed to decode JSON: {e}")
+                logger.debug(f"Failed to decode JSON: {e}")
             except websockets.exceptions.ConnectionClosed:
                 self.connected = False
-                print("WebSocketClient: Connection closed by server.")
+                # Clear chunking state on connection close
+                self.active_chunks.clear()
+                self.chunk_buffers.clear()
+                self.output_chunks.clear()
+                logger.debug("Connection closed by server.")
                 break
             except Exception as e:
-                print(f"WebSocketClient: Error in handle_messages: {e}")
+                # Clear chunking state on error
+                self.active_chunks.clear()
+                self.chunk_buffers.clear()
+                self.output_chunks.clear()
+                logger.debug(f"Error in handle_messages: {e}")
                 break
 
     def process_connection_update(self, connection_data, update=False):
         """Process new or updated connection data."""
         action = "Updating" if update else "Adding"
-        print(f"WebSocketClient: {action} connection data: {json.dumps(connection_data, indent=4)}")
+        logger.debug(f"{action} connection data: {json.dumps(connection_data, indent=4)}")
 
         # Check if AgentTreeWidget is linked
         if not self.agent_tree_widget:
-            print("WebSocketClient: No agent_tree_widget linked!")
+            logger.debug("No agent_tree_widget linked!")
             return
 
         # Process the connection
