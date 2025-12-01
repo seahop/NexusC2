@@ -50,6 +50,14 @@ class WebSocketClient:
         self.batch_timeout = MESSAGE_BATCH_TIMEOUT
         self.high_priority_types = HIGH_PRIORITY_MESSAGE_TYPES
 
+        # Message metadata cache to avoid double-parsing
+        # Maps message string -> (msg_type, is_high_priority, is_chunked, chunk_info)
+        self.message_metadata = {}
+
+        # Chunk cleanup configuration
+        self.chunk_ttl = 300  # 5 minutes TTL for stale chunks
+        self.cleanup_task = None
+
     async def connect(self, username, host, port):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.load_verify_locations(self.cert_path)
@@ -70,9 +78,10 @@ class WebSocketClient:
             self.connected = True
             self.running = True
             logger.info("Connection successful")
-            
-            # Store the task reference so we can cancel it later
+
+            # Store the task references so we can cancel them later
             self.queue_task = asyncio.create_task(self.process_message_queue())
+            self.cleanup_task = asyncio.create_task(self.cleanup_stale_chunks())
             
         except Exception as e:
             logger.error(f"Connection failed: {str(e)}")
@@ -94,6 +103,17 @@ class WebSocketClient:
                 pass
             except Exception as e:
                 logger.error(f"Error cancelling queue task: {e}")
+
+        # Cancel the cleanup task if it exists
+        if self.cleanup_task and not self.cleanup_task.done():
+            logger.debug("Cancelling chunk cleanup task")
+            self.cleanup_task.cancel()
+            try:
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error cancelling cleanup task: {e}")
         
         # Close the websocket connection
         if self.websocket:
@@ -114,6 +134,10 @@ class WebSocketClient:
             self.active_chunks.clear()
             self.chunk_buffers.clear()
             self.output_chunks.clear()
+
+        # Clear message metadata cache
+        self.message_metadata.clear()
+
         self.websocket = None
 
         logger.info("Disconnected from server")
@@ -172,28 +196,47 @@ class WebSocketClient:
             logger.debug(f"Synchronous connection failed: {str(e)}")
 
     def queue_message(self, message):
-        """Queue a message for sending"""
+        """Queue a message for sending and cache metadata to avoid double-parsing"""
         self.message_queue.append(message)
-        
-        # Check if this is a chunked message
+
+        # Parse once and cache metadata
         try:
             msg_data = json.loads(message)
-            if msg_data.get('type') == 'agent_command':
+            msg_type = msg_data.get('type', '')
+            is_high_priority = msg_type in self.high_priority_types
+
+            # Check for chunked transfers
+            is_chunked = False
+            chunk_info = None
+            if msg_type == 'agent_command':
                 data = msg_data.get('data', {})
-                if data.get('totalChunks', 1) > 1:
-                    chunk_num = data.get('currentChunk', 0)
-                    total = data.get('totalChunks', 1)
-                    if self.terminal_widget:
-                        self.terminal_widget.log_message(
-                            f"Chunk {chunk_num + 1}/{total} queued. Queue size: {len(self.message_queue)}"
-                        )
-                else:
-                    if self.terminal_widget:
-                        self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
+                total_chunks = data.get('totalChunks', 1)
+                if total_chunks > 1:
+                    is_chunked = True
+                    chunk_info = {
+                        'current': data.get('currentChunk', 0),
+                        'total': total_chunks,
+                        'filename': data.get('filename', 'unknown')
+                    }
+
+            # Cache metadata for later use
+            self.message_metadata[message] = (msg_type, is_high_priority, is_chunked, chunk_info)
+
+            # Log based on cached metadata
+            if is_chunked and chunk_info:
+                if self.terminal_widget:
+                    self.terminal_widget.log_message(
+                        f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued. Queue size: {len(self.message_queue)}"
+                    )
+            else:
+                if self.terminal_widget:
+                    self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
         except:
+            # If parsing fails, cache minimal metadata
+            self.message_metadata[message] = ('unknown', False, False, None)
             if self.terminal_widget:
                 self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
-        
+
         logger.debug(f"Message queued. Queue size: {len(self.message_queue)}")
 
     async def process_message_queue(self):
@@ -235,13 +278,9 @@ class WebSocketClient:
                 if len(self.message_queue) > 0:
                     message = self.message_queue.popleft()
 
-                    # Check if this is a high-priority message (skip batching)
-                    try:
-                        msg_data = json.loads(message)
-                        msg_type = msg_data.get('type', '')
-                        is_high_priority = msg_type in self.high_priority_types
-                    except:
-                        is_high_priority = False
+                    # Use cached metadata instead of re-parsing
+                    metadata = self.message_metadata.get(message, ('unknown', False, False, None))
+                    msg_type, is_high_priority, is_chunked, chunk_info = metadata
 
                     if is_high_priority:
                         # Send immediately without batching
@@ -253,6 +292,8 @@ class WebSocketClient:
                                         timeout=self.SEND_TIMEOUT
                                     )
                                     await self._handle_message_sent(message)
+                                    # Clean up metadata cache after successful send
+                                    self.message_metadata.pop(message, None)
                                     last_send_time = asyncio.get_event_loop().time()
                                 except asyncio.TimeoutError:
                                     self.message_queue.appendleft(message)
@@ -303,12 +344,66 @@ class WebSocketClient:
                             timeout=self.SEND_TIMEOUT
                         )
                         await self._handle_message_sent(message)
+                        # Clean up metadata cache after successful send
+                        self.message_metadata.pop(message, None)
                     except asyncio.TimeoutError:
                         self.message_queue.appendleft(message)
                         await self._handle_send_timeout()
                     except Exception as e:
                         self.message_queue.appendleft(message)
                         await self._handle_send_error(e)
+
+    async def cleanup_stale_chunks(self):
+        """Periodically clean up stale chunk tracking data based on TTL"""
+        from datetime import datetime, timedelta
+
+        while self.running and self.connected:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+
+                async with self.chunks_lock:
+                    now = datetime.now()
+                    stale_threshold = now - timedelta(seconds=self.chunk_ttl)
+
+                    # Clean up stale output chunks
+                    stale_sessions = []
+                    for session_id, session_data in self.output_chunks.items():
+                        start_time = session_data.get('start_time')
+                        if start_time and start_time < stale_threshold:
+                            stale_sessions.append(session_id)
+
+                    for session_id in stale_sessions:
+                        logger.warning(f"Cleaning up stale chunk session {session_id} (TTL expired)")
+                        del self.output_chunks[session_id]
+
+                    # Clean up stale active chunks
+                    stale_chunks = []
+                    for track_id, chunk_data in self.active_chunks.items():
+                        last_update = chunk_data.get('last_update')
+                        if last_update and last_update < stale_threshold:
+                            stale_chunks.append(track_id)
+
+                    for track_id in stale_chunks:
+                        logger.warning(f"Cleaning up stale active chunk {track_id} (TTL expired)")
+                        del self.active_chunks[track_id]
+
+                    # Clean up stale chunk buffers (these don't have timestamps, so clear all if empty for a while)
+                    # For simplicity, we won't track timestamps on chunk_buffers since they're typically short-lived
+
+                    total_cleaned = len(stale_sessions) + len(stale_chunks)
+                    if total_cleaned > 0:
+                        logger.info(f"TTL cleanup: removed {len(stale_sessions)} output sessions and {len(stale_chunks)} active chunks")
+                        if self.terminal_widget:
+                            self.terminal_widget.log_message(
+                                f"Cleaned up {total_cleaned} stale chunk(s)"
+                            )
+
+            except asyncio.CancelledError:
+                logger.debug("Chunk cleanup task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in chunk cleanup: {e}")
+                await asyncio.sleep(60)
 
     async def send_message(self, message):
         """Public method to send messages - adds to queue instead of sending directly."""
@@ -403,13 +498,15 @@ class WebSocketClient:
         progress = data.get('progress', 0)
 
         # Update tracking (thread-safe)
+        from datetime import datetime
         track_id = f"{agent_id}_{command_id}"
         async with self.chunks_lock:
             self.active_chunks[track_id] = {
                 'filename': filename,
                 'current': current_chunk,
                 'total': total_chunks,
-                'progress': progress
+                'progress': progress,
+                'last_update': datetime.now()
             }
 
         # Log progress

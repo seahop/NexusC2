@@ -65,7 +65,7 @@ class ResponseHandler:
                     "output": f"\n{complete_output}"
                 }
                 self.command_buffer.add_output(formatted_output)
-                self.terminal.update_display()
+                self.terminal.update_display(incremental=True)
             # If not complete, don't display anything yet
             return
         
@@ -104,7 +104,7 @@ class ResponseHandler:
                         "output": f"\n{decompressed_output}"
                     }
                     self.command_buffer.add_output(formatted_output)
-                    self.terminal.update_display()
+                    self.terminal.update_display(incremental=True)
                     return
                 
             except Exception as e:
@@ -118,7 +118,7 @@ class ResponseHandler:
                 "output": f"\n[Inline-Assembly Result]\n{output}"
             }
             self.command_buffer.add_output(formatted_output)
-            self.terminal.update_display()
+            self.terminal.update_display(incremental=True)
             return
         
         # Parse BOF async status messages
@@ -135,7 +135,7 @@ class ResponseHandler:
                 "output": f"\n{output}"
             }
             self.command_buffer.add_output(formatted_output)
-            self.terminal.update_display()
+            self.terminal.update_display(incremental=True)
             return
         
         # Default formatting for other outputs
@@ -144,7 +144,7 @@ class ResponseHandler:
             "output": f"\n{output}"
         }
         self.command_buffer.add_output(formatted_output)
-        self.terminal.update_display()
+        self.terminal.update_display(incremental=True)
 
     def handle_upload_response(self, response_data):
         """Handle upload chunk responses"""
@@ -169,7 +169,7 @@ class ResponseHandler:
                     "output": f"[BOF Error]\n{error}"
                 })
         
-        self.terminal.update_display()
+        self.terminal.update_display(incremental=True)
     
     def handle_inline_assembly_response(self, response_data):
         """Handle inline-assembly execution responses from the server"""
@@ -205,7 +205,7 @@ class ResponseHandler:
                 "output": f"[+] Async assembly job {job_id[:8]}... completed"
             })
         
-        self.terminal.update_display()
+        self.terminal.update_display(incremental=True)
     
     # Private helper methods
     def _handle_validation_message(self, output_data):
@@ -265,7 +265,7 @@ class ResponseHandler:
         self.command_buffer.add_output(formatted_output)
         
         print("DEBUG: Updating terminal display")
-        self.terminal.update_display()
+        self.terminal.update_display(incremental=True)
     
     def _is_inline_assembly_result(self, output):
         """Check if output is an inline-assembly result"""
@@ -453,4 +453,4 @@ class ResponseHandler:
             }
         
         self.command_buffer.add_output(formatted_output)
-        self.terminal.update_display()
+        self.terminal.update_display(incremental=True)

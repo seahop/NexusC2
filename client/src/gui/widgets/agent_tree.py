@@ -24,11 +24,13 @@ class AgentTreeWidget(QWidget):
         self.listener_data = []
         self.agent_items = {}  # Store references to tree items
         self.last_seen_items = {}  # Cache "Last Seen" child items for O(1) lookup
+        self.agent_by_guid = {}  # GUID-indexed dictionary for O(1) agent lookup
 
         # Setup timer for updating "Last Seen" timestamps
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_last_seen)
         self.update_timer.start(AGENT_TREE_UPDATE_INTERVAL)
+        self._timer_active = True  # Track timer state
 
         self.setLayout(layout)
         self.current_view = 'agents'
@@ -42,6 +44,31 @@ class AgentTreeWidget(QWidget):
         """Destructor to ensure timer is stopped"""
         if hasattr(self, 'update_timer'):
             self.update_timer.stop()
+
+    def showEvent(self, event):
+        """Handle widget becoming visible - resume timer"""
+        super().showEvent(event)
+        if hasattr(self, 'update_timer') and hasattr(self, '_timer_active'):
+            if not self._timer_active:
+                self.update_timer.start(AGENT_TREE_UPDATE_INTERVAL)
+                self._timer_active = True
+                print("AgentTreeWidget: Timer resumed (widget visible)")
+
+    def hideEvent(self, event):
+        """Handle widget becoming hidden - pause timer"""
+        super().hideEvent(event)
+        if hasattr(self, 'update_timer') and hasattr(self, '_timer_active'):
+            if self._timer_active:
+                self.update_timer.stop()
+                self._timer_active = False
+                print("AgentTreeWidget: Timer paused (widget hidden)")
+
+    def cleanup(self):
+        """Explicit cleanup method for timers and resources"""
+        if hasattr(self, 'update_timer'):
+            self.update_timer.stop()
+            self._timer_active = False
+            print("AgentTreeWidget: Explicit cleanup - timer stopped")
 
     def update_last_seen(self):
         """Optimized last-seen update using cached child items."""
@@ -160,6 +187,8 @@ class AgentTreeWidget(QWidget):
 
         print(f"AgentTreeWidget: Adding agent {agent_name} with details: {details}")
         self.agent_data.append(new_agent)
+        # Index by GUID for O(1) lookup
+        self.agent_by_guid[new_agent['guid']] = new_agent
 
         if self.current_view == 'agents':
             print(f"AgentTreeWidget: Current view is agents, adding to tree")
@@ -265,11 +294,8 @@ class AgentTreeWidget(QWidget):
         print("AgentTreeWidget: show_listeners complete")
 
     def get_agent_by_guid(self, guid):
-        """Get agent data using the GUID"""
-        for agent in self.agent_data:
-            if agent['guid'] == guid:
-                return agent
-        return None
+        """Get agent data using the GUID - O(1) lookup with dictionary"""
+        return self.agent_by_guid.get(guid, None)
 
     def add_listener(self, name, protocol, host, port):
         print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}")
@@ -474,6 +500,7 @@ class AgentTreeWidget(QWidget):
         print("\nAgentTreeWidget: Clearing current data...")
         self.agent_data.clear()
         self.listener_data.clear()
+        self.agent_by_guid.clear()  # Clear GUID index
         self.tree.clear()
         
         try:
@@ -611,6 +638,8 @@ class AgentTreeWidget(QWidget):
                             
                         print(f"DEBUG: Created agent data structure: {agent}")
                         self.agent_data.append(agent)
+                        # Index by GUID for O(1) lookup
+                        self.agent_by_guid[agent['guid']] = agent
                         print(f"AgentTreeWidget: Added agent {agent_name} (deleted: {is_deleted})")
                         
                     print(f"\nDEBUG: Successfully loaded {len(self.agent_data)} agents")

@@ -271,78 +271,91 @@ class AgentTerminal(QWidget):
         if self.command_handler.send_command(command):
             self.command_input.clear()
     
-    def update_display(self):
-        """Update the terminal display with current buffer content"""
-        display_content = self.command_buffer.get_display_content()
+    def update_display(self, incremental=False):
+        """Update the terminal display with current buffer content
+
+        Args:
+            incremental: If True, only append new content instead of full redraw
+        """
         print(f"AgentTerminal [{self.agent_name}]: Updating terminal display")
-        
+
         # Check if we're at bottom before updating
         scrollbar = self.terminal_output.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 50
-        
-        # Update the content
-        if was_at_bottom:
-            # If we were at bottom, use append to maintain auto-scroll
-            self.terminal_output.setText("")  # Clear first
-            self.terminal_output.append(display_content)
+
+        if incremental and hasattr(self, '_last_output_count'):
+            # Incremental update: only append new content
+            current_count = len(self.command_buffer.received_outputs)
+            if current_count > self._last_output_count:
+                # Get only new outputs
+                new_outputs = list(self.command_buffer.received_outputs)[self._last_output_count:]
+                new_lines = [output.get('output', '') for output in new_outputs if output.get('output')]
+
+                if new_lines:
+                    # Append only new content without clearing
+                    new_content = "\n".join(new_lines)
+                    self.terminal_output.append(new_content)
+
+                self._last_output_count = current_count
         else:
-            # If we weren't at bottom, use setText to maintain position
-            self.terminal_output.setText(display_content)
+            # Full update (used for initial load or when incremental not possible)
+            display_content = self.command_buffer.get_display_content()
+
+            if was_at_bottom:
+                # If we were at bottom, use append to maintain auto-scroll
+                self.terminal_output.setText("")  # Clear first
+                self.terminal_output.append(display_content)
+            else:
+                # If we weren't at bottom, use setText to maintain position
+                self.terminal_output.setText(display_content)
+
+            # Track output count for incremental updates
+            self._last_output_count = len(self.command_buffer.received_outputs)
     
     def initialize_with_history(self, commands, outputs_by_command):
-        """Initialize terminal with command history"""
+        """Initialize terminal with command history - optimized for single render"""
         print(f"DEBUG: Initializing history for agent {self.agent_name}")
         if self.is_initialized:
             print("DEBUG: Already initialized, skipping")
             return
-        
+
         try:
             # Sort commands chronologically
             sorted_commands = sorted(commands, key=lambda x: x[4])
             print(f"DEBUG: Processing {len(sorted_commands)} commands")
-            
-            # Process in smaller batches
-            batch_size = 10
-            total_batches = (len(sorted_commands) + batch_size - 1) // batch_size
-            
-            for batch_num in range(total_batches):
-                start_idx = batch_num * batch_size
-                end_idx = min(start_idx + batch_size, len(sorted_commands))
-                batch_commands = sorted_commands[start_idx:end_idx]
-                
-                for command in batch_commands:
-                    command_id, username, agent_guid, command_text, timestamp = command
-                    
-                    if agent_guid == self.agent_guid:
-                        # Add command to history (for navigation)
-                        self.command_history.add_command(command_text)
-                        
-                        # Add command to buffer
-                        formatted_command = {
-                            "timestamp": timestamp,
-                            "output": f"[{timestamp}] {username} > {command_text}"
+
+            # Buffer all outputs without rendering
+            for command in sorted_commands:
+                command_id, username, agent_guid, command_text, timestamp = command
+
+                if agent_guid == self.agent_guid:
+                    # Add command to history (for navigation)
+                    self.command_history.add_command(command_text)
+
+                    # Add command to buffer
+                    formatted_command = {
+                        "timestamp": timestamp,
+                        "output": f"[{timestamp}] {username} > {command_text}"
+                    }
+                    self.command_buffer.add_output(formatted_command)
+
+                    # Add corresponding outputs
+                    command_outputs = outputs_by_command.get(command_id, [])
+                    for output in command_outputs:
+                        output_id, cmd_id, output_text, output_timestamp = output
+                        formatted_output = {
+                            "timestamp": output_timestamp,
+                            "output": output_text
                         }
-                        self.command_buffer.add_output(formatted_command)
-                        
-                        # Add corresponding outputs
-                        command_outputs = outputs_by_command.get(command_id, [])
-                        for output in command_outputs:
-                            output_id, cmd_id, output_text, output_timestamp = output
-                            formatted_output = {
-                                "timestamp": output_timestamp,
-                                "output": output_text
-                            }
-                            self.command_buffer.add_output(formatted_output)
-                
-                # Update display after each batch
-                if batch_num % 2 == 0:  # Update every other batch
-                    self.update_display()
-                    QApplication.processEvents()
-            
-            # Final update
+                        self.command_buffer.add_output(formatted_output)
+
+            # Single render at the end - much more efficient
+            print(f"DEBUG: Rendering {len(self.command_buffer.received_outputs)} outputs")
             self.update_display()
             self.is_initialized = True
-            
+
+            print(f"DEBUG: History initialization complete for {self.agent_name}")
+
         except Exception as e:
             print(f"ERROR in initialize_with_history: {e}")
             import traceback
