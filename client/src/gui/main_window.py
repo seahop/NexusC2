@@ -13,20 +13,28 @@ from .widgets.floating_status_indicator import FloatingStatusIndicator
 import json
 import os
 import base64
+from pathlib import Path
 
 class C2ClientGUI(QMainWindow):
     state_loaded = pyqtSignal()
 
     def __init__(self):
         super().__init__()
+        self.config_dir = Path.home() / '.c2_client'
+        self.config_dir.mkdir(exist_ok=True)
+        self.window_state_file = self.config_dir / 'window_state.json'
+
         self.initUI()
         self.ws_thread = None
         self.is_connected = False
         self.ws_client = None
         self.processed_listener_ids = set()
-        self.state_db = StateDatabase() 
+        self.state_db = StateDatabase()
         if self.ws_client:
             self.ws_client.agent_tree_widget = self.agent_tree
+
+        # Restore window geometry after UI is set up
+        self.restore_window_state()
 
     def initUI(self):
         self.setWindowTitle('Nexus')
@@ -98,11 +106,14 @@ class C2ClientGUI(QMainWindow):
         print(f"Window decorations updated to {'dark' if is_dark_theme else 'light'} theme")
 
     def setupMenuBar(self):
+        from PyQt6.QtGui import QKeySequence
+
         menubar = self.menuBar()
-        
+
         # Server menu
         serverMenu = menubar.addMenu('Server')
         connectAction = serverMenu.addAction('Connect...')
+        connectAction.setShortcut(QKeySequence('Ctrl+Shift+C'))
         connectAction.triggered.connect(self.showConnectDialog)
         disconnectAction = serverMenu.addAction('Disconnect')
         disconnectAction.triggered.connect(self.disconnectFromServer)
@@ -112,17 +123,24 @@ class C2ClientGUI(QMainWindow):
         # View menu
         viewMenu = menubar.addMenu('View')
         showListenersAction = viewMenu.addAction('Show Listeners')
+        showListenersAction.setShortcut(QKeySequence('Ctrl+L'))
         showListenersAction.triggered.connect(self.showListeners)
         showAgentsAction = viewMenu.addAction('Show Agents')
+        showAgentsAction.setShortcut(QKeySequence('Ctrl+Shift+A'))
         showAgentsAction.triggered.connect(self.showAgents)
         showDownloadsAction = viewMenu.addAction('Downloads')
+        showDownloadsAction.setShortcut(QKeySequence('Ctrl+D'))
         showDownloadsAction.triggered.connect(self.showDownloads)
 
         # Tools menu
         toolsMenu = menubar.addMenu('Tools')
         createListenerAction = toolsMenu.addAction('Create Listener')
+        createListenerAction.setShortcut(QKeySequence('Ctrl+Shift+L'))
         createListenerAction.triggered.connect(self.showCreateListener)
-        toolsMenu.addAction('Create Payload').triggered.connect(self.showCreatePayload)
+
+        createPayloadAction = toolsMenu.addAction('Create Payload')
+        createPayloadAction.setShortcut(QKeySequence('Ctrl+P'))
+        createPayloadAction.triggered.connect(self.showCreatePayload)
         
         # Add CNA script loading option
         toolsMenu.addSeparator()
@@ -132,9 +150,11 @@ class C2ClientGUI(QMainWindow):
         manageCNAAction.triggered.connect(self.manageCNAScripts)
         cnaDebugAction = toolsMenu.addAction('CNA Debug Console...')
         cnaDebugAction.triggered.connect(self.showCNADebugConsole)
-        
+
+
         optionsMenu = menubar.addMenu('Options')
         settingsAction = optionsMenu.addAction('Settings...')
+        settingsAction.setShortcut(QKeySequence('Ctrl+,'))
         settingsAction.triggered.connect(self.showSettings)
         versionAction = optionsMenu.addAction('Version...')
         versionAction.triggered.connect(self.showVersion)
@@ -143,27 +163,27 @@ class C2ClientGUI(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout()
-        
+
         # Create splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+
         # Create terminal first
         self.terminal = TerminalWidget()
-        
+
         # Add agent tree widget with terminal reference
         self.agent_tree = AgentTreeWidget(self.terminal)
-        splitter.addWidget(self.agent_tree)
-        
+        self.splitter.addWidget(self.agent_tree)
+
         # Add this line to set the agent_tree reference in the terminal
         self.terminal.agent_tree = self.agent_tree
-        
+
         # Add terminal and logs in tabs
-        splitter.addWidget(self.terminal)
-        
+        self.splitter.addWidget(self.terminal)
+
         # Set initial sizes for the splitter
-        splitter.setSizes([300, 900])
-        
-        layout.addWidget(splitter)
+        self.splitter.setSizes([300, 900])
+
+        layout.addWidget(self.splitter)
         main_widget.setLayout(layout)
         
         # ADD FLOATING STATUS INDICATOR
@@ -584,20 +604,69 @@ class C2ClientGUI(QMainWindow):
                 connectAction.setEnabled(not self.is_connected)
                 disconnectAction.setEnabled(self.is_connected)
 
+    def save_window_state(self):
+        """Save window geometry and splitter state"""
+        try:
+            state = {
+                'geometry': {
+                    'x': self.x(),
+                    'y': self.y(),
+                    'width': self.width(),
+                    'height': self.height()
+                },
+                'splitter_sizes': self.splitter.sizes() if hasattr(self, 'splitter') else [300, 900]
+            }
+
+            with open(self.window_state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+
+            print(f"Window state saved: {state}")
+        except Exception as e:
+            print(f"Failed to save window state: {e}")
+
+    def restore_window_state(self):
+        """Restore window geometry and splitter state"""
+        try:
+            if self.window_state_file.exists():
+                with open(self.window_state_file, 'r') as f:
+                    state = json.load(f)
+
+                # Restore window geometry
+                geom = state.get('geometry', {})
+                if geom:
+                    self.setGeometry(
+                        geom.get('x', 100),
+                        geom.get('y', 100),
+                        geom.get('width', 1200),
+                        geom.get('height', 800)
+                    )
+
+                # Restore splitter sizes
+                if hasattr(self, 'splitter'):
+                    sizes = state.get('splitter_sizes', [300, 900])
+                    self.splitter.setSizes(sizes)
+
+                print(f"Window state restored: {state}")
+        except Exception as e:
+            print(f"Failed to restore window state: {e}")
+
     def closeEvent(self, event):
         """Handle application close event with proper cleanup"""
         print("MainWindow: Close event triggered")
-        
+
+        # Save window state before closing
+        self.save_window_state()
+
         # Stop any timers in the agent tree widget
         if hasattr(self, 'agent_tree') and hasattr(self.agent_tree, 'last_seen_timer'):
             print("MainWindow: Stopping agent tree timer...")
             self.agent_tree.last_seen_timer.stop()
-        
+
         # Stop the WebSocket thread if it exists
         if hasattr(self, 'ws_thread') and self.ws_thread:
             print("MainWindow: Stopping WebSocket thread...")
             self.ws_thread.stop()
-            
+
             # Wait for the thread to finish with a timeout
             if self.ws_thread.isRunning():
                 print("MainWindow: Waiting for WebSocket thread to finish...")
@@ -605,22 +674,22 @@ class C2ClientGUI(QMainWindow):
                     print("MainWindow: WebSocket thread didn't stop cleanly, terminating...")
                     self.ws_thread.terminate()
                     self.ws_thread.wait(1000)  # Give it 1 more second
-            
+
             self.ws_thread = None
             print("MainWindow: WebSocket thread cleanup complete")
-        
+
         # Close any open dialogs
         for widget in self.findChildren(QDialog):
             widget.close()
-        
+
         # Accept the close event
         event.accept()
-        
+
         # Call parent class closeEvent
         super().closeEvent(event)
-        
+
         print("MainWindow: Close event complete")
-        
+
         # Force quit the application
         QApplication.instance().quit()
 

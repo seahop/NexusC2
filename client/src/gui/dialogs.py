@@ -631,7 +631,7 @@ class ServerConnectDialog(QDialog):
         layout.addRow(line)
 
         # Server connection fields
-        self.username = QLineEdit("seahop")
+        self.username = QLineEdit("nexus")
         self.host = QLineEdit("localhost")
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
@@ -675,13 +675,13 @@ class ServerConnectDialog(QDialog):
     def load_preset(self, preset_name):
         """Load a saved server configuration"""
         if preset_name == "-- New Connection --":
-            self.username.setText("seahop")
+            self.username.setText("nexus")
             self.host.setText("localhost")
             self.port.setValue(3131)
             self.delete_button.setVisible(False)
         elif preset_name in self.saved_servers:
             config = self.saved_servers[preset_name]
-            self.username.setText(config.get('username', 'seahop'))
+            self.username.setText(config.get('username', 'nexus'))
             self.host.setText(config.get('host', 'localhost'))
             self.port.setValue(config.get('port', 3131))
             self.delete_button.setVisible(True)
