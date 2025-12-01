@@ -55,6 +55,7 @@ class AgentTreeWidget(QWidget):
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
         self.ws_thread = None  # We'll set this from the main window
         self.agent_aliases = {}
+        self.agent_tags = {}  # GUID -> [{"name": "tag", "color": "#fff"}]
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
@@ -132,6 +133,13 @@ class AgentTreeWidget(QWidget):
                     agent.get('ip', ''),
                     self.agent_aliases.get(agent.get('guid', ''), '')  # Include alias
                 ]
+
+                # Include tags in search
+                agent_guid = agent.get('guid', '')
+                if agent_guid in self.agent_tags:
+                    tag_names = [tag['name'] for tag in self.agent_tags[agent_guid]]
+                    searchable_fields.extend(tag_names)
+
                 searchable_text = ' '.join(str(f).lower() for f in searchable_fields if f)
 
                 # Simple substring match (can be enhanced with fuzzy matching later)
@@ -292,6 +300,12 @@ class AgentTreeWidget(QWidget):
             # No alias: show first 16 characters instead of 8 for better distinction
             display_name = f"{agent['guid'][:16]}..."
 
+        # Add tag badges to display name
+        agent_tags = self.agent_tags.get(agent['guid'], [])
+        if agent_tags:
+            tag_badges = " ".join([f"[{tag['name']}]" for tag in agent_tags])
+            display_name = f"{display_name} {tag_badges}"
+
         agent['display_name'] = display_name
 
         tree_item = QTreeWidgetItem([display_name])
@@ -308,6 +322,9 @@ class AgentTreeWidget(QWidget):
         ]
         if alias:
             tooltip_parts.insert(0, f"Alias: {alias}")
+        if agent_tags:
+            tag_list = ", ".join([f"{tag['name']} ({tag['color']})" for tag in agent_tags])
+            tooltip_parts.append(f"Tags: {tag_list}")
         if agent.get('last_seen'):
             tooltip_parts.append(f"Last Seen: {agent['last_seen']}")
 
@@ -454,12 +471,16 @@ class AgentTreeWidget(QWidget):
             copy_guid_action = menu.addAction("Copy GUID")
             menu.addSeparator()
             rename_action = menu.addAction("Rename Agent")
+            manage_tags_action = menu.addAction("Manage Tags...")
+            menu.addSeparator()
             remove_action = menu.addAction("Remove Agent")
             action = menu.exec(self.tree.viewport().mapToGlobal(position))
             if action == copy_guid_action:
                 self.copy_agent_guid(item)
             elif action == rename_action:
                 self.rename_agent(item)
+            elif action == manage_tags_action:
+                self.manage_agent_tags(item)
             elif action == remove_action:
                 self.remove_agent(item)
 
@@ -536,6 +557,46 @@ class AgentTreeWidget(QWidget):
                     item.setText(0, agent['name'])
                     del agent['display_name']
 
+    def manage_agent_tags(self, item):
+        """Open tag management dialog for an agent"""
+        # Find the agent
+        agent = None
+        for a in self.agent_data:
+            if a['name'] in self.agent_items and self.agent_items[a['name']] == item:
+                agent = a
+                break
+
+        if not agent:
+            item_text = item.text(0)
+            for a in self.agent_data:
+                if a.get('display_name', a['name']) == item_text:
+                    agent = a
+                    break
+
+        if not agent:
+            QMessageBox.warning(self, "Error", "Could not find agent data")
+            return
+
+        # Check connection
+        if not self.ws_thread or not self.ws_thread.is_connected():
+            QMessageBox.warning(self, "Error", "Not connected to server")
+            return
+
+        # Get current tags for this agent
+        agent_guid = agent['guid']
+        current_tags = self.agent_tags.get(agent_guid, [])
+
+        # Get display name
+        display_name = self.agent_aliases.get(agent_guid, agent['name'])
+
+        # Import and show tag manager dialog
+        from gui.widgets.tag_manager_dialog import TagManagerDialog
+        dialog = TagManagerDialog(agent_guid, display_name, current_tags, self.ws_thread, self)
+
+        if dialog.exec():
+            # Dialog was accepted - tags were saved
+            self.terminal_widget.log_message(f"Tags updated for agent {display_name}")
+
     def delete_listener(self, name):
         """Delete a listener after verifying connection state."""
         #print("\nDEBUG: Starting delete_listener")
@@ -610,12 +671,13 @@ class AgentTreeWidget(QWidget):
 
     def loadStateFromDatabase(self):
         print("\nAgentTreeWidget: loadStateFromDatabase called")
-        
+
         # Clear current state
         print("\nAgentTreeWidget: Clearing current data...")
         self.agent_data.clear()
         self.listener_data.clear()
         self.agent_by_guid.clear()  # Clear GUID index
+        self.agent_tags.clear()  # Clear tags
         self.tree.clear()
         
         try:
@@ -758,14 +820,30 @@ class AgentTreeWidget(QWidget):
                         print(f"AgentTreeWidget: Added agent {agent_name} (deleted: {is_deleted})")
                         
                     print(f"\nDEBUG: Successfully loaded {len(self.agent_data)} agents")
-                    
+
+                # Load agent tags
+                print("\nAgentTreeWidget: Loading agent tags from database")
+                cursor = conn.execute("""
+                    SELECT agent_guid, tag_name, tag_color
+                    FROM agent_tags
+                    ORDER BY agent_guid, tag_name ASC
+                """)
+                tags_rows = cursor.fetchall()
+                for row in tags_rows:
+                    agent_guid = row[0]
+                    tag = {"name": row[1], "color": row[2]}
+                    if agent_guid not in self.agent_tags:
+                        self.agent_tags[agent_guid] = []
+                    self.agent_tags[agent_guid].append(tag)
+                print(f"AgentTreeWidget: Loaded tags for {len(self.agent_tags)} agents")
+
         except sqlite3.Error as e:
             print(f"\nDatabase error: {e}")
             traceback.print_exc()
         except Exception as e:
             print(f"\nUnexpected error: {e}")
             traceback.print_exc()
-                
+
         # Display the current view
         print(f"\nAgentTreeWidget: Current view is {self.current_view}")
         if self.current_view == 'listeners':
@@ -978,19 +1056,100 @@ class AgentTreeWidget(QWidget):
         """Handle agent rename notification from server"""
         agent_id = data.get('agent_id')
         new_name = data.get('new_name')
-        
+
         # Update local alias cache
         self.agent_aliases[agent_id] = new_name
-        
+
         # Find and update the agent
         for agent in self.agent_data:
             if agent['guid'] == agent_id:
-                agent['display_name'] = new_name
-                
+                # Build display name with GUID (same format as add_agent_to_tree)
+                display_name = f"{new_name} ({agent_id[:16]}...)"
+                agent['display_name'] = display_name
+
                 # Update tree view if visible
                 if self.current_view == 'agents' and agent['name'] in self.agent_items:
                     item = self.agent_items[agent['name']]
-                    item.setText(0, new_name)
-                
+                    item.setText(0, display_name)
+
+                    # Update tooltip as well
+                    tooltip_parts = [
+                        f"Alias: {new_name}",
+                        f"Full GUID: {agent_id}",
+                        f"Hostname: {agent.get('hostname', 'N/A')}",
+                        f"OS: {agent.get('os', 'N/A')}",
+                        f"Username: {agent.get('username', 'N/A')}",
+                        f"IP: {agent.get('ip', 'N/A')}",
+                    ]
+                    if agent.get('last_seen'):
+                        tooltip_parts.append(f"Last Seen: {agent['last_seen']}")
+                    item.setToolTip(0, '\n'.join(tooltip_parts))
+
                 self.terminal_widget.log_message(f"Agent {agent_id[:8]} renamed to '{new_name}'")
+                break
+
+    def handle_agent_tags_updated(self, data):
+        """Handle agent tag update notification from server"""
+        agent_id = data.get('agent_id')
+        tags = data.get('tags', [])
+
+        print(f"AgentTreeWidget: Tags updated for {agent_id[:8]}: {tags}")
+
+        # Update local tags cache
+        if tags:
+            self.agent_tags[agent_id] = tags
+        elif agent_id in self.agent_tags:
+            # No tags remaining, remove from dict
+            del self.agent_tags[agent_id]
+
+        # Update database
+        if hasattr(self, 'terminal_widget') and hasattr(self.terminal_widget, 'ws_thread'):
+            from utils.database import StateDatabase
+            db = StateDatabase()
+            db.update_agent_tags(agent_id, tags)
+
+        # Update tree display if agent is visible
+        for agent in self.agent_data:
+            if agent['guid'] == agent_id:
+                if self.current_view == 'agents' and agent['name'] in self.agent_items:
+                    item = self.agent_items[agent['name']]
+
+                    # Rebuild display name with tags
+                    alias = self.agent_aliases.get(agent_id)
+                    if alias:
+                        display_name = f"{alias} ({agent_id[:16]}...)"
+                    else:
+                        display_name = f"{agent_id[:16]}..."
+
+                    # Add tag badges
+                    if tags:
+                        tag_badges = " ".join([f"[{tag['name']}]" for tag in tags])
+                        display_name = f"{display_name} {tag_badges}"
+
+                    # Update tree item
+                    item.setText(0, display_name)
+                    agent['display_name'] = display_name
+
+                    # Update tooltip
+                    tooltip_parts = [
+                        f"Full GUID: {agent_id}",
+                        f"Hostname: {agent.get('hostname', 'N/A')}",
+                        f"OS: {agent.get('os', 'N/A')}",
+                        f"Username: {agent.get('username', 'N/A')}",
+                        f"IP: {agent.get('ip', 'N/A')}",
+                    ]
+                    if alias:
+                        tooltip_parts.insert(0, f"Alias: {alias}")
+                    if tags:
+                        tag_list = ", ".join([f"{tag['name']} ({tag['color']})" for tag in tags])
+                        tooltip_parts.append(f"Tags: {tag_list}")
+                    if agent.get('last_seen'):
+                        tooltip_parts.append(f"Last Seen: {agent['last_seen']}")
+                    item.setToolTip(0, '\n'.join(tooltip_parts))
+
+                    # Log message
+                    tag_names = [tag['name'] for tag in tags]
+                    self.terminal_widget.log_message(
+                        f"Agent {agent_id[:8]} tags updated: {', '.join(tag_names) if tag_names else '(none)'}"
+                    )
                 break

@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS connections (
     alias VARCHAR DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_tags (
+    id SERIAL PRIMARY KEY,
+    agent_guid UUID NOT NULL,
+    tag_name VARCHAR(100) NOT NULL,
+    tag_color VARCHAR(7) DEFAULT '#4A90E2',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_guid) REFERENCES connections(newclientID) ON DELETE CASCADE,
+    UNIQUE(agent_guid, tag_name)
+);
+
 CREATE TABLE IF NOT EXISTS link_routes (
     id UUID PRIMARY KEY,
     source_guid UUID NOT NULL,
@@ -122,6 +132,13 @@ CREATE INDEX IF NOT EXISTS idx_agent_aliases_guid
 -- User sessions index
 CREATE INDEX IF NOT EXISTS idx_user_sessions_username
     ON user_sessions(username);
+
+-- Agent tags indexes (for tag filtering)
+CREATE INDEX IF NOT EXISTS idx_agent_tags_guid
+    ON agent_tags(agent_guid);
+
+CREATE INDEX IF NOT EXISTS idx_agent_tags_name
+    ON agent_tags(tag_name);
 
 -- Link routes indexes (if link functionality is implemented)
 CREATE INDEX IF NOT EXISTS idx_link_routes_source

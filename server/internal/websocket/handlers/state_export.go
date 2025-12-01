@@ -169,12 +169,41 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 		}
 	}
 
+	// 5. Query all agent tags
+	rows, err = tx.QueryContext(ctx, `
+		SELECT agent_guid, tag_name, tag_color
+		FROM agent_tags
+		ORDER BY agent_guid, tag_name ASC
+	`)
+	if err != nil {
+		return nil, &DBOperationError{
+			Operation: "query agent tags",
+			Err:       err,
+		}
+	}
+	defer rows.Close()
+
+	export.AgentTags = make(map[string][]Tag)
+	for rows.Next() {
+		var agentGUID string
+		var tag Tag
+		if err := rows.Scan(&agentGUID, &tag.Name, &tag.Color); err != nil {
+			return nil, &DBOperationError{
+				Operation: "scan agent tag",
+				Err:       err,
+			}
+		}
+		export.AgentTags[agentGUID] = append(export.AgentTags[agentGUID], tag)
+		logMessage(LOG_VERBOSE, "Exported tag: Agent=%s, Tag=%s", agentGUID, tag.Name)
+	}
+
 	// Log summary of exported data
 	logMessage(LOG_NORMAL, "Export state summary:")
 	logMessage(LOG_NORMAL, "- Connections: %d", len(export.Connections))
 	logMessage(LOG_NORMAL, "- Listeners: %d", len(export.Listeners))
 	logMessage(LOG_NORMAL, "- Commands: %d", len(export.Commands))
 	logMessage(LOG_NORMAL, "- Command Outputs: %d", len(export.CommandOutputs))
+	logMessage(LOG_NORMAL, "- Agent Tags: %d agents with tags", len(export.AgentTags))
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {

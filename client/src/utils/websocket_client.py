@@ -452,6 +452,16 @@ class WebSocketClient:
                             self.terminal_widget.handle_agent_renamed(rename_data)
                         else:
                             print("WebSocketClient: No terminal_widget linked.")
+
+                    elif message_type == "agent_tags_updated":
+                        print("WebSocketClient: Handling agent tags update broadcast.")
+                        tags_data = message_data.get("data", {})
+
+                        if self.agent_tree_widget:
+                            self.agent_tree_widget.handle_agent_tags_updated(tags_data)
+                        else:
+                            print("WebSocketClient: No agent_tree_widget linked.")
+
                     elif message_type == 'command_output_chunk_complete':
                         return self._handle_command_output_chunk_complete(message_data)
                     elif message_type == 'binary_chunk':
@@ -793,8 +803,15 @@ class WebSocketClient:
 
                     if self.terminal_widget:
                         self.terminal_widget.handle_agent_renamed(rename_data)
+
+                elif message_type == "agent_tags_updated":
+                    print("WebSocketClient: Handling agent tags update broadcast.")
+                    tags_data = message_data.get("data", {})
+
+                    if self.agent_tree_widget:
+                        self.agent_tree_widget.handle_agent_tags_updated(tags_data)
                     else:
-                        print("WebSocketClient: No terminal_widget linked.")
+                        print("WebSocketClient: No agent_tree_widget linked.")
 
                 elif message_type == "new_connection":
                     print("WebSocketClient: Handling new connection.")

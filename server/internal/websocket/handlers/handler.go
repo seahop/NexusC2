@@ -364,6 +364,14 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		logMessage(LOG_VERBOSE, "Processing rename_agent message")
 		return h.handleRenameAgent(client, message)
 
+	case "add_tag":
+		logMessage(LOG_VERBOSE, "Processing add_tag message")
+		return h.handleAddTag(client, message)
+
+	case "remove_tag":
+		logMessage(LOG_VERBOSE, "Processing remove_tag message")
+		return h.handleRemoveTag(client, message)
+
 	default:
 		logMessage(LOG_NORMAL, "Unknown message type: %s", msgType)
 		return nil

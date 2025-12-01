@@ -61,10 +61,11 @@ func (e *DBOperationError) Error() string {
 
 // StateExport represents the complete state export
 type StateExport struct {
-	Connections    []Connection    `json:"connections"`
-	Commands       []Command       `json:"commands"`
-	CommandOutputs []CommandOutput `json:"command_outputs"`
-	Listeners      []Listener      `json:"listeners"`
+	Connections    []Connection     `json:"connections"`
+	Commands       []Command        `json:"commands"`
+	CommandOutputs []CommandOutput  `json:"command_outputs"`
+	Listeners      []Listener       `json:"listeners"`
+	AgentTags      map[string][]Tag `json:"agent_tags"` // Map of agent_guid -> tags
 }
 
 // Connection represents a connection record

@@ -29,8 +29,8 @@ class StateDatabase:
                 conn.executescript("""
                     CREATE TABLE IF NOT EXISTS connections (
                         newclient_id TEXT PRIMARY KEY,
-                        client_id TEXT NOT NULL, 
-                        protocol TEXT NOT NULL, 
+                        client_id TEXT NOT NULL,
+                        protocol TEXT NOT NULL,
                         extIP TEXT,
                         intIP TEXT,
                         username TEXT,
@@ -65,6 +65,15 @@ class StateDatabase:
                         port TEXT NOT NULL,
                         ip TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS agent_tags (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        agent_guid TEXT NOT NULL,
+                        tag_name TEXT NOT NULL,
+                        tag_color TEXT DEFAULT '#4A90E2',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (agent_guid) REFERENCES connections(newclient_id) ON DELETE CASCADE,
+                        UNIQUE(agent_guid, tag_name)
+                    );
 
                     -- Performance indexes
                     CREATE INDEX IF NOT EXISTS idx_connections_newclient_id ON connections(newclient_id);
@@ -75,11 +84,13 @@ class StateDatabase:
                     CREATE INDEX IF NOT EXISTS idx_commands_timestamp ON commands(timestamp DESC);
                     CREATE INDEX IF NOT EXISTS idx_command_outputs_command_id ON command_outputs(command_id);
                     CREATE INDEX IF NOT EXISTS idx_command_outputs_timestamp ON command_outputs(timestamp);
+                    CREATE INDEX IF NOT EXISTS idx_agent_tags_guid ON agent_tags(agent_guid);
+                    CREATE INDEX IF NOT EXISTS idx_agent_tags_name ON agent_tags(tag_name);
                 """)
 
                 # Debug: Print current table contents after initialization
                 print("\nDEBUG: Checking database tables after initialization:")
-                for table in ['connections', 'commands', 'command_outputs', 'listeners']:
+                for table in ['connections', 'commands', 'command_outputs', 'listeners', 'agent_tags']:
                     cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
                     count = cursor.fetchone()[0]
                     print(f"Table {table}: {count} rows")
@@ -190,6 +201,35 @@ class StateDatabase:
                             )
                             print(f"Upserted {len(state_data['command_outputs'])} command outputs")
 
+                        # Store agent tags using UPSERT
+                        if state_data.get("agent_tags"):
+                            print("Upserting agent tags in database")
+                            # First clear existing tags if initial state
+                            if is_initial_state:
+                                conn.execute("DELETE FROM agent_tags")
+
+                            # agent_tags is a dict: {agent_guid: [{"name": "tag", "color": "#fff"}, ...]}
+                            tag_rows = []
+                            for agent_guid, tags in state_data["agent_tags"].items():
+                                for tag in tags:
+                                    tag_rows.append((
+                                        agent_guid,
+                                        tag["name"],
+                                        tag.get("color", "#4A90E2")
+                                    ))
+
+                            if tag_rows:
+                                conn.executemany(
+                                    """INSERT OR REPLACE INTO agent_tags (agent_guid, tag_name, tag_color)
+                                       VALUES (?,?,?)""",
+                                    tag_rows
+                                )
+                                print(f"Upserted {len(tag_rows)} agent tags")
+                        elif is_initial_state:
+                            # Server sent no tags - clear local tags
+                            conn.execute("DELETE FROM agent_tags")
+                            print("StateDatabase: Cleared agent tags (no tags in initial state)")
+
                         # Commit transaction
                         conn.commit()
                         return True
@@ -265,6 +305,68 @@ class StateDatabase:
     def __del__(self):
         """Cleanup when the object is deleted."""
         self._close_connections()
+
+    def get_agent_tags(self, agent_guid):
+        """Get all tags for a specific agent"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT tag_name, tag_color
+                    FROM agent_tags
+                    WHERE agent_guid = ?
+                    ORDER BY tag_name ASC
+                """, (agent_guid,))
+                rows = cursor.fetchall()
+                return [{"name": row[0], "color": row[1]} for row in rows]
+
+    def get_all_agent_tags(self):
+        """Get all agent tags as a dictionary {agent_guid: [tags]}"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT agent_guid, tag_name, tag_color
+                    FROM agent_tags
+                    ORDER BY agent_guid, tag_name ASC
+                """)
+                rows = cursor.fetchall()
+
+                # Build dictionary
+                tags_dict = {}
+                for row in rows:
+                    agent_guid = row[0]
+                    tag = {"name": row[1], "color": row[2]}
+                    if agent_guid not in tags_dict:
+                        tags_dict[agent_guid] = []
+                    tags_dict[agent_guid].append(tag)
+
+                return tags_dict
+
+    def update_agent_tags(self, agent_guid, tags):
+        """Update all tags for a specific agent (replaces existing)"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    # Clear existing tags for this agent
+                    conn.execute("DELETE FROM agent_tags WHERE agent_guid = ?", (agent_guid,))
+
+                    # Insert new tags
+                    if tags:
+                        conn.executemany(
+                            """INSERT INTO agent_tags (agent_guid, tag_name, tag_color)
+                               VALUES (?,?,?)""",
+                            [(agent_guid, tag["name"], tag.get("color", "#4A90E2")) for tag in tags]
+                        )
+
+                    conn.commit()
+                    print(f"Updated tags for agent {agent_guid}: {len(tags)} tags")
+                    return True
+                except Exception as e:
+                    print(f"Error updating agent tags: {e}")
+                    conn.rollback()
+                    return False
 
     def verify_database_state(self):
         """Verify and print current database state"""
