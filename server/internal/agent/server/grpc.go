@@ -1154,6 +1154,127 @@ func parseSocksCommand(cmdStr string) (map[string]interface{}, error) {
 	}, nil
 }
 
+// startSocksServer initializes and starts a server-side SOCKS proxy
+func (s *GRPCServer) startSocksServer(socksData map[string]interface{}) error {
+	socksPort, ok := socksData["socks_port"].(int)
+	if !ok {
+		return fmt.Errorf("invalid socks_port in configuration")
+	}
+
+	path, ok := socksData["path"].(string)
+	if !ok {
+		return fmt.Errorf("invalid path in configuration")
+	}
+
+	serverKey := fmt.Sprintf("%d", socksPort)
+
+	s.socksMutex.Lock()
+	defer s.socksMutex.Unlock()
+
+	// Check if server already exists
+	if _, exists := s.socksServers[serverKey]; exists {
+		return fmt.Errorf("SOCKS server already running on port %d", socksPort)
+	}
+
+	// Create credentials (for now, we'll use empty credentials as they're handled on the agent side)
+	// The server-side proxy just needs to accept WebSocket connections from agents
+	creds := &socks.Credentials{
+		Username: "",
+		Password: "",
+		SSHKey:   []byte{},
+	}
+
+	// Create the SOCKS server
+	server, err := socks.NewServer(socksPort, path, creds)
+	if err != nil {
+		return fmt.Errorf("failed to create SOCKS server: %w", err)
+	}
+
+	// Start the server
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("failed to start SOCKS server: %w", err)
+	}
+
+	// Register the WebSocket handler with the HTTP server
+	if s.manager != nil {
+		s.manager.RegisterSocksRoute(path, server.GetHandler())
+		log.Printf("[SOCKS] Registered WebSocket handler for path: %s", path)
+	} else {
+		server.Stop()
+		return fmt.Errorf("no manager available to register WebSocket handler")
+	}
+
+	// Set up automatic cleanup when agent connection dies
+	server.SetConnectionLostCallback(func() {
+		log.Printf("[SOCKS] Agent connection lost for port %d, cleaning up server-side proxy", socksPort)
+
+		// Create socksData for cleanup
+		cleanupData := map[string]interface{}{
+			"socks_port": socksPort,
+			"path":       path,
+		}
+
+		// Stop the server (this will also clean up from the map)
+		if err := s.stopSocksServer(cleanupData); err != nil {
+			log.Printf("[SOCKS] Error during automatic cleanup: %v", err)
+		} else {
+			log.Printf("[SOCKS] Automatic cleanup completed for port %d", socksPort)
+		}
+	})
+
+	// Store the server
+	s.socksServers[serverKey] = &struct {
+		server *socks.Server
+		bridge *socks.Bridge
+	}{
+		server: server,
+		bridge: nil, // Bridge is handled on agent side
+	}
+
+	log.Printf("[SOCKS] Started SOCKS server on port %d (WebSocket path: %s)", socksPort, path)
+	return nil
+}
+
+// stopSocksServer stops a running SOCKS proxy server
+func (s *GRPCServer) stopSocksServer(socksData map[string]interface{}) error {
+	socksPort, ok := socksData["socks_port"].(int)
+	if !ok {
+		return fmt.Errorf("invalid socks_port in configuration")
+	}
+
+	serverKey := fmt.Sprintf("%d", socksPort)
+
+	s.socksMutex.Lock()
+	defer s.socksMutex.Unlock()
+
+	// Check if server exists
+	serverInfo, exists := s.socksServers[serverKey]
+	if !exists {
+		return fmt.Errorf("no SOCKS server running on port %d", socksPort)
+	}
+
+	// Get the path for unregistering
+	path, _ := socksData["path"].(string)
+
+	// Unregister the WebSocket handler
+	if path != "" && s.manager != nil {
+		s.manager.RemoveSocksRoute(path)
+		log.Printf("[SOCKS] Unregistered WebSocket handler for path: %s", path)
+	}
+
+	// Stop the server
+	if err := serverInfo.server.Stop(); err != nil {
+		log.Printf("[SOCKS] Error stopping SOCKS server on port %d: %v", socksPort, err)
+		// Continue with cleanup even if stop fails
+	}
+
+	// Remove from map
+	delete(s.socksServers, serverKey)
+
+	log.Printf("[SOCKS] Stopped SOCKS server on port %d", socksPort)
+	return nil
+}
+
 func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 	switch msg.Type {
 	case "agent_command":
@@ -1402,6 +1523,25 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			if err != nil {
 				log.Printf("[ProcessMessage] Failed to parse SOCKS command: %v", err)
 				return
+			}
+
+			// Start server-side SOCKS proxy if action is "start"
+			if socksData["action"] == "start" {
+				if err := s.startSocksServer(socksData); err != nil {
+					log.Printf("[ProcessMessage] Failed to start SOCKS server: %v", err)
+					// Send error back to client
+					errorMsg := map[string]interface{}{
+						"type":      "socks_error",
+						"command_id": commandData.CommandID,
+						"agent_id":  commandData.AgentID,
+						"error":     fmt.Sprintf("Failed to start SOCKS server: %v", err),
+						"timestamp": time.Now().Format(time.RFC3339),
+					}
+					s.BroadcastResult(errorMsg)
+					return
+				}
+			} else if socksData["action"] == "stop" {
+				s.stopSocksServer(socksData)
 			}
 
 			// Convert to JSON for the Data field

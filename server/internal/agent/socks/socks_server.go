@@ -2,6 +2,7 @@
 package socks
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -18,6 +19,14 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 )
+
+// Buffer pool for SOCKS5 parsing to reduce allocations
+var socksParseBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 512) // 512 bytes sufficient for SOCKS5 request
+		return &buf
+	},
+}
 
 type Server struct {
 	socksPort     int
@@ -37,6 +46,13 @@ type Server struct {
 
 	// Channel for forwarding requests
 	forwardChan chan *ForwardRequest
+
+	// Context for graceful shutdown
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// Callback invoked when connection dies
+	onConnectionLost func()
 }
 
 type ForwardRequest struct {
@@ -46,6 +62,7 @@ type ForwardRequest struct {
 }
 
 func NewServer(socksPort int, path string, creds *Credentials) (*Server, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		socksPort:   socksPort,
 		path:        path,
@@ -56,6 +73,8 @@ func NewServer(socksPort int, path string, creds *Credentials) (*Server, error) 
 			},
 		},
 		forwardChan: make(chan *ForwardRequest, 100),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 
 	// Setup SSH server config
@@ -309,34 +328,99 @@ func (s *Server) handleTunnelForwarding(clientConn net.Conn, target string) {
 
 	go ssh.DiscardRequests(reqs)
 
-	// Bridge the connections
+	// Create context for coordinated shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Error channel for propagation
+	errChan := make(chan error, 2)
+
+	// Bridge the connections with context-based error propagation
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	// Client -> Target (through SSH)
 	go func() {
 		defer wg.Done()
-		bytes, err := io.Copy(channel, clientConn)
-		if err != nil {
-			log.Printf("[SOCKS] Client->Target copy error: %v", err)
+		bytes, err := s.copyWithContext(ctx, channel, clientConn, target, "Client->Target")
+		if err != nil && err != io.EOF && err != context.Canceled {
+			log.Printf("[SOCKS] Client->Target error for %s: %v", target, err)
+			select {
+			case errChan <- err:
+				cancel() // Signal other goroutine to abort
+			default:
+			}
 		}
-		log.Printf("[SOCKS] Client->Target transferred %d bytes", bytes)
-		channel.Close()
+		log.Printf("[SOCKS] Client->Target transferred %d bytes for %s", bytes, target)
+		channel.CloseWrite()
 	}()
 
 	// Target -> Client (through SSH)
 	go func() {
 		defer wg.Done()
-		bytes, err := io.Copy(clientConn, channel)
-		if err != nil {
-			log.Printf("[SOCKS] Target->Client copy error: %v", err)
+		bytes, err := s.copyWithContext(ctx, clientConn, channel, target, "Target->Client")
+		if err != nil && err != io.EOF && err != context.Canceled {
+			log.Printf("[SOCKS] Target->Client error for %s: %v", target, err)
+			select {
+			case errChan <- err:
+				cancel() // Signal other goroutine to abort
+			default:
+			}
 		}
-		log.Printf("[SOCKS] Target->Client transferred %d bytes", bytes)
-		clientConn.Close()
+		log.Printf("[SOCKS] Target->Client transferred %d bytes for %s", bytes, target)
+		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+			tcpConn.CloseWrite()
+		}
 	}()
 
 	wg.Wait()
+	clientConn.Close()
+	channel.Close()
 	log.Printf("[SOCKS] Tunnel closed for target %s", target)
+}
+
+// copyWithContext performs buffered copy with context cancellation support
+// Optimized for various workloads: small messages (tools), large transfers (files), streaming
+func (s *Server) copyWithContext(ctx context.Context, dst io.Writer, src io.Reader, target, direction string) (int64, error) {
+	const (
+		bufferSize  = 32 * 1024       // 32KB buffer - good balance for all use cases
+		idleTimeout = 10 * time.Minute // Very forgiving timeout for slow tools/transfers
+	)
+
+	buf := make([]byte, bufferSize)
+	var written int64
+
+	for {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return written, ctx.Err()
+		default:
+		}
+
+		// Set generous read deadline for idle timeout
+		// This is very forgiving to support slow operations, large file transfers, etc.
+		if conn, ok := src.(net.Conn); ok {
+			conn.SetReadDeadline(time.Now().Add(idleTimeout))
+		}
+
+		nr, err := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				return written, ew
+			}
+			if nr != nw {
+				return written, io.ErrShortWrite
+			}
+		}
+		if err != nil {
+			return written, err
+		}
+	}
 }
 
 func (s *Server) handleSocksAuth(conn net.Conn) error {
@@ -365,49 +449,62 @@ func (s *Server) handleSocksAuth(conn net.Conn) error {
 }
 
 func (s *Server) parseSocksRequest(conn net.Conn) (string, error) {
-	// Read request header
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(conn, header); err != nil {
+	// Get buffer from pool for efficient parsing
+	bufPtr := socksParseBufferPool.Get().(*[]byte)
+	defer socksParseBufferPool.Put(bufPtr)
+	buf := *bufPtr
+
+	// Read request header (4 bytes)
+	if _, err := io.ReadFull(conn, buf[:4]); err != nil {
 		return "", err
 	}
 
-	if header[0] != 0x05 {
+	if buf[0] != 0x05 {
 		return "", fmt.Errorf("invalid SOCKS version")
 	}
 
-	if header[1] != 0x01 { // Only support CONNECT
+	if buf[1] != 0x01 { // Only support CONNECT
 		return "", fmt.Errorf("unsupported command")
 	}
 
-	// Read address type and address
+	// Read address based on type
 	var addr string
-	switch header[3] {
-	case 0x01: // IPv4
-		buf := make([]byte, 4)
-		if _, err := io.ReadFull(conn, buf); err != nil {
-			return "", err
-		}
-		addr = net.IP(buf).String()
+	var addrLen int
 
-	case 0x03: // Domain name
-		buf := make([]byte, 1)
-		if _, err := io.ReadFull(conn, buf); err != nil {
+	switch buf[3] {
+	case 0x01: // IPv4 (4 bytes)
+		addrLen = 4
+		if _, err := io.ReadFull(conn, buf[:addrLen]); err != nil {
 			return "", err
 		}
-		domainLen := buf[0]
-		domain := make([]byte, domainLen)
-		if _, err := io.ReadFull(conn, domain); err != nil {
+		addr = net.IP(buf[:addrLen]).String()
+
+	case 0x03: // Domain name (1 byte length + domain)
+		if _, err := io.ReadFull(conn, buf[:1]); err != nil {
 			return "", err
 		}
-		addr = string(domain)
+		domainLen := int(buf[0])
+		if domainLen > 255 {
+			return "", fmt.Errorf("invalid domain length")
+		}
+		if _, err := io.ReadFull(conn, buf[:domainLen]); err != nil {
+			return "", err
+		}
+		addr = string(buf[:domainLen])
+
+	case 0x04: // IPv6 (16 bytes)
+		addrLen = 16
+		if _, err := io.ReadFull(conn, buf[:addrLen]); err != nil {
+			return "", err
+		}
+		addr = net.IP(buf[:addrLen]).String()
 
 	default:
-		return "", fmt.Errorf("unsupported address type")
+		return "", fmt.Errorf("unsupported address type: %d", buf[3])
 	}
 
-	// Read port
-	buf := make([]byte, 2)
-	if _, err := io.ReadFull(conn, buf); err != nil {
+	// Read port (2 bytes)
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
 		return "", err
 	}
 	port := (uint16(buf[0]) << 8) | uint16(buf[1])
@@ -462,11 +559,31 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.sshConnMu.Unlock()
 
 	log.Printf("[SOCKS] SSH connection closed")
+
+	// Invoke cleanup callback if set (connection died)
+	s.mu.Lock()
+	callback := s.onConnectionLost
+	s.mu.Unlock()
+
+	if callback != nil {
+		log.Printf("[SOCKS] Connection lost, invoking cleanup callback")
+		go callback() // Run in goroutine to avoid blocking
+	}
 }
 
 func (s *Server) handleSSHChannels(chans <-chan ssh.NewChannel) {
-	for newChannel := range chans {
-		go s.handleSSHChannel(newChannel)
+	for {
+		select {
+		case newChannel, ok := <-chans:
+			if !ok {
+				log.Printf("[SOCKS] SSH channels closed")
+				return
+			}
+			go s.handleSSHChannel(newChannel)
+		case <-s.ctx.Done():
+			log.Printf("[SOCKS] SSH channel handler shutting down")
+			return
+		}
 	}
 }
 
@@ -503,6 +620,11 @@ func (s *Server) Stop() error {
 		return nil
 	}
 
+	// Cancel context to signal all goroutines to shutdown
+	if s.cancel != nil {
+		s.cancel()
+	}
+
 	if s.socksListener != nil {
 		s.socksListener.Close()
 	}
@@ -516,10 +638,27 @@ func (s *Server) GetHandler() http.HandlerFunc {
 	return s.HandleWebSocket
 }
 
+// SetConnectionLostCallback sets a callback to invoke when the agent connection dies
+func (s *Server) SetConnectionLostCallback(callback func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onConnectionLost = callback
+}
+
+// Buffer pool for WebSocket messages to reduce allocations (shared with agent implementation)
+var wsBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 0, 32*1024) // Pre-allocate 32KB capacity
+		return &buf
+	},
+}
+
 // wsConn wraps a websocket connection to implement net.Conn
+// Unified implementation with buffer pooling for efficiency
 type wsConn struct {
-	conn *websocket.Conn
-	buf  []byte
+	conn        *websocket.Conn
+	buf         []byte
+	bufFromPool bool
 }
 
 func (w *wsConn) Read(p []byte) (n int, err error) {
@@ -528,11 +667,40 @@ func (w *wsConn) Read(p []byte) (n int, err error) {
 		if err != nil {
 			return 0, err
 		}
-		w.buf = message
+
+		// For large messages, use the message directly
+		// For small messages, copy to pooled buffer to avoid holding WebSocket memory
+		const largeMessageThreshold = 64 * 1024 // 64KB
+		if len(message) > largeMessageThreshold {
+			// Return pooled buffer if we had one
+			if w.bufFromPool && cap(w.buf) > 0 {
+				emptyBuf := w.buf[:0]
+				wsBufferPool.Put(&emptyBuf)
+				w.bufFromPool = false
+			}
+			w.buf = message
+		} else {
+			// Get pooled buffer for small messages
+			if !w.bufFromPool {
+				bufPtr := wsBufferPool.Get().(*[]byte)
+				w.buf = (*bufPtr)[:0]
+				w.bufFromPool = true
+			}
+			w.buf = append(w.buf[:0], message...)
+		}
 	}
 
 	n = copy(p, w.buf)
 	w.buf = w.buf[n:]
+
+	// Return buffer to pool when fully consumed
+	if len(w.buf) == 0 && w.bufFromPool {
+		emptyBuf := w.buf[:0]
+		wsBufferPool.Put(&emptyBuf)
+		w.bufFromPool = false
+		w.buf = nil
+	}
+
 	return n, nil
 }
 
@@ -545,6 +713,12 @@ func (w *wsConn) Write(p []byte) (n int, err error) {
 }
 
 func (w *wsConn) Close() error {
+	// Clean up any pooled buffer on close
+	if w.bufFromPool && cap(w.buf) > 0 {
+		emptyBuf := w.buf[:0]
+		wsBufferPool.Put(&emptyBuf)
+		w.bufFromPool = false
+	}
 	return w.conn.Close()
 }
 
@@ -557,7 +731,10 @@ func (w *wsConn) RemoteAddr() net.Addr {
 }
 
 func (w *wsConn) SetDeadline(t time.Time) error {
-	return w.conn.SetReadDeadline(t)
+	if err := w.conn.SetReadDeadline(t); err != nil {
+		return err
+	}
+	return w.conn.SetWriteDeadline(t)
 }
 
 func (w *wsConn) SetReadDeadline(t time.Time) error {

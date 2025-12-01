@@ -6,17 +6,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 )
 
+type SocksRouteRegistry interface {
+	AddRoute(path string, handler http.HandlerFunc)
+	RemoveRoute(path string)
+}
+
 type SocksManager struct {
-	mu      sync.RWMutex
-	servers map[string]*socks.Server
+	mu            sync.RWMutex
+	servers       map[string]*socks.Server
+	routeRegistry SocksRouteRegistry
 }
 
 func NewSocksManager() *SocksManager {
 	return &SocksManager{
 		servers: make(map[string]*socks.Server),
+	}
+}
+
+func NewSocksManagerWithRegistry(registry SocksRouteRegistry) *SocksManager {
+	return &SocksManager{
+		servers:       make(map[string]*socks.Server),
+		routeRegistry: registry,
 	}
 }
 
@@ -74,6 +88,14 @@ func (sm *SocksManager) HandleSocksCommand(command string, data string) (string,
 			return "", fmt.Errorf("failed to start SOCKS server: %v", err)
 		}
 
+		// Register the WebSocket handler with the route registry
+		if sm.routeRegistry != nil {
+			sm.routeRegistry.AddRoute(socksData.Path, server.GetHandler())
+			log.Printf("[SOCKS] Registered WebSocket handler for path: %s", socksData.Path)
+		} else {
+			log.Printf("[SOCKS] WARNING: No route registry available, WebSocket handler not registered")
+		}
+
 		sm.servers[serverKey] = server
 		log.Printf("Started SOCKS server on port %d and WSS server on port %d (path: %s)",
 			socksData.SocksPort, socksData.WSSPort, socksData.Path)
@@ -97,6 +119,12 @@ func (sm *SocksManager) HandleSocksCommand(command string, data string) (string,
 		server, exists := sm.servers[serverKey]
 		if !exists {
 			return "No SOCKS server running on specified port", nil
+		}
+
+		// Unregister the WebSocket handler
+		if sm.routeRegistry != nil {
+			sm.routeRegistry.RemoveRoute(socksData.Path)
+			log.Printf("[SOCKS] Unregistered WebSocket handler for path: %s", socksData.Path)
 		}
 
 		if err := server.Stop(); err != nil {
