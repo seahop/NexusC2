@@ -68,7 +68,6 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf("failed to marshal post data: %v", err)
 	}
 
-
 	// Create the request with custom method
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -89,7 +88,7 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	}
 
 	// Debugging headers
-	fmt.Println("Request headers set:")
+	//fmt.Println("Request headers set:")
 
 	// Custom HTTP client
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}

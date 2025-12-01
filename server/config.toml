@@ -59,6 +59,21 @@ x_content_type_options = "nosniff"
 sleep = 20
 jitter = 10
 
+# Malleable command values - customize these to avoid detection signatures
+[payload_config.malleable_commands]
+# The value that will replace 'rekey' in cleartext communication
+# Agent will be compiled to recognize this value as the rekey command
+# Change this to any value to remove 'rekey' signature from network traffic and binary
+rekey = "bloop"
+
+# JSON field names for rekey response - customize to avoid structural fingerprinting
+# These control the field names in the JSON response sent over the wire
+# Default: {"status": "bloop", "data": "", "command_db_id": 1}
+# Custom:  {"x": "bloop", "y": "", "z": 1}
+rekey_status_field = "status"
+rekey_data_field = "data"
+rekey_id_field = "id"
+
 [payload_config.http_headers]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 content_type = "application/json"

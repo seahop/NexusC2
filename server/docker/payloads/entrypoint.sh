@@ -215,6 +215,10 @@ build_binary() {
         -X 'main.protocol=${PROTOCOL}' \
         -X 'main.ip=${IP}' \
         -X 'main.port=${PORT}' \
+        -X 'main.MALLEABLE_REKEY_COMMAND=${MALLEABLE_REKEY_COMMAND}' \
+        -X 'main.MALLEABLE_REKEY_STATUS_FIELD=${MALLEABLE_REKEY_STATUS_FIELD}' \
+        -X 'main.MALLEABLE_REKEY_DATA_FIELD=${MALLEABLE_REKEY_DATA_FIELD}' \
+        -X 'main.MALLEABLE_REKEY_ID_FIELD=${MALLEABLE_REKEY_ID_FIELD}' \
         ${TOGGLE_FLAGS} \
         ${SAFETY_FLAGS}" \
         -trimpath -o "/output/${OUTPUT_FILENAME}"

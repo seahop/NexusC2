@@ -8,7 +8,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+
+	//"os"
 	"strings"
 	"time"
 )
@@ -26,10 +27,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	cq.mu.Unlock()
 
 	// Add this diagnostic
-	fmt.Fprintf(os.Stderr, "DIAGNOSTIC: Processing command type: %s\n", cmd.Command)
-	if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
-		fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
-	}
+	//fmt.Fprintf(os.Stderr, "DIAGNOSTIC: Processing command type: %s\n", cmd.Command)
+	//if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
+	//	fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
+	//}
 
 	// Set the current command in context
 	cq.cmdContext.mu.Lock()
@@ -84,7 +85,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Handle inline-assembly-output command WITH arguments
 	if strings.HasPrefix(cmd.Command, "inline-assembly-output ") {
-		fmt.Printf("DEBUG: Executing inline-assembly-output command with args\n")
 		parts := strings.Fields(cmd.Command)
 		if handler, exists := cq.cmdRegistry["inline-assembly-output"]; exists {
 			args := []string{}
@@ -242,7 +242,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		cmdType = args[0]
 		cmdArgs = args[1:]
 	}
-
 
 	// Look up command handler
 	if handler, exists := cq.cmdRegistry[cmdType]; exists {
