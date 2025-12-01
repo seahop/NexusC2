@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -305,7 +304,7 @@ func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Save to file if requested
 	if outputPath != "" {
 		output := strings.Join(results, "\n")
-		if err := ioutil.WriteFile(outputPath, []byte(output), 0600); err != nil {
+		if err := os.WriteFile(outputPath, []byte(output), 0600); err != nil {
 			results = append(results, fmt.Sprintf("\n[-] Failed to write output: %v", err))
 		} else {
 			results = append(results, fmt.Sprintf("\n[+] Results saved to %s", outputPath))
@@ -350,7 +349,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 	}
 
 	// 3. Check cgroup for container signatures
-	if data, err := ioutil.ReadFile("/proc/1/cgroup"); err == nil {
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
 		cgroupData := string(data)
 		if strings.Contains(cgroupData, "docker") {
 			isContainer = true
@@ -387,7 +386,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 	}
 
 	// 5. Check init process
-	if data, err := ioutil.ReadFile("/proc/1/comm"); err == nil {
+	if data, err := os.ReadFile("/proc/1/comm"); err == nil {
 		initProcess := strings.TrimSpace(string(data))
 		if initProcess != "systemd" && initProcess != "init" {
 			results = append(results, fmt.Sprintf("[*] Non-standard init process: %s (possible container)",
@@ -396,7 +395,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 	}
 
 	// 6. Check for limited capabilities
-	if data, err := ioutil.ReadFile("/proc/self/status"); err == nil {
+	if data, err := os.ReadFile("/proc/self/status"); err == nil {
 		lines := strings.Split(string(data), "\n")
 		for _, line := range lines {
 			if strings.HasPrefix(line, "CapEff:") {
@@ -441,7 +440,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 		}
 
 		// Check for dangerous capabilities
-		if data, err := ioutil.ReadFile("/proc/self/status"); err == nil {
+		if data, err := os.ReadFile("/proc/self/status"); err == nil {
 			if strings.Contains(string(data), "CapEff:") {
 				// Check for CAP_SYS_ADMIN (21), CAP_SYS_PTRACE (19), CAP_SYS_MODULE (16)
 				results = append(results, "[*] Checking for dangerous capabilities...")
@@ -450,7 +449,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 		}
 
 		// Check for host filesystem mounts
-		if data, err := ioutil.ReadFile("/proc/mounts"); err == nil {
+		if data, err := os.ReadFile("/proc/mounts"); err == nil {
 			mounts := string(data)
 			if strings.Contains(mounts, "/host") || strings.Contains(mounts, "hostPath") {
 				results = append(results, "[!] Host filesystem mounted")
@@ -459,7 +458,7 @@ func (c *ContainerDetectCommand) Execute(ctx *CommandContext, args []string) Com
 		}
 
 		// Check for excessive PIDs (container vs host)
-		if files, err := ioutil.ReadDir("/proc"); err == nil {
+		if files, err := os.ReadDir("/proc"); err == nil {
 			pidCount := 0
 			for _, file := range files {
 				if _, err := strconv.Atoi(file.Name()); err == nil {
@@ -677,7 +676,7 @@ void* {{.HookFunc}}() {
 
 	// Write C source to temp file
 	sourceFile := "/tmp/hook_source.c"
-	if err := ioutil.WriteFile(sourceFile, source.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(sourceFile, source.Bytes(), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to write source: %v", err),
 			ExitCode: 1,

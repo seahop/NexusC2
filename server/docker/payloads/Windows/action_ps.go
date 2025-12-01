@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"sort"
@@ -52,7 +51,7 @@ func getFullCommandLine(pid int32) string {
 	if runtime.GOOS == "linux" {
 		// On Linux, read directly from /proc/[pid]/cmdline
 		cmdlineFile := fmt.Sprintf("/proc/%d/cmdline", pid)
-		data, err := ioutil.ReadFile(cmdlineFile)
+		data, err := os.ReadFile(cmdlineFile)
 		if err == nil && len(data) > 0 {
 			// Replace null bytes with spaces and get FULL command line
 			cmdline := string(bytes.ReplaceAll(data, []byte{0}, []byte{' '}))

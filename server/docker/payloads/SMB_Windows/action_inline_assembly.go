@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -205,7 +204,7 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 
 	// Read output from file
 	time.Sleep(100 * time.Millisecond) // Give time for flush
-	output, _ := ioutil.ReadFile(outputFile)
+	output, _ := os.ReadFile(outputFile)
 
 	return string(output), int(retCode), execErr
 }

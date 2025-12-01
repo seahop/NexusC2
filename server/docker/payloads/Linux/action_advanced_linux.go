@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -99,7 +98,7 @@ If you understand these risks, run again with --force flag.`,
 
 	// Read process comm to show what we're injecting into
 	commPath := fmt.Sprintf("/proc/%d/comm", pid)
-	commData, _ := ioutil.ReadFile(commPath)
+	commData, _ := os.ReadFile(commPath)
 	processName := strings.TrimSpace(string(commData))
 
 
@@ -148,7 +147,7 @@ If you understand these risks, run again with --force flag.`,
 			}
 		}
 
-		data, err := ioutil.ReadFile(shellcodePath)
+		data, err := os.ReadFile(shellcodePath)
 		if err != nil {
 			return CommandResult{
 				Output:   fmt.Sprintf("Failed to read shellcode file: %v", err),
@@ -297,7 +296,8 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 	// Wait a moment for execution
 	time.Sleep(100 * time.Millisecond)
 
-	// Restore original code
+	// Restore original code - track restoration errors
+	var restorationErrors []string
 	for i := 0; i < len(originalCode); i += 8 {
 		word := binary.LittleEndian.Uint64(originalCode[i : i+8])
 		_, err := syscall.PtracePokeData(pid, injectionAddr+uintptr(i), []byte{
@@ -311,15 +311,27 @@ func (c *ProcessInjectionCommand) injectShellcode(pid int, shellcode []byte) err
 			byte(word >> 56),
 		})
 		if err != nil {
+			restorationErrors = append(restorationErrors,
+				fmt.Sprintf("failed to restore code at offset %d: %v", i, err))
 		}
 	}
 
 	// Restore original registers
 	if err := syscall.PtraceSetRegs(pid, &originalRegs); err != nil {
+		restorationErrors = append(restorationErrors,
+			fmt.Sprintf("failed to restore registers: %v", err))
 	}
 
 	// Continue execution
 	if err := syscall.PtraceCont(pid, 0); err != nil {
+		restorationErrors = append(restorationErrors,
+			fmt.Sprintf("failed to continue process: %v", err))
+	}
+
+	// If there were restoration errors, return them as a warning
+	if len(restorationErrors) > 0 {
+		return fmt.Errorf("injection completed but restoration had issues:\n  - %s\nTarget process may be unstable",
+			strings.Join(restorationErrors, "\n  - "))
 	}
 
 	return nil
@@ -408,7 +420,7 @@ func (c *MemoryDumpCommand) Execute(ctx *CommandContext, args []string) CommandR
 
 	// Check if process exists
 	mapsPath := fmt.Sprintf("/proc/%d/maps", pid)
-	mapsData, err := ioutil.ReadFile(mapsPath)
+	mapsData, err := os.ReadFile(mapsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return CommandResult{
@@ -525,7 +537,7 @@ func (c *MemoryDumpCommand) Execute(ctx *CommandContext, args []string) CommandR
 		if err := os.MkdirAll(outputDir, 0700); err != nil {
 			results = append(results, fmt.Sprintf("[-] Failed to create output directory: %v", err))
 		} else {
-			if err := ioutil.WriteFile(outputFile, dumpData, 0600); err != nil {
+			if err := os.WriteFile(outputFile, dumpData, 0600); err != nil {
 				results = append(results, fmt.Sprintf("[-] Failed to write dump: %v", err))
 			} else {
 				results = append(results, fmt.Sprintf("[+] Memory dumped to %s (%d bytes)",
@@ -796,7 +808,7 @@ If you understand these risks, run again with --confirm flag:
 func (c *CapabilityCommand) listCapabilities() CommandResult {
 	// Read current process capabilities
 	capsFile := "/proc/self/status"
-	data, err := ioutil.ReadFile(capsFile)
+	data, err := os.ReadFile(capsFile)
 	if err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to read capabilities: %v", err),
@@ -1049,7 +1061,7 @@ func (c *SELinuxCommand) checkStatus() CommandResult {
 
 	// Check enforcement status
 	enforcePath := filepath.Join(selinuxPath, "enforce")
-	if data, err := ioutil.ReadFile(enforcePath); err == nil {
+	if data, err := os.ReadFile(enforcePath); err == nil {
 		status := "Unknown"
 		enforceValue := strings.TrimSpace(string(data))
 
@@ -1066,13 +1078,13 @@ func (c *SELinuxCommand) checkStatus() CommandResult {
 		var extraInfo []string
 
 		// Policy version
-		if policy, err := ioutil.ReadFile(filepath.Join(selinuxPath, "policyvers")); err == nil {
+		if policy, err := os.ReadFile(filepath.Join(selinuxPath, "policyvers")); err == nil {
 			extraInfo = append(extraInfo, fmt.Sprintf("Policy version: %s",
 				strings.TrimSpace(string(policy))))
 		}
 
 		// Check if we're confined
-		if context, err := ioutil.ReadFile("/proc/self/attr/current"); err == nil {
+		if context, err := os.ReadFile("/proc/self/attr/current"); err == nil {
 			contextStr := strings.TrimSpace(string(context))
 			if contextStr != "" {
 				extraInfo = append(extraInfo, fmt.Sprintf("Current context: %s", contextStr))
@@ -1100,7 +1112,7 @@ func (c *SELinuxCommand) showContext() CommandResult {
 	// Get current process context
 	contextPath := "/proc/self/attr/current"
 
-	data, err := ioutil.ReadFile(contextPath)
+	data, err := os.ReadFile(contextPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return CommandResult{
@@ -1165,7 +1177,7 @@ func (c *SELinuxCommand) attemptDisable() CommandResult {
 	}
 
 	// Check current status first
-	currentData, err := ioutil.ReadFile(enforcePath)
+	currentData, err := os.ReadFile(enforcePath)
 	if err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Cannot read SELinux status: %v", err),
@@ -1190,7 +1202,7 @@ func (c *SELinuxCommand) attemptDisable() CommandResult {
 	}
 
 	// Attempt to set to permissive
-	if err := ioutil.WriteFile(enforcePath, []byte("0"), 0644); err != nil {
+	if err := os.WriteFile(enforcePath, []byte("0"), 0644); err != nil {
 		return CommandResult{
 			Output:   fmt.Sprintf("Failed to set permissive mode: %v", err),
 			ExitCode: 1,
@@ -1199,7 +1211,7 @@ func (c *SELinuxCommand) attemptDisable() CommandResult {
 
 	// Verify the change
 	time.Sleep(100 * time.Millisecond)
-	if newData, err := ioutil.ReadFile(enforcePath); err == nil {
+	if newData, err := os.ReadFile(enforcePath); err == nil {
 		if strings.TrimSpace(string(newData)) == "0" {
 			return CommandResult{
 				Output:   "[+] SELinux set to permissive mode (logging only, not blocking)",

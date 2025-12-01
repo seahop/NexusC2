@@ -259,10 +259,13 @@ class AgentTreeWidget(QWidget):
         new_agent = {
             'name': agent_name,
             'details': details,
-            'last_seen_timestamp': last_seen, 
+            'last_seen_timestamp': last_seen,
             'guid': conn_data['new_client_id'],
             'client_id': conn_data['client_id'],
             'os': conn_data.get('os', 'unknown'),
+            'hostname': conn_data.get('hostname', 'unknown'),
+            'username': conn_data.get('username', 'unknown'),
+            'ip': conn_data.get('ext_ip', conn_data.get('int_ip', 'unknown')),
             'deleted': False  # Initialize with not deleted
         }
 
@@ -805,6 +808,10 @@ class AgentTreeWidget(QWidget):
                             'last_seen_timestamp': last_seen,
                             'guid': row[0],
                             'client_id': row[10],
+                            'os': row[9],
+                            'hostname': row[1],
+                            'username': row[4],
+                            'ip': row[3] if row[3] else row[2],  # Prefer external IP, fallback to internal
                             'deleted': is_deleted
                         }
 
