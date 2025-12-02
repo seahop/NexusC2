@@ -10,10 +10,41 @@ import (
 	"time"
 )
 
+// Timeout constants for sudo session commands
+const (
+	execCommandTimeout  = 5 * time.Second
+	execAbsoluteTimeout = 6 * time.Second
+)
+
 type SudoSessionCommand struct{}
 
 func (c *SudoSessionCommand) Name() string {
 	return "sudo-session"
+}
+
+// getActiveSession retrieves and validates the sudo session from context.
+// Returns the session and an error message if not available or inactive.
+func getActiveSession(ctx *CommandContext) (*SudoSession, string) {
+	ctx.mu.RLock()
+	sessionInterface := ctx.SudoSession
+	ctx.mu.RUnlock()
+
+	if sessionInterface == nil {
+		return nil, "Error: No active sudo session. Start one with 'sudo-session start <password> [username]'"
+	}
+
+	session := sessionInterface.(*SudoSession)
+
+	// Use the session's own mutex to safely check isActive
+	session.mu.Lock()
+	active := session.isActive
+	session.mu.Unlock()
+
+	if !active {
+		return nil, "Error: Sudo session is not active. Start a new one with 'sudo-session start <password> [username]'"
+	}
+
+	return session, ""
 }
 
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -45,19 +76,12 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			targetUser = args[2]
 		}
 
-		// Check if session already exists
-		ctx.mu.RLock()
-		existingSession := ctx.SudoSession
-		ctx.mu.RUnlock()
-
-		if existingSession != nil {
-			sess := existingSession.(*SudoSession)
-			if sess.isActive {
-				return CommandResult{
-					Output:      "Error: A sudo session is already active. Stop it first with 'sudo-session stop'",
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
-				}
+		// Check if session already exists (use helper for thread-safe check)
+		if existingSession, _ := getActiveSession(ctx); existingSession != nil {
+			return CommandResult{
+				Output:      "Error: A sudo session is already active. Stop it first with 'sudo-session stop'",
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
@@ -107,23 +131,10 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 			}
 		}
 
-		// Get session
-		ctx.mu.RLock()
-		sessionInterface := ctx.SudoSession
-		ctx.mu.RUnlock()
-
-		if sessionInterface == nil {
+		session, errMsg := getActiveSession(ctx)
+		if session == nil {
 			return CommandResult{
-				Output:      "Error: No active sudo session. Start one with 'sudo-session start <password> [username]'",
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
-			}
-		}
-
-		session := sessionInterface.(*SudoSession)
-		if !session.isActive {
-			return CommandResult{
-				Output:      "Error: Sudo session is not active. Start a new one with 'sudo-session start <password> [username]'",
+				Output:      errMsg,
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -132,7 +143,11 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 		// If exec-stateful, temporarily enable stateful mode
 		if subCommand == "exec-stateful" {
 			// Try to enable stateful if not already enabled
-			if !session.useStateful {
+			session.mu.Lock()
+			stateful := session.useStateful
+			session.mu.Unlock()
+
+			if !stateful {
 				if err := session.EnableStatefulMode(); err != nil {
 					return CommandResult{
 						Output:      fmt.Sprintf("Failed to enable stateful mode: %v\nFalling back to stateless execution", err),
@@ -146,7 +161,6 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 		// Execute command with timeout protection
 		command := strings.Join(args[1:], " ")
 
-		// Use a goroutine with timeout to prevent hanging
 		type execResult struct {
 			output   string
 			exitCode int
@@ -156,8 +170,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 		resultChan := make(chan execResult, 1)
 
 		go func() {
-			// Short timeout for individual commands
-			output, exitCode, err := session.ExecuteCommand(command, 5*time.Second)
+			output, exitCode, err := session.ExecuteCommand(command, execCommandTimeout)
 			resultChan <- execResult{output, exitCode, err}
 		}()
 
@@ -175,7 +188,6 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 				}
 			}
 
-			// If we have output, return it successfully
 			output := result.output
 			if output == "" {
 				output = fmt.Sprintf("Command '%s' executed (no output captured)", command)
@@ -187,39 +199,24 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 
-		case <-time.After(6 * time.Second):
-			// Absolute timeout
+		case <-time.After(execAbsoluteTimeout):
 			return CommandResult{
-				Output:      fmt.Sprintf("Command '%s' timed out after 6 seconds", command),
+				Output:      fmt.Sprintf("Command '%s' timed out after %v", command, execAbsoluteTimeout),
 				ExitCode:    124,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
 	case "enable-stateful":
-		// Get session
-		ctx.mu.RLock()
-		sessionInterface := ctx.SudoSession
-		ctx.mu.RUnlock()
-
-		if sessionInterface == nil {
+		session, errMsg := getActiveSession(ctx)
+		if session == nil {
 			return CommandResult{
-				Output:      "Error: No active sudo session",
+				Output:      errMsg,
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
-		session := sessionInterface.(*SudoSession)
-		if !session.isActive {
-			return CommandResult{
-				Output:      "Error: Session is not active",
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
-			}
-		}
-
-		// Try to enable stateful mode
 		if err := session.EnableStatefulMode(); err != nil {
 			return CommandResult{
 				Output:      fmt.Sprintf("Failed to enable stateful mode: %v", err),
@@ -229,35 +226,23 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 		}
 
 		return CommandResult{
-			Output: "",
+			Output: `Stateful mode enabled.
+Commands will now preserve state (environment variables, working directory).
+Use 'sudo-session disable-stateful' to return to stateless mode.`,
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
 	case "disable-stateful":
-		// Get session
-		ctx.mu.RLock()
-		sessionInterface := ctx.SudoSession
-		ctx.mu.RUnlock()
-
-		if sessionInterface == nil {
+		session, errMsg := getActiveSession(ctx)
+		if session == nil {
 			return CommandResult{
-				Output:      "Error: No active sudo session",
+				Output:      errMsg,
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
-		session := sessionInterface.(*SudoSession)
-		if !session.isActive {
-			return CommandResult{
-				Output:      "Error: Session is not active",
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
-			}
-		}
-
-		// Disable stateful mode
 		session.SetStateful(false)
 
 		return CommandResult{
@@ -269,6 +254,7 @@ Each command starts fresh without state from previous commands.`,
 		}
 
 	case "status":
+		// For status, we check for session existence but don't require it to be active
 		ctx.mu.RLock()
 		sessionInterface := ctx.SudoSession
 		ctx.mu.RUnlock()
@@ -282,7 +268,6 @@ Each command starts fresh without state from previous commands.`,
 		}
 
 		session := sessionInterface.(*SudoSession)
-
 		return CommandResult{
 			Output:      session.GetInfo(),
 			ExitCode:    0,
