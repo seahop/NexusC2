@@ -40,34 +40,37 @@ graph TB
         Client["👤 Operator Client"]
     end
 
-    subgraph HostSystem["🖥️ Host System - Docker Host"]
-        subgraph FirewallLayer["🛡️ Firewall Layer - iptables"]
+    subgraph HostSystem[" "]
+        direction TB
+        HostLabel["🖥️ Host System - Docker Host"]
+
+        subgraph FirewallLayer[" "]
+            FW_Label["🛡️ Firewall Layer"]
             FW_Allow["✅ Allow: 127.0.0.1<br/>✅ Allow: 172.28.0.0/16<br/>❌ Block: External → :50051"]
         end
 
-        subgraph HostNetwork["🔴 Host Network Mode"]
+        subgraph HostNetwork[" "]
+            HN_Label["🔴 Host Network Mode"]
             AgentHandler["⚡ Agent-Handler<br/>network_mode: host<br/>gRPC: 0.0.0.0:50051<br/>Listeners: Any Port"]
         end
 
-        subgraph DockerBridge["🔵 Docker Bridge Network - 172.28.0.0/16"]
-            direction LR
-            Database["🗄️ PostgreSQL<br/>172.28.0.2:5432<br/>(Internal Only)"]
-            Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131<br/>(Public)"]
-            Builder["🔨 Builder Service<br/>172.28.0.5<br/>(On-Demand)"]
+        subgraph DockerBridge[" "]
+            DB_Label["🔵 Docker Bridge Network<br/>172.28.0.0/16"]
+            Database["🗄️ PostgreSQL<br/>172.28.0.2:5432"]
+            Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131"]
+            Builder["🔨 Builder Service<br/>172.28.0.5"]
         end
     end
 
-    %% External Connections - Separated paths
-    Agent <-->|"HTTPS/HTTP<br/>Dynamic Ports"| AgentHandler
+    %% External Connections
+    Agent <-->|"HTTPS/HTTP"| AgentHandler
     Client <-->|"WSS :3131"| Websocket
 
-    %% Internal Docker Bridge Network
-    Websocket <-->|"gRPC :50051<br/>via host.docker.internal"| AgentHandler
-    Websocket -->|"PostgreSQL :5432"| Database
-    AgentHandler -->|"PostgreSQL :5432<br/>via 172.28.0.2"| Database
-    Websocket -.->|"Docker API<br/>Trigger Build"| Builder
-
-    %% Firewall Protection
+    %% Internal connections
+    Websocket <-->|"gRPC :50051"| AgentHandler
+    Websocket -->|":5432"| Database
+    AgentHandler -->|":5432"| Database
+    Websocket -.->|"Docker API"| Builder
     FW_Allow -.->|"Protects"| AgentHandler
 
     %% Styling
@@ -76,12 +79,14 @@ graph TB
     classDef external fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
     classDef firewall fill:#f39c12,stroke:#e67e22,stroke-width:3px,color:#000
     classDef spacer fill:none,stroke:none,color:transparent
+    classDef label fill:none,stroke:none,color:#fff,font-weight:bold
 
     class AgentHandler hostNet
     class Database,Websocket,Builder bridgeNet
     class Agent,Client external
     class FW_Allow firewall
     class Spacer spacer
+    class HostLabel,FW_Label,HN_Label,DB_Label label
 ```
 
 **Message Flow:**
