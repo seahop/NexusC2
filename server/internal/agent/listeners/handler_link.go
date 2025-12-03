@@ -459,9 +459,6 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 	// Generate secrets from the seed (same as normal handshake)
 	secret1, secret2 := generateInitialSecrets(matchedInit.Secret, sysInfo.AgentInfo.Seed)
 
-	// Generate new client ID for this connection
-	newClientID := generateNewClientID()
-
 	// Get external IP from edge agent's connection (linked agents don't have direct external IP)
 	edgeConn, _ := m.activeConnections.GetConnection(edgeClientID)
 	extIP := ""
@@ -470,81 +467,141 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		extIP = fmt.Sprintf("via:%s", edgeClientID[:8])
 	}
 
-	// Store the connection with parent reference
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO connections (
-			newclientID, clientID, protocol, secret1, secret2,
-			extIP, intIP, username, hostname, note,
-			process, pid, arch, lastSEEN, os, proto,
-			parent_clientID, link_type, hop_count
-		) VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10,
-			$11, $12, $13, CURRENT_TIMESTAMP, $14, $15,
-			$16, $17, $18
-		)`,
-		newClientID,
+	// Check if this SMB agent already exists (reconnection scenario)
+	// Match by clientID (init ID) and protocol SMB, hostname, and process name
+	var existingClientID string
+	err = m.db.QueryRowContext(ctx, `
+		SELECT newclientID FROM connections
+		WHERE clientID = $1 AND protocol = 'SMB'
+		AND hostname = $2 AND process = $3
+		AND deleted_at IS NULL
+		LIMIT 1`,
 		matchedInit.ClientID,
-		"SMB",
-		secret1,
-		secret2,
-		extIP,
-		sysInfo.AgentInfo.InternalIP,
-		sysInfo.AgentInfo.Username,
 		sysInfo.AgentInfo.Hostname,
-		"",
 		sysInfo.AgentInfo.ProcessName,
-		fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
-		sysInfo.AgentInfo.Arch,
-		sysInfo.AgentInfo.OS,
-		"SMB",
-		edgeClientID,
-		"smb",
-		1, // hop_count = 1 for direct link
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to store linked connection: %w", err)
-	}
+	).Scan(&existingClientID)
 
-	// Add to active connections
-	m.activeConnections.AddConnection(&ActiveConnection{
-		ClientID: newClientID,
-		Protocol: "SMB",
-		Secret1:  secret1,
-		Secret2:  secret2,
-	})
+	var newClientID string
+	var isReconnect bool
+
+	if err == nil && existingClientID != "" {
+		// Existing SMB agent found - update it instead of creating new
+		isReconnect = true
+		newClientID = existingClientID
+		log.Printf("[LinkHandshake] Reconnecting existing SMB agent %s to new parent %s", newClientID, edgeClientID)
+
+		// Update the existing connection with new secrets and parent
+		_, err = m.db.ExecContext(ctx, `
+			UPDATE connections SET
+				secret1 = $1, secret2 = $2,
+				extIP = $3, parent_clientID = $4,
+				lastSEEN = CURRENT_TIMESTAMP,
+				pid = $5
+			WHERE newclientID = $6`,
+			secret1, secret2,
+			extIP, edgeClientID,
+			fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
+			newClientID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update linked connection: %w", err)
+		}
+
+		// Update active connections with new secrets
+		m.activeConnections.AddConnection(&ActiveConnection{
+			ClientID: newClientID,
+			Protocol: "SMB",
+			Secret1:  secret1,
+			Secret2:  secret2,
+		})
+	} else {
+		// New SMB agent - create new entry
+		isReconnect = false
+		newClientID = generateNewClientID()
+
+		// Store the connection with parent reference
+		_, err = m.db.ExecContext(ctx, `
+			INSERT INTO connections (
+				newclientID, clientID, protocol, secret1, secret2,
+				extIP, intIP, username, hostname, note,
+				process, pid, arch, lastSEEN, os, proto,
+				parent_clientID, link_type, hop_count
+			) VALUES (
+				$1, $2, $3, $4, $5,
+				$6, $7, $8, $9, $10,
+				$11, $12, $13, CURRENT_TIMESTAMP, $14, $15,
+				$16, $17, $18
+			)`,
+			newClientID,
+			matchedInit.ClientID,
+			"SMB",
+			secret1,
+			secret2,
+			extIP,
+			sysInfo.AgentInfo.InternalIP,
+			sysInfo.AgentInfo.Username,
+			sysInfo.AgentInfo.Hostname,
+			"",
+			sysInfo.AgentInfo.ProcessName,
+			fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
+			sysInfo.AgentInfo.Arch,
+			sysInfo.AgentInfo.OS,
+			"SMB",
+			edgeClientID,
+			"smb",
+			1, // hop_count = 1 for direct link
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to store linked connection: %w", err)
+		}
+
+		// Add to active connections
+		m.activeConnections.AddConnection(&ActiveConnection{
+			ClientID: newClientID,
+			Protocol: "SMB",
+			Secret1:  secret1,
+			Secret2:  secret2,
+		})
+	}
 
 	// Register the link routing
 	if err := m.linkRouting.RegisterLink(edgeClientID, routingID, newClientID, "smb"); err != nil {
 		return nil, fmt.Errorf("failed to register link: %w", err)
 	}
 
-	// Notify websocket service about the new linked agent
-	notification := &pb.ConnectionNotification{
-		NewClientId:    newClientID,
-		ClientId:       matchedInit.ClientID,
-		Protocol:       "SMB",
-		Secret1:        secret1,
-		Secret2:        secret2,
-		ExtIp:          extIP,
-		IntIp:          sysInfo.AgentInfo.InternalIP,
-		Username:       sysInfo.AgentInfo.Username,
-		Hostname:       sysInfo.AgentInfo.Hostname,
-		Process:        sysInfo.AgentInfo.ProcessName,
-		Pid:            fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
-		Arch:           sysInfo.AgentInfo.Arch,
-		Os:             sysInfo.AgentInfo.OS,
-		Proto:          "SMB",
-		LastSeen:       time.Now().Unix(),
-		ParentClientId: edgeClientID, // Link parent info for UI hierarchy
-		LinkType:       "smb",
-	}
+	if isReconnect {
+		// Broadcast link_update for reconnection (re-parenting existing agent)
+		if err := m.commandBuffer.BroadcastLinkUpdate(newClientID, edgeClientID, "smb"); err != nil {
+			log.Printf("[LinkHandshake] Warning: Failed to broadcast link update: %v", err)
+		}
+		log.Printf("[LinkHandshake] Successfully re-linked existing agent %s to edge %s", newClientID, edgeClientID)
+	} else {
+		// Notify websocket service about the new linked agent
+		notification := &pb.ConnectionNotification{
+			NewClientId:    newClientID,
+			ClientId:       matchedInit.ClientID,
+			Protocol:       "SMB",
+			Secret1:        secret1,
+			Secret2:        secret2,
+			ExtIp:          extIP,
+			IntIp:          sysInfo.AgentInfo.InternalIP,
+			Username:       sysInfo.AgentInfo.Username,
+			Hostname:       sysInfo.AgentInfo.Hostname,
+			Process:        sysInfo.AgentInfo.ProcessName,
+			Pid:            fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
+			Arch:           sysInfo.AgentInfo.Arch,
+			Os:             sysInfo.AgentInfo.OS,
+			Proto:          "SMB",
+			LastSeen:       time.Now().Unix(),
+			ParentClientId: edgeClientID, // Link parent info for UI hierarchy
+			LinkType:       "smb",
+		}
 
-	if err := m.notifyWebsocketService(notification); err != nil {
-		log.Printf("[LinkHandshake] Warning: Failed to notify websocket service: %v", err)
+		if err := m.notifyWebsocketService(notification); err != nil {
+			log.Printf("[LinkHandshake] Warning: Failed to notify websocket service: %v", err)
+		}
+		log.Printf("[LinkHandshake] Successfully registered new linked agent %s via edge %s", newClientID, edgeClientID)
 	}
-
-	log.Printf("[LinkHandshake] Successfully registered linked agent %s via edge %s", newClientID, edgeClientID)
 
 	// Create signed response (same as normal handshake)
 	signature, err := signHandshakeResponse(newClientID, sysInfo.AgentInfo.Seed, matchedInit.RSAKey)

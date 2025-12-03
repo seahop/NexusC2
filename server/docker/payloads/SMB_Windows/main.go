@@ -130,14 +130,14 @@ func handleConnection(conn *PipeConnection, config map[string]string) {
 
 	logDebug("Authentication successful")
 
-	// If this is first connection and we haven't done handshake yet
-	if clientID == "" || secureComms == nil {
-		if err := performHandshake(conn, config); err != nil {
-			logDebug("Handshake failed: %v", err)
-			return
-		}
-		logDebug("Handshake complete, clientID=%s", clientID)
+	// Always perform handshake for each new connection
+	// Even if we already have clientID/keys, the connecting HTTPS agent needs
+	// to receive our handshake data to complete the link
+	if err := performHandshake(conn, config); err != nil {
+		logDebug("Handshake failed: %v", err)
+		return
 	}
+	logDebug("Handshake complete, clientID=%s", clientID)
 
 	// Main message loop
 	log.Printf("[SMB] Entering main message loop")
