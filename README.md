@@ -40,7 +40,7 @@ graph TB
         Client["👤 Operator Client<br/>"]
     end
 
-    subgraph HostSystem["🖥️ Host System (Docker Host)"]
+    subgraph HostSystem["🖥️ Host System (Docker Host)  "]
         subgraph FirewallLayer["🛡️ Firewall Layer (iptables)"]
             FW_Allow["✅ Allow: 127.0.0.1<br/>✅ Allow: 172.28.0.0/16<br/>❌ Block: External → :50051"]
         end
@@ -49,7 +49,7 @@ graph TB
             AgentHandler["⚡ Agent-Handler<br/>network_mode: host<br/>gRPC: 0.0.0.0:50051<br/>Listeners: Any Port"]
         end
 
-        subgraph DockerBridge["🔵 Docker Bridge Network (172.28.0.0/16)"]
+        subgraph DockerBridge["🔵 Docker Bridge Network<br/>(172.28.0.0/16)"]
             Database["🗄️ PostgreSQL<br/>172.28.0.2:5432<br/>(Internal Only)"]
             Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131<br/>(Public)"]
             Builder["🔨 Builder Service<br/>172.28.0.5<br/>(On-Demand)"]
