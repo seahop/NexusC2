@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Nexus
+Comment=Nexus C2 Client
+Exec=bash -c "cd $(dirname %k)/../client && python src/main.py"
+Icon=nexus
+Terminal=false
+Type=Application
+Categories=Development;Security;
+StartupWMClass=nexus

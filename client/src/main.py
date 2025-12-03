@@ -1,8 +1,9 @@
 import sys
 import os
 import signal
+from pathlib import Path
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QPalette, QColor, QIcon
 from PyQt6.QtCore import Qt
 from gui.main_window import C2ClientGUI
 
@@ -52,18 +53,33 @@ def set_application_dark_palette(app):
 def main():
     # Set environment hints BEFORE creating QApplication
     setup_dark_theme_hints()
-    
+
+    # Set application name and desktop file name for Linux taskbar integration
+    # This must be done BEFORE creating QApplication
+    QApplication.setApplicationName("Nexus")
+    QApplication.setDesktopFileName("nexus")
+    QApplication.setApplicationDisplayName("Nexus")
+
+    # Set WM_CLASS for proper GNOME/Linux taskbar icon matching
+    # This helps GNOME associate the window with a .desktop file
+    os.environ['RESOURCE_NAME'] = 'nexus'
+
     app = QApplication(sys.argv)
-    
+
+    # Set application-wide icon (required for Linux taskbar)
+    icon_path = Path(__file__).parent / 'gui' / 'resources' / 'n.png'
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     # Set application-wide dark palette (affects Linux window decorations)
     set_application_dark_palette(app)
-    
+
     # Set application style hints
     app.setStyle('Fusion')  # Fusion style works well with dark themes
-    
+
     # Set up signal handler for clean shutdown
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    
+
     ex = C2ClientGUI()
     ex.show()
     

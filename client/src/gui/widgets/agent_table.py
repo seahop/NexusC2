@@ -83,35 +83,15 @@ class AgentTableWidget(QWidget):
         header.sectionClicked.connect(self.on_header_clicked)
         self.is_sorted_manually = False
 
-        # Style the table
+        # Table styling is handled by the application theme (see main_window.py)
+        # Only set structural properties here, not colors
         self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #2b2b2b;
-                color: #d4d4d4;
-                gridline-color: #3a3a3a;
-                border: none;
-            }
             QTableWidget::item {
                 padding: 4px;
-                border-bottom: 1px solid #3a3a3a;
-            }
-            QTableWidget::item:selected {
-                background-color: #094771;
-                color: white;
-            }
-            QTableWidget::item:hover {
-                background-color: #3a3a3a;
             }
             QHeaderView::section {
-                background-color: #333333;
-                color: #d4d4d4;
                 padding: 6px;
-                border: none;
-                border-bottom: 2px solid #094771;
                 font-weight: bold;
-            }
-            QHeaderView::section:hover {
-                background-color: #404040;
             }
         """)
 
@@ -186,12 +166,22 @@ class AgentTableWidget(QWidget):
         guid = agent.get('guid', '')
         link_type = agent.get('link_type', '')
 
-        # Get display name (alias or short GUID)
+        # Get GUID display length from tree widget settings
+        guid_len = 16
+        if self.agent_tree_widget:
+            guid_len = getattr(self.agent_tree_widget, 'guid_display_length', 16)
+
+        # Get display name (alias or short GUID based on settings)
         if self.agent_tree_widget:
             alias = self.agent_tree_widget.agent_aliases.get(guid, '')
-            display_name = alias if alias else f"{guid[:16]}..."
+            if alias:
+                display_name = alias
+            elif guid_len >= 36:
+                display_name = guid
+            else:
+                display_name = f"{guid[:guid_len]}..."
         else:
-            display_name = f"{guid[:16]}..."
+            display_name = f"{guid[:guid_len]}..." if guid_len < 36 else guid
 
         # Add visual hierarchy indicator based on depth
         if depth > 0:

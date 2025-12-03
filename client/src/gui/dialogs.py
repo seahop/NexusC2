@@ -3,8 +3,8 @@ from PyQt6.QtWidgets import (QDialog, QSpinBox, QFormLayout,
                             QLineEdit, QPushButton, QComboBox, QHBoxLayout,
                             QVBoxLayout, QMessageBox, QFileDialog, QProgressDialog, QTabWidget, QWidget,
                             QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit)
-from PyQt6.QtCore import QThread, pyqtSignal, QDateTime, QTime, pyqtSlot
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QThread, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
+from PyQt6.QtGui import QPixmap, QIcon
 from version import get_version_info, APP_NAME, APP_DESCRIPTION
 from utils.websocket_client import WebSocketClient
 import asyncio
@@ -1377,23 +1377,24 @@ class CreatePayloadDialog(QDialog):
 class SettingsDialog(QDialog):
     """Settings dialog for application preferences"""
     theme_changed = pyqtSignal(str)
-    
+    settings_changed = pyqtSignal(dict)  # Emitted when any settings change
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(350)
-        self.setMinimumHeight(150)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(400)
         self.settings = self.load_settings()
         self.setup_ui()
-        
+
     def setup_ui(self):
         layout = QVBoxLayout()
-        
-        # Appearance Group
+
+        # ==================== APPEARANCE GROUP ====================
         appearance_group = QGroupBox("Appearance")
         appearance_layout = QFormLayout()
-        
-        # Theme selection - ADD ALL NEW THEMES HERE
+
+        # Theme selection
         self.theme_combo = QComboBox()
         self.theme_combo.addItems([
             "Dark",
@@ -1407,57 +1408,196 @@ class SettingsDialog(QDialog):
         ])
         self.theme_combo.setCurrentText(self.settings.get('theme', 'Dark'))
         appearance_layout.addRow("Theme:", self.theme_combo)
-        
+
+        # Default view on startup
+        self.default_view_combo = QComboBox()
+        self.default_view_combo.addItems(["Tree", "Table", "Graph"])
+        default_view_map = {0: "Tree", 1: "Table", 2: "Graph"}
+        current_default = self.settings.get('default_view', 0)
+        self.default_view_combo.setCurrentText(default_view_map.get(current_default, "Tree"))
+        appearance_layout.addRow("Default View:", self.default_view_combo)
+
         appearance_group.setLayout(appearance_layout)
         layout.addWidget(appearance_group)
-        
-        # Add stretch to push everything up
+
+        # ==================== AGENT DISPLAY GROUP ====================
+        display_group = QGroupBox("Agent Display")
+        display_layout = QFormLayout()
+
+        # GUID display length
+        self.guid_length_combo = QComboBox()
+        self.guid_length_combo.addItems(["8 characters", "12 characters", "16 characters", "Full GUID"])
+        guid_length = self.settings.get('guid_display_length', 16)
+        guid_length_map = {8: "8 characters", 12: "12 characters", 16: "16 characters", 36: "Full GUID"}
+        self.guid_length_combo.setCurrentText(guid_length_map.get(guid_length, "16 characters"))
+        display_layout.addRow("GUID Display Length:", self.guid_length_combo)
+
+        display_group.setLayout(display_layout)
+        layout.addWidget(display_group)
+
+        # ==================== NOTIFICATIONS GROUP ====================
+        notifications_group = QGroupBox("Notifications")
+        notifications_layout = QVBoxLayout()
+
+        # Master enable checkbox
+        self.notifications_enabled = QCheckBox("Enable notifications for new agents")
+        self.notifications_enabled.setChecked(self.settings.get('notifications_enabled', True))
+        self.notifications_enabled.stateChanged.connect(self._update_notification_ui_state)
+        notifications_layout.addWidget(self.notifications_enabled)
+
+        # Notification type sub-options (indented)
+        type_layout = QVBoxLayout()
+        type_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+
+        self.toast_enabled = QCheckBox("Show in-app toast notifications")
+        self.toast_enabled.setChecked(self.settings.get('notification_toast_enabled', True))
+        type_layout.addWidget(self.toast_enabled)
+
+        self.native_enabled = QCheckBox("Show OS native notifications")
+        self.native_enabled.setChecked(self.settings.get('notification_native_enabled', True))
+        type_layout.addWidget(self.native_enabled)
+
+        notifications_layout.addLayout(type_layout)
+
+        # Sound notifications checkbox
+        self.sound_enabled = QCheckBox("Play sound on new agent connection")
+        self.sound_enabled.setChecked(self.settings.get('notification_sound_enabled', True))
+        self.sound_enabled.stateChanged.connect(self._update_notification_ui_state)
+        notifications_layout.addWidget(self.sound_enabled)
+
+        # Sound volume slider
+        volume_layout = QHBoxLayout()
+        volume_label = QLabel("Sound Volume:")
+        self.volume_slider = QSpinBox()
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setSuffix("%")
+        self.volume_slider.setValue(self.settings.get('notification_sound_volume', 70))
+        volume_layout.addWidget(volume_label)
+        volume_layout.addWidget(self.volume_slider)
+        volume_layout.addStretch()
+        notifications_layout.addLayout(volume_layout)
+
+        # Test notification button
+        test_layout = QHBoxLayout()
+        test_btn = QPushButton("Test Notification")
+        test_btn.clicked.connect(self.test_notification)
+        test_layout.addWidget(test_btn)
+        test_layout.addStretch()
+        notifications_layout.addLayout(test_layout)
+
+        notifications_group.setLayout(notifications_layout)
+        layout.addWidget(notifications_group)
+
+        # Add stretch to push buttons to bottom
         layout.addStretch()
-        
-        # Buttons
+
+        # ==================== BUTTONS ====================
         button_layout = QHBoxLayout()
         save_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
-        
+
         save_btn.clicked.connect(self.save_settings)
         cancel_btn.clicked.connect(self.reject)
-        
+
         button_layout.addStretch()
         button_layout.addWidget(save_btn)
         button_layout.addWidget(cancel_btn)
-        
+
         layout.addLayout(button_layout)
         self.setLayout(layout)
-    
+
+        # Initialize notification UI state
+        self._update_notification_ui_state()
+
+    def _update_notification_ui_state(self):
+        """Enable/disable notification sub-options based on master checkbox."""
+        enabled = self.notifications_enabled.isChecked()
+        self.toast_enabled.setEnabled(enabled)
+        self.native_enabled.setEnabled(enabled)
+        self.sound_enabled.setEnabled(enabled)
+        self.volume_slider.setEnabled(enabled and self.sound_enabled.isChecked())
+
     def load_settings(self):
         """Load settings from file"""
         config_file = Path.home() / '.c2_client' / 'settings.json'
+        defaults = {
+            'theme': 'Dark',
+            'default_view': 0,  # 0=Tree, 1=Table, 2=Graph
+            'guid_display_length': 16,
+            'notifications_enabled': True,
+            'notification_toast_enabled': True,
+            'notification_native_enabled': True,
+            'notification_sound_enabled': True,
+            'notification_sound_volume': 70,
+        }
+
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:
-                    return json.load(f)
+                    saved = json.load(f)
+                    # Merge saved settings with defaults
+                    for key, value in defaults.items():
+                        if key not in saved:
+                            saved[key] = value
+                    return saved
             except:
                 pass
-        return {}
-    
+        return defaults
+
     def save_settings(self):
         """Save settings to file"""
         config_file = Path.home() / '.c2_client' / 'settings.json'
         config_file.parent.mkdir(exist_ok=True)
-        
+
+        # Map display strings back to values
+        view_map = {"Tree": 0, "Table": 1, "Graph": 2}
+        guid_map = {"8 characters": 8, "12 characters": 12, "16 characters": 16, "Full GUID": 36}
+
         settings = {
-            'theme': self.theme_combo.currentText()
+            'theme': self.theme_combo.currentText(),
+            'default_view': view_map.get(self.default_view_combo.currentText(), 0),
+            'guid_display_length': guid_map.get(self.guid_length_combo.currentText(), 16),
+            'notifications_enabled': self.notifications_enabled.isChecked(),
+            'notification_toast_enabled': self.toast_enabled.isChecked(),
+            'notification_native_enabled': self.native_enabled.isChecked(),
+            'notification_sound_enabled': self.sound_enabled.isChecked(),
+            'notification_sound_volume': self.volume_slider.value(),
         }
-        
+
         with open(config_file, 'w') as f:
             json.dump(settings, f, indent=2)
-        
+
         # Emit theme change signal if theme changed
         if settings['theme'] != self.settings.get('theme', 'Dark'):
             self.theme_changed.emit(settings['theme'])
-        
+
+        # Emit general settings changed signal
+        self.settings_changed.emit(settings)
+
         self.accept()
-    
+
+    def test_notification(self):
+        """Test notification with current (unsaved) settings."""
+        # Get parent window's notification manager if available
+        parent = self.parent()
+        if parent and hasattr(parent, 'notification_manager'):
+            # Temporarily apply current settings for test
+            parent.notification_manager.settings['notifications_enabled'] = self.notifications_enabled.isChecked()
+            parent.notification_manager.settings['notification_toast_enabled'] = self.toast_enabled.isChecked()
+            parent.notification_manager.settings['notification_native_enabled'] = self.native_enabled.isChecked()
+            parent.notification_manager.settings['notification_sound_enabled'] = self.sound_enabled.isChecked()
+            parent.notification_manager.settings['notification_sound_volume'] = self.volume_slider.value()
+
+            # Update volume immediately
+            if parent.notification_manager.sound_effect:
+                parent.notification_manager.sound_effect.setVolume(self.volume_slider.value() / 100.0)
+
+            # Send test notification
+            parent.notification_manager.test_notification()
+        else:
+            QMessageBox.information(self, "Test",
+                "Notification test - save settings and restart to fully enable notifications.")
+
     def get_settings(self):
         """Return current settings"""
         return self.settings
@@ -1465,23 +1605,42 @@ class SettingsDialog(QDialog):
 
 class VersionDialog(QDialog):
     """Version information dialog"""
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About")
-        self.setMinimumWidth(350)
-        self.setFixedHeight(200)
+        self.setMinimumWidth(400)
+        self.setFixedHeight(280)
+
+        # Set dialog icon
+        icon_path = Path(__file__).parent / 'resources' / 'nexus.png'
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
         self.setup_ui()
-        
+
     def setup_ui(self):
         layout = QVBoxLayout()
-        
+        layout.setSpacing(15)
+
+        # Icon at the top
+        icon_path = Path(__file__).parent / 'resources' / 'nexus.png'
+        if icon_path.exists():
+            icon_label = QLabel()
+            pixmap = QPixmap(str(icon_path))
+            # Scale icon to reasonable size (64x64)
+            scaled_pixmap = pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                                          Qt.TransformationMode.SmoothTransformation)
+            icon_label.setPixmap(scaled_pixmap)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(icon_label)
+
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(10)
-        
+        info_layout.setSpacing(8)
+
         # Get version info from central config
         version_info = get_version_info()
-        
+
         # App name
         app_name = QLabel(version_info["app_name"])
         app_name.setStyleSheet("font-size: 18px; font-weight: bold;")

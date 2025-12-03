@@ -3,13 +3,14 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QDialog,
                             QMenu, QSplitter, QMessageBox, QFileDialog, QApplication,
                             QListWidget, QPushButton, QHBoxLayout, QLabel, QComboBox, QVBoxLayout)
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot
-from PyQt6.QtGui import QPalette, QColor 
+from PyQt6.QtGui import QPalette, QColor, QIcon
 
 from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog
 from .widgets import AgentTreeWidget, TerminalWidget, AgentDisplayWidget
 from utils.database import StateDatabase
 from .widgets.downloads import DownloadsWidget
 from .widgets.floating_status_indicator import FloatingStatusIndicator
+from .widgets.notifications import NotificationManager
 import json
 import os
 import base64
@@ -24,6 +25,9 @@ class C2ClientGUI(QMainWindow):
         self.config_dir.mkdir(exist_ok=True)
         self.window_state_file = self.config_dir / 'window_state.json'
 
+        # Load application settings
+        self.app_settings = self._load_app_settings()
+
         self.initUI()
         self.ws_thread = None
         self.is_connected = False
@@ -33,12 +37,71 @@ class C2ClientGUI(QMainWindow):
         if self.ws_client:
             self.ws_client.agent_tree_widget = self.agent_tree
 
+        # Initialize notification manager
+        self.notification_manager = NotificationManager(self)
+        self.notification_manager.notification_clicked.connect(self.on_notification_clicked)
+
+        # Apply default view from settings
+        self._apply_default_view()
+
         # Restore window geometry after UI is set up
         self.restore_window_state()
+
+    def _load_app_settings(self):
+        """Load application settings from config file."""
+        config_file = self.config_dir / 'settings.json'
+        defaults = {
+            'theme': 'Dark',
+            'default_view': 0,
+            'guid_display_length': 16,
+            'notifications_enabled': True,
+            'notification_sound_enabled': True,
+            'notification_sound_volume': 70,
+        }
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    saved = json.load(f)
+                    for key, value in defaults.items():
+                        if key not in saved:
+                            saved[key] = value
+                    return saved
+            except:
+                pass
+        return defaults
+
+    def _apply_default_view(self):
+        """Apply the default view setting on startup."""
+        default_view = self.app_settings.get('default_view', 0)
+        if hasattr(self, 'agent_display'):
+            # Switch to the default view
+            self.agent_display.switch_view(default_view)
+            # Also update the button group to reflect this
+            buttons = self.agent_display.view_button_group.buttons()
+            for btn in buttons:
+                if self.agent_display.view_button_group.id(btn) == default_view:
+                    btn.setChecked(True)
+                    break
+
+    def on_notification_clicked(self, agent_guid):
+        """Handle notification click - focus on the agent."""
+        if hasattr(self, 'agent_tree') and agent_guid:
+            agent = self.agent_tree.agent_by_guid.get(agent_guid)
+            if agent:
+                # Open terminal for the agent
+                self.terminal.add_agent_tab(agent['name'], agent_guid)
+                # Bring window to front
+                self.activateWindow()
+                self.raise_()
 
     def initUI(self):
         self.setWindowTitle('Nexus')
         self.setGeometry(100, 100, 1200, 800)
+
+        # Set window icon (smaller n.png for title bar)
+        icon_path = Path(__file__).parent / 'resources' / 'n.png'
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         
         # Apply additional window-specific attributes for Linux
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -667,6 +730,16 @@ class C2ClientGUI(QMainWindow):
                 connectAction.setEnabled(not self.is_connected)
                 disconnectAction.setEnabled(self.is_connected)
 
+    def changeEvent(self, event):
+        """Handle window state changes - auto-dismiss notifications when window is activated."""
+        from PyQt6.QtCore import QEvent
+        if event.type() == QEvent.Type.ActivationChange:
+            if self.isActiveWindow():
+                # Window just became active - dismiss any pending notifications
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.on_main_window_focused()
+        super().changeEvent(event)
+
     def save_window_state(self):
         """Save window geometry, splitter state, and view-specific layouts"""
         try:
@@ -757,6 +830,11 @@ class C2ClientGUI(QMainWindow):
         # Close any open dialogs
         for widget in self.findChildren(QDialog):
             widget.close()
+
+        # Cleanup notification manager
+        if hasattr(self, 'notification_manager'):
+            print("MainWindow: Cleaning up notification manager...")
+            self.notification_manager.cleanup()
 
         # Accept the close event
         event.accept()
@@ -875,6 +953,11 @@ class C2ClientGUI(QMainWindow):
             print("MainWindow: Passing connection data to AgentDisplayWidget")
             self.agent_display.handle_new_connection(conn_data)
             print("MainWindow: Successfully handled new connection")
+
+            # Send notification for new agent
+            if hasattr(self, 'notification_manager'):
+                self.notification_manager.notify_new_agent(conn_data)
+
         except Exception as e:
             print(f"ERROR in onConnectionUpdate: {e}")
             import traceback
@@ -967,8 +1050,31 @@ class C2ClientGUI(QMainWindow):
         """Show settings dialog"""
         dialog = SettingsDialog(self)
         dialog.theme_changed.connect(self.apply_theme)
+        dialog.settings_changed.connect(self.on_settings_changed)
         if dialog.exec():
             print("Settings saved")
+
+    def on_settings_changed(self, settings):
+        """Handle settings changes - apply them to relevant components."""
+        self.app_settings = settings
+
+        # Reload notification manager settings
+        if hasattr(self, 'notification_manager'):
+            self.notification_manager.reload_settings()
+
+        # Update GUID display length in agent tree and refresh views
+        guid_length = settings.get('guid_display_length', 16)
+        if hasattr(self, 'agent_tree'):
+            self.agent_tree.guid_display_length = guid_length
+            # Refresh the tree to apply new GUID length
+            if self.agent_tree.current_view == 'agents':
+                self.agent_tree.show_agents()
+            # Refresh table view
+            if hasattr(self, 'agent_display'):
+                self.agent_display.table_widget.refresh_from_tree()
+                self.agent_display.graph_widget.refresh_graph()
+
+        print(f"Settings applied: {settings}")
     
     def showVersion(self):
         """Show version dialog"""

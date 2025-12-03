@@ -89,8 +89,12 @@ class AgentNode(QGraphicsEllipseItem):
         # Check if there's a stored alias (not the display_name which has indentation)
         scene = self.scene()
         alias = ''
+        guid_len = 12  # Default for graph view (keep it compact)
         if scene and hasattr(scene, 'parent_widget') and scene.parent_widget.agent_tree_widget:
             alias = scene.parent_widget.agent_tree_widget.agent_aliases.get(self.guid, '')
+            # Get configured GUID length, but cap at 14 for graph view readability
+            configured_len = getattr(scene.parent_widget.agent_tree_widget, 'guid_display_length', 16)
+            guid_len = min(configured_len, 14)
 
         hostname = self.agent_data.get('hostname', '')
         username = self.agent_data.get('username', '')
@@ -99,11 +103,14 @@ class AgentNode(QGraphicsEllipseItem):
         # Build multi-line label for more info
         lines = []
 
-        # Line 1: Name (alias or short GUID)
+        # Line 1: Name (alias or short GUID based on settings)
         if alias:
             name = alias if len(alias) <= 14 else alias[:12] + '..'
         else:
-            name = f"{self.guid[:12]}.."
+            if guid_len >= 14:
+                name = f"{self.guid[:14]}.."
+            else:
+                name = f"{self.guid[:guid_len]}.."
         lines.append(name)
 
         # Line 2: Hostname (if available and different from name)

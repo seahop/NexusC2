@@ -57,6 +57,22 @@ class AgentTreeWidget(QWidget):
         self.agent_aliases = {}
         self.agent_tags = {}  # GUID -> [{"name": "tag", "color": "#fff"}]
 
+        # Load GUID display length from settings (default to 16)
+        self.guid_display_length = self._load_guid_display_length()
+
+    def _load_guid_display_length(self):
+        """Load GUID display length from settings."""
+        from pathlib import Path
+        config_file = Path.home() / '.c2_client' / 'settings.json'
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    settings = json.load(f)
+                    return settings.get('guid_display_length', 16)
+            except:
+                pass
+        return 16
+
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
         # Ctrl+F to focus search
@@ -305,12 +321,21 @@ class AgentTreeWidget(QWidget):
 
         # Build display name: prioritize alias, then show more context
         alias = self.agent_aliases.get(agent['guid'])
+        guid_len = self.guid_display_length
+        guid = agent['guid']
+
         if alias:
-            # If aliased, show "alias (first 16 chars of GUID)"
-            display_name = f"{alias} ({agent['guid'][:16]}...)"
+            # If aliased, show "alias (GUID truncated based on settings)"
+            if guid_len >= 36:
+                display_name = f"{alias} ({guid})"
+            else:
+                display_name = f"{alias} ({guid[:guid_len]}...)"
         else:
-            # No alias: show first 16 characters instead of 8 for better distinction
-            display_name = f"{agent['guid'][:16]}..."
+            # No alias: show GUID truncated based on settings
+            if guid_len >= 36:
+                display_name = guid
+            else:
+                display_name = f"{guid[:guid_len]}..."
 
         # Add link indicator for linked agents (visual hierarchy via prefix)
         link_type = agent.get('link_type', '')

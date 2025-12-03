@@ -9,7 +9,7 @@ from datetime import datetime
 # Semantic Versioning: MAJOR.MINOR.PATCH-PRERELEASE
 VERSION_MAJOR = 0
 VERSION_MINOR = 8
-VERSION_PATCH = 0
+VERSION_PATCH = 1
 VERSION_PRERELEASE = "beta" 
 
 # Build information - UPDATE WHEN RELEASING
