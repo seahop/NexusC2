@@ -21,7 +21,7 @@ class C2ClientGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.config_dir = Path.home() / '.c2_client'
+        self.config_dir = Path.home() / '.nexus'
         self.config_dir.mkdir(exist_ok=True)
         self.window_state_file = self.config_dir / 'window_state.json'
 
@@ -1094,7 +1094,8 @@ class C2ClientGUI(QMainWindow):
             "Nord": (self.set_nord_theme, "nord", True),
             "Solarized Dark": (self.set_solarized_dark_theme, "solarized_dark", True),
             "Gruvbox": (self.set_gruvbox_theme, "gruvbox", True),
-            "One Dark": (self.set_one_dark_theme, "one_dark", True)
+            "One Dark": (self.set_one_dark_theme, "one_dark", True),
+            "Brandon's Hotdog Stand": (self.set_hotdog_stand_theme, "hotdog_stand", False)
         }
         
         if theme_name in theme_map:
@@ -1843,12 +1844,219 @@ class C2ClientGUI(QMainWindow):
         self.setStyleSheet(one_dark_stylesheet)
         print("One Dark theme applied")
 
+    # NEW THEME 7: BRANDON'S HOTDOG STAND
+    def set_hotdog_stand_theme(self):
+        """Apply Brandon's Hotdog Stand theme - a loving tribute to Windows 3.1's worst color scheme.
+
+        The original Hot Dog Stand theme was included in Windows 3.1 and is famous for being
+        called 'the world's worst theme'. Legend has it, it was created as a challenge to
+        come up with the worst scheme possible. Colors represent ketchup (red) and mustard (yellow).
+        """
+        # Classic Hot Dog Stand colors:
+        # Red: #FF0000 (buttons, windows, borders)
+        # Yellow: #FFFF00 (background, workspace)
+        # Black: #000000 (active title, highlights)
+        # White: #FFFFFF (text on red, menus)
+
+        hotdog_stylesheet = """
+            QMainWindow, QDialog, QWidget {
+                background-color: #FFFF00;
+                color: #FFFFFF;
+            }
+            QMenuBar {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                font-weight: bold;
+            }
+            QMenuBar::item:selected {
+                background-color: #000000;
+                color: #FFFFFF;
+            }
+            QMenu {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px solid #000000;
+            }
+            QMenu::item:selected {
+                background-color: #FFFF00;
+                color: #000000;
+            }
+            QPushButton {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px outset #FF0000;
+                padding: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #CC0000;
+            }
+            QPushButton:pressed {
+                background-color: #000000;
+                color: #FFFFFF;
+                border-style: inset;
+            }
+            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px inset #000000;
+                padding: 3px;
+                selection-background-color: #FFFF00;
+                selection-color: #000000;
+            }
+            QComboBox {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px outset #FF0000;
+                padding: 3px;
+            }
+            QComboBox::drop-down {
+                background-color: #FF0000;
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                selection-background-color: #FFFF00;
+                selection-color: #000000;
+            }
+            QTreeWidget, QListWidget, QTableWidget {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px inset #000000;
+                alternate-background-color: #CC0000;
+            }
+            QTreeWidget::item:selected, QListWidget::item:selected, QTableWidget::item:selected {
+                background-color: #000000;
+                color: #FFFFFF;
+            }
+            QTreeWidget::item:hover, QListWidget::item:hover, QTableWidget::item:hover {
+                background-color: #CC0000;
+                color: #FFFFFF;
+            }
+            QHeaderView::section {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px outset #FF0000;
+                padding: 5px;
+                font-weight: bold;
+            }
+            QTabWidget::pane {
+                border: 2px solid #000000;
+                background-color: #FF0000;
+            }
+            QTabBar::tab {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px outset #FF0000;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFF00;
+                color: #FF0000;
+                border-bottom: 2px solid #FFFF00;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #CC0000;
+            }
+            QGroupBox {
+                border: 2px solid #000000;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #FF0000;
+            }
+            QGroupBox::title {
+                color: #FFFFFF;
+                font-weight: bold;
+            }
+            QScrollBar:vertical {
+                background-color: #FFFF00;
+                width: 16px;
+                border: 1px solid #000000;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #FF0000;
+                border: 2px outset #FF0000;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                background-color: #FF0000;
+                border: 2px outset #FF0000;
+                height: 16px;
+            }
+            QScrollBar:horizontal {
+                background-color: #FFFF00;
+                height: 16px;
+                border: 1px solid #000000;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #FF0000;
+                border: 2px outset #FF0000;
+                min-width: 20px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                background-color: #FF0000;
+                border: 2px outset #FF0000;
+                width: 16px;
+            }
+            QLabel {
+                color: #FF0000;
+                font-weight: bold;
+            }
+            QCheckBox {
+                color: #FF0000;
+                font-weight: bold;
+            }
+            QCheckBox::indicator {
+                background-color: #FF0000;
+                border: 2px inset #000000;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #FFFF00;
+                border: 2px inset #000000;
+            }
+            QSlider::groove:horizontal {
+                background-color: #FF0000;
+                height: 8px;
+                border: 1px solid #000000;
+            }
+            QSlider::handle:horizontal {
+                background-color: #FFFF00;
+                border: 2px outset #FF0000;
+                width: 16px;
+            }
+            QSplitter::handle {
+                background-color: #FF0000;
+            }
+            QStatusBar {
+                background-color: #FF0000;
+                color: #FFFFFF;
+            }
+            QToolTip {
+                background-color: #FF0000;
+                color: #FFFFFF;
+                border: 2px solid #000000;
+                font-weight: bold;
+            }
+            QMessageBox {
+                background-color: #FF0000;
+            }
+            QMessageBox QLabel {
+                color: #FFFFFF;
+                font-weight: bold;
+            }
+        """
+        self.setStyleSheet(hotdog_stylesheet)
+        print("Brandon's Hotdog Stand theme applied - enjoy the ketchup and mustard!")
+
     def load_and_apply_theme(self):
         """Load saved theme and apply it"""
         from pathlib import Path
         import json
         
-        config_file = Path.home() / '.c2_client' / 'settings.json'
+        config_file = Path.home() / '.nexus' / 'settings.json'
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:

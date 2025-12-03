@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 
 # Optional: Add file handler for debug logs
 try:
-    log_dir = Path.home() / '.c2_client' / 'logs'
+    log_dir = Path.home() / '.nexus' / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
 
     file_handler = logging.FileHandler(log_dir / 'client.log')

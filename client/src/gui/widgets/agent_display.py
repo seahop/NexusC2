@@ -211,8 +211,9 @@ class AgentDisplayWidget(QWidget):
         # View toggle
         self.view_button_group.idClicked.connect(self.switch_view)
 
-        # Tree selection
+        # Tree selection and actions
         self.tree_widget.tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
+        self.tree_widget.agents_removed.connect(self.on_agents_removed)
 
         # Table selection and actions
         self.table_widget.agents_selected.connect(self.on_table_selection_changed)
@@ -343,13 +344,10 @@ class AgentDisplayWidget(QWidget):
         else:
             self.selection_bar.setVisible(False)
 
-        # Refresh graph view (table already refreshed itself, tree already hidden items)
+        # Refresh table and graph views to sync with tree
+        # (tree handles its own items via setHidden)
+        self.table_widget.refresh_from_tree()
         self.graph_widget.refresh_graph()
-
-        # Log the removal
-        if self.terminal_widget:
-            for guid in guids:
-                self.terminal_widget.log_message(f"Agent {guid[:8]}... removed")
 
     def open_selected_terminals(self):
         """Open terminals for all selected agents"""

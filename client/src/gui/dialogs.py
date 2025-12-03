@@ -700,7 +700,7 @@ class ServerConnectDialog(QDialog):
         import json
         from pathlib import Path
         
-        config_file = Path.home() / '.c2_client' / 'servers.json'
+        config_file = Path.home() / '.nexus' / 'servers.json'
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:
@@ -714,7 +714,7 @@ class ServerConnectDialog(QDialog):
         import json
         from pathlib import Path
         
-        config_file = Path.home() / '.c2_client' / 'servers.json'
+        config_file = Path.home() / '.nexus' / 'servers.json'
         config_file.parent.mkdir(exist_ok=True)
         
         servers = self.load_saved_servers()
@@ -743,7 +743,7 @@ class ServerConnectDialog(QDialog):
                 # Save updated config
                 import json
                 from pathlib import Path
-                config_file = Path.home() / '.c2_client' / 'servers.json'
+                config_file = Path.home() / '.nexus' / 'servers.json'
                 with open(config_file, 'w') as f:
                     json.dump(self.saved_servers, f, indent=2)
                 
@@ -1404,7 +1404,8 @@ class SettingsDialog(QDialog):
             "Nord",
             "Solarized Dark",
             "Gruvbox",
-            "One Dark"
+            "One Dark",
+            "Brandon's Hotdog Stand"
         ])
         self.theme_combo.setCurrentText(self.settings.get('theme', 'Dark'))
         appearance_layout.addRow("Theme:", self.theme_combo)
@@ -1519,7 +1520,7 @@ class SettingsDialog(QDialog):
 
     def load_settings(self):
         """Load settings from file"""
-        config_file = Path.home() / '.c2_client' / 'settings.json'
+        config_file = Path.home() / '.nexus' / 'settings.json'
         defaults = {
             'theme': 'Dark',
             'default_view': 0,  # 0=Tree, 1=Table, 2=Graph
@@ -1546,7 +1547,7 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         """Save settings to file"""
-        config_file = Path.home() / '.c2_client' / 'settings.json'
+        config_file = Path.home() / '.nexus' / 'settings.json'
         config_file.parent.mkdir(exist_ok=True)
 
         # Map display strings back to values

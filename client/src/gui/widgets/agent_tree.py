@@ -1,7 +1,7 @@
 #agent_tree.py
 from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout,
                               QMessageBox, QMenu, QInputDialog, QLineEdit, QHBoxLayout, QLabel)
-from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot
+from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot, pyqtSignal
 import json
 import asyncio
 import sqlite3
@@ -9,6 +9,9 @@ import traceback
 from utils.constants import AGENT_TREE_UPDATE_INTERVAL
 
 class AgentTreeWidget(QWidget):
+    # Signal emitted when agents are removed (for syncing other views)
+    agents_removed = pyqtSignal(list)  # list of GUIDs that were removed
+
     def __init__(self, terminal_widget):
         super().__init__()
         self.terminal_widget = terminal_widget
@@ -29,6 +32,8 @@ class AgentTreeWidget(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(['Agents'])
         self.tree.itemClicked.connect(self.on_item_clicked)
+        # Enable multi-selection with Ctrl+Click and Shift+Click
+        self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         layout.addWidget(self.tree)
         self.show_deleted = False
 
@@ -63,7 +68,7 @@ class AgentTreeWidget(QWidget):
     def _load_guid_display_length(self):
         """Load GUID display length from settings."""
         from pathlib import Path
-        config_file = Path.home() / '.c2_client' / 'settings.json'
+        config_file = Path.home() / '.nexus' / 'settings.json'
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:
@@ -609,21 +614,38 @@ class AgentTreeWidget(QWidget):
                 self.delete_listener(item.text(0))
                 
         elif self.current_view == 'agents' and not item.parent():
-            copy_guid_action = menu.addAction("Copy GUID")
-            menu.addSeparator()
-            rename_action = menu.addAction("Rename Agent")
-            manage_tags_action = menu.addAction("Manage Tags...")
-            menu.addSeparator()
-            remove_action = menu.addAction("Remove Agent")
-            action = menu.exec(self.tree.viewport().mapToGlobal(position))
-            if action == copy_guid_action:
-                self.copy_agent_guid(item)
-            elif action == rename_action:
-                self.rename_agent(item)
-            elif action == manage_tags_action:
-                self.manage_agent_tags(item)
-            elif action == remove_action:
-                self.remove_agent(item)
+            # Get all selected agent items (filter out detail items which have parents)
+            selected_items = [i for i in self.tree.selectedItems() if not i.parent()]
+            selected_guids = []
+            for sel_item in selected_items:
+                guid = sel_item.data(0, Qt.ItemDataRole.UserRole)
+                if guid:
+                    selected_guids.append(guid)
+
+            if len(selected_guids) <= 1:
+                # Single agent selected - show full menu
+                copy_guid_action = menu.addAction("Copy GUID")
+                menu.addSeparator()
+                rename_action = menu.addAction("Rename Agent")
+                manage_tags_action = menu.addAction("Manage Tags...")
+                menu.addSeparator()
+                remove_action = menu.addAction("Remove Agent")
+                action = menu.exec(self.tree.viewport().mapToGlobal(position))
+                if action == copy_guid_action:
+                    self.copy_agent_guid(item)
+                elif action == rename_action:
+                    self.rename_agent(item)
+                elif action == manage_tags_action:
+                    self.manage_agent_tags(item)
+                elif action == remove_action:
+                    self.remove_agent(item)
+            else:
+                # Multiple agents selected - show bulk actions
+                count = len(selected_guids)
+                remove_all_action = menu.addAction(f"Remove {count} Agents")
+                action = menu.exec(self.tree.viewport().mapToGlobal(position))
+                if action == remove_all_action:
+                    self.remove_agents(selected_guids)
 
     def copy_agent_guid(self, item):
         """Copy agent GUID to clipboard"""
@@ -1105,8 +1127,63 @@ class AgentTreeWidget(QWidget):
             agent['deleted'] = True
             item.setHidden(True)  # Hide from view but maintain data
             self.terminal_widget.log_message(f"Agent '{agent_display_name}' (ID: {agent['guid'][:12]}...) removed")
+            # Emit signal to sync other views
+            self.agents_removed.emit([agent['guid']])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to remove agent: {e}")
+
+    def remove_agents(self, guids):
+        """Remove multiple agents by their GUIDs"""
+        if not guids:
+            return
+
+        if not self.ws_thread or not self.ws_thread.is_connected():
+            QMessageBox.warning(self, "Error", "Not connected to server")
+            return
+
+        count = len(guids)
+        reply = QMessageBox.question(
+            self,
+            'Remove Agents',
+            f'Are you sure you want to remove {count} agent(s)?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        removed_guids = []
+        for guid in guids:
+            agent = self.agent_by_guid.get(guid)
+            if not agent:
+                continue
+
+            msg = {
+                "type": "remove_agent",
+                "data": {
+                    "agent_id": guid,
+                    "username": self.ws_thread.username
+                }
+            }
+
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self.ws_thread.ws_client.send_message(json.dumps(msg)),
+                    self.ws_thread.loop
+                )
+                # Mark agent as deleted
+                agent['deleted'] = True
+                # Hide the tree item
+                if agent['name'] in self.agent_items:
+                    self.agent_items[agent['name']].setHidden(True)
+                removed_guids.append(guid)
+            except Exception as e:
+                print(f"Failed to remove agent {guid[:12]}: {e}")
+
+        if removed_guids:
+            self.terminal_widget.log_message(f"Removed {len(removed_guids)} agent(s)")
+            # Emit signal to sync other views
+            self.agents_removed.emit(removed_guids)
 
     def handle_agent_reactivation(self, conn_data):
         """Handle reactivation of an existing agent"""

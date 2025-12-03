@@ -184,7 +184,7 @@ class NotificationManager(QObject):
 
     def _load_settings(self):
         """Load notification settings from config file."""
-        config_file = Path.home() / '.c2_client' / 'settings.json'
+        config_file = Path.home() / '.nexus' / 'settings.json'
         defaults = {
             'notifications_enabled': True,
             'notification_toast_enabled': True,
@@ -222,7 +222,7 @@ class NotificationManager(QObject):
             Path(__file__).parent / 'sounds' / 'notification.wav',
             Path(__file__).parent.parent / 'sounds' / 'notification.wav',
             Path(__file__).parent.parent.parent / 'sounds' / 'notification.wav',
-            Path.home() / '.c2_client' / 'sounds' / 'notification.wav',
+            Path.home() / '.nexus' / 'sounds' / 'notification.wav',
         ]
 
         sound_file = None
@@ -244,7 +244,7 @@ class NotificationManager(QObject):
         import struct
         import wave
 
-        sounds_dir = Path.home() / '.c2_client' / 'sounds'
+        sounds_dir = Path.home() / '.nexus' / 'sounds'
         sounds_dir.mkdir(parents=True, exist_ok=True)
         sound_file = sounds_dir / 'notification.wav'
 

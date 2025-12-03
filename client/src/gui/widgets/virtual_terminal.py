@@ -329,6 +329,40 @@ class VirtualTerminal(QScrollArea):
                 QScrollBar::sub-line:vertical {
                     height: 0px;
                 }
+            """,
+
+            "hotdog_stand": """
+                QTextEdit {
+                    background-color: #FF0000;
+                    color: #FFFFFF;
+                    border: 2px inset #000000;
+                    selection-background-color: #000000;
+                    selection-color: #FFFFFF;
+                    padding: 5px;
+                    font-weight: bold;
+                }
+                QScrollBar:vertical {
+                    background-color: #FFFF00;
+                    width: 16px;
+                    border: 1px solid #000000;
+                }
+                QScrollBar::handle:vertical {
+                    background-color: #FF0000;
+                    border: 2px outset #FF0000;
+                    min-height: 20px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background-color: #CC0000;
+                }
+                QScrollBar::handle:vertical:pressed {
+                    background-color: #000000;
+                }
+                QScrollBar::add-line:vertical,
+                QScrollBar::sub-line:vertical {
+                    background-color: #FF0000;
+                    border: 2px outset #FF0000;
+                    height: 16px;
+                }
             """
         }
         
