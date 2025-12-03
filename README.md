@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="client/src/gui/resources/nexus.png" alt="Nexus Logo" width="300"/>
+  <img src="client/src/gui/resources/nexus.png" alt="Nexus Logo" width="400"/>
 </p>
 
 # C2 Command & Control Framework
