@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="client/src/gui/resources/nexus.png" alt="Nexus Logo" width="200"/>
+</p>
+
 # C2 Command & Control Framework
 
 A modern, distributed Command & Control (C2) framework designed for secure remote administration and red team operations. Built with Go for the backend services and Python for the operator interface.
