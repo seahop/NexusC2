@@ -8,18 +8,18 @@ from datetime import datetime
 
 # Semantic Versioning: MAJOR.MINOR.PATCH-PRERELEASE
 VERSION_MAJOR = 0
-VERSION_MINOR = 7
+VERSION_MINOR = 8
 VERSION_PATCH = 0
 VERSION_PRERELEASE = "beta" 
 
 # Build information - UPDATE WHEN RELEASING
-BUILD_DATE = "2025-11-07"   # Format: YYYY-MM-DD
+BUILD_DATE = "2025-12-03"   # Format: YYYY-MM-DD
 BUILD_NUMBER = None         # Not used for releases
 
 # Application information
 APP_NAME = "Nexus"
 APP_DESCRIPTION = "Command & Control Framework"
-CODENAME = "Orion"
+CODENAME = "Vulpecula"
 
 
 def get_version_string():
