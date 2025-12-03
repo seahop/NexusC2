@@ -287,10 +287,12 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		// DEBUG: Log the decrypted payload to see what we received
 		log.Printf("[LinkData] DEBUG: Decrypted payload from linked agent %s: %s", linkedClientID, string(decryptedPayload))
 
-		// Parse the decrypted payload
+		// Parse the decrypted payload - now includes potential nested link data
 		var linkedData struct {
-			AgentID string                   `json:"agent_id"`
-			Results []map[string]interface{} `json:"results"`
+			AgentID            string                   `json:"agent_id"`
+			Results            []map[string]interface{} `json:"results"`
+			NestedLinkData     []interface{}            `json:"ld"` // Link data from grandchild agents
+			UnlinkNotifications []interface{}           `json:"lu"` // Unlink notifications from children
 		}
 		if err := json.Unmarshal(decryptedPayload, &linkedData); err != nil {
 			log.Printf("[LinkData] Failed to parse linked payload: %v", err)
@@ -298,7 +300,8 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		}
 
 		// DEBUG: Log the parsed results
-		log.Printf("[LinkData] DEBUG: Parsed %d results from linked agent", len(linkedData.Results))
+		log.Printf("[LinkData] DEBUG: Parsed %d results from linked agent, %d nested link items, %d unlink notifications",
+			len(linkedData.Results), len(linkedData.NestedLinkData), len(linkedData.UnlinkNotifications))
 		for i, result := range linkedData.Results {
 			log.Printf("[LinkData] DEBUG: Result[%d]: command=%v, output_length=%d, exit_code=%v",
 				i, result["command"], len(fmt.Sprintf("%v", result["output"])), result["exit_code"])
@@ -308,6 +311,24 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		if err := m.processResults(ctx, tx, linkedClientID, linkedData.Results); err != nil {
 			log.Printf("[LinkData] Failed to process linked results: %v", err)
 			continue
+		}
+
+		// RECURSIVE: Process nested link data from grandchild agents
+		// This enables multi-hop chains: HTTPS -> SMB -> SMB -> SMB
+		if len(linkedData.NestedLinkData) > 0 {
+			log.Printf("[LinkData] Processing %d nested link data items from %s (multi-hop chain)",
+				len(linkedData.NestedLinkData), linkedClientID)
+			if err := m.processLinkData(ctx, tx, linkedClientID, linkedData.NestedLinkData); err != nil {
+				log.Printf("[LinkData] Failed to process nested link data: %v", err)
+				// Don't fail the entire operation - continue with this agent's data
+			}
+		}
+
+		// Process unlink notifications from child agents
+		if len(linkedData.UnlinkNotifications) > 0 {
+			log.Printf("[LinkData] Processing %d unlink notifications from %s",
+				len(linkedData.UnlinkNotifications), linkedClientID)
+			m.processUnlinkNotifications(ctx, linkedClientID, linkedData.UnlinkNotifications)
 		}
 
 		// Rotate the linked agent's secrets
@@ -632,6 +653,8 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 }
 
 // getCommandsForLinkedAgents retrieves pending commands for all linked agents
+// For multi-hop chains, this also recursively gets commands for grandchildren
+// and wraps them properly for forwarding through the chain
 func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommandItem, error) {
 	if m.linkRouting == nil {
 		return nil, nil
@@ -681,7 +704,13 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 		// Get pending commands for this linked agent
 		// GetCommand returns []string with a single JSON-encoded string of commands
 		pendingCmds, hasCommands := m.commandBuffer.GetCommand(linkedClientID)
-		if !hasCommands || len(pendingCmds) == 0 {
+
+		// MULTI-HOP: Also get commands and handshake responses for this agent's children
+		// These need to be nested in the payload so the linked agent can forward them
+		nestedHandshakes, nestedCommands, _ := m.getPendingLinkResponsesSeparate(linkedClientID)
+
+		// If no commands and no nested data, skip
+		if (!hasCommands || len(pendingCmds) == 0) && len(nestedHandshakes) == 0 && len(nestedCommands) == 0 {
 			continue
 		}
 
@@ -691,9 +720,48 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 			continue
 		}
 
-		// pendingCmds[0] is already JSON-encoded commands from GetCommand
-		// Don't re-marshal - use it directly
-		cmdJSON := []byte(pendingCmds[0])
+		// Build the payload - can include commands and/or nested link data
+		var payload map[string]interface{}
+
+		if hasCommands && len(pendingCmds) > 0 {
+			// Parse the commands JSON first
+			var cmds []interface{}
+			if err := json.Unmarshal([]byte(pendingCmds[0]), &cmds); err == nil {
+				payload = map[string]interface{}{
+					"commands": cmds,
+				}
+			}
+		}
+
+		// Add nested handshake responses (for grandchildren)
+		if len(nestedHandshakes) > 0 {
+			if payload == nil {
+				payload = make(map[string]interface{})
+			}
+			payload["lr"] = nestedHandshakes
+			log.Printf("[LinkCommands] Including %d nested handshake responses for %s", len(nestedHandshakes), linkedClientID)
+		}
+
+		// Add nested commands (for grandchildren)
+		if len(nestedCommands) > 0 {
+			if payload == nil {
+				payload = make(map[string]interface{})
+			}
+			payload["lc"] = nestedCommands
+			log.Printf("[LinkCommands] Including %d nested link commands for %s", len(nestedCommands), linkedClientID)
+		}
+
+		// Skip if nothing to send
+		if payload == nil {
+			continue
+		}
+
+		// Marshal the combined payload
+		cmdJSON, err := json.Marshal(payload)
+		if err != nil {
+			log.Printf("[LinkCommands] Failed to marshal payload for %s: %v", linkedClientID, err)
+			continue
+		}
 
 		encryptedPayload, err := encryptForLinkedAgent(cmdJSON, linkedConn.Secret1)
 		if err != nil {

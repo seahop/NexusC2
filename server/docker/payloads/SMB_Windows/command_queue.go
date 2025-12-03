@@ -83,6 +83,11 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&InlineAssemblyCommand{})
 	queue.RegisterCommand(&InlineAssemblyAsyncCommand{})
 
+	// Link commands for SMB chaining (SMB -> SMB -> SMB)
+	queue.RegisterCommand(&LinkCommand{})
+	queue.RegisterCommand(&UnlinkCommand{})
+	queue.RegisterCommand(&LinksCommand{})
+
 	return queue
 }
 
