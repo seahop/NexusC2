@@ -378,6 +378,7 @@ func logDebug(format string, v ...interface{}) {
 }
 
 // processLinkCommands forwards commands from parent to linked (child) SMB agents
+// and waits for responses synchronously so they can be included in the same response cycle
 func processLinkCommands(linkCmds []interface{}) {
 	lm := GetLinkManager()
 
@@ -396,13 +397,22 @@ func processLinkCommands(linkCmds []interface{}) {
 			continue
 		}
 
-		// Forward to the linked agent
-		if err := lm.ForwardToLinkedAgent(routingID, payload); err != nil {
+		// Forward to the linked agent AND WAIT for response
+		// This ensures the response is available before we send our results back
+		log.Printf("[SMB LinkManager] Forwarding command to linked agent %s and waiting for response", routingID)
+		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, 30*time.Second)
+		if err != nil {
 			log.Printf("[SMB LinkManager] Failed to forward command to %s: %v", routingID, err)
 			continue
 		}
 
-		log.Printf("[SMB LinkManager] Forwarded command to linked agent %s", routingID)
+		if response != nil {
+			// Queue the response for sending back to parent
+			lm.queueOutboundData(response)
+			log.Printf("[SMB LinkManager] Got response from linked agent %s, queued for parent", routingID)
+		} else {
+			log.Printf("[SMB LinkManager] No immediate response from linked agent %s (timeout)", routingID)
+		}
 	}
 }
 
