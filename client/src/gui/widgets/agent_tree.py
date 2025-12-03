@@ -294,7 +294,13 @@ class AgentTreeWidget(QWidget):
         return item
 
     def add_agent_to_tree(self, agent):
-        """Add a single agent to the tree view."""
+        """Add a single agent to the tree view.
+
+        Structure: Linked agents are added as SIBLINGS (at the same tree level) as their
+        parent, not as children. This way, collapsing a parent only hides its details,
+        not the linked agents in the chain. Visual indentation in the display name shows
+        the relationship.
+        """
         print(f"AgentTreeWidget: add_agent_to_tree called for {agent['name']}")
 
         # Build display name: prioritize alias, then show more context
@@ -306,10 +312,14 @@ class AgentTreeWidget(QWidget):
             # No alias: show first 16 characters instead of 8 for better distinction
             display_name = f"{agent['guid'][:16]}..."
 
-        # Add link indicator for linked agents
+        # Add link indicator for linked agents (visual hierarchy via prefix)
         link_type = agent.get('link_type', '')
+        parent_client_id = agent.get('parent_client_id', '')
         if link_type:
-            display_name = f"↳ [{link_type.upper()}] {display_name}"
+            # Calculate depth for visual indentation
+            depth = self._get_agent_depth(agent)
+            indent = "    " * depth  # 4 spaces per level
+            display_name = f"{indent}↳ [{link_type.upper()}] {display_name}"
 
         # Add tag badges to display name
         agent_tags = self.agent_tags.get(agent['guid'], [])
@@ -322,6 +332,8 @@ class AgentTreeWidget(QWidget):
         tree_item = QTreeWidgetItem([display_name])
         # Store GUID in item data for filtering and lookups
         tree_item.setData(0, Qt.ItemDataRole.UserRole, agent['guid'])
+        # Mark this as an agent item (not a detail item)
+        tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, 'agent')
 
         # Build comprehensive tooltip with all agent info
         tooltip_parts = [
@@ -335,9 +347,8 @@ class AgentTreeWidget(QWidget):
             tooltip_parts.insert(0, f"Alias: {alias}")
         if link_type:
             tooltip_parts.append(f"Link Type: {link_type.upper()}")
-            parent_id = agent.get('parent_client_id', '')
-            if parent_id:
-                tooltip_parts.append(f"Parent Agent: {parent_id[:16]}...")
+            if parent_client_id:
+                tooltip_parts.append(f"Parent Agent: {parent_client_id[:16]}...")
         if agent_tags:
             tag_list = ", ".join([f"{tag['name']} ({tag['color']})" for tag in agent_tags])
             tooltip_parts.append(f"Tags: {tag_list}")
@@ -346,30 +357,16 @@ class AgentTreeWidget(QWidget):
 
         tree_item.setToolTip(0, '\n'.join(tooltip_parts))
 
+        # Add details as direct children (original structure)
         for detail in agent['details']:
-            tree_item.addChild(QTreeWidgetItem([detail]))
+            detail_child = QTreeWidgetItem([detail])
+            detail_child.setData(0, Qt.ItemDataRole.UserRole + 1, 'detail')
+            tree_item.addChild(detail_child)
 
-        # Check if this is a linked agent with a parent
-        parent_client_id = agent.get('parent_client_id', '')
-        parent_item = None
-
-        if parent_client_id:
-            # Find the parent agent's tree item
-            parent_agent = self.agent_by_guid.get(parent_client_id)
-            if parent_agent and parent_agent['name'] in self.agent_items:
-                parent_item = self.agent_items[parent_agent['name']]
-                print(f"AgentTreeWidget: Found parent agent {parent_client_id[:16]} for linked agent {agent['name']}")
-
-        if parent_item:
-            # Add as child of parent agent (after the details but as a distinct linked agent)
-            # Insert at the end of the parent's children
-            parent_item.addChild(tree_item)
-            print(f"AgentTreeWidget: Added linked agent {agent['name']} under parent {parent_client_id[:16]}")
-        else:
-            # Add as top-level item (no parent or parent not found yet)
-            self.tree.addTopLevelItem(tree_item)
-            if parent_client_id:
-                print(f"AgentTreeWidget: Parent {parent_client_id[:16]} not found, adding {agent['name']} as top-level")
+        # All agents are added as top-level items (siblings)
+        # Linked agents show their relationship via visual indentation in the name
+        # This means collapsing an agent only hides its details, not linked agents
+        self.tree.addTopLevelItem(tree_item)
 
         self.agent_items[agent['name']] = tree_item
 
@@ -377,15 +374,38 @@ class AgentTreeWidget(QWidget):
         tree_item.setHidden(agent.get('deleted', False))
 
         if not agent.get('deleted', False):
+            # Expand the agent item to show its details
             tree_item.setExpanded(True)
-            # Also expand parent if this is a linked agent
-            if parent_item:
-                parent_item.setExpanded(True)
 
         print(f"AgentTreeWidget: Added agent {agent['name']} to tree (hidden: {agent.get('deleted', False)})")
 
+    def _get_agent_depth(self, agent):
+        """Calculate the depth of an agent in the link chain (how many parents up to root)"""
+        depth = 0
+        current = agent
+        visited = set()  # Prevent infinite loops
+
+        while current.get('parent_client_id'):
+            parent_id = current['parent_client_id']
+            if parent_id in visited:
+                break  # Circular reference, stop
+            visited.add(parent_id)
+
+            parent = self.agent_by_guid.get(parent_id)
+            if not parent:
+                break  # Parent not found
+            depth += 1
+            current = parent
+
+        return depth
+
     def show_agents(self):
-        """Render all agents in the tree regardless of deleted status."""
+        """Render all agents in the tree regardless of deleted status.
+
+        Agents are displayed as siblings (all top-level) but ordered so that
+        linked agents appear immediately after their parent. Visual indentation
+        in the display name shows the hierarchy.
+        """
         print(f"AgentTreeWidget: show_agents called with {len(self.agent_data)} agents")
         self.tree.clear()
         self.tree.setHeaderLabels(['Agents'])
@@ -394,30 +414,45 @@ class AgentTreeWidget(QWidget):
         self.last_seen_items.clear()
         self.agent_items.clear()
 
-        # First pass: add all agents as top-level items
-        for agent in self.agent_data:
+        # Build ordered list: parents followed by their children (depth-first)
+        ordered_agents = self._get_hierarchically_ordered_agents()
+
+        # Add all agents in hierarchical order (all as top-level, but ordered correctly)
+        for agent in ordered_agents:
             print(f"AgentTreeWidget: Processing agent {agent['name']} for display")
             self.add_agent_to_tree(agent)
 
-        # Second pass: re-parent linked agents that were added before their parent
-        for agent in self.agent_data:
-            parent_client_id = agent.get('parent_client_id', '')
-            if parent_client_id and agent['name'] in self.agent_items:
-                tree_item = self.agent_items[agent['name']]
-                # Check if item is currently a top-level item but should be a child
-                if self.tree.indexOfTopLevelItem(tree_item) >= 0:
-                    parent_agent = self.agent_by_guid.get(parent_client_id)
-                    if parent_agent and parent_agent['name'] in self.agent_items:
-                        parent_item = self.agent_items[parent_agent['name']]
-                        # Remove from top level and add to parent
-                        index = self.tree.indexOfTopLevelItem(tree_item)
-                        self.tree.takeTopLevelItem(index)
-                        parent_item.addChild(tree_item)
-                        parent_item.setExpanded(True)
-                        print(f"AgentTreeWidget: Re-parented {agent['name']} under {parent_client_id[:16]}")
-
         self.current_view = 'agents'
         print("AgentTreeWidget: show_agents complete")
+
+    def _get_hierarchically_ordered_agents(self):
+        """Order agents so children appear immediately after their parents (depth-first)."""
+        # Build parent -> children map
+        agent_guids = {a['guid'] for a in self.agent_data}
+        children_map = {}  # parent_guid -> [child_agents]
+        root_agents = []
+
+        for agent in self.agent_data:
+            parent_id = agent.get('parent_client_id', '')
+            if not parent_id or parent_id not in agent_guids:
+                root_agents.append(agent)
+            else:
+                if parent_id not in children_map:
+                    children_map[parent_id] = []
+                children_map[parent_id].append(agent)
+
+        # Depth-first traversal to build ordered list
+        def add_with_children(agent):
+            result = [agent]
+            for child in children_map.get(agent['guid'], []):
+                result.extend(add_with_children(child))
+            return result
+
+        ordered = []
+        for root in root_agents:
+            ordered.extend(add_with_children(root))
+
+        return ordered
 
     def on_item_clicked(self, item, column):
         if self.current_view == 'agents':
@@ -1257,7 +1292,11 @@ class AgentTreeWidget(QWidget):
                 break
 
     def handle_link_update(self, data):
-        """Handle link update notification from server (link or unlink event)"""
+        """Handle link update notification from server (link or unlink event).
+
+        Since agents are displayed as siblings with visual indentation, we simply
+        update the display name and rebuild the tree to ensure proper ordering.
+        """
         agent_id = data.get('agent_id')
         parent_client_id = data.get('parent_client_id', '')
         link_type = data.get('link_type', '')
@@ -1281,84 +1320,17 @@ class AgentTreeWidget(QWidget):
         agent['parent_client_id'] = parent_client_id
         agent['link_type'] = link_type
 
-        # Update the tree view
-        if self.current_view == 'agents' and agent['name'] in self.agent_items:
-            tree_item = self.agent_items[agent['name']]
+        # Rebuild the tree to get proper ordering and visual indentation
+        # This is simpler than trying to reorder individual items
+        if self.current_view == 'agents':
+            self.show_agents()
 
-            # Remove from current location
-            parent_item = tree_item.parent()
-            if parent_item:
-                # Remove from parent
-                parent_item.removeChild(tree_item)
-            else:
-                # Remove from top level
-                index = self.tree.indexOfTopLevelItem(tree_item)
-                if index >= 0:
-                    self.tree.takeTopLevelItem(index)
-
-            # Rebuild display name
-            alias = self.agent_aliases.get(agent_id)
-            if alias:
-                display_name = f"{alias} ({agent_id[:16]}...)"
-            else:
-                display_name = f"{agent_id[:16]}..."
-
-            # Add link indicator for linked agents
-            if link_type:
-                display_name = f"↳ [{link_type.upper()}] {display_name}"
-
-            # Add tag badges if any
-            agent_tags = self.agent_tags.get(agent_id, [])
-            if agent_tags:
-                tag_badges = " ".join([f"[{tag['name']}]" for tag in agent_tags])
-                display_name = f"{display_name} {tag_badges}"
-
-            agent['display_name'] = display_name
-            tree_item.setText(0, display_name)
-
-            # Update tooltip
-            tooltip_parts = [
-                f"Full GUID: {agent_id}",
-                f"Hostname: {agent.get('hostname', 'N/A')}",
-                f"OS: {agent.get('os', 'N/A')}",
-                f"Username: {agent.get('username', 'N/A')}",
-                f"IP: {agent.get('ip', 'N/A')}",
-            ]
-            if alias:
-                tooltip_parts.insert(0, f"Alias: {alias}")
-            if link_type:
-                tooltip_parts.append(f"Link Type: {link_type.upper()}")
-                if parent_client_id:
-                    tooltip_parts.append(f"Parent Agent: {parent_client_id[:16]}...")
-            tree_item.setToolTip(0, '\n'.join(tooltip_parts))
-
-            # Add to new location
-            if parent_client_id:
-                # Find parent agent's tree item
-                parent_agent = self.agent_by_guid.get(parent_client_id)
-                if parent_agent and parent_agent['name'] in self.agent_items:
-                    new_parent_item = self.agent_items[parent_agent['name']]
-                    new_parent_item.addChild(tree_item)
-                    new_parent_item.setExpanded(True)
-                    tree_item.setExpanded(True)
-                    print(f"AgentTreeWidget: Moved {agent_id[:8]} under parent {parent_client_id[:8]}")
-                else:
-                    # Parent not found, add as top-level
-                    self.tree.addTopLevelItem(tree_item)
-                    tree_item.setExpanded(True)
-                    print(f"AgentTreeWidget: Parent {parent_client_id[:8]} not found, adding {agent_id[:8]} as top-level")
-            else:
-                # No parent - add as top-level (unlinked)
-                self.tree.addTopLevelItem(tree_item)
-                tree_item.setExpanded(True)
-                print(f"AgentTreeWidget: Unlinked {agent_id[:8]}, moved to top-level")
-
-            # Log message
-            if parent_client_id:
-                self.terminal_widget.log_message(
-                    f"Agent {agent_id[:8]} linked to {parent_client_id[:8]} via {link_type.upper()}"
-                )
-            else:
-                self.terminal_widget.log_message(
-                    f"Agent {agent_id[:8]} unlinked (moved to top-level)"
-                )
+        # Log message
+        if parent_client_id:
+            self.terminal_widget.log_message(
+                f"Agent {agent_id[:8]} linked to {parent_client_id[:8]} via {link_type.upper()}"
+            )
+        else:
+            self.terminal_widget.log_message(
+                f"Agent {agent_id[:8]} unlinked (moved to top-level)"
+            )

@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot
 from PyQt6.QtGui import QPalette, QColor 
 
 from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog
-from .widgets import AgentTreeWidget, TerminalWidget
+from .widgets import AgentTreeWidget, TerminalWidget, AgentDisplayWidget
 from utils.database import StateDatabase
 from .widgets.downloads import DownloadsWidget
 from .widgets.floating_status_indicator import FloatingStatusIndicator
@@ -170,9 +170,12 @@ class C2ClientGUI(QMainWindow):
         # Create terminal first
         self.terminal = TerminalWidget()
 
-        # Add agent tree widget with terminal reference
-        self.agent_tree = AgentTreeWidget(self.terminal)
-        self.splitter.addWidget(self.agent_tree)
+        # Use the new unified AgentDisplayWidget (includes tree, table, and graph views)
+        self.agent_display = AgentDisplayWidget(self.terminal)
+        self.splitter.addWidget(self.agent_display)
+
+        # Keep agent_tree reference for backward compatibility (points to tree_widget inside agent_display)
+        self.agent_tree = self.agent_display.tree_widget
 
         # Add this line to set the agent_tree reference in the terminal
         self.terminal.agent_tree = self.agent_tree
@@ -180,12 +183,12 @@ class C2ClientGUI(QMainWindow):
         # Add terminal and logs in tabs
         self.splitter.addWidget(self.terminal)
 
-        # Set initial sizes for the splitter
-        self.splitter.setSizes([300, 900])
+        # Set initial sizes for the splitter (slightly wider left panel for table/graph views)
+        self.splitter.setSizes([350, 850])
 
         layout.addWidget(self.splitter)
         main_widget.setLayout(layout)
-        
+
         # ADD FLOATING STATUS INDICATOR
         self.status_indicator = FloatingStatusIndicator(self)
         self.status_indicator.show()
@@ -469,10 +472,10 @@ class C2ClientGUI(QMainWindow):
             self.ws_thread.listener_update.connect(self.onListenerUpdate)
             self.ws_thread.state_received.connect(self.loadInitialState)
             
-            # Connect signals
-            self.ws_thread.connection_update.connect(self.agent_tree.handle_new_connection)
+            # Connect signals - use agent_display for proper delegation to all views
+            self.ws_thread.connection_update.connect(self.agent_display.handle_new_connection)
             self.ws_thread.connection_update.connect(self.onConnectionUpdate)
-            self.ws_thread.link_update.connect(self.agent_tree.handle_link_update)
+            self.ws_thread.link_update.connect(self.agent_display.handle_link_update)
             
             # The connection is already established at this point, so directly set status to connected
             self.status_indicator.set_connected()
@@ -548,7 +551,7 @@ class C2ClientGUI(QMainWindow):
             # Add listener to the tree if it hasn't been processed yet
             if listener_id not in self.processed_listener_ids:
                 print("MainWindow: Adding new listener to tree after broadcast update")
-                self.agent_tree.add_listener(
+                self.agent_display.add_listener(
                     name=listener_details['name'],
                     protocol=listener_details['protocol'],
                     host=listener_details.get('ip', ''),
@@ -564,7 +567,7 @@ class C2ClientGUI(QMainWindow):
         elif event == "deleted":
             listener_name = listener_details['name']
             print(f"MainWindow: Removing listener: {listener_name}")
-            self.agent_tree.remove_listener(listener_name)
+            self.agent_display.remove_listener(listener_name)
             self.terminal.log_message(f"Listener {listener_name} has been deleted")
             # Remove the listener ID from the processed set if it was stored
             self.processed_listener_ids.discard(listener_name)
@@ -583,11 +586,11 @@ class C2ClientGUI(QMainWindow):
             pass
     
     def showListeners(self):
-        self.agent_tree.show_listeners()
+        self.agent_display.show_listeners()
         self.terminal.log_message("Switched to Listeners view")
 
     def showAgents(self):
-        self.agent_tree.show_agents()
+        self.agent_display.show_agents()
         self.terminal.log_message("Switched to Agents view")
 
     def resizeEvent(self, event):
@@ -735,12 +738,12 @@ class C2ClientGUI(QMainWindow):
         if self.ws_thread:
             self.ws_thread.wait()
             self.ws_thread = None
-            # Clear AgentTreeWidget's ws_thread reference
-            self.agent_tree.ws_thread = None
+            # Clear AgentDisplayWidget's ws_thread reference (propagates to tree)
+            self.agent_display.ws_thread = None
             # Add this: Clear downloads widget's ws_thread reference if it exists
             if hasattr(self, 'downloads_widget'):
                 self.downloads_widget.ws_thread = None
-            print("MainWindow: Cleared AgentTreeWidget ws_thread reference")
+            print("MainWindow: Cleared AgentDisplayWidget ws_thread reference")
 
         self.is_connected = False
         self.updateMenuState()
@@ -777,13 +780,13 @@ class C2ClientGUI(QMainWindow):
 
     def loadInitialState(self):
         print("\nMainWindow: Loading initial state")
-        self.agent_tree.ws_thread = self.ws_thread
+        self.agent_display.ws_thread = self.ws_thread
 
         # Set view to agents by default
         self.agent_tree.current_view = 'agents'
 
-        # Load the state
-        self.agent_tree.loadStateFromDatabase()
+        # Load the state via agent_display (delegates to tree and refreshes other views)
+        self.agent_display.loadStateFromDatabase()
         self.sync_with_database()
 
         # Sync agent aliases from agent_tree to terminal widget
@@ -798,8 +801,8 @@ class C2ClientGUI(QMainWindow):
         """Handle new connection updates from the server"""
         print(f"MainWindow: Received connection update: {conn_data}")
         try:
-            print("MainWindow: Passing connection data to AgentTreeWidget")
-            self.agent_tree.handle_new_connection(conn_data)
+            print("MainWindow: Passing connection data to AgentDisplayWidget")
+            self.agent_display.handle_new_connection(conn_data)
             print("MainWindow: Successfully handled new connection")
         except Exception as e:
             print(f"ERROR in onConnectionUpdate: {e}")
