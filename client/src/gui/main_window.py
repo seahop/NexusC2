@@ -164,7 +164,7 @@ class C2ClientGUI(QMainWindow):
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout()
 
-        # Create splitter
+        # Create splitter - starts horizontal for tree view
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Create terminal first
@@ -186,6 +186,9 @@ class C2ClientGUI(QMainWindow):
         # Set initial sizes for the splitter (slightly wider left panel for table/graph views)
         self.splitter.setSizes([350, 850])
 
+        # Connect view change signal to adjust layout
+        self.agent_display.view_changed.connect(self.on_agent_view_changed)
+
         layout.addWidget(self.splitter)
         main_widget.setLayout(layout)
 
@@ -193,6 +196,61 @@ class C2ClientGUI(QMainWindow):
         self.status_indicator = FloatingStatusIndicator(self)
         self.status_indicator.show()
         self.status_indicator.raise_()  # Keep on top
+
+    def on_agent_view_changed(self, view_id):
+        """Adjust splitter orientation based on the active view.
+
+        Tree view (0): Horizontal split (agents left, terminal right)
+        Table view (1): Vertical split (agents top, terminal bottom) - like Cobalt Strike
+        Graph view (2): Horizontal split (graph left, terminal right)
+
+        Remembers splitter sizes per view so user adjustments persist.
+        """
+        # Save current view's splitter sizes before switching
+        if hasattr(self, '_current_view_id'):
+            self._save_view_splitter_sizes(self._current_view_id)
+
+        # Update current view tracker
+        self._current_view_id = view_id
+
+        if view_id == 1:  # Table view
+            # Switch to vertical layout (table on top, terminal below)
+            if self.splitter.orientation() != Qt.Orientation.Vertical:
+                self.splitter.setOrientation(Qt.Orientation.Vertical)
+
+            # Restore saved sizes for table view, or use defaults (more terminal space)
+            saved_sizes = self._get_view_splitter_sizes(view_id)
+            if saved_sizes:
+                self.splitter.setSizes(saved_sizes)
+            else:
+                # Default: 35% table, 65% terminal (more terminal space)
+                new_total = self.splitter.height()
+                self.splitter.setSizes([int(new_total * 0.35), int(new_total * 0.65)])
+        else:  # Tree or Graph view
+            # Switch to horizontal layout (agents left, terminal right)
+            if self.splitter.orientation() != Qt.Orientation.Horizontal:
+                self.splitter.setOrientation(Qt.Orientation.Horizontal)
+
+            # Restore saved sizes for this view, or use defaults
+            saved_sizes = self._get_view_splitter_sizes(view_id)
+            if saved_sizes:
+                self.splitter.setSizes(saved_sizes)
+            else:
+                # Default: 30% agents, 70% terminal
+                new_total = self.splitter.width()
+                self.splitter.setSizes([int(new_total * 0.3), int(new_total * 0.7)])
+
+    def _save_view_splitter_sizes(self, view_id):
+        """Save the current splitter sizes for a specific view."""
+        if not hasattr(self, '_view_splitter_sizes'):
+            self._view_splitter_sizes = {}
+        self._view_splitter_sizes[view_id] = self.splitter.sizes()
+
+    def _get_view_splitter_sizes(self, view_id):
+        """Get saved splitter sizes for a specific view, or None if not saved."""
+        if not hasattr(self, '_view_splitter_sizes'):
+            self._view_splitter_sizes = {}
+        return self._view_splitter_sizes.get(view_id)
 
     def showCNADebugConsole(self):
         """Show the CNA debug console"""
@@ -610,8 +668,12 @@ class C2ClientGUI(QMainWindow):
                 disconnectAction.setEnabled(self.is_connected)
 
     def save_window_state(self):
-        """Save window geometry and splitter state"""
+        """Save window geometry, splitter state, and view-specific layouts"""
         try:
+            # Save current view's splitter sizes before saving
+            if hasattr(self, '_current_view_id'):
+                self._save_view_splitter_sizes(self._current_view_id)
+
             state = {
                 'geometry': {
                     'x': self.x(),
@@ -619,7 +681,9 @@ class C2ClientGUI(QMainWindow):
                     'width': self.width(),
                     'height': self.height()
                 },
-                'splitter_sizes': self.splitter.sizes() if hasattr(self, 'splitter') else [300, 900]
+                'splitter_sizes': self.splitter.sizes() if hasattr(self, 'splitter') else [300, 900],
+                'current_view_id': getattr(self, '_current_view_id', 0),
+                'view_splitter_sizes': getattr(self, '_view_splitter_sizes', {})
             }
 
             with open(self.window_state_file, 'w') as f:
@@ -630,7 +694,7 @@ class C2ClientGUI(QMainWindow):
             print(f"Failed to save window state: {e}")
 
     def restore_window_state(self):
-        """Restore window geometry and splitter state"""
+        """Restore window geometry, splitter state, and view-specific layouts"""
         try:
             if self.window_state_file.exists():
                 with open(self.window_state_file, 'r') as f:
@@ -650,6 +714,13 @@ class C2ClientGUI(QMainWindow):
                 if hasattr(self, 'splitter'):
                     sizes = state.get('splitter_sizes', [300, 900])
                     self.splitter.setSizes(sizes)
+
+                # Restore view-specific splitter sizes (convert string keys back to int)
+                saved_view_sizes = state.get('view_splitter_sizes', {})
+                self._view_splitter_sizes = {int(k): v for k, v in saved_view_sizes.items()}
+
+                # Restore current view ID tracker
+                self._current_view_id = state.get('current_view_id', 0)
 
                 print(f"Window state restored: {state}")
         except Exception as e:

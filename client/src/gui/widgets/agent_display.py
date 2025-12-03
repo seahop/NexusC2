@@ -52,6 +52,7 @@ class AgentDisplayWidget(QWidget):
     # Signals
     agents_selected = pyqtSignal(list)  # List of selected agent GUIDs
     agent_activated = pyqtSignal(str, str)  # name, guid - when double-clicked
+    view_changed = pyqtSignal(int)  # Emitted when view changes: 0=tree, 1=table, 2=graph
 
     def __init__(self, terminal_widget):
         super().__init__()
@@ -240,6 +241,9 @@ class AgentDisplayWidget(QWidget):
 
         # Apply current filter
         self.filter_agents(self.search_input.text())
+
+        # Emit signal so main window can adjust layout
+        self.view_changed.emit(view_id)
 
     def filter_agents(self, filter_text):
         """Apply filter across all views"""

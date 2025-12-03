@@ -21,16 +21,16 @@ class AgentTableWidget(QWidget):
 
     # Column definitions (no Parent column - hierarchy shown via indentation)
     COLUMNS = [
-        ('Name', 180),
-        ('Hostname', 120),
-        ('Username', 100),
-        ('IP', 120),
-        ('OS', 80),
-        ('Arch', 50),
-        ('Protocol', 70),
-        ('PID', 60),
-        ('Last Seen', 100),
-        ('Tags', 100),
+        ('Name', 280),
+        ('Hostname', 160),
+        ('Username', 180),
+        ('IP', 180),
+        ('OS', 100),
+        ('Arch', 60),
+        ('Protocol', 80),
+        ('PID', 70),
+        ('Last Seen', 110),
+        ('Tags', 120),
     ]
 
     def __init__(self, terminal_widget=None, agent_tree_widget=None):
