@@ -37,7 +37,7 @@ graph TB
         direction LR
         Agent["💻 Compromised Agent<br/>(Implant on Target)"]
         Spacer[" "]
-        Client["👤 Operator Client<br/>(Web Browser)"]
+        Client["👤 Operator Client<br/>"]
     end
 
     subgraph HostSystem["🖥️ Host System (Docker Host)"]
