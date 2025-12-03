@@ -91,6 +91,11 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&InlineAssemblyCommand{})
 	queue.RegisterCommand(&InlineAssemblyAsyncCommand{})
 
+	// Register link commands for SMB agent linking
+	queue.RegisterCommand(&LinkCommand{})
+	queue.RegisterCommand(&UnlinkCommand{})
+	queue.RegisterCommand(&LinksCommand{})
+
 	// Print all registered commands
 	fmt.Println()
 

@@ -341,10 +341,14 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		log.Printf("Failed to unmarshal listener message: %v", err)
 		return err
 	}
-	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s",
-		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host)
+	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s",
+		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName)
 
-	if h.ListenerManager.IsPortInUse(msg.Data.Port) {
+	// Check if this is an SMB listener - handle specially
+	isSMB := msg.Data.Protocol == "SMB" || msg.Data.Protocol == "smb"
+
+	// Only check port availability for non-SMB listeners
+	if !isSMB && h.ListenerManager.IsPortInUse(msg.Data.Port) {
 		log.Printf("Port %d is already in use", msg.Data.Port)
 		response := ListenerResponse{
 			Status:  "error",
@@ -355,11 +359,13 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		return fmt.Errorf("port %d is already in use", msg.Data.Port)
 	}
 
-	l, err := h.ListenerManager.Create(
+	// Use CreateWithPipe to support SMB listeners with pipe names
+	l, err := h.ListenerManager.CreateWithPipe(
 		msg.Data.Name,
 		msg.Data.Protocol,
 		msg.Data.Port,
 		msg.Data.Host,
+		msg.Data.PipeName,
 	)
 	if err != nil {
 		log.Printf("Listener creation failed: %v", err)
@@ -375,49 +381,54 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 	log.Printf("Listener created successfully with ID: %s", l.ID)
 	h.ListenerManager.DumpState()
 
-	// Use host.docker.internal for agent-handler running on host network
-	// Falls back to localhost for local development
-	grpcAddress := os.Getenv("GRPC_ADDRESS")
-	if grpcAddress == "" {
-		grpcAddress = "localhost:50051"
-	}
-
-	clientID := "websocket_hub"
-	agentClient, err := agent.NewClient(grpcAddress, clientID)
-	if err != nil {
-		log.Printf("Failed to create agent gRPC client: %v", err)
-		return err
-	}
-	defer agentClient.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	listenerType := agentClient.GetListenerType(msg.Data.Protocol)
-	resp, err := agentClient.StartListener(ctx, msg.Data.Name, int32(msg.Data.Port), listenerType, false)
-	if err != nil {
-		log.Printf("gRPC StartListener failed: %v", err)
-		response := ListenerResponse{
-			Status:  "error",
-			Message: fmt.Sprintf("Failed to start listener via agent service: %v", err),
+	// Skip gRPC for SMB listeners - they don't need to bind a port
+	if !isSMB {
+		// Use host.docker.internal for agent-handler running on host network
+		// Falls back to localhost for local development
+		grpcAddress := os.Getenv("GRPC_ADDRESS")
+		if grpcAddress == "" {
+			grpcAddress = "localhost:50051"
 		}
-		responseJSON, _ := json.Marshal(response)
-		client.Send <- responseJSON
-		return err
-	}
 
-	if !resp.Success {
-		log.Printf("gRPC StartListener returned failure: %s", resp.Message)
-		response := ListenerResponse{
-			Status:  "error",
-			Message: resp.Message,
+		clientID := "websocket_hub"
+		agentClient, err := agent.NewClient(grpcAddress, clientID)
+		if err != nil {
+			log.Printf("Failed to create agent gRPC client: %v", err)
+			return err
 		}
-		responseJSON, _ := json.Marshal(response)
-		client.Send <- responseJSON
-		return fmt.Errorf("agent service failed to start listener: %s", resp.Message)
-	}
+		defer agentClient.Close()
 
-	log.Printf("gRPC StartListener succeeded for listener: %s", msg.Data.Name)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		listenerType := agentClient.GetListenerType(msg.Data.Protocol)
+		resp, err := agentClient.StartListener(ctx, msg.Data.Name, int32(msg.Data.Port), listenerType, false)
+		if err != nil {
+			log.Printf("gRPC StartListener failed: %v", err)
+			response := ListenerResponse{
+				Status:  "error",
+				Message: fmt.Sprintf("Failed to start listener via agent service: %v", err),
+			}
+			responseJSON, _ := json.Marshal(response)
+			client.Send <- responseJSON
+			return err
+		}
+
+		if !resp.Success {
+			log.Printf("gRPC StartListener returned failure: %s", resp.Message)
+			response := ListenerResponse{
+				Status:  "error",
+				Message: resp.Message,
+			}
+			responseJSON, _ := json.Marshal(response)
+			client.Send <- responseJSON
+			return fmt.Errorf("agent service failed to start listener: %s", resp.Message)
+		}
+
+		log.Printf("gRPC StartListener succeeded for listener: %s", msg.Data.Name)
+	} else {
+		log.Printf("SMB listener created - no gRPC call needed (pipe: %s)", l.PipeName)
+	}
 
 	// Create broadcast message
 	broadcastMsg := struct {
@@ -430,6 +441,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				Protocol string `json:"protocol"`
 				Port     int    `json:"port"`
 				IP       string `json:"ip"`
+				PipeName string `json:"pipe_name,omitempty"`
 			} `json:"listener"`
 		} `json:"data"`
 	}{
@@ -442,6 +454,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				Protocol string `json:"protocol"`
 				Port     int    `json:"port"`
 				IP       string `json:"ip"`
+				PipeName string `json:"pipe_name,omitempty"`
 			} `json:"listener"`
 		}{
 			Event: "created",
@@ -451,19 +464,21 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				Protocol string `json:"protocol"`
 				Port     int    `json:"port"`
 				IP       string `json:"ip"`
+				PipeName string `json:"pipe_name,omitempty"`
 			}{
 				ID:       l.ID.String(),
 				Name:     l.Name,
 				Protocol: l.Protocol,
 				Port:     l.Port,
 				IP:       l.IP,
+				PipeName: l.PipeName,
 			},
 		},
 	}
 
 	broadcastJSON, _ := json.Marshal(broadcastMsg)
 	log.Printf("Broadcasting listener creation to all clients")
-	ctx = context.Background()
+	ctx := context.Background()
 	if err := h.BroadcastToAll(ctx, broadcastJSON); err != nil {
 		log.Printf("Error broadcasting listener creation: %v", err)
 	}
@@ -478,12 +493,14 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			Protocol string `json:"protocol"`
 			Port     string `json:"port"`
 			IP       string `json:"ip"`
+			PipeName string `json:"pipe_name,omitempty"`
 		}{
 			ID:       l.ID.String(),
 			Name:     l.Name,
 			Protocol: l.Protocol,
 			Port:     fmt.Sprintf("%d", l.Port),
 			IP:       l.IP,
+			PipeName: l.PipeName,
 		},
 	}
 

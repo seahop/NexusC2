@@ -31,11 +31,11 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 
 	// 1. Query all connections
 	rows, err := tx.QueryContext(ctx, `
-		SELECT 
+		SELECT
 			newclientID, clientID, protocol, secret1, secret2,
 			extIP, intIP, username, hostname, note,
 			process, pid, arch, lastSEEN, os,
-			proto, deleted_at, alias
+			proto, deleted_at, alias, parent_clientID, link_type
 		FROM connections
 		ORDER BY lastSEEN DESC
 	`)
@@ -49,12 +49,14 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 
 	for rows.Next() {
 		var conn Connection
-		var alias sql.NullString // Add this
+		var alias sql.NullString
+		var parentClientID sql.NullString
+		var linkType sql.NullString
 		if err := rows.Scan(
 			&conn.NewclientID, &conn.ClientID, &conn.Protocol, &conn.Secret1, &conn.Secret2,
 			&conn.ExtIP, &conn.IntIP, &conn.Username, &conn.Hostname, &conn.Note,
 			&conn.Process, &conn.PID, &conn.Arch, &conn.LastSeen, &conn.OS,
-			&conn.Proto, &conn.DeletedAt, &alias); err != nil { // scan into alias
+			&conn.Proto, &conn.DeletedAt, &alias, &parentClientID, &linkType); err != nil {
 			return nil, &DBOperationError{
 				Operation: "scan connection",
 				Err:       err,
@@ -65,17 +67,25 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 		if alias.Valid {
 			conn.Alias = &alias.String
 		}
+		// Set parent client ID if it exists (for linked agents)
+		if parentClientID.Valid {
+			conn.ParentClientID = &parentClientID.String
+		}
+		// Set link type if it exists
+		if linkType.Valid {
+			conn.LinkType = &linkType.String
+		}
 
 		export.Connections = append(export.Connections, conn)
-		logMessage(LOG_VERBOSE, "Exported connection: ClientID=%s, Hostname=%s, Alias=%v",
-			conn.ClientID, conn.Hostname, conn.Alias)
+		logMessage(LOG_VERBOSE, "Exported connection: ClientID=%s, Hostname=%s, Alias=%v, ParentClientID=%v, LinkType=%v",
+			conn.ClientID, conn.Hostname, conn.Alias, conn.ParentClientID, conn.LinkType)
 	}
 
 	// 2. Query all listeners
 	rows, err = tx.QueryContext(ctx, `
-        SELECT 
-            id, name, protocol, port, ip
-        FROM listeners 
+        SELECT
+            id, name, protocol, port, ip, COALESCE(pipe_name, '')
+        FROM listeners
         ORDER BY name ASC
     `)
 	if err != nil {
@@ -88,15 +98,15 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 
 	for rows.Next() {
 		var listener Listener
-		if err := rows.Scan(&listener.ID, &listener.Name, &listener.Protocol, &listener.Port, &listener.IP); err != nil {
+		if err := rows.Scan(&listener.ID, &listener.Name, &listener.Protocol, &listener.Port, &listener.IP, &listener.PipeName); err != nil {
 			return nil, &DBOperationError{
 				Operation: "scan listener",
 				Err:       err,
 			}
 		}
 		export.Listeners = append(export.Listeners, listener)
-		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s",
-			listener.Name, listener.Protocol, listener.Port)
+		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s, PipeName=%s",
+			listener.Name, listener.Protocol, listener.Port, listener.PipeName)
 	}
 
 	// 3. Query recent commands

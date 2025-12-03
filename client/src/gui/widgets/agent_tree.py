@@ -266,7 +266,10 @@ class AgentTreeWidget(QWidget):
             'hostname': conn_data.get('hostname', 'unknown'),
             'username': conn_data.get('username', 'unknown'),
             'ip': conn_data.get('ext_ip', conn_data.get('int_ip', 'unknown')),
-            'deleted': False  # Initialize with not deleted
+            'deleted': False,  # Initialize with not deleted
+            'parent_client_id': conn_data.get('parent_client_id', ''),  # Parent agent for linked agents
+            'link_type': conn_data.get('link_type', ''),  # Link type (e.g., "smb")
+            'protocol': conn_data.get('protocol', 'HTTPS'),  # Protocol type
         }
 
         print(f"AgentTreeWidget: Adding agent {agent_name} with details: {details}")
@@ -303,6 +306,11 @@ class AgentTreeWidget(QWidget):
             # No alias: show first 16 characters instead of 8 for better distinction
             display_name = f"{agent['guid'][:16]}..."
 
+        # Add link indicator for linked agents
+        link_type = agent.get('link_type', '')
+        if link_type:
+            display_name = f"↳ [{link_type.upper()}] {display_name}"
+
         # Add tag badges to display name
         agent_tags = self.agent_tags.get(agent['guid'], [])
         if agent_tags:
@@ -325,6 +333,11 @@ class AgentTreeWidget(QWidget):
         ]
         if alias:
             tooltip_parts.insert(0, f"Alias: {alias}")
+        if link_type:
+            tooltip_parts.append(f"Link Type: {link_type.upper()}")
+            parent_id = agent.get('parent_client_id', '')
+            if parent_id:
+                tooltip_parts.append(f"Parent Agent: {parent_id[:16]}...")
         if agent_tags:
             tag_list = ", ".join([f"{tag['name']} ({tag['color']})" for tag in agent_tags])
             tooltip_parts.append(f"Tags: {tag_list}")
@@ -336,15 +349,39 @@ class AgentTreeWidget(QWidget):
         for detail in agent['details']:
             tree_item.addChild(QTreeWidgetItem([detail]))
 
-        self.tree.addTopLevelItem(tree_item)
+        # Check if this is a linked agent with a parent
+        parent_client_id = agent.get('parent_client_id', '')
+        parent_item = None
+
+        if parent_client_id:
+            # Find the parent agent's tree item
+            parent_agent = self.agent_by_guid.get(parent_client_id)
+            if parent_agent and parent_agent['name'] in self.agent_items:
+                parent_item = self.agent_items[parent_agent['name']]
+                print(f"AgentTreeWidget: Found parent agent {parent_client_id[:16]} for linked agent {agent['name']}")
+
+        if parent_item:
+            # Add as child of parent agent (after the details but as a distinct linked agent)
+            # Insert at the end of the parent's children
+            parent_item.addChild(tree_item)
+            print(f"AgentTreeWidget: Added linked agent {agent['name']} under parent {parent_client_id[:16]}")
+        else:
+            # Add as top-level item (no parent or parent not found yet)
+            self.tree.addTopLevelItem(tree_item)
+            if parent_client_id:
+                print(f"AgentTreeWidget: Parent {parent_client_id[:16]} not found, adding {agent['name']} as top-level")
+
         self.agent_items[agent['name']] = tree_item
-        
+
         # Set visibility based on deleted status
         tree_item.setHidden(agent.get('deleted', False))
-        
+
         if not agent.get('deleted', False):
             tree_item.setExpanded(True)
-        
+            # Also expand parent if this is a linked agent
+            if parent_item:
+                parent_item.setExpanded(True)
+
         print(f"AgentTreeWidget: Added agent {agent['name']} to tree (hidden: {agent.get('deleted', False)})")
 
     def show_agents(self):
@@ -355,34 +392,64 @@ class AgentTreeWidget(QWidget):
 
         # Clear cache since tree is being rebuilt
         self.last_seen_items.clear()
+        self.agent_items.clear()
 
+        # First pass: add all agents as top-level items
         for agent in self.agent_data:
             print(f"AgentTreeWidget: Processing agent {agent['name']} for display")
-            print(f"AgentTreeWidget: Agent details: {agent}")
             self.add_agent_to_tree(agent)
+
+        # Second pass: re-parent linked agents that were added before their parent
+        for agent in self.agent_data:
+            parent_client_id = agent.get('parent_client_id', '')
+            if parent_client_id and agent['name'] in self.agent_items:
+                tree_item = self.agent_items[agent['name']]
+                # Check if item is currently a top-level item but should be a child
+                if self.tree.indexOfTopLevelItem(tree_item) >= 0:
+                    parent_agent = self.agent_by_guid.get(parent_client_id)
+                    if parent_agent and parent_agent['name'] in self.agent_items:
+                        parent_item = self.agent_items[parent_agent['name']]
+                        # Remove from top level and add to parent
+                        index = self.tree.indexOfTopLevelItem(tree_item)
+                        self.tree.takeTopLevelItem(index)
+                        parent_item.addChild(tree_item)
+                        parent_item.setExpanded(True)
+                        print(f"AgentTreeWidget: Re-parented {agent['name']} under {parent_client_id[:16]}")
 
         self.current_view = 'agents'
         print("AgentTreeWidget: show_agents complete")
 
     def on_item_clicked(self, item, column):
-        if self.current_view == 'agents' and not item.parent():
-            # Find the agent by tree item reference or display name
-            agent = None
-            for a in self.agent_data:
-                if a['name'] in self.agent_items and self.agent_items[a['name']] == item:
-                    agent = a
-                    break
-            
-            # If not found by tree item, try by display name
-            if not agent:
-                item_text = item.text(0)
+        if self.current_view == 'agents':
+            # Check if this is an agent item (either top-level or linked child)
+            # by checking if its GUID is stored in UserRole data
+            guid = item.data(0, Qt.ItemDataRole.UserRole)
+            if guid:
+                # This is an agent item (has GUID)
+                agent = self.agent_by_guid.get(guid)
+                if agent:
+                    self.terminal_widget.add_agent_tab(agent['name'], agent['guid'])
+                    return
+
+            # Fallback for top-level items without proper UserRole data
+            if not item.parent():
+                # Find the agent by tree item reference or display name
+                agent = None
                 for a in self.agent_data:
-                    if a.get('display_name', a['name']) == item_text:
+                    if a['name'] in self.agent_items and self.agent_items[a['name']] == item:
                         agent = a
                         break
-            
-            if agent:
-                self.terminal_widget.add_agent_tab(agent['name'], agent['guid'])
+
+                # If not found by tree item, try by display name
+                if not agent:
+                    item_text = item.text(0)
+                    for a in self.agent_data:
+                        if a.get('display_name', a['name']) == item_text:
+                            agent = a
+                            break
+
+                if agent:
+                    self.terminal_widget.add_agent_tab(agent['name'], agent['guid'])
 
     def show_listeners(self):
         print("AgentTreeWidget: show_listeners called")
@@ -415,8 +482,8 @@ class AgentTreeWidget(QWidget):
         """Get agent data using the GUID - O(1) lookup with dictionary"""
         return self.agent_by_guid.get(guid, None)
 
-    def add_listener(self, name, protocol, host, port):
-        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}")
+    def add_listener(self, name, protocol, host, port, pipe_name=""):
+        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}")
 
         # Check for existing listener to avoid duplicates
         for listener in self.listener_data:
@@ -424,14 +491,25 @@ class AgentTreeWidget(QWidget):
                 print(f"AgentTreeWidget: Listener {name} already exists")
                 return
 
-        new_listener = {
-            'name': name,
-            'details': [
-                f'Protocol: {protocol}',
-                f'Host: {host}',
-                f'Port: {port}'
-            ]
-        }
+        # For SMB listeners, show pipe name instead of host/port
+        if protocol.upper() == "SMB":
+            pipe = pipe_name if pipe_name else "spoolss"
+            new_listener = {
+                'name': name,
+                'details': [
+                    f'Protocol: {protocol}',
+                    f'Pipe: {pipe}'
+                ]
+            }
+        else:
+            new_listener = {
+                'name': name,
+                'details': [
+                    f'Protocol: {protocol}',
+                    f'Host: {host}',
+                    f'Port: {port}'
+                ]
+            }
         self.listener_data.append(new_listener)
 
         if self.current_view == 'listeners':
@@ -704,23 +782,35 @@ class AgentTreeWidget(QWidget):
                 # Load listeners first
                 print("\nAgentTreeWidget: Loading listeners from database")
                 cursor = conn.execute("""
-                    SELECT id, name, protocol, port, ip 
+                    SELECT id, name, protocol, port, ip, pipe_name
                     FROM listeners
                     ORDER BY name ASC
                 """)
                 listeners = cursor.fetchall()
                 print(f"AgentTreeWidget: Found {len(listeners)} listeners in database")
-                
+
                 for row in listeners:
                     print(f"AgentTreeWidget: Processing listener {row[1]}")
-                    listener = {
-                        'name': row[1],
-                        'details': [
-                            f'Protocol: {row[2]}',
-                            f'Host: {row[4]}',
-                            f'Port: {row[3]}'
-                        ]
-                    }
+                    protocol = row[2]
+                    # For SMB listeners, show pipe name instead of port/host
+                    if protocol == "SMB":
+                        pipe_name = row[5] if len(row) > 5 and row[5] else "spoolss"
+                        listener = {
+                            'name': row[1],
+                            'details': [
+                                f'Protocol: {protocol}',
+                                f'Pipe: {pipe_name}'
+                            ]
+                        }
+                    else:
+                        listener = {
+                            'name': row[1],
+                            'details': [
+                                f'Protocol: {protocol}',
+                                f'Host: {row[4]}',
+                                f'Port: {row[3]}'
+                            ]
+                        }
                     self.listener_data.append(listener)
                     print(f"AgentTreeWidget: Added listener '{listener['name']}' to data")
 
@@ -742,6 +832,8 @@ class AgentTreeWidget(QWidget):
                         lastSEEN,
                         deleted_at,
                         alias,
+                        parent_client_id,
+                        link_type,
                         COUNT(*) OVER () as total_count
                     FROM connections
                     ORDER BY lastSEEN DESC
@@ -812,7 +904,10 @@ class AgentTreeWidget(QWidget):
                             'hostname': row[1],
                             'username': row[4],
                             'ip': row[3] if row[3] else row[2],  # Prefer external IP, fallback to internal
-                            'deleted': is_deleted
+                            'deleted': is_deleted,
+                            'parent_client_id': row[14] if row[14] else '',  # For linked agents
+                            'link_type': row[15] if row[15] else '',         # Link type (e.g., "smb")
+                            'protocol': row[5],  # Protocol type
                         }
 
                         # Add this to read the alias from column 13
@@ -1160,3 +1255,110 @@ class AgentTreeWidget(QWidget):
                         f"Agent {agent_id[:8]} tags updated: {', '.join(tag_names) if tag_names else '(none)'}"
                     )
                 break
+
+    def handle_link_update(self, data):
+        """Handle link update notification from server (link or unlink event)"""
+        agent_id = data.get('agent_id')
+        parent_client_id = data.get('parent_client_id', '')
+        link_type = data.get('link_type', '')
+
+        print(f"AgentTreeWidget: Link update for {agent_id[:8]}: parent={parent_client_id[:8] if parent_client_id else 'None'}, type={link_type}")
+
+        # Find and update the agent
+        agent = self.agent_by_guid.get(agent_id)
+        if not agent:
+            print(f"AgentTreeWidget: Agent {agent_id[:8]} not found for link update")
+            return
+
+        # Check if anything actually changed
+        old_parent = agent.get('parent_client_id', '')
+        old_link_type = agent.get('link_type', '')
+        if old_parent == parent_client_id and old_link_type == link_type:
+            print(f"AgentTreeWidget: No change in link status for {agent_id[:8]}")
+            return
+
+        # Update agent data
+        agent['parent_client_id'] = parent_client_id
+        agent['link_type'] = link_type
+
+        # Update the tree view
+        if self.current_view == 'agents' and agent['name'] in self.agent_items:
+            tree_item = self.agent_items[agent['name']]
+
+            # Remove from current location
+            parent_item = tree_item.parent()
+            if parent_item:
+                # Remove from parent
+                parent_item.removeChild(tree_item)
+            else:
+                # Remove from top level
+                index = self.tree.indexOfTopLevelItem(tree_item)
+                if index >= 0:
+                    self.tree.takeTopLevelItem(index)
+
+            # Rebuild display name
+            alias = self.agent_aliases.get(agent_id)
+            if alias:
+                display_name = f"{alias} ({agent_id[:16]}...)"
+            else:
+                display_name = f"{agent_id[:16]}..."
+
+            # Add link indicator for linked agents
+            if link_type:
+                display_name = f"↳ [{link_type.upper()}] {display_name}"
+
+            # Add tag badges if any
+            agent_tags = self.agent_tags.get(agent_id, [])
+            if agent_tags:
+                tag_badges = " ".join([f"[{tag['name']}]" for tag in agent_tags])
+                display_name = f"{display_name} {tag_badges}"
+
+            agent['display_name'] = display_name
+            tree_item.setText(0, display_name)
+
+            # Update tooltip
+            tooltip_parts = [
+                f"Full GUID: {agent_id}",
+                f"Hostname: {agent.get('hostname', 'N/A')}",
+                f"OS: {agent.get('os', 'N/A')}",
+                f"Username: {agent.get('username', 'N/A')}",
+                f"IP: {agent.get('ip', 'N/A')}",
+            ]
+            if alias:
+                tooltip_parts.insert(0, f"Alias: {alias}")
+            if link_type:
+                tooltip_parts.append(f"Link Type: {link_type.upper()}")
+                if parent_client_id:
+                    tooltip_parts.append(f"Parent Agent: {parent_client_id[:16]}...")
+            tree_item.setToolTip(0, '\n'.join(tooltip_parts))
+
+            # Add to new location
+            if parent_client_id:
+                # Find parent agent's tree item
+                parent_agent = self.agent_by_guid.get(parent_client_id)
+                if parent_agent and parent_agent['name'] in self.agent_items:
+                    new_parent_item = self.agent_items[parent_agent['name']]
+                    new_parent_item.addChild(tree_item)
+                    new_parent_item.setExpanded(True)
+                    tree_item.setExpanded(True)
+                    print(f"AgentTreeWidget: Moved {agent_id[:8]} under parent {parent_client_id[:8]}")
+                else:
+                    # Parent not found, add as top-level
+                    self.tree.addTopLevelItem(tree_item)
+                    tree_item.setExpanded(True)
+                    print(f"AgentTreeWidget: Parent {parent_client_id[:8]} not found, adding {agent_id[:8]} as top-level")
+            else:
+                # No parent - add as top-level (unlinked)
+                self.tree.addTopLevelItem(tree_item)
+                tree_item.setExpanded(True)
+                print(f"AgentTreeWidget: Unlinked {agent_id[:8]}, moved to top-level")
+
+            # Log message
+            if parent_client_id:
+                self.terminal_widget.log_message(
+                    f"Agent {agent_id[:8]} linked to {parent_client_id[:8]} via {link_type.upper()}"
+                )
+            else:
+                self.terminal_widget.log_message(
+                    f"Agent {agent_id[:8]} unlinked (moved to top-level)"
+                )

@@ -22,6 +22,34 @@ class StateDatabase:
             self._connections.conn.close()
             delattr(self._connections, 'conn')
 
+    def _run_migrations(self, conn):
+        """Run schema migrations to add missing columns to existing tables."""
+        # Get existing columns for listeners table
+        cursor = conn.execute("PRAGMA table_info(listeners)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        # Migration: Add pipe_name column to listeners if missing
+        if 'pipe_name' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding pipe_name column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN pipe_name TEXT DEFAULT ''")
+            print("StateDatabase: Migration complete - pipe_name column added")
+
+        # Get existing columns for connections table
+        cursor = conn.execute("PRAGMA table_info(connections)")
+        conn_columns = {row[1] for row in cursor.fetchall()}
+
+        # Migration: Add parent_client_id column to connections if missing (for linked agents)
+        if 'parent_client_id' not in conn_columns:
+            print("StateDatabase: Migrating connections table - adding parent_client_id column")
+            conn.execute("ALTER TABLE connections ADD COLUMN parent_client_id TEXT NULL")
+            print("StateDatabase: Migration complete - parent_client_id column added")
+
+        # Migration: Add link_type column to connections if missing (for linked agents)
+        if 'link_type' not in conn_columns:
+            print("StateDatabase: Migrating connections table - adding link_type column")
+            conn.execute("ALTER TABLE connections ADD COLUMN link_type TEXT NULL")
+            print("StateDatabase: Migration complete - link_type column added")
+
     def init_db(self):
         """Initialize the database schema with thread safety."""
         with self._db_lock:  # Ensure exclusive access during initialization
@@ -43,7 +71,9 @@ class StateDatabase:
                         os TEXT,
                         proto TEXT NOT NULL,
                         deleted_at TIMESTAMP NULL DEFAULT NULL,
-                        alias TEXT NULL
+                        alias TEXT NULL,
+                        parent_client_id TEXT NULL,
+                        link_type TEXT NULL
                     );
                     CREATE TABLE IF NOT EXISTS commands (
                         id INTEGER PRIMARY KEY,
@@ -63,7 +93,8 @@ class StateDatabase:
                         name TEXT NOT NULL,
                         protocol TEXT NOT NULL,
                         port TEXT NOT NULL,
-                        ip TEXT NOT NULL
+                        ip TEXT NOT NULL,
+                        pipe_name TEXT DEFAULT ''
                     );
                     CREATE TABLE IF NOT EXISTS agent_tags (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,6 +118,9 @@ class StateDatabase:
                     CREATE INDEX IF NOT EXISTS idx_agent_tags_guid ON agent_tags(agent_guid);
                     CREATE INDEX IF NOT EXISTS idx_agent_tags_name ON agent_tags(tag_name);
                 """)
+
+                # Schema migrations - add missing columns to existing tables
+                self._run_migrations(conn)
 
                 # Debug: Print current table contents after initialization
                 print("\nDEBUG: Checking database tables after initialization:")
@@ -125,9 +159,9 @@ class StateDatabase:
                         if state_data.get("listeners"):
                             print("Upserting listeners in database")
                             conn.executemany(
-                                """INSERT OR REPLACE INTO listeners (id, name, protocol, port, ip)
-                                   VALUES (?,?,?,?,?)""",
-                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"])
+                                """INSERT OR REPLACE INTO listeners (id, name, protocol, port, ip, pipe_name)
+                                   VALUES (?,?,?,?,?,?)""",
+                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"], l.get("pipe_name", ""))
                                 for l in state_data["listeners"] if l is not None]
                             )
                             print(f"Upserted {len(state_data['listeners'])} listeners")
@@ -142,8 +176,9 @@ class StateDatabase:
                                 """INSERT OR REPLACE INTO connections (
                                     newclient_id, client_id, protocol, extIP, intIP,
                                     username, hostname, note, process, pid,
-                                    arch, lastSEEN, os, proto, deleted_at, alias
-                                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                    arch, lastSEEN, os, proto, deleted_at, alias,
+                                    parent_client_id, link_type
+                                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                 [(
                                     c["newclient_id"],
                                     c["client_id"],
@@ -160,7 +195,9 @@ class StateDatabase:
                                     c["os"],
                                     c["proto"],
                                     c.get("deleted_at", {}).get("Time") if isinstance(c.get("deleted_at"), dict) else None,
-                                    c.get("alias")
+                                    c.get("alias"),
+                                    c.get("parent_client_id"),  # For linked agents
+                                    c.get("link_type"),         # Link type (e.g., "smb")
                                 ) for c in state_data["connections"] if c is not None]
                             )
                             print(f"Upserted {len(state_data['connections'])} connections")
@@ -384,6 +421,8 @@ class StateDatabase:
                     print(f"  Protocol: {listener[2]}")
                     print(f"  Port: {listener[3]}")
                     print(f"  IP: {listener[4]}")
+                    if len(listener) > 5 and listener[5]:
+                        print(f"  Pipe Name: {listener[5]}")
                 
                 # Get counts
                 cursor.execute("SELECT COUNT(*) FROM listeners")

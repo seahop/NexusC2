@@ -735,31 +735,35 @@ func (s *GRPCServer) NotifyNewConnection(ctx context.Context, notification *pb.C
 
 	// Create a sanitized message for broadcast that excludes secrets
 	connectionData := struct {
-		NewClientID string `json:"new_client_id"`
-		ClientID    string `json:"client_id"`
-		Protocol    string `json:"protocol"`
-		ExtIP       string `json:"ext_ip"`
-		IntIP       string `json:"int_ip"`
-		Username    string `json:"username"`
-		Hostname    string `json:"hostname"`
-		Process     string `json:"process"`
-		PID         string `json:"pid"`
-		Arch        string `json:"arch"`
-		OS          string `json:"os"`
-		LastSeen    int64  `json:"last_seen"`
+		NewClientID    string `json:"new_client_id"`
+		ClientID       string `json:"client_id"`
+		Protocol       string `json:"protocol"`
+		ExtIP          string `json:"ext_ip"`
+		IntIP          string `json:"int_ip"`
+		Username       string `json:"username"`
+		Hostname       string `json:"hostname"`
+		Process        string `json:"process"`
+		PID            string `json:"pid"`
+		Arch           string `json:"arch"`
+		OS             string `json:"os"`
+		LastSeen       int64  `json:"last_seen"`
+		ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+		LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 	}{
-		NewClientID: notification.NewClientId,
-		ClientID:    notification.ClientId,
-		Protocol:    notification.Protocol,
-		ExtIP:       notification.ExtIp,
-		IntIP:       notification.IntIp,
-		Username:    notification.Username,
-		Hostname:    notification.Hostname,
-		Process:     notification.Process,
-		PID:         notification.Pid,
-		Arch:        notification.Arch,
-		OS:          notification.Os,
-		LastSeen:    notification.LastSeen,
+		NewClientID:    notification.NewClientId,
+		ClientID:       notification.ClientId,
+		Protocol:       notification.Protocol,
+		ExtIP:          notification.ExtIp,
+		IntIP:          notification.IntIp,
+		Username:       notification.Username,
+		Hostname:       notification.Hostname,
+		Process:        notification.Process,
+		PID:            notification.Pid,
+		Arch:           notification.Arch,
+		OS:             notification.Os,
+		LastSeen:       notification.LastSeen,
+		ParentClientID: notification.ParentClientId,
+		LinkType:       notification.LinkType,
 	}
 
 	// Convert to JSON
@@ -1059,6 +1063,66 @@ func (s *GRPCServer) BroadcastLastSeen(agentID string, timestamp int64) error {
 		}
 	}
 
+	return nil
+}
+
+// BroadcastLinkUpdate broadcasts a link update to all websocket clients
+// This is used when an agent is linked or unlinked from a parent
+// parentClientID and linkType are empty strings for unlink events
+func (s *GRPCServer) BroadcastLinkUpdate(agentID string, parentClientID string, linkType string) error {
+	linkUpdateData := struct {
+		Type string `json:"type"`
+		Data struct {
+			AgentID        string `json:"agent_id"`
+			ParentClientID string `json:"parent_client_id"`
+			LinkType       string `json:"link_type"`
+		} `json:"data"`
+	}{
+		Type: "link_update",
+		Data: struct {
+			AgentID        string `json:"agent_id"`
+			ParentClientID string `json:"parent_client_id"`
+			LinkType       string `json:"link_type"`
+		}{
+			AgentID:        agentID,
+			ParentClientID: parentClientID,
+			LinkType:       linkType,
+		},
+	}
+
+	jsonData, err := json.Marshal(linkUpdateData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal link update data: %v", err)
+	}
+
+	// Create stream message
+	streamMsg := &pb.StreamMessage{
+		Type:      "link_update",
+		Content:   string(jsonData),
+		Sender:    "agent_handler",
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Snapshot subscribers to avoid holding lock during sends
+	s.Mutex.Lock()
+	subscriberSnapshot := make(map[string]chan *pb.StreamMessage, len(s.subscribers))
+	for clientID, ch := range s.subscribers {
+		subscriberSnapshot[clientID] = ch
+	}
+	s.Mutex.Unlock()
+
+	// Broadcast to snapshot (no lock held)
+	for clientID, ch := range subscriberSnapshot {
+		select {
+		case ch <- streamMsg:
+			log.Printf("[BroadcastLinkUpdate] Successfully sent to subscriber: %s", clientID)
+		default:
+			log.Printf("[BroadcastLinkUpdate] Warning: Subscriber channel full, skipping: %s", clientID)
+		}
+	}
+
+	log.Printf("[BroadcastLinkUpdate] Broadcast link update for agent %s (parent=%s, type=%s)",
+		agentID, parentClientID, linkType)
 	return nil
 }
 

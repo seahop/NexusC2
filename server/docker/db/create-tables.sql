@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS listeners (
     name VARCHAR NOT NULL,
     protocol VARCHAR NOT NULL,
     port VARCHAR NOT NULL,
-    ip VARCHAR NOT NULL
+    ip VARCHAR NOT NULL,
+    pipe_name VARCHAR DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS inits (
@@ -90,6 +91,43 @@ CREATE TABLE IF NOT EXISTS link_routes (
     -- FOREIGN KEY (next_hop_guid) REFERENCES links(GUID)
 );
 
+-- =============================================================================
+-- SMB LINK ROUTING TABLE
+-- =============================================================================
+-- Maps (edge_clientID, routing_id) -> smb_clientID for link traffic routing
+
+CREATE TABLE IF NOT EXISTS link_routing (
+    id SERIAL PRIMARY KEY,
+    edge_clientID UUID NOT NULL,
+    routing_id VARCHAR(16) NOT NULL,
+    linked_clientID UUID NOT NULL,
+    link_type VARCHAR(20) DEFAULT 'smb',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active',
+    UNIQUE(edge_clientID, routing_id)
+);
+
+-- Add parent tracking columns to connections table if they don't exist
+-- These track the link hierarchy for multi-hop routing
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'connections' AND column_name = 'parent_clientid') THEN
+        ALTER TABLE connections ADD COLUMN parent_clientID UUID NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'connections' AND column_name = 'link_type') THEN
+        ALTER TABLE connections ADD COLUMN link_type VARCHAR(20) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'connections' AND column_name = 'hop_count') THEN
+        ALTER TABLE connections ADD COLUMN hop_count INTEGER DEFAULT 0;
+    END IF;
+END $$;
+
 -- ============================================================================
 -- PERFORMANCE INDEXES
 -- ============================================================================
@@ -146,3 +184,19 @@ CREATE INDEX IF NOT EXISTS idx_link_routes_source
 
 CREATE INDEX IF NOT EXISTS idx_link_routes_destination
     ON link_routes(destination_guid);
+
+-- Link routing indexes (for SMB link traffic)
+CREATE INDEX IF NOT EXISTS idx_link_routing_edge
+    ON link_routing(edge_clientID);
+
+CREATE INDEX IF NOT EXISTS idx_link_routing_linked
+    ON link_routing(linked_clientID);
+
+CREATE INDEX IF NOT EXISTS idx_link_routing_lookup
+    ON link_routing(edge_clientID, routing_id)
+    WHERE status = 'active';
+
+-- Connections parent tracking index (for multi-hop routing)
+CREATE INDEX IF NOT EXISTS idx_connections_parent
+    ON connections(parent_clientID)
+    WHERE parent_clientID IS NOT NULL;

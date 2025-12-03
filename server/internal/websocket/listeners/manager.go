@@ -63,19 +63,41 @@ func NewManager(db *sql.DB) *Manager {
 }
 
 func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener, error) {
-	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s",
-		name, protocol, port, ip)
+	return m.CreateWithPipe(name, protocol, port, ip, "")
+}
 
-	// Input validation
-	if err := m.validateInput(name, protocol, port, ip); err != nil {
-		log.Printf("Validation failed: %v", err)
-		return nil, err
+// CreateWithPipe creates a listener with optional pipe name for SMB listeners
+func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pipeName string) (*Listener, error) {
+	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s",
+		name, protocol, port, ip, pipeName)
+
+	// Normalize protocol to uppercase
+	protocol = strings.ToUpper(protocol)
+
+	// Input validation - use SMB-specific validation if SMB protocol
+	if protocol == "SMB" {
+		if err := m.validateSMBInput(name, pipeName); err != nil {
+			log.Printf("SMB Validation failed: %v", err)
+			return nil, err
+		}
+	} else {
+		if err := m.validateInput(name, protocol, port, ip); err != nil {
+			log.Printf("Validation failed: %v", err)
+			return nil, err
+		}
 	}
 
-	// Resource availability check
-	if err := m.checkAvailability(name, port); err != nil {
-		log.Printf("Resource check failed: %v", err)
-		return nil, err
+	// Resource availability check - skip port check for SMB
+	if protocol == "SMB" {
+		if err := m.checkNameAvailability(name); err != nil {
+			log.Printf("Resource check failed: %v", err)
+			return nil, err
+		}
+	} else {
+		if err := m.checkAvailability(name, port); err != nil {
+			log.Printf("Resource check failed: %v", err)
+			return nil, err
+		}
 	}
 
 	m.mu.Lock()
@@ -88,7 +110,14 @@ func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener,
 		Protocol: protocol,
 		Port:     port,
 		IP:       ip,
+		PipeName: pipeName,
 		Created:  time.Now(),
+	}
+
+	// For SMB, use port 0 to indicate no port binding
+	if protocol == "SMB" {
+		l.Port = 0
+		l.IP = "" // No IP needed for SMB listeners
 	}
 
 	// Save to database first
@@ -105,7 +134,9 @@ func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener,
 	log.Printf("Adding listener to memory maps")
 	m.listeners[l.ID] = l
 	m.ListenersByName[l.Name] = l
-	m.listenersByPort[l.Port] = l
+	if l.Port > 0 {
+		m.listenersByPort[l.Port] = l
+	}
 
 	return l, nil
 }
@@ -189,6 +220,65 @@ func (m *Manager) checkAvailability(name string, port int) error {
 	return nil
 }
 
+// checkNameAvailability checks only if the name is available (for SMB listeners which don't use ports)
+func (m *Manager) checkNameAvailability(name string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.ListenersByName[name]; exists {
+		return &ValidationError{
+			Field:   "name",
+			Message: fmt.Sprintf("listener with name %s already exists", name),
+		}
+	}
+
+	return nil
+}
+
+// validateSMBInput validates input specifically for SMB listeners
+func (m *Manager) validateSMBInput(name, pipeName string) error {
+	// Name validation
+	name = strings.TrimSpace(name)
+	if len(name) < MinNameLen {
+		return &ValidationError{
+			Field:   "name",
+			Message: "name is too short",
+		}
+	}
+	if len(name) > MaxNameLen {
+		return &ValidationError{
+			Field:   "name",
+			Message: fmt.Sprintf("name exceeds maximum length of %d characters", MaxNameLen),
+		}
+	}
+	if !isValidName(name) {
+		return &ValidationError{
+			Field:   "name",
+			Message: "name contains invalid characters (use alphanumeric, hyphen, underscore only)",
+		}
+	}
+
+	// Pipe name validation - if provided, validate it
+	if pipeName != "" {
+		if !isValidPipeName(pipeName) {
+			return &ValidationError{
+				Field:   "pipe_name",
+				Message: "pipe name contains invalid characters (use alphanumeric, hyphen, underscore only)",
+			}
+		}
+	}
+
+	return nil
+}
+
+// isValidPipeName validates SMB pipe names
+func isValidPipeName(pipeName string) bool {
+	// Allow alphanumeric characters, hyphens, and underscores
+	// Pipe names like "spoolss", "netlogon", "lsarpc" are valid
+	validPipe := regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
+	return validPipe.MatchString(pipeName)
+}
+
 // Helper functions
 func isValidName(name string) bool {
 	// Allow alphanumeric characters, hyphens, and underscores
@@ -215,7 +305,7 @@ func isValidIP(ip string) bool {
 func (m *Manager) loadExistingListeners() error {
 	log.Println("Loading existing listeners from database...")
 
-	rows, err := m.db.Query("SELECT id, name, protocol, port, ip FROM listeners")
+	rows, err := m.db.Query("SELECT id, name, protocol, port, ip, COALESCE(pipe_name, '') FROM listeners")
 	if err != nil {
 		log.Printf("Error querying listeners: %v", err)
 		return err
@@ -226,7 +316,7 @@ func (m *Manager) loadExistingListeners() error {
 	for rows.Next() {
 		var l Listener
 		var idStr string
-		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP); err != nil {
+		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName); err != nil {
 			log.Printf("Error scanning listener row: %v", err)
 			return err
 		}
@@ -241,11 +331,14 @@ func (m *Manager) loadExistingListeners() error {
 
 		m.listeners[l.ID] = &l
 		m.ListenersByName[l.Name] = &l
-		m.listenersByPort[l.Port] = &l
+		// Only add to port map if port > 0 (SMB listeners have port 0)
+		if l.Port > 0 {
+			m.listenersByPort[l.Port] = &l
+		}
 
 		count++
-		log.Printf("Loaded listener: ID=%s, Name=%s, Protocol=%s, Port=%d, IP=%s",
-			l.ID, l.Name, l.Protocol, l.Port, l.IP)
+		log.Printf("Loaded listener: ID=%s, Name=%s, Protocol=%s, Port=%d, IP=%s, PipeName=%s",
+			l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName)
 	}
 
 	log.Printf("Successfully loaded %d listeners from database", count)
@@ -383,9 +476,9 @@ func (m *Manager) saveToDB(l *Listener) error {
 		defer tx.Rollback()
 
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO listeners (id, name, protocol, port, ip)
-            VALUES ($1, $2, $3, $4, $5)
-        `, l.ID, l.Name, l.Protocol, l.Port, l.IP); err != nil {
+            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName); err != nil {
 			return fmt.Errorf("failed to insert listener: %v", err)
 		}
 

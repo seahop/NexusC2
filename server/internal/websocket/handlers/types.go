@@ -70,24 +70,26 @@ type StateExport struct {
 
 // Connection represents a connection record
 type Connection struct {
-	NewclientID string       `json:"newclient_id"`
-	ClientID    string       `json:"client_id"`
-	Protocol    string       `json:"protocol"`
-	Secret1     string       `json:"secret1"`
-	Secret2     string       `json:"secret2"`
-	ExtIP       string       `json:"ext_ip"`
-	IntIP       string       `json:"int_ip"`
-	Username    string       `json:"username"`
-	Hostname    string       `json:"hostname"`
-	Note        string       `json:"note"`
-	Process     string       `json:"process"`
-	PID         string       `json:"pid"`
-	Arch        string       `json:"arch"`
-	LastSeen    time.Time    `json:"last_seen"`
-	OS          string       `json:"os"`
-	Proto       string       `json:"proto"`
-	DeletedAt   sql.NullTime `json:"deleted_at"`
-	Alias       *string      `json:"alias,omitempty"`
+	NewclientID    string       `json:"newclient_id"`
+	ClientID       string       `json:"client_id"`
+	Protocol       string       `json:"protocol"`
+	Secret1        string       `json:"secret1"`
+	Secret2        string       `json:"secret2"`
+	ExtIP          string       `json:"ext_ip"`
+	IntIP          string       `json:"int_ip"`
+	Username       string       `json:"username"`
+	Hostname       string       `json:"hostname"`
+	Note           string       `json:"note"`
+	Process        string       `json:"process"`
+	PID            string       `json:"pid"`
+	Arch           string       `json:"arch"`
+	LastSeen       time.Time    `json:"last_seen"`
+	OS             string       `json:"os"`
+	Proto          string       `json:"proto"`
+	DeletedAt      sql.NullTime `json:"deleted_at"`
+	Alias          *string      `json:"alias,omitempty"`
+	ParentClientID *string      `json:"parent_client_id,omitempty"` // For linked agents
+	LinkType       *string      `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 }
 
 // Command represents a command record
@@ -114,6 +116,7 @@ type Listener struct {
 	Protocol string `json:"protocol"`
 	Port     string `json:"port"`
 	IP       string `json:"ip"`
+	PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
 }
 
 // messageJob represents a message processing job

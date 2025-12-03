@@ -472,6 +472,7 @@ class C2ClientGUI(QMainWindow):
             # Connect signals
             self.ws_thread.connection_update.connect(self.agent_tree.handle_new_connection)
             self.ws_thread.connection_update.connect(self.onConnectionUpdate)
+            self.ws_thread.link_update.connect(self.agent_tree.handle_link_update)
             
             # The connection is already established at this point, so directly set status to connected
             self.status_indicator.set_connected()
@@ -550,8 +551,9 @@ class C2ClientGUI(QMainWindow):
                 self.agent_tree.add_listener(
                     name=listener_details['name'],
                     protocol=listener_details['protocol'],
-                    host=listener_details['ip'],
-                    port=str(listener_details['port'])
+                    host=listener_details.get('ip', ''),
+                    port=str(listener_details.get('port', '')),
+                    pipe_name=listener_details.get('pipe_name', '')
                 )
                 self.terminal.log_message(f"New listener added: {listener_details['name']}")
                 # Mark this listener as processed

@@ -13,6 +13,7 @@ type Listener struct {
 	Protocol string
 	Port     int
 	IP       string
+	PipeName string // For SMB listeners - the named pipe to listen on
 	Active   bool
 	Created  time.Time
 }
@@ -24,6 +25,7 @@ type Message struct {
 		Protocol string `json:"protocol"`
 		Port     int    `json:"port"`
 		Host     string `json:"host"`
+		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
 	} `json:"data"`
 }
 
@@ -36,5 +38,6 @@ type Response struct {
 		Protocol string `json:"protocol"`
 		Port     string `json:"port"`
 		IP       string `json:"ip"`
+		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
 	} `json:"data,omitempty"`
 }

@@ -342,6 +342,7 @@ func (c *Client) registerMessageHandlers() {
 	c.messageHandlers["command_result"] = c.handleCommandResult
 	c.messageHandlers["agent_checkin"] = c.handleAgentCheckin
 	c.messageHandlers["upload_complete"] = c.handleUploadComplete
+	c.messageHandlers["link_update"] = c.handleLinkUpdate
 }
 
 func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool) (*pb.ListenerResponse, error) {
@@ -531,18 +532,20 @@ func (c *Client) handleNewConnection(msg *pb.StreamMessage) error {
 	}
 
 	var connData struct {
-		NewClientID string `json:"new_client_id"`
-		ClientID    string `json:"client_id"`
-		Protocol    string `json:"protocol"`
-		ExtIP       string `json:"ext_ip"`
-		IntIP       string `json:"int_ip"`
-		Username    string `json:"username"`
-		Hostname    string `json:"hostname"`
-		Process     string `json:"process"`
-		PID         string `json:"pid"`
-		Arch        string `json:"arch"`
-		OS          string `json:"os"`
-		LastSeen    int64  `json:"last_seen"`
+		NewClientID    string `json:"new_client_id"`
+		ClientID       string `json:"client_id"`
+		Protocol       string `json:"protocol"`
+		ExtIP          string `json:"ext_ip"`
+		IntIP          string `json:"int_ip"`
+		Username       string `json:"username"`
+		Hostname       string `json:"hostname"`
+		Process        string `json:"process"`
+		PID            string `json:"pid"`
+		Arch           string `json:"arch"`
+		OS             string `json:"os"`
+		LastSeen       int64  `json:"last_seen"`
+		ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+		LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 	}
 
 	if err := json.Unmarshal([]byte(msg.Content), &connData); err != nil {
@@ -550,18 +553,20 @@ func (c *Client) handleNewConnection(msg *pb.StreamMessage) error {
 	}
 
 	notification := &pb.ConnectionNotification{
-		NewClientId: connData.NewClientID,
-		ClientId:    connData.ClientID,
-		Protocol:    connData.Protocol,
-		ExtIp:       connData.ExtIP,
-		IntIp:       connData.IntIP,
-		Username:    connData.Username,
-		Hostname:    connData.Hostname,
-		Process:     connData.Process,
-		Pid:         connData.PID,
-		Arch:        connData.Arch,
-		Os:          connData.OS,
-		LastSeen:    connData.LastSeen,
+		NewClientId:    connData.NewClientID,
+		ClientId:       connData.ClientID,
+		Protocol:       connData.Protocol,
+		ExtIp:          connData.ExtIP,
+		IntIp:          connData.IntIP,
+		Username:       connData.Username,
+		Hostname:       connData.Hostname,
+		Process:        connData.Process,
+		Pid:            connData.PID,
+		Arch:           connData.Arch,
+		Os:             connData.OS,
+		LastSeen:       connData.LastSeen,
+		ParentClientId: connData.ParentClientID,
+		LinkType:       connData.LinkType,
 	}
 
 	c.Hub.HandleNewConnection(notification)
@@ -713,6 +718,29 @@ func (c *Client) handleUploadComplete(msg *pb.StreamMessage) error {
 			return fmt.Errorf("failed to broadcast upload complete: %v", err)
 		}
 		log.Printf("[UploadComplete] Successfully broadcast upload complete to all clients")
+	}
+
+	return nil
+}
+
+// handleLinkUpdate handles link_update messages from the agent handler and broadcasts to websocket clients
+func (c *Client) handleLinkUpdate(msg *pb.StreamMessage) error {
+	log.Printf("[LinkUpdate] Received link update message: %s", msg.Content)
+
+	// The message content is already in the correct format from the agent handler:
+	// {"type":"link_update","data":{"agent_id":"...","parent_client_id":"...","link_type":"..."}}
+	// Just forward it directly to websocket clients
+	broadcastJSON := []byte(msg.Content)
+
+	// Broadcast to all connected websocket clients
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if c.Hub != nil {
+		if err := c.Hub.BroadcastToAll(ctx, broadcastJSON); err != nil {
+			return fmt.Errorf("failed to broadcast link update: %v", err)
+		}
+		log.Printf("[LinkUpdate] Successfully broadcast link update to all clients")
 	}
 
 	return nil

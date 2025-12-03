@@ -1,4 +1,5 @@
-// server/docker/payloads/Windows/secure_comms.go
+// server/docker/payloads/SMB_Windows/secure_comms.go
+// Secure communications with HMAC-based secret rotation
 
 //go:build windows
 // +build windows
@@ -6,79 +7,140 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"sync"
 )
 
+// SecureComms handles encrypted communication with secret rotation
 type SecureComms struct {
-	mu            sync.RWMutex
-	secret1       string
-	secret2       string
-	initialSecret string
-	seed          string
+	mu      sync.RWMutex
+	secret1 string // Current secret
+	secret2 string // Previous secret (for decryption fallback)
 }
 
-func NewSecureComms(initialSecret, seed string) *SecureComms {
-	sc := &SecureComms{
-		initialSecret: initialSecret,
-		seed:          seed,
+// NewSecureComms creates a new SecureComms instance
+func NewSecureComms(secret1, secret2 string) *SecureComms {
+	return &SecureComms{
+		secret1: secret1,
+		secret2: secret2,
 	}
-	h1 := hmac.New(sha256.New, []byte(seed))
-	h1.Write([]byte(initialSecret))
-	sc.secret2 = fmt.Sprintf("%x", h1.Sum(nil))
-
-	h2 := hmac.New(sha256.New, []byte(seed))
-	h2.Write([]byte(sc.secret2))
-	sc.secret1 = fmt.Sprintf("%x", h2.Sum(nil))
-
-	return sc
 }
 
+// EncryptMessage encrypts a message using AES-GCM with the current secret
+func (sc *SecureComms) EncryptMessage(plaintext string) (string, error) {
+	sc.mu.RLock()
+	secret := sc.secret1
+	sc.mu.RUnlock()
+
+	// Derive key from secret
+	key := sha256.Sum256([]byte(secret))
+
+	// Create cipher
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate nonce
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+// DecryptMessage decrypts a message, trying current secret first, then previous
+func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
+	sc.mu.RLock()
+	secret1 := sc.secret1
+	secret2 := sc.secret2
+	sc.mu.RUnlock()
+
+	// Decode base64
+	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	// Try current secret first
+	if plaintext, err := sc.decryptWithSecret(ciphertext, secret1); err == nil {
+		return plaintext, nil
+	}
+
+	// Try previous secret as fallback
+	if plaintext, err := sc.decryptWithSecret(ciphertext, secret2); err == nil {
+		return plaintext, nil
+	}
+
+	return "", fmt.Errorf("failed to decrypt with any known secret")
+}
+
+func (sc *SecureComms) decryptWithSecret(ciphertext []byte, secret string) (string, error) {
+	// Derive key from secret
+	key := sha256.Sum256([]byte(secret))
+
+	// Create cipher
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce := ciphertext[:nonceSize]
+	ciphertext = ciphertext[nonceSize:]
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return string(plaintext), nil
+}
+
+// RotateSecret performs HMAC-based secret rotation
+// Must match the server's algorithm exactly
 func (sc *SecureComms) RotateSecret() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
-
+	// New secret = HMAC(secret2 as key, secret1 as data)
+	// This matches the Windows HTTPS agent and server implementation
 	h := hmac.New(sha256.New, []byte(sc.secret2))
 	h.Write([]byte(sc.secret1))
 	newSecret := fmt.Sprintf("%x", h.Sum(nil))
 
+	// Rotate
 	sc.secret2 = sc.secret1
 	sc.secret1 = newSecret
-
 }
 
-func (sc *SecureComms) GetDecryptionSecret() string {
+// GetCurrentSecret returns the current secret (for debugging)
+func (sc *SecureComms) GetCurrentSecret() string {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.secret1
-}
-
-// DecryptMessage decrypts a message using the current secret
-func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
-	// Convert current secret to 32-byte key via SHA-256
-	secretHash := sha256.Sum256([]byte(sc.GetDecryptionSecret()))
-
-	// Attempt decryption with current secret
-	decrypted, err := DecryptAES(encrypted, secretHash[:])
-	if err != nil {
-		return "", fmt.Errorf("decryption failed: %v", err)
-	}
-	//print(decrypted)
-	return decrypted, nil
-}
-
-func (sc *SecureComms) EncryptMessage(message string) (string, error) {
-	// Get current secret for encryption
-	sc.mu.RLock()
-	currentSecret := sc.secret1
-	sc.mu.RUnlock()
-
-	// Convert current secret to 32-byte key via SHA-256 (matching decrypt)
-	secretHash := sha256.Sum256([]byte(currentSecret))
-
-	// Encrypt using the same pattern as decryption
-	return EncryptAES([]byte(message), secretHash[:])
 }

@@ -21,7 +21,7 @@ func (c *TokenCommand) Name() string {
 func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output:      "Usage: token <verb> [arguments]\nVerbs: create, steal, store, use, impersonate, netonly, list, current, remove, clear, revert",
+			Output: "Usage: token <verb> [options]",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -87,7 +87,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 
 	if len(args) == 0 {
 		return CommandResult{
-			Output:      "Usage: token create <DOMAIN\\user> <password> <n> [logon_type]\n       token create netonly <DOMAIN\\user> <password> <n>",
+			Output: "Usage: token create [options]",
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

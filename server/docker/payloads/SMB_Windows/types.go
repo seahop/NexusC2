@@ -1,4 +1,6 @@
-// server/docker/payloads/Windows/shared/types.go
+// server/docker/payloads/SMB_Windows/types.go
+// Type definitions for SMB agent - matches Windows agent types for compatibility
+
 //go:build windows
 // +build windows
 
@@ -33,7 +35,7 @@ type CommandResult struct {
 	ErrorString string
 	ExitCode    int
 	CompletedAt string
-	JobID       string // Add this field for async BOF tracking
+	JobID       string
 }
 
 // CommandResponse represents the response to send back to server
@@ -51,19 +53,19 @@ type CommandResponse struct {
 	Error        string `json:"error,omitempty"`
 	ExitCode     int    `json:"exit_code"`
 	Timestamp    string `json:"timestamp"`
-	JobID        string `json:"job_id"` // Add this field
+	JobID        string `json:"job_id"`
 }
 
 // CommandContext holds shared state and functionality for commands
 type CommandContext struct {
 	mu             sync.RWMutex
 	WorkingDir     string
-	CurrentCommand *Command          // Add this field for BOF support
-	SudoSession    interface{}       // Add this field for storing sudo session
-	SessionEnv     map[string]string // Add this field for persistent environment variables
-	StolenToken    interface{}       // Keep for backward compatibility
-	TokenStore     interface{}       // Unified token store for both steal-token and make-token
-	MakeToken      interface{}       // Keep for backward compatibility
+	CurrentCommand *Command
+	SudoSession    interface{}
+	SessionEnv     map[string]string
+	StolenToken    interface{}
+	TokenStore     interface{}
+	MakeToken      interface{}
 }
 
 // CommandInterface defines the interface that all commands must implement
@@ -74,11 +76,11 @@ type CommandInterface interface {
 
 // JobInfo represents information about an active job
 type JobInfo struct {
-	ID        string // Unique job identifier
+	ID        string
 	StartTime time.Time
 	Filename  string
 	Active    bool
-	Type      string // "download", "upload", etc
+	Type      string
 }
 
 // UploadInfo tracks active upload operations
@@ -87,8 +89,8 @@ type UploadInfo struct {
 	TotalChunks int
 	RemotePath  string
 	Filename    string
-	LastUpdate  time.Time // Track last chunk received time
-	StartTime   time.Time // Track when upload started
+	LastUpdate  time.Time
+	StartTime   time.Time
 }
 
 // DownloadInfo tracks active download operations

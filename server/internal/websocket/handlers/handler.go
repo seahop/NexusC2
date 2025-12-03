@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -320,9 +321,25 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 
 	case "create_listener":
 		logMessage(LOG_VERBOSE, "Processing create_listener message")
-		// Check gRPC connection
-		if _, err := h.GetAgentClient(); err != nil {
-			return h.handleOfflineMessage(client, msgType, err)
+		// Peek at the protocol to determine if gRPC check is needed
+		var listenerPeek struct {
+			Data struct {
+				Protocol string `json:"protocol"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(message, &listenerPeek); err == nil {
+			protocol := strings.ToUpper(listenerPeek.Data.Protocol)
+			// SMB listeners don't need gRPC - they don't bind to network ports
+			if protocol != "SMB" {
+				if _, err := h.GetAgentClient(); err != nil {
+					return h.handleOfflineMessage(client, msgType, err)
+				}
+			}
+		} else {
+			// If we can't parse, check gRPC anyway (will fail in CreateListener if SMB)
+			if _, err := h.GetAgentClient(); err != nil {
+				return h.handleOfflineMessage(client, msgType, err)
+			}
 		}
 		return h.hub.CreateListener(client, message)
 

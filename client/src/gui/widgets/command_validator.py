@@ -464,13 +464,15 @@ class CommandValidator:
                 
                 # Group commands by category
                 categories = {
-                    "Shell & System": ['shell', 'sudo-session', 'env'],  # Added 'env' here
-                    "File Operations": ['upload', 'download', 'ls', 'pwd', 'cd', 'cat'],  # Added 'cat' here
-                    "Process Execution": ['inline-assembly', 'inline-assembly-async', 
+                    "Shell & System": ['shell', 'ps', 'whoami', 'sudo-session', 'env'],
+                    "File Operations": ['upload', 'download', 'ls', 'pwd', 'cd', 'cat', 'rm', 'hash', 'hashdir'],
+                    "Windows Token": ['token', 'rev2self'],
+                    "Lateral Movement": ['link', 'links', 'unlink'],
+                    "Process Execution": ['inline-assembly', 'inline-assembly-async',
                                         'execute-assembly', 'inline-execute'],
-                    "BOF Operations": ['bof', 'bof-async', 'bof-jobs', 'bof-output', 
+                    "BOF Operations": ['bof', 'bof-async', 'bof-jobs', 'bof-output',
                                     'bof-kill'],
-                    "Assembly Jobs": ['inline-assembly-jobs', 'inline-assembly-output', 
+                    "Assembly Jobs": ['inline-assembly-jobs', 'inline-assembly-output',
                                     'inline-assembly-kill', 'inline-assembly-jobs-clean',
                                     'inline-assembly-jobs-stats'],
                     "CNA Scripts": ['cna-load', 'cna-list'],

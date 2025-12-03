@@ -22,6 +22,7 @@ type ListenerMessage struct {
 		Protocol string `json:"protocol"`
 		Port     int    `json:"port"`
 		Host     string `json:"host"`
+		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
 	} `json:"data"`
 }
 
@@ -34,6 +35,7 @@ type ListenerResponse struct {
 		Protocol string `json:"protocol"`
 		Port     string `json:"port"`
 		IP       string `json:"ip"`
+		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
 	} `json:"data,omitempty"`
 }
 
@@ -304,18 +306,20 @@ func (h *Hub) HandleNewConnection(notification *pb.ConnectionNotification) {
 		Data struct {
 			Event string `json:"event"`
 			Agent struct {
-				NewClientID string `json:"new_client_id"`
-				ClientID    string `json:"client_id"`
-				Protocol    string `json:"protocol"`
-				ExtIP       string `json:"ext_ip"`
-				IntIP       string `json:"int_ip"`
-				Username    string `json:"username"`
-				Hostname    string `json:"hostname"`
-				Process     string `json:"process"`
-				PID         string `json:"pid"`
-				Arch        string `json:"arch"`
-				OS          string `json:"os"`
-				LastSeen    string `json:"last_seen"`
+				NewClientID    string `json:"new_client_id"`
+				ClientID       string `json:"client_id"`
+				Protocol       string `json:"protocol"`
+				ExtIP          string `json:"ext_ip"`
+				IntIP          string `json:"int_ip"`
+				Username       string `json:"username"`
+				Hostname       string `json:"hostname"`
+				Process        string `json:"process"`
+				PID            string `json:"pid"`
+				Arch           string `json:"arch"`
+				OS             string `json:"os"`
+				LastSeen       string `json:"last_seen"`
+				ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+				LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 			} `json:"agent"`
 		} `json:"data"`
 	}{
@@ -323,47 +327,53 @@ func (h *Hub) HandleNewConnection(notification *pb.ConnectionNotification) {
 		Data: struct {
 			Event string `json:"event"`
 			Agent struct {
-				NewClientID string `json:"new_client_id"`
-				ClientID    string `json:"client_id"`
-				Protocol    string `json:"protocol"`
-				ExtIP       string `json:"ext_ip"`
-				IntIP       string `json:"int_ip"`
-				Username    string `json:"username"`
-				Hostname    string `json:"hostname"`
-				Process     string `json:"process"`
-				PID         string `json:"pid"`
-				Arch        string `json:"arch"`
-				OS          string `json:"os"`
-				LastSeen    string `json:"last_seen"`
+				NewClientID    string `json:"new_client_id"`
+				ClientID       string `json:"client_id"`
+				Protocol       string `json:"protocol"`
+				ExtIP          string `json:"ext_ip"`
+				IntIP          string `json:"int_ip"`
+				Username       string `json:"username"`
+				Hostname       string `json:"hostname"`
+				Process        string `json:"process"`
+				PID            string `json:"pid"`
+				Arch           string `json:"arch"`
+				OS             string `json:"os"`
+				LastSeen       string `json:"last_seen"`
+				ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+				LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 			} `json:"agent"`
 		}{
 			Event: "connected",
 			Agent: struct {
-				NewClientID string `json:"new_client_id"`
-				ClientID    string `json:"client_id"`
-				Protocol    string `json:"protocol"`
-				ExtIP       string `json:"ext_ip"`
-				IntIP       string `json:"int_ip"`
-				Username    string `json:"username"`
-				Hostname    string `json:"hostname"`
-				Process     string `json:"process"`
-				PID         string `json:"pid"`
-				Arch        string `json:"arch"`
-				OS          string `json:"os"`
-				LastSeen    string `json:"last_seen"`
+				NewClientID    string `json:"new_client_id"`
+				ClientID       string `json:"client_id"`
+				Protocol       string `json:"protocol"`
+				ExtIP          string `json:"ext_ip"`
+				IntIP          string `json:"int_ip"`
+				Username       string `json:"username"`
+				Hostname       string `json:"hostname"`
+				Process        string `json:"process"`
+				PID            string `json:"pid"`
+				Arch           string `json:"arch"`
+				OS             string `json:"os"`
+				LastSeen       string `json:"last_seen"`
+				ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+				LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 			}{
-				NewClientID: conn.NewClientID,
-				ClientID:    conn.ClientID,
-				Protocol:    conn.Protocol,
-				ExtIP:       conn.ExtIP,
-				IntIP:       conn.IntIP,
-				Username:    conn.Username,
-				Hostname:    conn.Hostname,
-				Process:     conn.Process,
-				PID:         conn.PID,
-				Arch:        conn.Arch,
-				OS:          conn.OS,
-				LastSeen:    conn.LastSeen.Format(time.RFC3339),
+				NewClientID:    conn.NewClientID,
+				ClientID:       conn.ClientID,
+				Protocol:       conn.Protocol,
+				ExtIP:          conn.ExtIP,
+				IntIP:          conn.IntIP,
+				Username:       conn.Username,
+				Hostname:       conn.Hostname,
+				Process:        conn.Process,
+				PID:            conn.PID,
+				Arch:           conn.Arch,
+				OS:             conn.OS,
+				LastSeen:       conn.LastSeen.Format(time.RFC3339),
+				ParentClientID: notification.ParentClientId,
+				LinkType:       notification.LinkType,
 			},
 		},
 	}

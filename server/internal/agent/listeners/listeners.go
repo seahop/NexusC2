@@ -46,6 +46,7 @@ type Manager struct {
 	socksRoutes       *SocksRoutes
 	asyncEnabled      bool              // Add this flag for async processing
 	heartbeatBatcher  *HeartbeatBatcher // Batches lastSEEN updates to reduce DB load
+	linkRouting       *LinkRouting      // Manages SMB link routing for lateral movement
 }
 
 // NewManagerWithOptions creates a manager with optional configurations

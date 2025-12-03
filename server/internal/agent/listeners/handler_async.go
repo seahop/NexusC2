@@ -294,8 +294,10 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 
 	// Parse the decrypted data
 	var decryptedData struct {
-		AgentID string                   `json:"agent_id"`
-		Results []map[string]interface{} `json:"results"`
+		AgentID             string                   `json:"agent_id"`
+		Results             []map[string]interface{} `json:"results"`
+		LinkData            []interface{}            `json:"ld"` // Link data from connected SMB agents
+		UnlinkNotifications []interface{}            `json:"lu"` // Unlink notifications (routing IDs)
 	}
 
 	if err := json.Unmarshal(plaintext, &decryptedData); err != nil {
@@ -306,6 +308,30 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 
 	resultCount := len(decryptedData.Results)
 	log.Printf("[Async] Received %d results from agent %s", resultCount, conn.ClientID)
+
+	// Process link data if present (from connected SMB agents)
+	if len(decryptedData.LinkData) > 0 {
+		log.Printf("[Async] Processing %d link data items from edge agent %s", len(decryptedData.LinkData), conn.ClientID)
+		ctx := context.Background()
+		tx, err := ah.db.BeginTx(ctx, nil)
+		if err != nil {
+			log.Printf("[Async] Failed to begin transaction for link data: %v", err)
+		} else {
+			if err := ah.Manager.processLinkData(ctx, tx, conn.ClientID, decryptedData.LinkData); err != nil {
+				log.Printf("[Async] Failed to process link data: %v", err)
+				tx.Rollback()
+			} else {
+				tx.Commit()
+			}
+		}
+	}
+
+	// Process unlink notifications if present (when edge agent disconnects from SMB agent)
+	if len(decryptedData.UnlinkNotifications) > 0 {
+		log.Printf("[Async] Processing %d unlink notifications from edge agent %s", len(decryptedData.UnlinkNotifications), conn.ClientID)
+		ctx := context.Background()
+		ah.Manager.processUnlinkNotifications(ctx, conn.ClientID, decryptedData.UnlinkNotifications)
+	}
 
 	// Update metrics if available
 	if ah.metrics != nil {

@@ -7,6 +7,7 @@ type CommandBuffer interface {
 	DeleteCommand(clientID string)
 	BroadcastResult(result map[string]interface{}) error
 	BroadcastLastSeen(agentID string, timestamp int64) error
+	BroadcastLinkUpdate(agentID string, parentClientID string, linkType string) error
 	QueueDownloadCommand(clientID string, downloadCmd map[string]interface{}) error
 	QueueUploadNextChunk(agentID string, chunkDir string) error
 }

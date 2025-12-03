@@ -36,9 +36,10 @@ class WebSocketThread(QThread):
     connection_update = pyqtSignal(dict)
     command_response = pyqtSignal(dict)
     command_result = pyqtSignal(dict)
-    downloads_update = pyqtSignal(list)  
+    downloads_update = pyqtSignal(list)
     download_chunk = pyqtSignal(dict)
-    upload_response = pyqtSignal(dict) 
+    upload_response = pyqtSignal(dict)
+    link_update = pyqtSignal(dict) 
 
     def __init__(self, username, host, port, parent=None):
         super().__init__(parent)
@@ -376,6 +377,12 @@ class WebSocketThread(QThread):
                 else:
                     print("WebSocketThread: No terminal_widget available")
 
+            elif message_type == 'link_update':
+                print(f"WebSocketThread: Processing link_update message")
+                link_data = message_data.get('data', {})
+                print(f"WebSocketThread: Emitting link_update signal with data: {link_data}")
+                self.link_update.emit(link_data)
+
             elif message_type == 'agent_update':
                 pass
 
@@ -499,7 +506,9 @@ class WebSocketThread(QThread):
                     'arch': agent_data['arch'],
                     'os': agent_data['os'],
                     'client_id': agent_data['client_id'],
-                    'last_seen': agent_data.get('last_seen', '')
+                    'last_seen': agent_data.get('last_seen', ''),
+                    'parent_client_id': agent_data.get('parent_client_id', ''),  # For linked agents
+                    'link_type': agent_data.get('link_type', ''),  # Link type (e.g., "smb")
                 }
                 print("WebSocketThread: About to emit connection_update with data:", conn_data)
                 self.connection_update.emit(conn_data)
@@ -883,7 +892,7 @@ class CreateListenerDialog(QDialog):
         self.setLayout(layout)
 
     def setup_network_tab(self):
-        """Setup traditional network listener configuration - UNCHANGED FROM ORIGINAL"""
+        """Setup listener configuration with SMB support"""
         layout = QVBoxLayout()
         form_layout = QFormLayout()
 
@@ -891,25 +900,52 @@ class CreateListenerDialog(QDialog):
         self.name = QLineEdit()
         form_layout.addRow("Name:", self.name)
 
-        # Protocol dropdown
+        # Protocol dropdown - includes SMB
         self.protocol = QComboBox()
-        self.protocol.addItems(["HTTPS", "HTTP"])
+        self.protocol.addItems(["HTTPS", "HTTP", "SMB"])
+        self.protocol.currentTextChanged.connect(self.on_protocol_changed)
         form_layout.addRow("Protocol:", self.protocol)
 
-        # Port number field
+        # Port number field (hidden for SMB)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
         self.port.setValue(443)
-        form_layout.addRow("Port:", self.port)
+        self.port_label = QLabel("Port:")
+        form_layout.addRow(self.port_label, self.port)
 
-        # IP/Hostname field
+        # IP/Hostname field (hidden for SMB)
         self.host = QLineEdit()
         self.host.setText("0.0.0.0")
-        form_layout.addRow("IP/Hostname:", self.host)
+        self.host_label = QLabel("IP/Hostname:")
+        form_layout.addRow(self.host_label, self.host)
+
+        # Pipe name field (only shown for SMB)
+        self.pipe_name = QLineEdit()
+        self.pipe_name.setText("spoolss")
+        self.pipe_name.setPlaceholderText("e.g., spoolss, netlogon, lsarpc")
+        self.pipe_name_label = QLabel("Pipe Name:")
+        form_layout.addRow(self.pipe_name_label, self.pipe_name)
+        # Initially hide pipe name since HTTPS is default
+        self.pipe_name_label.hide()
+        self.pipe_name.hide()
 
         layout.addLayout(form_layout)
         layout.addStretch()
         self.network_tab.setLayout(layout)
+
+    def on_protocol_changed(self, protocol):
+        """Show/hide fields based on selected protocol"""
+        is_smb = protocol == "SMB"
+
+        # Hide port and host for SMB
+        self.port_label.setVisible(not is_smb)
+        self.port.setVisible(not is_smb)
+        self.host_label.setVisible(not is_smb)
+        self.host.setVisible(not is_smb)
+
+        # Show pipe name only for SMB
+        self.pipe_name_label.setVisible(is_smb)
+        self.pipe_name.setVisible(is_smb)
     
     #def setup_smb_tab(self):
     #    """Setup SMB listener configuration - SIMPLIFIED"""
@@ -951,55 +987,47 @@ class CreateListenerDialog(QDialog):
 
         # Store dialog reference for async callback
         self.ws_thread.current_dialog = self
-        
-        # Build listener data based on current tab
-        current_tab = self.tab_widget.currentWidget()
-        
-        if current_tab == self.network_tab:
-            # Traditional network listener - UNCHANGED
-            self.listener_name = self.name.text()
-            
+
+        # Validate name
+        self.listener_name = self.name.text()
+        if not self.listener_name:
+            QMessageBox.warning(self, "Error", "Please enter a listener name")
+            return
+
+        # Get selected protocol
+        protocol = self.protocol.currentText()
+
+        # Build listener data based on protocol
+        if protocol == "SMB":
+            # SMB listener - uses pipe name instead of port/host
+            pipe_name = self.pipe_name.text()
+            if not pipe_name:
+                QMessageBox.warning(self, "Error", "Please enter a pipe name")
+                return
+
             listener_data = {
                 "type": "create_listener",
                 "data": {
                     "name": self.listener_name,
-                    "protocol": self.protocol.currentText(),
+                    "protocol": "SMB",
+                    "pipe_name": pipe_name
+                }
+            }
+            print(f"CreateListenerDialog: Creating SMB listener with pipe: {pipe_name}")
+        else:
+            # Network listener (HTTP/HTTPS)
+            listener_data = {
+                "type": "create_listener",
+                "data": {
+                    "name": self.listener_name,
+                    "protocol": protocol,
                     "port": self.port.value(),
                     "host": self.host.text()
                 }
             }
-            
-        #elif current_tab == self.smb_tab:
-            # SMB listener - SIMPLIFIED
-            # Validate SMB inputs
-        #    if not self.smb_name.text():
-        #        QMessageBox.warning(self, "Error", "Please enter a listener name")
-        #        return
-            
-        #    if not self.pipe_name.text():
-        #        QMessageBox.warning(self, "Error", "Please enter a pipe name")
-        #        return
-            
-            # Validate pipe name format
-        #    if not self.pipe_name.text().startswith("\\pipe\\"):
-        #        QMessageBox.warning(self, "Error", "Pipe name must start with \\pipe\\")
-        #        return
-            
-        #    self.listener_name = self.smb_name.text()
-            
-        #    listener_data = {
-        #        "type": "create_listener",
-        #        "data": {
-        #            "name": self.listener_name,
-        #            "protocol": "SMB",
-        #            "pipe_name": self.pipe_name.text()
-        #        }
-        #    }
 
         message = json.dumps(listener_data)
         print(f"CreateListenerDialog: Sending listener creation message for {self.listener_name}")
-        #if current_tab == self.smb_tab:
-        #    print(f"CreateListenerDialog: SMB Pipe: {self.pipe_name.text()}")
 
         # Run in the event loop to avoid blocking the GUI
         future = asyncio.run_coroutine_threadsafe(

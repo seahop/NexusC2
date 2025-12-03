@@ -93,3 +93,55 @@ value = "en-US,en;q=0.9"
 [[payload_config.http_headers.custom_headers]]
 name = "Connection"
 value = "close"
+
+# =============================================================================
+# SMB LINK CONFIGURATION
+# =============================================================================
+# Settings for SMB-based agent linking (lateral movement)
+
+[smb_link]
+# Connection settings
+connection_timeout = 30        # Timeout for pipe connections in seconds
+max_message_size = 1048576     # Maximum message size in bytes (1MB)
+heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
+
+# Pipe name presets that look like legitimate Windows services
+# The actual pipe name is chosen at SMB agent build time
+# These are suggestions - you can use any name that blends with the environment
+[[smb_link.pipe_presets]]
+name = "spoolss"
+description = "Print Spooler Service"
+
+[[smb_link.pipe_presets]]
+name = "srvsvc"
+description = "Server Service"
+
+[[smb_link.pipe_presets]]
+name = "wkssvc"
+description = "Workstation Service"
+
+[[smb_link.pipe_presets]]
+name = "netlogon"
+description = "Netlogon Service"
+
+[[smb_link.pipe_presets]]
+name = "lsarpc"
+description = "LSA RPC"
+
+[[smb_link.pipe_presets]]
+name = "samr"
+description = "SAM RPC"
+
+[[smb_link.pipe_presets]]
+name = "browser"
+description = "Computer Browser"
+
+# Malleable field names for link protocol (inside encrypted layer)
+# Customize these to avoid structural fingerprinting
+[smb_link.malleable]
+link_data_field = "ld"                    # Array of linked agent data in POST
+link_commands_field = "lc"                # Array of commands for linked agents in GET response
+link_handshake_field = "lh"               # Initial handshake from SMB agent
+link_handshake_response_field = "lr"      # Handshake response for SMB agent
+routing_id_field = "r"                    # Short routing identifier
+payload_field = "p"                       # Encrypted payload blob

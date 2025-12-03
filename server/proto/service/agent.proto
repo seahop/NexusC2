@@ -83,6 +83,8 @@ message ConnectionNotification {
   string os = 13;
   string proto = 14;
   int64 last_seen = 15;
+  string parent_client_id = 16;  // Parent agent's newClientID for linked agents
+  string link_type = 17;          // Link type (e.g., "smb") for linked agents
 }
 
 message ConnectionResponse {

@@ -82,6 +82,21 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 		responseToEncrypt = map[string]interface{}{
 			"status": "no_commands",
 		}
+
+		// Even if no commands for edge agent, check for link responses
+		handshakes, linkCmds, linkErr := m.getPendingLinkResponsesSeparate(clientID)
+		if linkErr != nil {
+			log.Printf("[GetRequest] Warning: Failed to get link responses: %v", linkErr)
+		} else {
+			if len(handshakes) > 0 {
+				log.Printf("[GetRequest] Including %d handshake responses for edge agent %s", len(handshakes), clientID)
+				responseToEncrypt["lr"] = handshakes // "lr" = link responses (handshakes)
+			}
+			if len(linkCmds) > 0 {
+				log.Printf("[GetRequest] Including %d link commands for edge agent %s", len(linkCmds), clientID)
+				responseToEncrypt["lc"] = linkCmds // "lc" = link commands
+			}
+		}
 	} else {
 		// Don't log the full commands with base64 data
 		// Instead, log useful metadata about the commands
@@ -191,6 +206,22 @@ normalCommand:
 	responseToEncrypt = map[string]interface{}{
 		"status": "command_ready",
 		"data":   encrypted,
+	}
+
+	// Check for pending link responses (handshake responses + commands for linked agents)
+	// "lr" for handshake responses, "lc" for link commands
+	handshakes, linkCmds, err := m.getPendingLinkResponsesSeparate(clientID)
+	if err != nil {
+		log.Printf("[GetRequest] Warning: Failed to get link responses: %v", err)
+	} else {
+		if len(handshakes) > 0 {
+			log.Printf("[GetRequest] Including %d handshake responses for edge agent %s", len(handshakes), clientID)
+			responseToEncrypt["lr"] = handshakes // "lr" = link responses (handshakes)
+		}
+		if len(linkCmds) > 0 {
+			log.Printf("[GetRequest] Including %d link commands for edge agent %s", len(linkCmds), clientID)
+			responseToEncrypt["lc"] = linkCmds // "lc" = link commands
+		}
 	}
 
 	// Send XOR encrypted response
