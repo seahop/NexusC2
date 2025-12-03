@@ -96,7 +96,7 @@ class C2ClientGUI(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle('Nexus')
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1600, 950)
 
         # Set window icon (smaller n.png for title bar)
         icon_path = Path(__file__).parent / 'resources' / 'n.png'
@@ -229,12 +229,17 @@ class C2ClientGUI(QMainWindow):
 
         # Create splitter - starts horizontal for tree view
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Allow children to be collapsed to very small sizes (user can drag splitter far in either direction)
+        self.splitter.setChildrenCollapsible(True)
 
         # Create terminal first
         self.terminal = TerminalWidget()
 
         # Use the new unified AgentDisplayWidget (includes tree, table, and graph views)
         self.agent_display = AgentDisplayWidget(self.terminal)
+        # Set very small minimum size to allow flexible splitter positioning
+        self.agent_display.setMinimumWidth(50)
+        self.terminal.setMinimumWidth(50)
         self.splitter.addWidget(self.agent_display)
 
         # Keep agent_tree reference for backward compatibility (points to tree_widget inside agent_display)
@@ -246,8 +251,9 @@ class C2ClientGUI(QMainWindow):
         # Add terminal and logs in tabs
         self.splitter.addWidget(self.terminal)
 
-        # Set initial sizes for the splitter (slightly wider left panel for table/graph views)
-        self.splitter.setSizes([350, 850])
+        # Set initial sizes for the splitter (more space for terminal on the right)
+        # First value is agent panel, second is terminal
+        self.splitter.setSizes([560, 1040])
 
         # Connect view change signal to adjust layout
         self.agent_display.view_changed.connect(self.on_agent_view_changed)
@@ -286,9 +292,9 @@ class C2ClientGUI(QMainWindow):
             if saved_sizes:
                 self.splitter.setSizes(saved_sizes)
             else:
-                # Default: 35% table, 65% terminal (more terminal space)
+                # Default: 20% table (top), 80% terminal (bottom) - more terminal space
                 new_total = self.splitter.height()
-                self.splitter.setSizes([int(new_total * 0.35), int(new_total * 0.65)])
+                self.splitter.setSizes([int(new_total * 0.20), int(new_total * 0.80)])
         else:  # Tree or Graph view
             # Switch to horizontal layout (agents left, terminal right)
             if self.splitter.orientation() != Qt.Orientation.Horizontal:
@@ -299,9 +305,9 @@ class C2ClientGUI(QMainWindow):
             if saved_sizes:
                 self.splitter.setSizes(saved_sizes)
             else:
-                # Default: 30% agents, 70% terminal
+                # Default: 35% agents (left), 65% terminal (right)
                 new_total = self.splitter.width()
-                self.splitter.setSizes([int(new_total * 0.3), int(new_total * 0.7)])
+                self.splitter.setSizes([int(new_total * 0.35), int(new_total * 0.65)])
 
     def _save_view_splitter_sizes(self, view_id):
         """Save the current splitter sizes for a specific view."""
@@ -1175,18 +1181,18 @@ class C2ClientGUI(QMainWindow):
         dark_stylesheet = """
             QMainWindow, QDialog, QWidget {
                 background-color: #2b2b2b;
-                color: #ffffff;
+                color: #d4d4d4;
             }
             QMenuBar {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
             }
             QMenuBar::item:selected {
                 background-color: #4c4c4c;
             }
             QMenu {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
             }
             QMenu::item:selected {
@@ -1194,7 +1200,7 @@ class C2ClientGUI(QMainWindow):
             }
             QPushButton {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
                 padding: 5px;
                 border-radius: 3px;
@@ -1207,13 +1213,13 @@ class C2ClientGUI(QMainWindow):
             }
             QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
                 padding: 3px;
             }
             QTreeWidget, QListWidget, QTableWidget {
                 background-color: #2b2b2b;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
                 alternate-background-color: #323232;
             }
@@ -1222,7 +1228,7 @@ class C2ClientGUI(QMainWindow):
             }
             QHeaderView::section {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
                 padding: 5px;
             }
@@ -1232,7 +1238,7 @@ class C2ClientGUI(QMainWindow):
             }
             QTabBar::tab {
                 background-color: #3c3c3c;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: 1px solid #555555;
                 padding: 5px 10px;
             }
@@ -1245,7 +1251,7 @@ class C2ClientGUI(QMainWindow):
                 padding-top: 10px;
             }
             QGroupBox::title {
-                color: #ffffff;
+                color: #d4d4d4;
             }
         """
         self.setStyleSheet(dark_stylesheet)

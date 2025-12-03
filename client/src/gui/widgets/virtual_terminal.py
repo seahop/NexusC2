@@ -50,10 +50,10 @@ class VirtualTerminal(QScrollArea):
         self.text_widget.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
-                color: #ffffff;
+                color: #d4d4d4;
                 border: none;
                 selection-background-color: #3399ff;
-                selection-color: #ffffff;
+                selection-color: #d4d4d4;
                 padding: 5px;
             }
             QScrollBar:vertical {
@@ -86,10 +86,10 @@ class VirtualTerminal(QScrollArea):
             "dark": """
                 QTextEdit {
                     background-color: #1e1e1e;
-                    color: #ffffff;
+                    color: #d4d4d4;
                     border: none;
                     selection-background-color: #3399ff;
-                    selection-color: #ffffff;
+                    selection-color: #d4d4d4;
                     padding: 5px;
                 }
                 QScrollBar:vertical {

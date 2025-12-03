@@ -20,17 +20,18 @@ class AgentTableWidget(QWidget):
     agents_removed = pyqtSignal(list)  # list of GUIDs that were removed
 
     # Column definitions (no Parent column - hierarchy shown via indentation)
+    # Widths are proportional (percentages) - they get scaled to fit the table width
     COLUMNS = [
-        ('Name', 280),
-        ('Hostname', 160),
-        ('Username', 180),
-        ('IP', 180),
-        ('OS', 100),
-        ('Arch', 60),
-        ('Protocol', 80),
-        ('PID', 70),
-        ('Last Seen', 110),
-        ('Tags', 120),
+        ('Name', 14),         # Agent name/GUID
+        ('Hostname', 10),     # Machine hostname
+        ('Username', 9),      # User account
+        ('IP', 8),            # IP address
+        ('OS', 9),            # Operating system
+        ('Arch', 5),          # Architecture (x64, etc)
+        ('Protocol', 7),      # HTTP/HTTPS/SMB
+        ('PID', 5),           # Process ID
+        ('Last Seen', 7),     # Timestamp
+        ('Tags', 17),         # Tags column
     ]
 
     def __init__(self, terminal_widget=None, agent_tree_widget=None):
@@ -50,11 +51,14 @@ class AgentTableWidget(QWidget):
         self.table.setColumnCount(len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels([col[0] for col in self.COLUMNS])
 
-        # Set column widths
+        # Set column widths - Interactive mode allows user resizing
         header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)  # Last column fills remaining space
+
+        # Set initial column widths
         for i, (_, width) in enumerate(self.COLUMNS):
             self.table.setColumnWidth(i, width)
-        header.setStretchLastSection(True)
 
         # Enable sorting
         self.table.setSortingEnabled(True)
@@ -97,6 +101,36 @@ class AgentTableWidget(QWidget):
 
         layout.addWidget(self.table)
         self.setLayout(layout)
+
+        # Track if columns have been sized
+        self._columns_sized = False
+
+    def showEvent(self, event):
+        """Apply column widths when the widget is first shown."""
+        super().showEvent(event)
+        if not self._columns_sized:
+            self._apply_column_widths()
+            self._columns_sized = True
+
+    def resizeEvent(self, event):
+        """Reapply column widths when table is resized."""
+        super().resizeEvent(event)
+        if self._columns_sized:
+            self._apply_column_widths()
+
+    def _apply_column_widths(self):
+        """Apply proportional column widths based on available table width."""
+        total_width = self.table.viewport().width()
+        if total_width <= 0:
+            return
+
+        # Calculate total weight from column definitions
+        total_weight = sum(width for _, width in self.COLUMNS)
+
+        # Apply proportional widths (except last column which stretches)
+        for i, (_, weight) in enumerate(self.COLUMNS[:-1]):
+            col_width = int((weight / total_weight) * total_width)
+            self.table.setColumnWidth(i, col_width)
 
     def setup_timer(self):
         """Setup timer for updating last seen timestamps"""
