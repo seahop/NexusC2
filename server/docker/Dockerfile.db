@@ -7,12 +7,12 @@ ENV POSTGRES_DB=ops \
     PGDATA=/var/lib/postgresql/data
 
 # Copy SQL and setup scripts - these will run at container startup on first initialization
-COPY db/init.sql /docker-entrypoint-initdb.d/01-init.sql
-COPY db/create-tables.sql /docker-entrypoint-initdb.d/02-create-tables.sql
-COPY db/setup-permissions.sh /docker-entrypoint-initdb.d/03-setup-permissions.sh
+COPY docker/db/init.sql /docker-entrypoint-initdb.d/01-init.sql
+COPY docker/db/create-tables.sql /docker-entrypoint-initdb.d/02-create-tables.sql
+COPY docker/db/setup-permissions.sh /docker-entrypoint-initdb.d/03-setup-permissions.sh
 
 # Copy custom pg_hba.conf that allows Docker network connections
-COPY db/custom-pg_hba.conf /docker-entrypoint-initdb.d/99-custom-pg_hba.conf
+COPY docker/db/custom-pg_hba.conf /docker-entrypoint-initdb.d/99-custom-pg_hba.conf
 
 # Make scripts executable
 RUN chmod +x /docker-entrypoint-initdb.d/03-setup-permissions.sh

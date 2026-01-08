@@ -1,4 +1,17 @@
 #!/bin/bash
+#
+# LOCAL BUILD SCRIPT (OPTIONAL)
+#
+# NOTE: As of the containerized build update, you no longer need to run this script.
+# All building now happens inside Docker containers automatically when you run:
+#
+#     cd server/docker && docker compose up -d
+#
+# This script is kept for developers who want to build locally for testing.
+# It requires Go and protoc to be installed on the host system.
+#
+# For the recommended containerized approach, just run setup.sh and docker compose.
+#
 
 set -e  # Exit immediately if a command exits with a non-zero status
 export PATH=$PATH:$HOME/go/bin:/usr/local/go/bin

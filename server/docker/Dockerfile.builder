@@ -159,8 +159,8 @@ ENV TOGGLE_CHECK_PARENT_PROCESS=${TOGGLE_CHECK_PARENT_PROCESS}
 ENV TOGGLE_CHECK_LOADED_LIBRARIES=${TOGGLE_CHECK_LOADED_LIBRARIES}
 ENV TOGGLE_CHECK_DOCKER_CONTAINER=${TOGGLE_CHECK_DOCKER_CONTAINER}
 ENV TOGGLE_CHECK_PROCESS_LIST=${TOGGLE_CHECK_PROCESS_LIST}
-# Copy entrypoint script
-COPY payloads/entrypoint.sh /entrypoint.sh
+# Copy entrypoint script (from server/docker/payloads/)
+COPY docker/payloads/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

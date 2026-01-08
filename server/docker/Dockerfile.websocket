@@ -1,5 +1,41 @@
 # ==============================================================================
-# Stage 1: Docker/Docker-Compose Installer
+# Stage 1: Build Environment - Compiles Go binaries and generates protobuf files
+# ==============================================================================
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    protobuf \
+    protobuf-dev \
+    curl \
+    ca-certificates
+
+# Install protoc-gen-go plugins
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+WORKDIR /build
+
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the source code
+COPY . .
+
+# Generate protobuf files
+RUN protoc --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    proto/service/agent.proto && \
+    mv proto/service/agent.pb.go proto/ && \
+    mv proto/service/agent_grpc.pb.go proto/
+
+# Build the websocket service
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /websocket-service ./cmd/websocket
+
+# ==============================================================================
+# Stage 2: Docker/Docker-Compose Installer
 # ==============================================================================
 FROM alpine:3.20 AS docker-installer
 
@@ -15,7 +51,7 @@ RUN COMPOSE_VERSION=$(curl -sL https://api.github.com/repos/docker/compose/relea
     cp /tmp/docker-cli-plugins/docker-compose /tmp/docker-compose-standalone
 
 # ==============================================================================
-# Stage 2: Runtime Image
+# Stage 3: Runtime Image
 # ==============================================================================
 FROM alpine:3.20
 
@@ -51,23 +87,23 @@ RUN apk add --no-cache \
 COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-compose-standalone /usr/local/bin/docker-compose
 
-# Copy pre-built binary
-COPY --chown=nexus:nexus ./bin/websocket-service /app/websocket-service
+# Copy built binary from builder stage
+COPY --from=builder --chown=nexus:nexus /websocket-service /app/websocket-service
 
-# Copy certificates (combine into single layer)
-COPY --chown=nexus:nexus ./bin/certs/ws_server.crt \
-                          ./bin/certs/ws_server.key \
-                          ./bin/certs/rpc_server.crt \
-                          ./bin/certs/rpc_server.key \
+# Copy certificates from host (mounted via build context - server/certs/)
+COPY --chown=nexus:nexus ./certs/ws_server.crt \
+                          ./certs/ws_server.key \
+                          ./certs/rpc_server.crt \
+                          ./certs/rpc_server.key \
                           /app/certs/
 
-# Copy configuration
-COPY --chown=nexus:nexus ./bin/config.toml /app/config.toml
+# Copy configuration (from server/config.toml)
+COPY --chown=nexus:nexus ./config.toml /app/config.toml
 
-# Copy docker-compose and builder files for payload building
-COPY --chown=nexus:nexus docker-compose.yml /app/docker-compose.yml
-COPY --chown=nexus:nexus Dockerfile.builder /app/Dockerfile.builder
-COPY --chown=nexus:nexus payloads /app/payloads/
+# Copy docker-compose and builder files for payload building (from server/docker/)
+COPY --chown=nexus:nexus ./docker/docker-compose.yml /app/docker-compose.yml
+COPY --chown=nexus:nexus ./docker/Dockerfile.builder /app/Dockerfile.builder
+COPY --chown=nexus:nexus ./docker/payloads /app/payloads/
 
 # Ensure binary is executable
 RUN chmod +x /app/websocket-service
