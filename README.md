@@ -38,7 +38,7 @@ graph TB
         direction LR
         Agent["💻 Compromised Agent<br/>(Implant on Target)"]
         Spacer[" "]
-        Client["👤 Operator Client"]
+        Client["👤 Operator Client<br/>(GUI / API)"]
     end
 
     subgraph HostSystem[" "]
@@ -59,6 +59,7 @@ graph TB
             DB_Label["🔵 Docker Bridge Network<br/>172.28.0.0/16"]
             Database["🗄️ PostgreSQL<br/>172.28.0.2:5432"]
             Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131"]
+            RestAPI["🔌 REST API<br/>172.28.0.6:8443"]
             Builder["🔨 Builder Service<br/>172.28.0.5"]
         end
     end
@@ -66,12 +67,16 @@ graph TB
     %% External Connections
     Agent <-->|"HTTPS/HTTP"| AgentHandler
     Client <-->|"WSS :3131"| Websocket
+    Client <-->|"HTTPS :8443"| RestAPI
 
     %% Internal connections
     Websocket <-->|"gRPC :50051"| AgentHandler
+    RestAPI <-->|"gRPC :50051"| AgentHandler
     Websocket -->|":5432"| Database
+    RestAPI -->|":5432"| Database
     AgentHandler -->|":5432"| Database
     Websocket -.->|"Docker API"| Builder
+    RestAPI -.->|"Docker API"| Builder
     FW_Allow -.->|"Protects"| AgentHandler
 
     %% Styling
@@ -83,7 +88,7 @@ graph TB
     classDef label fill:none,stroke:none,color:#fff,font-weight:bold
 
     class AgentHandler hostNet
-    class Database,Websocket,Builder bridgeNet
+    class Database,Websocket,RestAPI,Builder bridgeNet
     class Agent,Client external
     class FW_Allow firewall
     class Spacer spacer
@@ -91,22 +96,25 @@ graph TB
 ```
 
 **Message Flow:**
-1. Operator Client → WebSocket: WSS connection on port 3131
-2. WebSocket ↔ Agent Handler: gRPC bidirectional stream via host.docker.internal:50051
-3. Agent ↔ Agent Handler: HTTPS/HTTP callbacks on dynamic ports
-4. Agent Handler → Database: Agent state and results via 172.28.0.2:5432
-5. WebSocket → Database: Session management and task storage
-6. WebSocket → Builder: Docker API triggers for payload compilation
+1. Operator Client → WebSocket: WSS connection on port 3131 (GUI)
+2. Operator Client → REST API: HTTPS connection on port 8443 (programmatic access)
+3. WebSocket ↔ Agent Handler: gRPC bidirectional stream via host.docker.internal:50051
+4. REST API ↔ Agent Handler: gRPC bidirectional stream via host.docker.internal:50051
+5. Agent ↔ Agent Handler: HTTPS/HTTP callbacks on dynamic ports
+6. Agent Handler → Database: Agent state and results via 172.28.0.2:5432
+7. WebSocket/REST API → Database: Session management and task storage
+8. WebSocket/REST API → Builder: Docker API triggers for payload compilation
 
 **Network Architecture:**
 - **Host Network Mode**: Agent-handler runs with `network_mode: host` for dynamic port binding
 - **Firewall Protection**: iptables rules secure gRPC port 50051 from external access
-- **Bridge Network**: Database, WebSocket, and Builder on isolated Docker network (172.28.0.0/16)
+- **Bridge Network**: Database, WebSocket, REST API, and Builder on isolated Docker network (172.28.0.0/16)
 - **Dynamic Listeners**: Agent-handler can bind to any port (80, 443, 8080, etc.) without container restart
 
 **Network Ports:**
 - PostgreSQL: 5432 (Internal bridge network only - 172.28.0.2)
 - WebSocket: 3131 (Public - WSS/TLS)
+- REST API: 8443 (Public - HTTPS/TLS)
 - gRPC: 50051 (Secured by firewall - localhost and Docker containers only)
 - HTTP/HTTPS Listeners: Dynamic (managed by agent-handler on host network)
 
