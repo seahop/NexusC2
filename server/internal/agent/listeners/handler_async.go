@@ -515,7 +515,7 @@ func (ah *AsyncHandler) broadcastResultImmediate(agentID string, result map[stri
 
 	commandResult := map[string]interface{}{
 		"agent_id":   agentID,
-		"command_id": commandDBID,
+		"command_id": fmt.Sprintf("%d", int(commandDBID)),
 		"output":     output,
 		"timestamp":  time.Now().Format(time.RFC3339),
 		"status":     "completed",

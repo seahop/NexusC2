@@ -1,0 +1,896 @@
+# NexusC2 REST API Documentation
+
+## Overview
+
+The NexusC2 REST API provides programmatic access to all C2 operations. The API uses JWT (JSON Web Token) authentication and communicates over HTTPS on port 8443.
+
+**Base URL**: `https://<server>:8443/api/v1`
+
+## Authentication
+
+All endpoints (except `/auth/cert-login`, `/auth/login`, and `/auth/refresh`) require a valid JWT access token in the `Authorization` header:
+
+```
+Authorization: Bearer <access_token>
+```
+
+### Token Lifecycle
+
+1. **Login** with username (cert-based) or username/password to receive an access token (1h) and refresh token (24h)
+2. **Use access token** for API requests
+3. **Refresh** the access token before expiry using the refresh token
+4. **Logout** to invalidate the refresh token
+
+### Authentication Methods
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| Shared API Password | `/auth/login` | **Recommended.** Use the API password from `.env` file with any username |
+| Certificate-based | `/auth/cert-login` | If you have the server certificate (can establish TLS), provide only username |
+
+### Shared API Password (Recommended)
+
+The simplest authentication method uses the shared API password generated during setup:
+
+1. During setup, `API_PASSWORD` is generated and stored in `server/docker/db/.secrets/.env`
+2. Use this password with any username to authenticate
+3. Users are auto-provisioned on first login
+
+```bash
+# Get the API password
+cat server/docker/db/.secrets/.env | grep API_PASSWORD
+
+# Set environment variable
+export NEXUS_API_PASSWORD="<password from above>"
+
+# Login with any username
+./nexus-api.py login -u operator1
+```
+
+---
+
+## Endpoints
+
+### Authentication
+
+#### POST /api/v1/auth/cert-login
+
+**Recommended authentication method.** Authenticate using TLS certificate trust. If you can establish a TLS connection (have the server certificate), you can authenticate with just a username. Users are auto-provisioned on first login.
+
+**Request Body:**
+```json
+{
+  "username": "string"     // Required: Your username/operator name
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "a1b2c3d4e5f6...",
+  "expires_in": 3600,
+  "token_type": "Bearer",
+  "username": "operator1"
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Username is required
+- `403 Forbidden`: User account is inactive
+- `500 Internal Server Error`: Authentication failed
+
+---
+
+#### POST /api/v1/auth/login
+
+Authenticate with username and password. Supports two authentication modes:
+
+1. **Shared API Password**: If the password matches the `API_PASSWORD` environment variable, the user is authenticated and auto-provisioned if they don't exist.
+2. **User-specific Password**: Falls back to checking the user's stored password hash in the database.
+
+**Request Body:**
+```json
+{
+  "username": "string",    // Required: Username/operator name
+  "password": "string"     // Required: API password (shared or user-specific)
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "a1b2c3d4e5f6...",
+  "expires_in": 3600,
+  "token_type": "Bearer",
+  "username": "admin"
+}
+```
+
+**Errors:**
+- `401 Unauthorized`: Invalid username or password
+- `403 Forbidden`: User account is inactive
+
+---
+
+#### POST /api/v1/auth/refresh
+
+Get a new access token using a refresh token.
+
+**Request Body:**
+```json
+{
+  "refresh_token": "string"    // Required: Current refresh token
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "f6e5d4c3b2a1...",
+  "expires_in": 3600,
+  "token_type": "Bearer",
+  "username": "admin"
+}
+```
+
+**Note:** The old refresh token is invalidated and a new one is issued.
+
+**Errors:**
+- `401 Unauthorized`: Invalid or expired refresh token
+- `403 Forbidden`: User account is inactive
+
+---
+
+#### POST /api/v1/auth/logout
+
+Invalidate a refresh token.
+
+**Authentication:** Required
+
+**Request Body:**
+```json
+{
+  "refresh_token": "string"    // Required: Refresh token to invalidate
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "logged out successfully"
+}
+```
+
+---
+
+#### GET /api/v1/auth/me
+
+Get current user information.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "admin"
+}
+```
+
+---
+
+### Agents
+
+#### GET /api/v1/agents
+
+List all agents with optional filtering and pagination.
+
+**Authentication:** Required
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| page | int | 1 | Page number |
+| limit | int | 50 | Results per page (max: 100) |
+| status | string | - | Filter: "active", "inactive", "all" |
+| os | string | - | Filter by OS (e.g., "windows", "linux") |
+| search | string | - | Search hostname, username, IP |
+
+**Response (200 OK):**
+```json
+{
+  "agents": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "client_id": "abc123",
+      "protocol": "https",
+      "external_ip": "203.0.113.50",
+      "internal_ip": "192.168.1.100",
+      "username": "CORP\\jsmith",
+      "hostname": "WORKSTATION01",
+      "process": "explorer.exe",
+      "pid": "1234",
+      "arch": "amd64",
+      "os": "windows",
+      "last_seen": "2025-01-08T12:30:00Z",
+      "alias": "target-1",
+      "tags": [
+        {"name": "high-value", "color": "#FF0000"},
+        {"name": "domain-admin", "color": "#4A90E2"}
+      ]
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 125
+  }
+}
+```
+
+---
+
+#### GET /api/v1/agents/:id
+
+Get detailed information about a specific agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Response (200 OK):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "client_id": "abc123",
+  "protocol": "https",
+  "external_ip": "203.0.113.50",
+  "internal_ip": "192.168.1.100",
+  "username": "CORP\\jsmith",
+  "hostname": "WORKSTATION01",
+  "process": "explorer.exe",
+  "pid": "1234",
+  "arch": "amd64",
+  "os": "windows",
+  "last_seen": "2025-01-08T12:30:00Z",
+  "alias": "target-1",
+  "note": "Primary target",
+  "tags": [
+    {"name": "high-value", "color": "#FF0000"}
+  ]
+}
+```
+
+**Errors:**
+- `404 Not Found`: Agent not found
+
+---
+
+#### DELETE /api/v1/agents/:id
+
+Remove (soft delete) an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Response (200 OK):**
+```json
+{
+  "message": "agent removed successfully"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Agent not found
+
+---
+
+#### PATCH /api/v1/agents/:id
+
+Update agent properties (alias, note).
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Request Body:**
+```json
+{
+  "alias": "string",    // Optional: New alias/nickname
+  "note": "string"      // Optional: Agent notes
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "agent updated successfully"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Agent not found
+
+---
+
+#### POST /api/v1/agents/:id/tags
+
+Add a tag to an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Request Body:**
+```json
+{
+  "tag": "string",      // Required: Tag name
+  "color": "string"     // Optional: Hex color (default: "#4A90E2")
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "tag added successfully",
+  "tags": [
+    {"name": "high-value", "color": "#FF0000"},
+    {"name": "new-tag", "color": "#4A90E2"}
+  ]
+}
+```
+
+---
+
+#### DELETE /api/v1/agents/:id/tags/:tag
+
+Remove a tag from an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+- `tag` (required): Tag name (URL encoded)
+
+**Response (200 OK):**
+```json
+{
+  "message": "tag removed successfully",
+  "tags": [
+    {"name": "high-value", "color": "#FF0000"}
+  ]
+}
+```
+
+---
+
+### Commands
+
+#### POST /api/v1/agents/:id/commands
+
+Send a command to an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Request Body:**
+```json
+{
+  "command": "string",    // Required: Command to execute
+  "data": "string"        // Optional: Additional data/arguments
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "command_id": "cmd-550e8400-e29b-41d4",
+  "db_id": 1234,
+  "status": "sent",
+  "timestamp": "2025-01-08T12:30:00Z"
+}
+```
+
+**Response (202 Accepted):** Agent offline, command queued
+```json
+{
+  "command_id": "cmd-550e8400-e29b-41d4",
+  "db_id": 1234,
+  "status": "queued",
+  "message": "command queued, agent will receive on next check-in"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Agent not found
+
+---
+
+#### GET /api/v1/agents/:id/commands
+
+Get command history for an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| page | int | 1 | Page number |
+| limit | int | 50 | Results per page (max: 100) |
+
+**Response (200 OK):**
+```json
+{
+  "commands": [
+    {
+      "id": 1234,
+      "username": "admin",
+      "guid": "550e8400-e29b-41d4-a716-446655440000",
+      "command": "whoami",
+      "timestamp": "2025-01-08T12:30:00Z",
+      "output": "CORP\\jsmith"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 25
+  }
+}
+```
+
+---
+
+#### GET /api/v1/agents/:id/commands/latest
+
+Get the most recent command for an agent with its output. Useful for polling command results after sending a command.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Response (200 OK):**
+```json
+{
+  "command": {
+    "id": 1234,
+    "username": "admin",
+    "guid": "550e8400-e29b-41d4-a716-446655440000",
+    "command": "whoami",
+    "timestamp": "2025-01-08T12:30:00Z"
+  },
+  "outputs": [
+    {
+      "output": "CORP\\jsmith",
+      "timestamp": "2025-01-08T12:30:05Z"
+    }
+  ],
+  "has_output": true,
+  "status": "completed"
+}
+```
+
+**Status Values:**
+- `completed`: Output has been received
+- `pending`: Command sent, waiting for output
+
+**Errors:**
+- `404 Not Found`: No commands found for agent
+
+---
+
+#### GET /api/v1/commands/:id
+
+Get a specific command with all outputs.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Command database ID
+
+**Response (200 OK):**
+```json
+{
+  "command": {
+    "id": 1234,
+    "username": "admin",
+    "guid": "550e8400-e29b-41d4-a716-446655440000",
+    "command": "dir C:\\",
+    "timestamp": "2025-01-08T12:30:00Z"
+  },
+  "outputs": [
+    {
+      "output": " Volume in drive C has no label...",
+      "timestamp": "2025-01-08T12:30:05Z"
+    }
+  ]
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Invalid command ID
+- `404 Not Found`: Command not found
+
+---
+
+#### DELETE /api/v1/agents/:id/commands/queue
+
+Clear pending commands for an agent.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `id` (required): Agent UUID
+
+**Response (200 OK):**
+```json
+{
+  "message": "queue cleared"
+}
+```
+
+---
+
+### Listeners
+
+#### GET /api/v1/listeners
+
+List all configured listeners.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "listeners": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "https-listener",
+      "protocol": "HTTPS",
+      "port": "443",
+      "ip": "0.0.0.0",
+      "pipe_name": ""
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "smb-listener",
+      "protocol": "SMB",
+      "port": "",
+      "ip": "",
+      "pipe_name": "spoolss"
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/listeners/:name
+
+Get a specific listener by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Listener name
+
+**Response (200 OK):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "https-listener",
+  "protocol": "HTTPS",
+  "port": "443",
+  "ip": "0.0.0.0",
+  "pipe_name": ""
+}
+```
+
+**Errors:**
+- `404 Not Found`: Listener not found
+
+---
+
+#### POST /api/v1/listeners
+
+Create a new listener.
+
+**Authentication:** Required
+
+**Request Body:**
+```json
+{
+  "name": "string",        // Required: Unique listener name
+  "protocol": "string",    // Required: "HTTP", "HTTPS", "SMB", or "RPC"
+  "port": 443,             // Required for HTTP/HTTPS: Port number (1-65535)
+  "ip": "string",          // Optional: Bind IP (default: "0.0.0.0")
+  "pipe_name": "string"    // Required for SMB: Named pipe name
+}
+```
+
+**Example (HTTPS):**
+```json
+{
+  "name": "https-listener",
+  "protocol": "HTTPS",
+  "port": 443,
+  "ip": "0.0.0.0"
+}
+```
+
+**Example (SMB):**
+```json
+{
+  "name": "smb-listener",
+  "protocol": "SMB",
+  "pipe_name": "spoolss"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "message": "listener created successfully",
+  "listener": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "https-listener",
+    "protocol": "HTTPS",
+    "port": "443",
+    "ip": "0.0.0.0",
+    "pipe_name": ""
+  }
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Invalid protocol, port, or missing required fields
+
+---
+
+#### DELETE /api/v1/listeners/:name
+
+Delete a listener.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Listener name
+
+**Response (200 OK):**
+```json
+{
+  "message": "listener deleted successfully"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Listener not found
+
+---
+
+### Payloads
+
+#### POST /api/v1/payloads/build
+
+Build a payload binary. This is a synchronous operation - the response is the binary file.
+
+**Authentication:** Required
+
+**Request Body:**
+```json
+{
+  "listener": "string",           // Required: Listener name to connect to
+  "os": "string",                 // Required: "windows", "linux", "darwin"
+  "arch": "string",               // Required: "amd64", "arm64"
+  "language": "string",           // Optional: "go" (default), "goproject" (export source)
+  "payload_type": "string",       // Optional: "http" (default), "smb"
+  "pipe_name": "string",          // Required if payload_type="smb": Pipe name
+  "safety_checks": {              // Optional: All fields optional
+    "hostname": "string",         // Must match target hostname
+    "username": "string",         // Must match target username
+    "domain": "string",           // Must match target domain
+    "file_check": {
+      "path": "string",           // File path to check
+      "must_exist": true          // true=must exist, false=must not exist
+    },
+    "process": "string",          // Process must be running
+    "kill_date": "string",        // Payload expires after (YYYY-MM-DD)
+    "working_hours": {
+      "start": "string",          // Start time (HH:MM)
+      "end": "string"             // End time (HH:MM)
+    }
+  }
+}
+```
+
+**Example (Basic):**
+```json
+{
+  "listener": "https-listener",
+  "os": "windows",
+  "arch": "amd64"
+}
+```
+
+**Example (With Safety Checks):**
+```json
+{
+  "listener": "https-listener",
+  "os": "windows",
+  "arch": "amd64",
+  "safety_checks": {
+    "hostname": "TARGET-PC",
+    "domain": "CORP",
+    "kill_date": "2025-12-31",
+    "working_hours": {
+      "start": "09:00",
+      "end": "17:00"
+    }
+  }
+}
+```
+
+**Response (200 OK):**
+- Content-Type: `application/octet-stream`
+- Content-Disposition: `attachment; filename="payload_windows_amd64.exe"`
+- X-Build-Duration: `45s`
+- Body: Binary file data
+
+**Errors:**
+- `400 Bad Request`: Invalid parameters or missing listener
+- `500 Internal Server Error`: Build failed
+
+---
+
+### Events (Server-Sent Events)
+
+#### GET /api/v1/events
+
+Subscribe to real-time events via SSE (Server-Sent Events).
+
+**Authentication:** Required
+
+**Response:** SSE stream with events:
+
+```
+event: connected
+data: {"message":"Connected to event stream","client_id":"user-123456789"}
+
+event: agent_connection
+data: {"event":"agent_connection","newclientID":"550e8400...","hostname":"WORKSTATION01",...}
+
+event: command_result
+data: {"agent_id":"550e8400...","command_id":"cmd-123","output":"result..."}
+
+event: heartbeat
+data: {"timestamp":1704718200}
+```
+
+**Event Types:**
+| Event | Description |
+|-------|-------------|
+| connected | Connection established |
+| agent_connection | New agent connected |
+| agent_update | Agent status changed |
+| command_result | Command output received |
+| listener_update | Listener state changed |
+| heartbeat | Keep-alive (every 30s) |
+
+---
+
+### Health
+
+#### GET /health
+
+Health check endpoint (no authentication required).
+
+**Response (200 OK):**
+```json
+{
+  "status": "healthy",
+  "goroutines": 15,
+  "memory_mb": 42,
+  "sse_clients": 3,
+  "grpc_connected": true
+}
+```
+
+---
+
+## Error Responses
+
+All errors follow a consistent format:
+
+```json
+{
+  "error": "error message"
+}
+```
+
+### HTTP Status Codes
+
+| Code | Description |
+|------|-------------|
+| 200 | Success |
+| 201 | Created |
+| 202 | Accepted (queued) |
+| 400 | Bad Request - Invalid input |
+| 401 | Unauthorized - Invalid/expired token |
+| 403 | Forbidden - Account inactive |
+| 404 | Not Found - Resource doesn't exist |
+| 429 | Too Many Requests - Rate limited |
+| 500 | Internal Server Error |
+
+---
+
+## Rate Limiting
+
+The API implements rate limiting per IP address:
+- Default: 100 requests per minute
+- When exceeded, returns `429 Too Many Requests` with:
+```json
+{
+  "error": "rate limit exceeded",
+  "retry_after": 60
+}
+```
+
+---
+
+## User Management
+
+### Auto-Provisioning (Recommended)
+
+When using the shared API password (`API_PASSWORD`), users are automatically created on first login. This is the recommended approach:
+
+```bash
+# Get API password from .env
+export NEXUS_API_PASSWORD=$(grep API_PASSWORD server/docker/db/.secrets/.env | cut -d= -f2)
+
+# First login creates the user
+./nexus-api.py login -u newoperator
+
+# User "newoperator" now exists in the database
+```
+
+### Manual User Creation
+
+For user-specific passwords, connect to the PostgreSQL database:
+
+```sql
+-- Generate a bcrypt hash for the password (cost=10)
+-- You can use: htpasswd -bnBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
+
+INSERT INTO api_users (username, password_hash, is_active)
+VALUES ('admin', '$2a$10$...hashed_password...', true);
+```
+
+Or use Python to generate the hash:
+```bash
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
+```
+
+### Environment Variables
+
+The REST API uses the following environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `API_PASSWORD` | Shared password for authentication (generated during setup) |
+| `JWT_SECRET` | Secret key for signing JWT tokens (generated during setup) |
+
+These are automatically set in `server/docker/db/.secrets/.env` during setup.

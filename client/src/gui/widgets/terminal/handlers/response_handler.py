@@ -1,6 +1,6 @@
 # client/src/gui/widgets/terminal/handlers/response_handler.py
 
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 class ResponseHandler:
@@ -45,15 +45,28 @@ class ResponseHandler:
     def handle_command_result(self, result_data):
         """Handle command execution results"""
         # Ensure the result belongs to the correct agent
-        if self.agent_guid != result_data.get('agent_id'):
+        # If agent_guid is None (general terminal), accept all messages
+        if self.agent_guid is not None and self.agent_guid != result_data.get('agent_id'):
             print(f"AgentTerminal [{self.terminal.agent_name}]: Skipping result not meant for this agent.")
             return
-        
+
         print(f"AgentTerminal [{self.terminal.agent_name}]: Handling command result: {result_data}")
-        
-        timestamp = result_data.get('timestamp', datetime.now().isoformat())
+
+        timestamp = result_data.get('timestamp', datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
         output = result_data.get('output', '')
         command_id = result_data.get('command_id', '')  # Get command ID for chunk tracking
+        status = result_data.get('status', '')
+
+        # For 'queued' status (API command prompts), the output is already formatted
+        # from dialogs.py with proper newlines - just display it as-is
+        if status == 'queued':
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": output
+            }
+            self.command_buffer.add_output(formatted_output)
+            self.terminal.update_display(incremental=True)
+            return
         
         # Check for BOF chunks FIRST (handles multi-chunk BOF output)
         if self._is_bof_chunk(output):
@@ -139,9 +152,10 @@ class ResponseHandler:
             return
         
         # Default formatting for other outputs
+        # End with \n\n to create blank line before next command prompt
         formatted_output = {
             "timestamp": timestamp,
-            "output": f"\n{output}"
+            "output": f"{output}\n\n"
         }
         self.command_buffer.add_output(formatted_output)
         self.terminal.update_display(incremental=True)
@@ -160,12 +174,12 @@ class ResponseHandler:
             
             if output:
                 self.command_buffer.add_output({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                     "output": f"[BOF Output]\n{output}"
                 })
             if error:
                 self.command_buffer.add_output({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                     "output": f"[BOF Error]\n{error}"
                 })
         
@@ -181,12 +195,12 @@ class ResponseHandler:
             
             if output:
                 self.command_buffer.add_output({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                     "output": f"[Inline-Assembly Output]\n{output}"
                 })
             if error:
                 self.command_buffer.add_output({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                     "output": f"[Inline-Assembly Error]\n{error}"
                 })
                 
@@ -194,14 +208,14 @@ class ResponseHandler:
             job_id = response_data.get("job_id", "")
             assembly_name = response_data.get("assembly_name", "")
             self.command_buffer.add_output({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                 "output": f"[+] Async assembly '{assembly_name}' started with job ID: {job_id}"
             })
             
         elif response_type == "inline_assembly_async_completed":
             job_id = response_data.get("job_id", "")
             self.command_buffer.add_output({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                 "output": f"[+] Async assembly job {job_id[:8]}... completed"
             })
         
@@ -215,7 +229,7 @@ class ResponseHandler:
                 print(f"DEBUG: Skipping output - agent mismatch")
                 return
         
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         if 'data' in output_data:
             timestamp = output_data['data'].get('timestamp', timestamp)
             username = output_data['data'].get('username', 'Unknown User')
@@ -241,7 +255,7 @@ class ResponseHandler:
     
     def _extract_output_fields(self, output_data):
         """Extract relevant fields from output data"""
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         if 'data' in output_data:
             timestamp = output_data['data'].get('timestamp', timestamp)

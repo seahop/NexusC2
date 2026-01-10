@@ -207,31 +207,6 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	logMessage(LOG_MINIMAL, "Client %s (%s) connected successfully", client.Username, client.ID)
 
-	// Create context with timeout for state export
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Export and send initial state
-	state, err := h.exportState(ctx)
-	if err != nil {
-		logMessage(LOG_NORMAL, "Failed to export state: %v", err)
-	} else {
-		stateMsg := struct {
-			Type string      `json:"type"`
-			Data StateExport `json:"data"`
-		}{
-			Type: "initial_state",
-			Data: *state,
-		}
-
-		stateJSON, err := json.Marshal(stateMsg)
-		if err != nil {
-			logMessage(LOG_NORMAL, "Failed to marshal state message: %v", err)
-		} else {
-			client.Send <- stateJSON
-		}
-	}
-
 	// Start the pumps FIRST
 	go client.WritePump()
 	go client.ReadPump()
@@ -256,10 +231,10 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Export and send initial state AFTER welcome
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	state, err = h.exportState(ctx)
+	state, err := h.exportState(ctx)
 	if err != nil {
 		logMessage(LOG_NORMAL, "Failed to export state: %v", err)
 	} else {
@@ -389,6 +364,10 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		logMessage(LOG_VERBOSE, "Processing remove_tag message")
 		return h.handleRemoveTag(client, message)
 
+	case "refresh_state":
+		logMessage(LOG_VERBOSE, "Processing refresh_state message")
+		return h.handleRefreshState(client)
+
 	default:
 		logMessage(LOG_NORMAL, "Unknown message type: %s", msgType)
 		return nil
@@ -422,6 +401,52 @@ func (h *WSHandler) handleOfflineMessage(client *hub.Client, msgType string, err
 	responseJSON, _ := json.Marshal(response)
 	client.Send <- responseJSON
 
+	return nil
+}
+
+// handleRefreshState re-exports and sends the current state to the client
+// This allows clients to sync state changes made by other services (e.g., REST API)
+func (h *WSHandler) handleRefreshState(client *hub.Client) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	state, err := h.exportState(ctx)
+	if err != nil {
+		logMessage(LOG_NORMAL, "Failed to export state for refresh: %v", err)
+		errorResponse := struct {
+			Type string `json:"type"`
+			Data struct {
+				Error string `json:"error"`
+			} `json:"data"`
+		}{
+			Type: "error",
+			Data: struct {
+				Error string `json:"error"`
+			}{
+				Error: "Failed to refresh state",
+			},
+		}
+		responseJSON, _ := json.Marshal(errorResponse)
+		client.Send <- responseJSON
+		return err
+	}
+
+	stateMsg := struct {
+		Type string      `json:"type"`
+		Data StateExport `json:"data"`
+	}{
+		Type: "state_refresh",
+		Data: *state,
+	}
+
+	stateJSON, err := json.Marshal(stateMsg)
+	if err != nil {
+		logMessage(LOG_NORMAL, "Failed to marshal state refresh: %v", err)
+		return err
+	}
+
+	client.Send <- stateJSON
+	logMessage(LOG_MINIMAL, "Sent state refresh to client %s", client.Username)
 	return nil
 }
 

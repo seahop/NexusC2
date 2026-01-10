@@ -278,7 +278,6 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 
 		// Broadcast all results after successful insert
 		for _, record := range outputBatch {
-			log.Printf("[Bulk Insert] DEBUG: Preparing to broadcast command %d, output_length=%d", record.CommandID, len(record.Output))
 			commandResult := map[string]interface{}{
 				"agent_id":   agentID,
 				"command_id": record.CommandID,
@@ -379,7 +378,7 @@ func (m *Manager) processInlineAssemblyResult(ctx context.Context, tx *sql.Tx, a
 	// Broadcast to WebSocket clients with special type
 	commandResult := map[string]interface{}{
 		"agent_id":   agentID,
-		"command_id": commandDBID,
+		"command_id": fmt.Sprintf("%d", int(commandDBID)),
 		"output":     output,
 		"timestamp":  time.Now().Format(time.RFC3339),
 		"status":     "completed",
@@ -608,7 +607,7 @@ func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, a
 	// Broadcast the result
 	commandResult := map[string]interface{}{
 		"agent_id":   agentID,
-		"command_id": commandDBID,
+		"command_id": fmt.Sprintf("%d", int(commandDBID)),
 		"output":     output,
 		"timestamp":  time.Now().Format(time.RFC3339),
 		"status":     "completed",
@@ -668,7 +667,7 @@ func (m *Manager) processBOFAsyncResult(ctx context.Context, tx *sql.Tx, agentID
 		// Broadcast the original BOF_ASYNC message so client can parse it
 		commandResult := map[string]interface{}{
 			"agent_id":   agentID,
-			"command_id": float64(commandDBID),
+			"command_id": fmt.Sprintf("%d", int(commandDBID)),
 			"output":     output, // Send original BOF_ASYNC_* format for client parsing
 			"timestamp":  time.Now().Format(time.RFC3339),
 			"status":     "completed",

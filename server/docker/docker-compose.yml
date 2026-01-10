@@ -122,6 +122,55 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  rest-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rest
+    networks:
+      c2_internal:
+        ipv4_address: 172.28.0.6
+    depends_on:
+      database:
+        condition: service_healthy
+      websocket:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allow accessing host network
+    environment:
+      CONFIG_FILE: /app/config.toml
+      HOST_PAYLOADS_PATH: ${PWD}/payloads
+      GRPC_ADDRESS: host.docker.internal:50051  # Connect to agent-handler on host network
+      # WebSocket proxy URL - REST API proxies operations through WebSocket service
+      # This ensures all events are broadcast to GUI clients and reuses existing logic
+      WS_PROXY_URL: wss://172.28.0.3:3131/ws
+    env_file:
+      - db/.secrets/.env
+    # Add host's docker group for socket access
+    group_add:
+      - ${DOCKER_GID:-984}
+    volumes:
+      - /shared:/shared
+      - ./downloads:/app/downloads
+      - ./uploads:/app/uploads
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./payloads:/app/payloads:ro
+      - ${PWD}/payloads:${PWD}/payloads:ro
+    ports:
+      - "8443:8443"  # Expose REST API for external clients
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   builder:
     image: docker_builder:latest
     build:

@@ -343,6 +343,7 @@ func (c *Client) registerMessageHandlers() {
 	c.messageHandlers["agent_checkin"] = c.handleAgentCheckin
 	c.messageHandlers["upload_complete"] = c.handleUploadComplete
 	c.messageHandlers["link_update"] = c.handleLinkUpdate
+	c.messageHandlers["command_ack"] = c.handleCommandAck
 }
 
 func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool) (*pb.ListenerResponse, error) {
@@ -576,7 +577,7 @@ func (c *Client) handleNewConnection(msg *pb.StreamMessage) error {
 func (c *Client) handleCommandResult(msg *pb.StreamMessage) error {
 	var resultData struct {
 		AgentID   string `json:"agent_id"`
-		CommandID int    `json:"command_id"`
+		CommandID string `json:"command_id"`
 		Output    string `json:"output"`
 		Timestamp string `json:"timestamp"`
 		Status    string `json:"status"`
@@ -585,17 +586,6 @@ func (c *Client) handleCommandResult(msg *pb.StreamMessage) error {
 	if err := json.Unmarshal([]byte(msg.Content), &resultData); err != nil {
 		return fmt.Errorf("failed to unmarshal command result: %v", err)
 	}
-
-	// Calculate output size for logging
-	outputSize := len(resultData.Output)
-
-	// Log metadata ONLY, never the actual content
-	log.Printf("[CommandResult] Received result:")
-	log.Printf("  Agent ID: %v", resultData.AgentID)
-	log.Printf("  Command ID: %v", resultData.CommandID)
-	log.Printf("  Output Size: %d bytes", outputSize)
-	log.Printf("  Timestamp: %s", resultData.Timestamp)
-	log.Printf("  Status: %s", resultData.Status)
 
 	// Create broadcast message
 	broadcastMsg := struct {
@@ -622,7 +612,6 @@ func (c *Client) handleCommandResult(msg *pb.StreamMessage) error {
 		if err != nil {
 			return fmt.Errorf("failed to broadcast command result: %v", err)
 		}
-		log.Printf("[CommandResult] Successfully broadcast command result to all clients")
 	}
 
 	return nil
@@ -741,6 +730,49 @@ func (c *Client) handleLinkUpdate(msg *pb.StreamMessage) error {
 			return fmt.Errorf("failed to broadcast link update: %v", err)
 		}
 		log.Printf("[LinkUpdate] Successfully broadcast link update to all clients")
+	}
+
+	return nil
+}
+
+// handleCommandAck handles command_ack messages from the agent handler and broadcasts to websocket clients
+// This is sent AFTER the command is stored in the database, so it includes the db_id
+func (c *Client) handleCommandAck(msg *pb.StreamMessage) error {
+	log.Printf("[CommandAck] Received command ack message: %s", msg.Content)
+
+	// Parse the message content to wrap it properly for WebSocket clients
+	var ackData map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &ackData); err != nil {
+		return fmt.Errorf("failed to parse command_ack content: %v", err)
+	}
+
+	// The message from agent-handler has: type, command_id, agent_id, db_id, status, timestamp
+	// We need to wrap it for WebSocket clients
+	broadcastMsg := map[string]interface{}{
+		"type": "command_ack",
+		"data": map[string]interface{}{
+			"agent_id":   ackData["agent_id"],
+			"command_id": ackData["command_id"],
+			"db_id":      ackData["db_id"],
+			"status":     ackData["status"],
+			"timestamp":  ackData["timestamp"],
+		},
+	}
+
+	broadcastJSON, err := json.Marshal(broadcastMsg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command_ack broadcast: %v", err)
+	}
+
+	// Broadcast to all connected websocket clients
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if c.Hub != nil {
+		if err := c.Hub.BroadcastToAll(ctx, broadcastJSON); err != nil {
+			return fmt.Errorf("failed to broadcast command_ack: %v", err)
+		}
+		log.Printf("[CommandAck] Successfully broadcast command_ack to all clients (db_id=%v)", ackData["db_id"])
 	}
 
 	return nil

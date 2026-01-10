@@ -3,6 +3,27 @@ port = "3131"
 cert_file = "/app/certs/ws_server.crt"
 key_file = "/app/certs/ws_server.key"
 
+# =============================================================================
+# REST API CONFIGURATION
+# =============================================================================
+[rest_api]
+port = "8443"
+cert_file = "/app/certs/api_server.crt"
+key_file = "/app/certs/api_server.key"
+
+[rest_api.jwt]
+# JWT token expiry durations
+access_expiry = "1h"      # Access token lifetime
+refresh_expiry = "24h"    # Refresh token lifetime
+
+[rest_api.rate_limit]
+# Rate limiting per IP address
+requests_per_minute = 100
+
+[rest_api.cors]
+# Allowed origins for CORS (use ["*"] to allow all)
+allowed_origins = ["*"]
+
 [web_server]
 cert_file = "/app/certs/web_server.crt"
 key_file = "/app/certs/web_server.key"

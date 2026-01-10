@@ -4,7 +4,7 @@ import json
 import uuid
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 class CommandHandler:
@@ -121,7 +121,8 @@ class CommandHandler:
             
             if not is_valid:
                 # Display error in terminal
-                timestamp = datetime.now().isoformat()
+                # Use UTC timestamp to match server format for proper sorting
+                timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                 username = self.terminal.command_buffer.username or "user"
                 
                 # Echo the command
@@ -294,7 +295,8 @@ Usage: bof {subcommand} [arguments]
 BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                     
                     # Echo and display
-                    timestamp = datetime.now().isoformat()
+                    # Use UTC timestamp to match server format for proper sorting
+                    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                     username = self.terminal.command_buffer.username or "user"
                     
                     self.terminal.command_buffer.add_output({
@@ -388,7 +390,8 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                     help_text += f"\n  {cmd_name:<25} {description}"
         
         # Echo the command and show help
-        timestamp = datetime.now().isoformat()
+        # Use UTC timestamp to match server format for proper sorting
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         username = self.terminal.command_buffer.username or "user"
         
         self.terminal.command_buffer.add_output({
@@ -406,23 +409,27 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
     def _send_via_websocket(self, command):
         """Send command via WebSocket"""
         print(f"DEBUG: Creating command message")
-        
+
+        # Use UTC timestamp to match server format for proper sorting
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        command_id = str(uuid.uuid4())
+
         command_msg = {
             "type": "agent_command",
             "data": {
                 "command": command,
                 "agent_id": self.agent_guid,
-                "command_id": str(uuid.uuid4()),
+                "command_id": command_id,
                 "filename": "",
                 "currentChunk": 0,
                 "totalChunks": 0,
                 "data": "",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": timestamp
             }
         }
-        
+
         print(f"DEBUG: Command message: {json.dumps(command_msg, indent=2)}")
-        
+
         try:
             print(f"DEBUG: Sending command via WebSocket")
             future = asyncio.run_coroutine_threadsafe(
@@ -431,13 +438,29 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
             )
             result = future.result(timeout=5)
             print(f"DEBUG: WebSocket send result: {result}")
-            
+
+            # Track this command_id so we skip the server's command_queued broadcast
+            # (we're echoing the command locally instead to avoid duplication)
+            if hasattr(self.ws_thread, 'locally_sent_commands'):
+                self.ws_thread.locally_sent_commands.add(command_id)
+                print(f"DEBUG: Tracked locally sent command: {command_id[:8]}")
+
+            # Echo the command locally in the terminal
+            # Add blank line after command for consistent spacing
+            username = self.terminal.command_buffer.username or "user"
+            self.terminal.command_buffer.add_output({
+                "timestamp": timestamp,
+                "output": f"[{timestamp}] {username} > {command}\n\n",
+                "type": "command"
+            })
+            self.terminal.update_display(incremental=True)
+
             # Handle upload commands specially
             if command.startswith('upload'):
                 print(f"DEBUG: Handling upload command")
                 self.file_uploader.original_command = command
                 self.file_uploader.handle_upload_command(command)
-            
+
             print(f"DEBUG: Command sent successfully")
             return True
             

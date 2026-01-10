@@ -155,32 +155,26 @@ class AgentTerminal(QWidget):
         self.setLayout(layout)
     
     def _connect_signals(self):
-        """Connect WebSocket signals to response handlers"""
+        """Connect WebSocket signals to response handlers.
+
+        NOTE: command_response, command_result, bof_response, and inline_assembly_response
+        are NOT connected here because TerminalWidget handles routing these signals to the
+        appropriate terminal. Connecting them here would cause duplicate processing.
+
+        Only upload_response is connected directly since it's not routed through TerminalWidget.
+        """
         if self.ws_thread:
-            print(f"DEBUG: Setting up WebSocket connections")
-            
+            print(f"DEBUG: Setting up WebSocket connections for AgentTerminal")
+
             # Set username if available
             if hasattr(self.ws_thread, 'username'):
                 print(f"DEBUG: Setting username: {self.ws_thread.username}")
                 self.command_buffer.set_username(self.ws_thread.username)
-            
-            # Connect response signals
-            print(f"DEBUG: Connecting signal handlers")
-            self.ws_thread.command_response.connect(self.response_handler.handle_command_output)
-            self.ws_thread.command_result.connect(self.response_handler.handle_command_result)
+
+            # Only connect upload_response directly - other signals are routed through TerminalWidget
+            # to avoid duplicate processing (TerminalWidget.handle_command_result routes to terminals)
             self.ws_thread.upload_response.connect(self.response_handler.handle_upload_response)
-            
-            # Connect BOF response handler
-            if hasattr(self.ws_thread, 'bof_response'):
-                self.ws_thread.bof_response.connect(self.response_handler.handle_bof_response)
-                print(f"DEBUG:   bof_response connected")
-            
-            # Connect inline-assembly response handler
-            if hasattr(self.ws_thread, 'inline_assembly_response'):
-                self.ws_thread.inline_assembly_response.connect(
-                    self.response_handler.handle_inline_assembly_response
-                )
-                print(f"DEBUG:   inline_assembly_response connected")
+            print(f"DEBUG: upload_response connected (other signals routed via TerminalWidget)")
         else:
             print(f"DEBUG: No ws_thread provided - running in limited mode")
     
@@ -467,6 +461,7 @@ class TerminalWidget(QWidget):
         self.ws_thread = ws_thread
         self.command_history = {"commands": [], "outputs": []}
         self.outputs_by_command = {}
+        self.pending_outputs = {}  # Store outputs for agents without open tabs: {agent_id: [(output, timestamp), ...]}
         self.agent_tree = None
         self.agent_aliases = {}  # Track agent renames (agent_guid -> display_name)
 
@@ -476,6 +471,11 @@ class TerminalWidget(QWidget):
         if ws_thread:
             ws_thread.command_response.connect(self.handle_command_output)
             ws_thread.command_result.connect(self.handle_command_result)
+
+            # Connect command_queued_data signal to update command_history cache
+            # This ensures commands sent via API appear when agent tab is created later
+            if hasattr(ws_thread, 'command_queued_data'):
+                ws_thread.command_queued_data.connect(self.handle_command_queued_data)
 
             if hasattr(ws_thread, 'bof_response'):
                 ws_thread.bof_response.connect(self.handle_bof_response)
@@ -510,7 +510,42 @@ class TerminalWidget(QWidget):
         self.command_history = commands
         self.outputs_by_command = outputs_by_command
         print(f"TerminalWidget: Stored {len(commands)} commands in history")
-    
+
+    @pyqtSlot(dict)
+    def handle_command_queued_data(self, data):
+        """Update command_history cache when a new command is queued.
+
+        This ensures commands sent via API (or other means) appear in the terminal
+        when the agent tab is created later, not just when the agent is already selected.
+        """
+        agent_id = data.get('agent_id')
+        command_id = data.get('command_id')
+        command = data.get('command')
+        username = data.get('username')
+        timestamp = data.get('timestamp')
+
+        # Convert command_history to list if it's still a dict (initial state)
+        if isinstance(self.command_history, dict):
+            self.command_history = list(self.command_history.get('commands', []))
+
+        # Create a command tuple matching the format from initial_state
+        # Format: (id, username, guid, command, timestamp)
+        # Since we don't have DB ID yet, use command_id as placeholder (will be negative to distinguish)
+        try:
+            placeholder_id = -abs(hash(command_id)) % (2**31)  # Use hash to create unique negative ID
+        except:
+            placeholder_id = -1
+
+        new_command = (placeholder_id, username, agent_id, command, timestamp)
+
+        # Add to command_history cache
+        self.command_history.append(new_command)
+
+        # Initialize empty outputs for this command (outputs will come via command_result)
+        self.outputs_by_command[placeholder_id] = []
+
+        print(f"TerminalWidget: Added command to history cache - agent={agent_id[:8] if agent_id else 'N/A'}, cmd={command[:30] if command else 'N/A'}...")
+
     def add_agent_tab(self, agent_name, agent_guid=None):
         """Create or activate an agent terminal tab"""
         # Check if agent has been renamed
@@ -563,8 +598,12 @@ class TerminalWidget(QWidget):
             index = self.tabs.addTab(agent_terminal, f"Agent: {display_name}")
 
             # Initialize with any stored command history for this agent
+            # Sort commands by timestamp, but keep each command's outputs grouped with it
             if hasattr(self, 'command_history'):
                 agent_commands = [cmd for cmd in self.command_history if cmd[2] == agent_guid]
+                # Sort commands by timestamp (index 4)
+                agent_commands.sort(key=lambda x: x[4])
+
                 for command in agent_commands:
                     command_id = command[0]
                     username = command[1]
@@ -581,7 +620,7 @@ class TerminalWidget(QWidget):
                     }
                     agent_terminal.command_buffer.add_output(formatted_command)
 
-                    # Add corresponding outputs
+                    # Add corresponding outputs immediately after the command (preserving grouping)
                     command_outputs = self.outputs_by_command.get(command_id, [])
                     for output in command_outputs:
                         formatted_output = {
@@ -590,7 +629,21 @@ class TerminalWidget(QWidget):
                         }
                         agent_terminal.command_buffer.add_output(formatted_output)
 
-                agent_terminal.update_display()
+            # Add any pending outputs that were received while the tab wasn't open
+            # These are real-time outputs, so they naturally have later timestamps
+            if agent_guid in self.pending_outputs:
+                pending = self.pending_outputs[agent_guid]
+                print(f"TerminalWidget: Adding {len(pending)} pending outputs for agent {agent_guid[:8]}")
+                for pending_output in pending:
+                    formatted_output = {
+                        "timestamp": pending_output.get('timestamp', ''),
+                        "output": pending_output.get('output', '')
+                    }
+                    agent_terminal.command_buffer.add_output(formatted_output)
+                # Clear the pending outputs now that they're added
+                del self.pending_outputs[agent_guid]
+
+            agent_terminal.update_display()
 
             self.tabs.setCurrentIndex(index)
 
@@ -645,11 +698,53 @@ class TerminalWidget(QWidget):
         self.logs.add_log(message)
     
     def set_ws_thread(self, ws_thread):
-        """Update WebSocket thread for all terminals"""
+        """Update WebSocket thread for all terminals and connect signals"""
         self.ws_thread = ws_thread
         self.general_terminal.ws_thread = ws_thread
         for terminal in self.agent_terminals.values():
             terminal.ws_thread = ws_thread
+
+        # Connect signals if ws_thread is provided
+        # This is needed because TerminalWidget might be created before ws_thread is available
+        if ws_thread:
+            # Disconnect any existing connections first to avoid duplicates
+            try:
+                ws_thread.command_response.disconnect(self.handle_command_output)
+            except (TypeError, RuntimeError):
+                pass  # Not connected yet
+            try:
+                ws_thread.command_result.disconnect(self.handle_command_result)
+            except (TypeError, RuntimeError):
+                pass
+
+            # Connect the signals
+            ws_thread.command_response.connect(self.handle_command_output)
+            ws_thread.command_result.connect(self.handle_command_result)
+
+            # Connect command_queued_data signal to update command_history cache
+            if hasattr(ws_thread, 'command_queued_data'):
+                try:
+                    ws_thread.command_queued_data.disconnect(self.handle_command_queued_data)
+                except (TypeError, RuntimeError):
+                    pass
+                ws_thread.command_queued_data.connect(self.handle_command_queued_data)
+
+            # Connect other signals
+            if hasattr(ws_thread, 'bof_response'):
+                try:
+                    ws_thread.bof_response.disconnect(self.handle_bof_response)
+                except (TypeError, RuntimeError):
+                    pass
+                ws_thread.bof_response.connect(self.handle_bof_response)
+
+            if hasattr(ws_thread, 'inline_assembly_response'):
+                try:
+                    ws_thread.inline_assembly_response.disconnect(self.handle_inline_assembly_response)
+                except (TypeError, RuntimeError):
+                    pass
+                ws_thread.inline_assembly_response.connect(self.handle_inline_assembly_response)
+
+            print("TerminalWidget: Connected signals to ws_thread")
     
     @pyqtSlot(dict)
     def handle_command_response(self, response_data):
@@ -673,12 +768,46 @@ class TerminalWidget(QWidget):
         """Route command results to the appropriate terminal"""
         print(f"TerminalWidget: Handling command result: {result_data}")
         agent_id = result_data.get('agent_id')
-        
+
         if agent_id in self.agent_terminals:
             terminal = self.agent_terminals[agent_id]
+            status = result_data.get('status', '')
+            command_id = result_data.get('command_id', '')
+
+            # For 'queued' status messages, check if this command was sent from THIS client
+            # If so, skip it (we already echoed locally). If not (API command), display it.
+            if status == 'queued':
+                locally_sent = self.ws_thread.locally_sent_commands if self.ws_thread else set()
+                if command_id in locally_sent:
+                    # GUI command - we already echoed it locally, skip the server broadcast
+                    print(f"TerminalWidget: Skipping locally-sent command {command_id[:8] if command_id else 'N/A'}")
+                    locally_sent.discard(command_id)
+                    return
+                # API command - display it since there was no local echo
+                print(f"TerminalWidget: Displaying API command for open terminal {agent_id[:8] if agent_id else 'N/A'}")
+
             print(f"TerminalWidget: Routing result to terminal for agent_id {agent_id}")
             terminal.response_handler.handle_command_result(result_data)
         else:
+            # Store output for later when agent tab is created
+            # This ensures outputs appear even if agent tab wasn't open when command ran
+            output = result_data.get('output', '')
+            timestamp = result_data.get('timestamp', '')
+            status = result_data.get('status', '')
+
+            # Only store actual command outputs in pending_outputs, not 'queued' status messages
+            # which are command prompt lines. Those are already captured in command_history
+            # via the command_queued_data signal to avoid duplication.
+            if agent_id and output and status != 'queued':
+                if agent_id not in self.pending_outputs:
+                    self.pending_outputs[agent_id] = []
+                self.pending_outputs[agent_id].append({
+                    'output': output,
+                    'timestamp': timestamp,
+                    'status': status
+                })
+                print(f"TerminalWidget: Stored pending output for agent {agent_id[:8] if agent_id else 'N/A'}")
+
             print(f"TerminalWidget: No terminal found for agent {agent_id}. Logging to general terminal.")
             self.general_terminal.response_handler.handle_command_result(result_data)
     

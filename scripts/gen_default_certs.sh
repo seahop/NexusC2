@@ -44,8 +44,9 @@ EOL
 generate_cert "web"
 generate_cert "ws"
 generate_cert "rpc"
+generate_cert "api"
 
-echo "Certificate generation complete for RPC, Web, and Websocket servers"
+echo "Certificate generation complete for RPC, Web, REST API, and Websocket servers"
 
 echo "Copying ws_server.crt to client/certs folder..."
 cp certs/ws_server.crt ../client/certs/

@@ -36,6 +36,7 @@ class WebSocketThread(QThread):
     connection_update = pyqtSignal(dict)
     command_response = pyqtSignal(dict)
     command_result = pyqtSignal(dict)
+    command_queued_data = pyqtSignal(dict)  # Signal to update command_history cache when command is queued
     downloads_update = pyqtSignal(list)
     download_chunk = pyqtSignal(dict)
     upload_response = pyqtSignal(dict)
@@ -52,6 +53,8 @@ class WebSocketThread(QThread):
         self.loop = None
         self.current_dialog = None
         self.shutdown_event = None  # Add shutdown event for clean stopping
+        # Track command_ids sent from THIS client to skip duplicate command_queued displays
+        self.locally_sent_commands = set()
 
     async def _run_async(self):
         """Async implementation of the run logic"""
@@ -340,16 +343,26 @@ class WebSocketThread(QThread):
             if message_type == 'command_queued':
                 data = message_data.get('data', {})
                 # Format it to look like a command result with the command as output
+                # Use \n\n for blank line after command prompt (consistent with GUI commands)
                 formatted_data = {
                     'agent_id': data.get('agent_id'),
                     'command_id': data.get('command_id'),
-                    'output': f"[{data.get('timestamp')}] {data.get('username')} > {data.get('command')}",
+                    'output': f"[{data.get('timestamp')}] {data.get('username')} > {data.get('command')}\n\n",
                     'timestamp': data.get('timestamp'),
                     'status': 'queued'
                 }
-                # Emit through the existing command_result signal
+                # Emit through the existing command_result signal for display
                 self.command_result.emit(formatted_data)
-                #print(f"WebSocketThread: Processed command_queued for agent {data.get('agent_id', '')[:8]}")
+
+                # Also emit command_queued_data to update the command_history cache
+                # This ensures the command shows up when agent tab is created later
+                self.command_queued_data.emit({
+                    'agent_id': data.get('agent_id'),
+                    'command_id': data.get('command_id'),
+                    'command': data.get('command'),
+                    'username': data.get('username'),
+                    'timestamp': data.get('timestamp'),
+                })
                 return
 
             elif message_type == 'upload_response':
@@ -491,6 +504,11 @@ class WebSocketThread(QThread):
                 }
                 #print(f"DEBUG: Emitting command result: {result_data}")
                 self.command_result.emit(result_data)
+
+            elif message_type == 'command_ack':
+                # Command acknowledgment from server (includes db_id)
+                # This is primarily used by the REST API; GUI doesn't need to do anything special
+                pass
 
             elif message_type == 'agent_connection':
                 agent_data = message_data['data']['agent']

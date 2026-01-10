@@ -152,8 +152,9 @@ class StateDatabase:
                             print("StateDatabase: Clearing stale cache data (initial_state received)")
                             conn.execute("DELETE FROM listeners")
                             conn.execute("DELETE FROM connections")
-                            # Don't clear commands/command_outputs - preserve terminal history
-                            print("StateDatabase: Cleared listeners and connections")
+                            conn.execute("DELETE FROM commands")
+                            conn.execute("DELETE FROM command_outputs")
+                            print("StateDatabase: Cleared listeners, connections, commands, and command_outputs")
 
                         # Store listeners using UPSERT
                         if state_data.get("listeners"):

@@ -969,8 +969,14 @@ func (s *GRPCServer) BroadcastResult(result map[string]interface{}) error {
 		return fmt.Errorf("failed to marshal command result: %v", err)
 	}
 
+	// Use the type from the result map if specified, otherwise default to command_result
+	msgType := "command_result"
+	if typeVal, ok := result["type"].(string); ok && typeVal != "" {
+		msgType = typeVal
+	}
+
 	streamMsg := &pb.StreamMessage{
-		Type:      "command_result",
+		Type:      msgType,
 		Content:   string(resultJSON),
 		Sender:    "agent_handler",
 		Timestamp: time.Now().Unix(),
@@ -1353,6 +1359,7 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			Data         string `json:"data"`
 			CurrentChunk int    `json:"currentChunk"`
 			TotalChunks  int    `json:"totalChunks"`
+			DBID         int    `json:"db_id,omitempty"` // If provided, command already stored by caller
 			// BOF-specific fields
 			Arch      string `json:"arch,omitempty"`
 			FileSize  int    `json:"file_size,omitempty"`
@@ -1402,25 +1409,32 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			}
 		}
 
-		// Store command in database first (store original for audit)
+		// Store command in database (unless already stored by caller who provided db_id)
 		var commandDBID int
-		err := s.db.QueryRow(`
-            INSERT INTO commands (username, guid, command, timestamp)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id`,
-			commandData.Username,
-			commandData.AgentID,
-			commandData.Command, // Store original for audit
-			commandData.Timestamp,
-		).Scan(&commandDBID)
+		if commandData.DBID > 0 {
+			// Command already stored by caller (e.g., direct REST handler)
+			commandDBID = commandData.DBID
+			log.Printf("[ProcessMessage] Using existing db_id=%d from caller", commandDBID)
+		} else {
+			// Store command in database
+			err := s.db.QueryRow(`
+                INSERT INTO commands (username, guid, command, timestamp)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id`,
+				commandData.Username,
+				commandData.AgentID,
+				commandData.Command, // Store original for audit
+				commandData.Timestamp,
+			).Scan(&commandDBID)
 
-		if err != nil {
-			log.Printf("[ProcessMessage] Failed to store command in database: %v", err)
-			// ADD: Log the error
-			if s.commandLogger != nil {
-				s.commandLogger.LogError(commandData.AgentID, commandData.Command, err)
+			if err != nil {
+				log.Printf("[ProcessMessage] Failed to store command in database: %v", err)
+				// ADD: Log the error
+				if s.commandLogger != nil {
+					s.commandLogger.LogError(commandData.AgentID, commandData.Command, err)
+				}
+				return
 			}
-			return
 		}
 
 		// ADD: Log the incoming command
@@ -1633,11 +1647,12 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 		log.Printf("[ProcessMessage] Command queued for agent %s (buffer size: %d)",
 			commandData.AgentID, bufferSize)
 
-		// Send acknowledgment
+		// Send acknowledgment with DB ID for REST API to use
 		ackMsg := map[string]interface{}{
 			"type":       "command_ack",
 			"command_id": commandData.CommandID,
 			"agent_id":   commandData.AgentID,
+			"db_id":      commandDBID, // Include DB ID for REST API
 			"status":     "queued",
 			"timestamp":  time.Now().Format(time.RFC3339),
 		}

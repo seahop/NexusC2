@@ -1,5 +1,5 @@
 # client/src/gui/widgets/terminal/command_buffer.py
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 import threading
 
@@ -48,7 +48,7 @@ class CommandBuffer:
                     # Store progress info
                     self.chunk_progress[filename] = {
                         'message': output_text,
-                        'timestamp': output_data.get('timestamp', datetime.now().isoformat())
+                        'timestamp': output_data.get('timestamp', datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
                     }
             except:
                 pass
@@ -109,7 +109,7 @@ class CommandBuffer:
     
     def add_command(self, command_text, username=None):
         """Add a command to the buffer"""
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         user = username or self.username or "user"
         
         output_data = {
@@ -123,7 +123,7 @@ class CommandBuffer:
     
     def add_chunk_notification(self, filename, current, total, status="sending"):
         """Add a chunk notification to the buffer"""
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         progress = (current / total * 100) if total > 0 else 0
         
         message = f"[{self.format_timestamp(timestamp)}] Chunk {status}: {filename} - {current}/{total} ({progress:.1f}%)"

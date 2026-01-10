@@ -182,6 +182,7 @@ func (h *WSHandler) handleAgentCommand(client *hub.Client, message []byte) error
 			TotalChunks  int    `json:"totalChunks"`
 			Data         string `json:"data"`
 			Timestamp    string `json:"timestamp"`
+			Username     string `json:"username,omitempty"` // Username from REST API (if proxied)
 			// BOF-specific fields
 			Arch      string `json:"arch,omitempty"`
 			FileSize  int    `json:"file_size,omitempty"`
@@ -263,6 +264,7 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 	TotalChunks  int      `json:"totalChunks"`
 	Data         string   `json:"data"`
 	Timestamp    string   `json:"timestamp"`
+	Username     string   `json:"username,omitempty"`
 	Arch         string   `json:"arch,omitempty"`
 	FileSize     int      `json:"file_size,omitempty"`
 	FileHash     string   `json:"file_hash,omitempty"`
@@ -301,6 +303,12 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 		chunkData = data.Data
 	}
 
+	// Use message username if provided (e.g., from REST API proxy), otherwise fall back to client username
+	username := data.Username
+	if username == "" {
+		username = client.Username
+	}
+
 	// Forward to agent immediately
 	payload := map[string]interface{}{
 		"command":      data.Command,
@@ -311,7 +319,7 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 		"totalChunks":  data.TotalChunks,
 		"data":         chunkData,
 		"timestamp":    data.Timestamp,
-		"username":     client.Username,
+		"username":     username,
 	}
 
 	// Send to agent service with backpressure
@@ -351,6 +359,7 @@ func (h *WSHandler) trackChunk(client *hub.Client, data struct {
 	TotalChunks  int      `json:"totalChunks"`
 	Data         string   `json:"data"`
 	Timestamp    string   `json:"timestamp"`
+	Username     string   `json:"username,omitempty"`
 	Arch         string   `json:"arch,omitempty"`
 	FileSize     int      `json:"file_size,omitempty"`
 	FileHash     string   `json:"file_hash,omitempty"`
@@ -425,6 +434,7 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 	TotalChunks  int      `json:"totalChunks"`
 	Data         string   `json:"data"`
 	Timestamp    string   `json:"timestamp"`
+	Username     string   `json:"username,omitempty"`
 	Arch         string   `json:"arch,omitempty"`
 	FileSize     int      `json:"file_size,omitempty"`
 	FileHash     string   `json:"file_hash,omitempty"`
@@ -476,6 +486,12 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		}
 	}
 
+	// Use message username if provided (e.g., from REST API proxy), otherwise fall back to client username
+	username := data.Username
+	if username == "" {
+		username = client.Username
+	}
+
 	// Handle clear command
 	if data.Command == "clear" {
 		payload := map[string]interface{}{
@@ -483,7 +499,7 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 			"agent_id":   data.AgentID,
 			"command_id": data.CommandID,
 			"timestamp":  data.Timestamp,
-			"username":   client.Username,
+			"username":   username,
 		}
 
 		// Apply backpressure
@@ -516,7 +532,7 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		"totalChunks":  data.TotalChunks,
 		"data":         data.Data,
 		"timestamp":    data.Timestamp,
-		"username":     client.Username,
+		"username":     username,
 	}
 
 	// Apply backpressure
@@ -637,6 +653,7 @@ func (h *WSHandler) sendSuccessMessage(client *hub.Client, message string, data 
 	TotalChunks  int      `json:"totalChunks"`
 	Data         string   `json:"data"`
 	Timestamp    string   `json:"timestamp"`
+	Username     string   `json:"username,omitempty"`
 	Arch         string   `json:"arch,omitempty"`
 	FileSize     int      `json:"file_size,omitempty"`
 	FileHash     string   `json:"file_hash,omitempty"`
@@ -691,10 +708,16 @@ func (h *WSHandler) sendSuccessMessage(client *hub.Client, message string, data 
 		Type: "command_queued",
 	}
 
+	// Use message username if provided (e.g., from REST API proxy), otherwise fall back to client username
+	username := data.Username
+	if username == "" {
+		username = client.Username
+	}
+
 	broadcastMsg.Data.AgentID = data.AgentID
 	broadcastMsg.Data.CommandID = data.CommandID
 	broadcastMsg.Data.Command = data.Command
-	broadcastMsg.Data.Username = client.Username
+	broadcastMsg.Data.Username = username
 	broadcastMsg.Data.Timestamp = data.Timestamp
 	broadcastMsg.Data.Status = "queued"
 	broadcastMsg.Data.FileName = data.FileName

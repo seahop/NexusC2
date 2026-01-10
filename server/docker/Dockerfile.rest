@@ -31,8 +31,8 @@ RUN protoc --go_out=. --go_opt=paths=source_relative \
     mv proto/service/agent.pb.go proto/ && \
     mv proto/service/agent_grpc.pb.go proto/
 
-# Build the websocket service
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /websocket-service ./cmd/websocket
+# Build the REST API service
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /rest-api-service ./cmd/rest-api
 
 # ==============================================================================
 # Stage 2: Docker/Docker-Compose Installer
@@ -58,12 +58,12 @@ FROM alpine:3.20
 
 # Metadata
 LABEL maintainer="NexusC2"
-LABEL description="WebSocket service for NexusC2 C2 framework"
+LABEL description="REST API service for NexusC2 C2 framework"
 
 WORKDIR /app
 
 # Install minimal runtime dependencies in a single layer
-# - docker-cli: For Docker SDK operations
+# - docker-cli: For Docker SDK operations (payload building)
 # - curl: For health checks only
 # - ca-certificates: For TLS validation
 RUN apk add --no-cache \
@@ -89,13 +89,13 @@ COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-cli-plugins/docker-
 COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-compose-standalone /usr/local/bin/docker-compose
 
 # Copy built binary from builder stage
-COPY --from=builder --chown=nexus:nexus /websocket-service /app/websocket-service
+COPY --from=builder --chown=nexus:nexus /rest-api-service /app/rest-api-service
 
 # Copy certificates from host (mounted via build context - server/certs/)
-COPY --chown=nexus:nexus ./certs/ws_server.crt \
-                          ./certs/ws_server.key \
+# REST API uses its own certificate for HTTPS
+COPY --chown=nexus:nexus ./certs/api_server.crt \
+                          ./certs/api_server.key \
                           ./certs/rpc_server.crt \
-                          ./certs/rpc_server.key \
                           /app/certs/
 
 # Copy configuration (from server/config.toml)
@@ -107,26 +107,25 @@ COPY --chown=nexus:nexus ./docker/Dockerfile.builder /app/Dockerfile.builder
 COPY --chown=nexus:nexus ./docker/payloads /app/payloads/
 
 # Ensure binary is executable
-RUN chmod +x /app/websocket-service
+RUN chmod +x /app/rest-api-service
 
 # Grant capability to bind to privileged ports (< 1024) as non-root
-# This allows the port availability check to test privileged ports without running as root
 RUN apk add --no-cache libcap && \
-    setcap 'cap_net_bind_service=+ep' /app/websocket-service && \
+    setcap 'cap_net_bind_service=+ep' /app/rest-api-service && \
     apk del libcap
 
 # Switch to non-root user
 USER nexus
 
-# Health check (more efficient than external curl)
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fk https://localhost:3131/health || exit 1
+    CMD curl -fk https://localhost:8443/health || exit 1
 
-# Expose WebSocket port (documentation only)
-EXPOSE 3131
+# Expose REST API port (documentation only)
+EXPOSE 8443
 
 # Set working directory
 WORKDIR /app
 
 # Use exec form to ensure proper signal handling
-CMD ["/app/websocket-service"]
+CMD ["/app/rest-api-service"]

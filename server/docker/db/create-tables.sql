@@ -128,6 +128,28 @@ BEGIN
     END IF;
 END $$;
 
+-- =============================================================================
+-- REST API AUTHENTICATION TABLES
+-- =============================================================================
+-- Separate user management for API access (not the same as GUI users)
+
+CREATE TABLE IF NOT EXISTS api_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP,
+    is_active BOOLEAN DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES api_users(id) ON DELETE CASCADE,
+    refresh_token_hash VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- PERFORMANCE INDEXES
 -- ============================================================================
@@ -200,3 +222,17 @@ CREATE INDEX IF NOT EXISTS idx_link_routing_lookup
 CREATE INDEX IF NOT EXISTS idx_connections_parent
     ON connections(parent_clientID)
     WHERE parent_clientID IS NOT NULL;
+
+-- API users and tokens indexes (for REST API authentication)
+CREATE INDEX IF NOT EXISTS idx_api_users_username
+    ON api_users(username);
+
+CREATE INDEX IF NOT EXISTS idx_api_users_active
+    ON api_users(is_active)
+    WHERE is_active = true;
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id
+    ON api_tokens(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_expires
+    ON api_tokens(expires_at);

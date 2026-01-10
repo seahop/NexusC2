@@ -18,6 +18,7 @@ This C2 framework provides a robust platform for managing remote agents through 
 
 - **WebSocket Service** - Real-time communication hub for operator clients
 - **Agent Handler** - Manages agent connections and HTTP/HTTPS listeners
+- **REST API Service** - Programmatic access to all C2 operations via HTTP/JSON
 - **PostgreSQL Database** - Persistent storage for all operational data
 - **Docker Builder** - On-demand payload generation for multiple platforms
 - **Python GUI Client** - Feature-rich operator interface
@@ -250,6 +251,31 @@ python main.py
 - Handles asynchronous task execution
 - Maintains agent state
 
+### REST API Service (Port 8443)
+- JWT-based authentication with access/refresh tokens
+- Full programmatic access to all C2 operations
+- Agent management, command execution, listener control
+- Payload building with safety check options
+- Real-time events via Server-Sent Events (SSE)
+- Rate limiting and CORS support
+
+**See [API Documentation](docs/API.md) for complete endpoint reference.**
+
+A Python CLI tool is included at `server/scripts/nexus-api.py` for testing and automation:
+```bash
+# Login and save credentials
+./nexus-api.py login -u admin -p password
+
+# List agents
+./nexus-api.py agents list
+
+# Send a command
+./nexus-api.py command <agent_id> "whoami"
+
+# Build a payload
+./nexus-api.py payload build -l https-listener -o windows -a amd64
+```
+
 ### Database
 - PostgreSQL for persistent storage
 - Stores agents, tasks, sessions, and audit logs
@@ -291,6 +317,7 @@ This software is provided for authorized security testing purposes only. Users a
 ## Additional Resources
 
 - **[Setup Guide](docs/SETUP.md)** - Comprehensive installation and configuration guide
+- **[REST API Documentation](docs/API.md)** - Complete API endpoint reference with examples
 - **[Log Viewer](docs/LOGVIEWER.md)** - Command log analysis tool documentation
 - **[Docker Documentation](server/docker/README.md)** - Container deployment details
 
