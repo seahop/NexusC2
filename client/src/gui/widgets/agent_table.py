@@ -19,9 +19,9 @@ class AgentTableWidget(QWidget):
     # Signal emitted when agents are removed (for syncing other views)
     agents_removed = pyqtSignal(list)  # list of GUIDs that were removed
 
-    # Column definitions (no Parent column - hierarchy shown via indentation)
+    # Agent column definitions (no Parent column - hierarchy shown via indentation)
     # Widths are proportional (percentages) - they get scaled to fit the table width
-    COLUMNS = [
+    AGENT_COLUMNS = [
         ('Name', 14),         # Agent name/GUID
         ('Hostname', 10),     # Machine hostname
         ('Username', 9),      # User account
@@ -33,6 +33,9 @@ class AgentTableWidget(QWidget):
         ('Last Seen', 7),     # Timestamp
         ('Tags', 17),         # Tags column
     ]
+
+    # Active columns
+    COLUMNS = AGENT_COLUMNS
 
     def __init__(self, terminal_widget=None, agent_tree_widget=None):
         super().__init__()

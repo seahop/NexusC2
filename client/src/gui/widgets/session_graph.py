@@ -413,11 +413,12 @@ class SessionGraphWidget(QWidget):
 
         # Legend
         legend_layout = QHBoxLayout()
+        legend_layout.setContentsMargins(0, 0, 0, 0)
         legend_layout.addWidget(self._create_legend_item('#4CAF50', 'Windows'))
         legend_layout.addWidget(self._create_legend_item('#FF9800', 'Linux'))
         legend_layout.addWidget(self._create_legend_item('#2196F3', 'macOS'))
         legend_layout.addWidget(self._create_legend_item('#FF5722', 'SMB Link', is_line=True))
-        legend_layout.addWidget(self._create_legend_item('#2196F3', 'TCP Link', is_line=True))
+        legend_layout.addWidget(self._create_legend_item('#3b82f6', 'TCP Link', is_line=True))
         legend_layout.addStretch()
         layout.addLayout(legend_layout)
 

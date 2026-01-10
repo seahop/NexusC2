@@ -9,6 +9,7 @@ from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDia
 from .widgets import AgentTreeWidget, TerminalWidget, AgentDisplayWidget
 from utils.database import StateDatabase
 from .widgets.downloads import DownloadsWidget
+from .widgets.listeners import ListenersWidget
 from .widgets.floating_status_indicator import FloatingStatusIndicator
 from .widgets.notifications import NotificationManager
 import json
@@ -185,12 +186,9 @@ class C2ClientGUI(QMainWindow):
 
         # View menu
         viewMenu = menubar.addMenu('View')
-        showListenersAction = viewMenu.addAction('Show Listeners')
+        showListenersAction = viewMenu.addAction('Listeners')
         showListenersAction.setShortcut(QKeySequence('Ctrl+L'))
         showListenersAction.triggered.connect(self.showListeners)
-        showAgentsAction = viewMenu.addAction('Show Agents')
-        showAgentsAction.setShortcut(QKeySequence('Ctrl+Shift+A'))
-        showAgentsAction.triggered.connect(self.showAgents)
         showDownloadsAction = viewMenu.addAction('Downloads')
         showDownloadsAction.setShortcut(QKeySequence('Ctrl+D'))
         showDownloadsAction.triggered.connect(self.showDownloads)
@@ -612,7 +610,11 @@ class C2ClientGUI(QMainWindow):
             # Add this: Connect downloads widget if it exists
             if hasattr(self, 'downloads_widget'):
                 self.downloads_widget.set_ws_thread(self.ws_thread)
-            
+
+            # Connect listeners widget if it exists
+            if hasattr(self, 'listeners_widget'):
+                self.listeners_widget.set_ws_thread(self.ws_thread)
+
             print("MainWindow: WebSocket thread setup complete")
         else:
             # Dialog was cancelled or connection failed
@@ -713,12 +715,28 @@ class C2ClientGUI(QMainWindow):
             pass
     
     def showListeners(self):
-        self.agent_display.show_listeners()
-        self.terminal.log_message("Switched to Listeners view")
+        """Show the listeners tab and refresh the data."""
+        # Check if listeners tab already exists
+        listeners_found = False
+        for i in range(self.terminal.tabs.count()):
+            if self.terminal.tabs.tabText(i) == "Listeners":
+                self.terminal.tabs.setCurrentIndex(i)
+                listeners_found = True
+                # Refresh the data
+                widget = self.terminal.tabs.widget(i)
+                if hasattr(widget, 'refresh_listeners'):
+                    widget.refresh_listeners()
+                break
 
-    def showAgents(self):
-        self.agent_display.show_agents()
-        self.terminal.log_message("Switched to Agents view")
+        if not listeners_found:
+            # Create new listeners widget
+            self.listeners_widget = ListenersWidget(self.agent_tree, self.ws_thread)
+            tab_index = self.terminal.tabs.addTab(self.listeners_widget, "Listeners")
+            self.terminal.tabs.setCurrentIndex(tab_index)
+            # Refresh to populate data
+            self.listeners_widget.refresh_listeners()
+
+        self.terminal.log_message("Opened Listeners view")
 
     def resizeEvent(self, event):
         """Handle window resize to reposition floating indicator"""
@@ -898,6 +916,9 @@ class C2ClientGUI(QMainWindow):
             # Add this: Clear downloads widget's ws_thread reference if it exists
             if hasattr(self, 'downloads_widget'):
                 self.downloads_widget.ws_thread = None
+            # Clear listeners widget's ws_thread reference if it exists
+            if hasattr(self, 'listeners_widget'):
+                self.listeners_widget.ws_thread = None
             print("MainWindow: Cleared AgentDisplayWidget ws_thread reference")
 
         self.is_connected = False
