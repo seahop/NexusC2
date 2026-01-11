@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QDialog,
                             QMenu, QSplitter, QMessageBox, QFileDialog, QApplication,
                             QListWidget, QPushButton, QHBoxLayout, QLabel, QComboBox, QVBoxLayout)
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot, QTimer
 from PyQt6.QtGui import QPalette, QColor, QIcon
 
 from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog
@@ -42,18 +42,18 @@ class C2ClientGUI(QMainWindow):
         self.notification_manager = NotificationManager(self)
         self.notification_manager.notification_clicked.connect(self.on_notification_clicked)
 
-        # Apply default view from settings
-        self._apply_default_view()
-
         # Restore window geometry after UI is set up
         self.restore_window_state()
+
+        # Flag to track if initial view has been applied
+        self._initial_view_applied = False
 
     def _load_app_settings(self):
         """Load application settings from config file."""
         config_file = self.config_dir / 'settings.json'
         defaults = {
             'theme': 'Dark',
-            'default_view': 0,
+            'default_view': 1,  # Default to Table view
             'guid_display_length': 16,
             'notifications_enabled': True,
             'notification_sound_enabled': True,
@@ -72,17 +72,37 @@ class C2ClientGUI(QMainWindow):
         return defaults
 
     def _apply_default_view(self):
-        """Apply the default view setting on startup."""
-        default_view = self.app_settings.get('default_view', 0)
+        """Apply the default view setting on startup.
+
+        Uses saved preference from window_state.json if available,
+        otherwise falls back to default_view from settings.json.
+        """
+        # Check for saved preference in window_state.json first
+        saved_view = None
+        try:
+            if self.window_state_file.exists():
+                with open(self.window_state_file, 'r') as f:
+                    state = json.load(f)
+                    if 'current_view_id' in state:
+                        saved_view = state['current_view_id']
+        except Exception:
+            pass
+
+        # Use saved preference if available, otherwise use settings default
+        if saved_view is not None:
+            view_to_apply = saved_view
+        else:
+            # No saved preference - use default_view from settings (default to Table = 1)
+            view_to_apply = self.app_settings.get('default_view', 1)
+
         if hasattr(self, 'agent_display'):
-            # Switch to the default view
-            self.agent_display.switch_view(default_view)
-            # Also update the button group to reflect this
-            buttons = self.agent_display.view_button_group.buttons()
-            for btn in buttons:
-                if self.agent_display.view_button_group.id(btn) == default_view:
-                    btn.setChecked(True)
-                    break
+            # Use _set_initial_view to avoid triggering a save
+            self.agent_display._set_initial_view(view_to_apply)
+            # Manually trigger the view changed handler to set splitter orientation
+            self.on_agent_view_changed(view_to_apply)
+            # Refresh the table if that's the view being shown
+            if view_to_apply == 1 and hasattr(self.agent_display, 'table_widget'):
+                self.agent_display.table_widget.refresh_from_tree()
 
     def on_notification_clicked(self, agent_guid):
         """Handle notification click - focus on the agent."""
@@ -743,6 +763,14 @@ class C2ClientGUI(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, 'status_indicator'):
             self.status_indicator.reposition()
+
+    def showEvent(self, event):
+        """Handle window show event to apply initial view after layout is complete"""
+        super().showEvent(event)
+        if not self._initial_view_applied:
+            self._initial_view_applied = True
+            # Use a short delay to ensure layout is fully settled
+            QTimer.singleShot(50, self._apply_default_view)
 
     def updateMenuState(self):
         serverMenu = self.menuBar().findChild(QMenu, "Server")

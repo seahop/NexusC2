@@ -487,18 +487,22 @@ class TerminalWidget(QWidget):
         self.tabs = QTabWidget()
         self.tabs.tabCloseRequested.connect(self.close_tab)
         
-        # Create general terminal and logs tabs
+        # Create general terminal (hidden) and logs tabs
         self.general_terminal = AgentTerminal("General", ws_thread=self.ws_thread)
         self.tabs.addTab(self.general_terminal, "Terminal")
-        
+        self.tabs.setTabVisible(0, False)  # Hide the Terminal tab but keep it functional
+
         self.logs = LogsWidget()
         self.tabs.addTab(self.logs, "Logs")
-        
+
         # Make tabs closable but protect Terminal and Logs tabs
         self.tabs.setTabsClosable(True)
         self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
         self.tabs.tabBar().setTabButton(1, QTabBar.ButtonPosition.RightSide, None)
-        
+
+        # Set Logs tab as the default active tab
+        self.tabs.setCurrentIndex(1)
+
         layout.addWidget(self.tabs)
         self.setLayout(layout)
         

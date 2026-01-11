@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
                               QFrame, QSizePolicy, QMenu, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon
+from pathlib import Path
+import json
 
 from .agent_tree import AgentTreeWidget
 from .agent_table import AgentTableWidget
@@ -63,6 +65,7 @@ class AgentDisplayWidget(QWidget):
 
         self.setup_ui()
         self.setup_connections()
+        # Note: Initial view is set by main_window._apply_default_view() after creation
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -105,11 +108,11 @@ class AgentDisplayWidget(QWidget):
         self.view_button_group.setExclusive(True)
 
         self.tree_btn = ViewToggleButton("Tree")
-        self.tree_btn.setChecked(True)
         self.view_button_group.addButton(self.tree_btn, 0)
         view_toggle_layout.addWidget(self.tree_btn)
 
         self.table_btn = ViewToggleButton("Table")
+        self.table_btn.setChecked(True)  # Default to Table view
         self.view_button_group.addButton(self.table_btn, 1)
         view_toggle_layout.addWidget(self.table_btn)
 
@@ -243,8 +246,65 @@ class AgentDisplayWidget(QWidget):
         # Apply current filter
         self.filter_agents(self.search_input.text())
 
+        # Save view preference
+        self._save_view_preference(view_id)
+
         # Emit signal so main window can adjust layout
         self.view_changed.emit(view_id)
+
+    def _set_initial_view(self, view_id):
+        """Set the initial view without triggering save"""
+        # Block signals to prevent triggering switch_view (which would save)
+        self.view_button_group.blockSignals(True)
+
+        # First uncheck all buttons, then check the correct one
+        # This ensures the button group state is clean
+        self.tree_btn.setChecked(False)
+        self.table_btn.setChecked(False)
+        self.graph_btn.setChecked(False)
+
+        buttons = {0: self.tree_btn, 1: self.table_btn, 2: self.graph_btn}
+        if view_id in buttons:
+            buttons[view_id].setChecked(True)
+
+        # Set the stack to show the correct view
+        self.stack.setCurrentIndex(view_id)
+
+        self.view_button_group.blockSignals(False)
+
+    def _load_view_preference(self):
+        """Load saved view preference from window_state.json. Default to Table (1)."""
+        config_file = Path.home() / '.nexus' / 'window_state.json'
+        try:
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    state = json.load(f)
+                    return state.get('current_view_id', 1)  # Default to Table view
+        except Exception:
+            pass
+        return 1  # Default to Table view
+
+    def _save_view_preference(self, view_id):
+        """Save view preference to window_state.json."""
+        config_file = Path.home() / '.nexus' / 'window_state.json'
+        try:
+            # Load existing state
+            state = {}
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    state = json.load(f)
+
+            # Update view preference (same key used by main_window)
+            state['current_view_id'] = view_id
+
+            # Ensure directory exists
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save state
+            with open(config_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception:
+            pass  # Silently fail on save errors
 
     def filter_agents(self, filter_text):
         """Apply filter across all views"""
