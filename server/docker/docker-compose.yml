@@ -173,6 +173,7 @@ services:
 
   builder:
     image: docker_builder:latest
+    pull_policy: never
     build:
       context: ..
       dockerfile: docker/Dockerfile.builder

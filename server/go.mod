@@ -1,20 +1,20 @@
 module c2
 
-go 1.23.0
+go 1.25
 
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/almounah/go-buena-clr v0.1.0
 	github.com/docker/docker v27.3.1+incompatible
-	github.com/gin-gonic/gin v1.10.0
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/gin-gonic/gin v1.11.0
+	github.com/golang-jwt/jwt/v5 v5.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.10.9
-	github.com/shirou/gopsutil/v3 v3.24.5
-	golang.org/x/crypto v0.31.0
-	google.golang.org/grpc v1.68.1
-	google.golang.org/protobuf v1.35.2
+	github.com/shirou/gopsutil/v4 v4.25.1
+	golang.org/x/crypto v0.35.0
+	google.golang.org/grpc v1.71.0
+	google.golang.org/protobuf v1.36.4
 )
 
 require (

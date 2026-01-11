@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Build Environment - Compiles Go binaries and generates protobuf files
 # ==============================================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -23,6 +23,9 @@ RUN go mod download
 
 # Copy the rest of the source code
 COPY . .
+
+# Update go.sum with any new dependencies
+RUN go mod tidy
 
 # Generate protobuf files
 RUN protoc --go_out=. --go_opt=paths=source_relative \
