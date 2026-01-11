@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -111,48 +110,36 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 	select {
 	case response := <-responseChan:
 		// Parse the response
-		log.Printf("[SMB] Received response, length=%d", len(response))
 		var respEnvelope struct {
 			Type    string `json:"type"`
 			Payload string `json:"payload"`
 		}
 		if err := json.Unmarshal(response, &respEnvelope); err != nil {
-			log.Printf("[SMB] Failed to parse response envelope: %v", err)
 			return fmt.Errorf("failed to parse handshake response: %w", err)
 		}
 
-		log.Printf("[SMB] Response type: %s", respEnvelope.Type)
 		if respEnvelope.Type != "handshake_response" {
-			log.Printf("[SMB] Unexpected response type: %s", respEnvelope.Type)
 			return fmt.Errorf("unexpected response type: %s", respEnvelope.Type)
 		}
 
 		// Decode and parse the signed response
 		respBytes, err := base64.StdEncoding.DecodeString(respEnvelope.Payload)
 		if err != nil {
-			log.Printf("[SMB] Failed to decode response payload: %v", err)
 			return fmt.Errorf("failed to decode response payload: %w", err)
 		}
 
 		var signedResp SignedResponse
 		if err := json.Unmarshal(respBytes, &signedResp); err != nil {
-			log.Printf("[SMB] Failed to parse signed response: %v", err)
 			return fmt.Errorf("failed to parse signed response: %w", err)
 		}
 
-		log.Printf("[SMB] Signed response: status=%s, newClientID=%s", signedResp.Status, signedResp.NewClientID)
-
 		// Verify server signature
 		if err := verifyServerSignature(&signedResp, publicKey); err != nil {
-			log.Printf("[SMB] Signature verification failed: %v", err)
 			return fmt.Errorf("server signature verification failed: %w", err)
 		}
 
-		log.Printf("[SMB] Signature verified successfully")
-
 		// Update client ID
 		if signedResp.NewClientID == "" {
-			log.Printf("[SMB] No new client ID in response")
 			return fmt.Errorf("no new client ID received")
 		}
 		clientID = signedResp.NewClientID
@@ -161,8 +148,7 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 		secret1, secret2 := generateInitialSecrets(initSecret, sysInfo.AgentInfo.Seed)
 		secureComms = NewSecureComms(secret1, secret2)
 
-		log.Printf("[SMB] Handshake successful: clientID=%s", clientID)
-		logDebug("Handshake successful: clientID=%s", clientID)
+		// logDebug("Handshake successful: clientID=%s", clientID)
 		return nil
 
 	case err := <-errChan:

@@ -89,7 +89,7 @@ func WrapNetworkFileOperation(path string, operation func() error) error {
 
 	// Log if using network-only token
 	if msg := PrepareNetworkOperation(path); msg != "" {
-		fmt.Print(msg)
+		// fmt.Print(msg)
 	}
 
 	// Apply token if needed

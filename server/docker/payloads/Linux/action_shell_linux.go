@@ -8,7 +8,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -54,7 +53,7 @@ func getUnixShell() string {
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -73,7 +72,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		case "--sudo":
 			if i+1 >= len(args) {
 				return CommandResult{
-					Output:      "Error: --sudo requires a password",
+					Output:      Err(E20),
 					ExitCode:    1,
 					CompletedAt: time.Now().Format(time.RFC3339),
 				}
@@ -85,7 +84,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		case "--timeout":
 			if i+1 >= len(args) {
 				return CommandResult{
-					Output:      "Error: --timeout requires a value",
+					Output:      Err(E20),
 					ExitCode:    1,
 					CompletedAt: time.Now().Format(time.RFC3339),
 				}
@@ -94,7 +93,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			timeoutSeconds, err := strconv.Atoi(args[i+1])
 			if err != nil || timeoutSeconds <= 0 {
 				return CommandResult{
-					Output:      fmt.Sprintf("Error: Invalid timeout value '%s'", args[i+1]),
+					Output:      ErrCtx(E22, args[i+1]),
 					ExitCode:    1,
 					CompletedAt: time.Now().Format(time.RFC3339),
 				}
@@ -110,7 +109,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	if len(commandArgs) == 0 {
 		return CommandResult{
-			Output:      "Error: No command specified after flags",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -124,11 +123,8 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	workingDir := ctx.WorkingDir
 	ctx.mu.RUnlock()
 
-	// Build output header
+	// Build output
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("[*] Executing: %s\n", commandStr))
-	output.WriteString(fmt.Sprintf("[*] Working Directory: %s\n", workingDir))
-	output.WriteString(fmt.Sprintf("[*] Timeout: %v\n", timeout))
 
 	var commandOutput string
 	var exitCode int
@@ -137,9 +133,6 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	startTime := time.Now()
 
 	if useSudo {
-		output.WriteString("[*] Mode: Sudo (PTY-based)\n")
-		output.WriteString(strings.Repeat("-", 50) + "\n")
-
 		// Use PTY helper for sudo
 		ptyHelper := &PTYHelper{timeout: timeout}
 		commandOutput, exitCode, cmdErr = ptyHelper.ExecuteWithSudo(sudoPassword, commandStr, workingDir)
@@ -147,8 +140,6 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	} else {
 		// Regular shell execution (existing code)
 		shell := getUnixShell()
-		output.WriteString(fmt.Sprintf("[*] Shell: %s\n", shell))
-		output.WriteString(strings.Repeat("-", 50) + "\n")
 
 		execContext, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -173,7 +164,6 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		if cmdErr != nil {
 			if execContext.Err() == context.DeadlineExceeded {
 				exitCode = 124
-				cmdErr = fmt.Errorf("command timed out")
 			} else if exitErr, ok := cmdErr.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
 			} else {
@@ -185,16 +175,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// Add command output
 	output.WriteString(commandOutput)
 
-	// Add execution time and status
-	executionTime := time.Since(startTime)
-	output.WriteString(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
-	output.WriteString(fmt.Sprintf("[*] Execution time: %v\n", executionTime.Round(time.Millisecond)))
-
-	if cmdErr != nil {
-		output.WriteString(fmt.Sprintf("[!] Command failed: %v (exit code: %d)\n", cmdErr, exitCode))
-	} else {
-		output.WriteString("[*] Command completed successfully\n")
-	}
+	_ = startTime
 
 	return CommandResult{
 		Output:      output.String(),

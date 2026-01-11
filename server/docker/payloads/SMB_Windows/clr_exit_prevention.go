@@ -31,37 +31,37 @@ func NewCLRExitPrevention() *CLRExitPrevention {
 
 // PatchAllExitMethods patches all known exit methods
 func (c *CLRExitPrevention) PatchAllExitMethods() error {
-	fmt.Println("[*] Starting CLR exit method patching...")
+	// removed debug log
 
 	// Patch Environment.Exit
 	if err := c.PatchEnvironmentExit(); err != nil {
 	} else {
-		fmt.Println("[+] Successfully patched Environment.Exit")
+		// removed debug log
 	}
 
 	// Patch Application.Exit (Windows Forms)
 	if err := c.PatchApplicationExit(); err != nil {
 		// This might fail if Windows.Forms isn't loaded, which is fine
 	} else {
-		fmt.Println("[+] Successfully patched Application.Exit")
+		// removed debug log
 	}
 
 	// Patch Process.GetCurrentProcess().Kill()
 	if err := c.PatchProcessKill(); err != nil {
 	} else {
-		fmt.Println("[+] Successfully patched Process.Kill")
+		// removed debug log
 	}
 
 	// Patch ExitProcess directly in kernel32
 	if err := c.PatchExitProcess(); err != nil {
 	} else {
-		fmt.Println("[+] Successfully patched ExitProcess")
+		// removed debug log
 	}
 
 	// Patch TerminateProcess
 	if err := c.PatchTerminateProcess(); err != nil {
 	} else {
-		fmt.Println("[+] Successfully patched TerminateProcess")
+		// removed debug log
 	}
 
 	return nil
@@ -134,7 +134,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 func (c *CLRExitPrevention) patchManagedEnvironmentExit() error {
 	// This is a fallback that works through managed code
 	// We'll implement this through the CLR hosting interface
-	fmt.Println("[*] Using managed code approach to patch Environment.Exit")
+	// removed debug log
 
 	// This would typically be done through ICLRRuntimeHost
 	// For now, we'll mark it as patched and handle it at execution time

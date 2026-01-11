@@ -199,7 +199,7 @@ func (cq *CommandQueue) AddCommands(jsonData string) error {
 	/*
 		// Debug: print details of each command
 		for i, cmd := range commands {
-			fmt.Printf("  Command %d: Type=%s, Data length=%d, Filename=%s\n",
+			// fmt.Printf("  Command %d: Type=%s, Data length=%d, Filename=%s\n",
 				i, cmd.Command, len(cmd.Data), cmd.Filename)
 		}
 	*/

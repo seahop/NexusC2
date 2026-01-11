@@ -53,8 +53,6 @@ func EncryptAES(data []byte, key []byte) (string, error) {
 
 // DecryptAES decrypts data using AES-256-GCM
 func DecryptAES(combined string, key []byte) (string, error) {
-	fmt.Println("Starting DecryptAES...")
-
 	// Step 1: Base64 Decode
 	allBytes, err := base64.StdEncoding.DecodeString(combined)
 	if err != nil {
@@ -86,7 +84,6 @@ func DecryptAES(combined string, key []byte) (string, error) {
 		return "", fmt.Errorf("decryption failed: %v", err)
 	}
 
-	fmt.Println("Decryption successful!")
 	return string(plaintext), nil
 }
 

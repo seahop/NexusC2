@@ -61,11 +61,11 @@ func decryptAllValues() map[string]string {
 	// Set defaults for HTTP methods if they're empty or failed to decrypt
 	if decrypted["GET Method"] == "" || decrypted["GET Method"] == "DECRYPTION_FAILED" {
 		decrypted["GET Method"] = "GET"
-		fmt.Println("Using default GET method")
+		// fmt.Println("Using default GET method")
 	}
 	if decrypted["POST Method"] == "" || decrypted["POST Method"] == "DECRYPTION_FAILED" {
 		decrypted["POST Method"] = "POST"
-		fmt.Println("Using default POST method")
+		// fmt.Println("Using default POST method")
 	}
 
 	// Log the HTTP methods being used

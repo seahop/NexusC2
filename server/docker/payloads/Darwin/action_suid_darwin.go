@@ -25,7 +25,7 @@ func (c *SUIDEnumCommand) Name() string {
 func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: "Usage: suid-enum <action> [options]",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -37,7 +37,7 @@ func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	case "check":
 		if len(args) < 2 {
 			return CommandResult{
-				Output:   "Usage: suid-enum check <binary_path>",
+				Output:   Err(E1),
 				ExitCode: 1,
 			}
 		}
@@ -46,7 +46,7 @@ func (c *SUIDEnumCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		return c.exploitSUIDBinary(args[1:])
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown action: %s", action),
+			Output:   ErrCtx(E21, action),
 			ExitCode: 1,
 		}
 	}
@@ -210,7 +210,7 @@ func (c *SUIDEnumCommand) checkSUIDBinary(binaryPath string) CommandResult {
 	info, err := os.Stat(binaryPath)
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Error: Cannot stat %s: %v", binaryPath, err),
+			Output:   ErrCtx(E4, binaryPath),
 			ExitCode: 1,
 		}
 	}
@@ -361,7 +361,7 @@ func (c *SUIDEnumCommand) exploitSUIDBinary(args []string) CommandResult {
 
 	if binaryPath == "" {
 		return CommandResult{
-			Output:   "Error: --binary is required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}

@@ -77,8 +77,8 @@ func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// Validate arguments
 	if len(args) == 0 || len(args) > 2 {
 		return CommandResult{
-			Error:       fmt.Errorf("usage: sleep <duration> [jitter_percent]"),
-			ErrorString: "usage: sleep <duration> [jitter_percent] (e.g., sleep 1m30s 15)",
+			Error:       fmt.Errorf(Err(E2)),
+			ErrorString: Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -88,8 +88,8 @@ func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	seconds, err := parseDuration(args[0])
 	if err != nil {
 		return CommandResult{
-			Error:       fmt.Errorf("invalid duration: %v", err),
-			ErrorString: fmt.Sprintf("invalid duration: %v", err),
+			Error:       fmt.Errorf(Err(E28)),
+			ErrorString: Err(E28),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -98,67 +98,41 @@ func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// Validate the sleep value
 	if seconds < 1 {
 		return CommandResult{
-			Error:       fmt.Errorf("sleep duration must be at least 1 second"),
-			ErrorString: "sleep duration must be at least 1 second",
+			Error:       fmt.Errorf(Err(E28)),
+			ErrorString: Err(E28),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Handle optional jitter parameter
-	var jitterStr string
 	if len(args) == 2 {
 		// Parse jitter percentage
 		jitterValue, err := strconv.ParseFloat(args[1], 64)
 		if err != nil {
 			return CommandResult{
-				Error:       fmt.Errorf("invalid jitter percentage: %v", err),
-				ErrorString: fmt.Sprintf("invalid jitter percentage: %v", err),
+				Error:       fmt.Errorf(Err(E29)),
+				ErrorString: Err(E29),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 		if jitterValue < 0 || jitterValue > 100 {
 			return CommandResult{
-				Error:       fmt.Errorf("jitter percentage must be between 0 and 100"),
-				ErrorString: "jitter percentage must be between 0 and 100",
+				Error:       fmt.Errorf(Err(E29)),
+				ErrorString: Err(E29),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 		jitter = fmt.Sprintf("%.1f", jitterValue)
-		jitterStr = fmt.Sprintf(" and jitter to %.1f%%", jitterValue)
 	}
 
 	// Update the global sleep value
 	sleep = strconv.Itoa(seconds)
 
-	// Format output message
-	var output string
-	if seconds >= 3600 {
-		hours := seconds / 3600
-		minutes := (seconds % 3600) / 60
-		secs := seconds % 60
-		if minutes > 0 || secs > 0 {
-			output = fmt.Sprintf("Sleep interval updated to %dh%dm%ds (%d seconds)%s",
-				hours, minutes, secs, seconds, jitterStr)
-		} else {
-			output = fmt.Sprintf("Sleep interval updated to %dh (%d seconds)%s",
-				hours, seconds, jitterStr)
-		}
-	} else if seconds >= 60 {
-		minutes := seconds / 60
-		secs := seconds % 60
-		if secs > 0 {
-			output = fmt.Sprintf("Sleep interval updated to %dm%ds (%d seconds)%s",
-				minutes, secs, seconds, jitterStr)
-		} else {
-			output = fmt.Sprintf("Sleep interval updated to %dm (%d seconds)%s",
-				minutes, seconds, jitterStr)
-		}
-	} else {
-		output = fmt.Sprintf("Sleep interval updated to %ds%s", seconds, jitterStr)
-	}
+	// Format output message - minimal
+	output := SuccCtx(S3, fmt.Sprintf("%ds/%s%%", seconds, jitter))
 
 	return CommandResult{
 		Output:      output,

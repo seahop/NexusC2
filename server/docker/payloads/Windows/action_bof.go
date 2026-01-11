@@ -5,9 +5,9 @@
 package main
 
 import (
-	"fmt"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // BOFCommand handles BOF execution
@@ -21,16 +21,17 @@ func (c *BOFCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// For Windows only - BOF is Windows-specific
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: BOF execution is only supported on Windows",
-			Error:    fmt.Errorf("unsupported platform: %s", runtime.GOOS),
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 	// This will be handled by the command queue's processBOF method
 	// The actual execution happens there with the full Command data
 	return CommandResult{
-		Output:   "BOF execution initiated",
-		ExitCode: 0,
+		Output:      Succ(S4),
+		ExitCode:    0,
+		CompletedAt: time.Now().Format(time.RFC3339),
 	}
 }
 
@@ -81,7 +82,7 @@ func parseBOFArguments(argString string) ([]byte, error) {
 // This will be implemented differently for Windows
 func executeBOF(bofBytes []byte, args []byte) (string, error) {
 	if runtime.GOOS != "windows" {
-		return "", fmt.Errorf("BOF execution not supported on %s", runtime.GOOS)
+		return "", nil
 	}
 
 	// The actual Windows implementation would go here

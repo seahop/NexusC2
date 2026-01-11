@@ -119,7 +119,7 @@ func executeBOFPlatform(bofBytes []byte, args []byte) (string, error) {
 
 	output, err := Load(bofBytes, args)
 	if err != nil {
-		return "", fmt.Errorf("COFF execution failed: %w", err)
+		return "", err
 	}
 
 	return output, nil
@@ -230,7 +230,7 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 	RevertToSelf()
 
 	if execErr != nil {
-		return "", fmt.Errorf("COFF execution failed: %w", execErr)
+		return "", execErr
 	}
 
 	return output, nil
@@ -249,7 +249,7 @@ func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
 	output, err := LoadWithTimeout(bofBytes, args, 30*time.Minute)
 
 	if err != nil {
-		return "", fmt.Errorf("COFF execution failed: %w", err)
+		return "", err
 	}
 
 	return output, nil
@@ -266,10 +266,11 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 	bofBytes, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
 		return CommandResult{
-			Command:  cmd,
-			Output:   fmt.Sprintf("Failed to decode BOF data: %v", err),
-			Error:    err,
-			ExitCode: 1,
+			Command:     cmd,
+			Output:      Err(E18),
+			Error:       err,
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -329,17 +330,17 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 					CurrentChunk: i + 1,
 					TotalChunks:  totalChunks,
 				},
-				Output:      fmt.Sprintf("[BOF Chunk %d/%d]\n%s", i+1, totalChunks, chunk),
+				Output:      fmt.Sprintf("C%d/%d\n%s", i+1, totalChunks, chunk),
 				ExitCode:    0,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 
 			if err != nil {
 				chunkResult.Error = err
-				chunkResult.ErrorString = err.Error()
+				chunkResult.ErrorString = Err(E25)
 				chunkResult.ExitCode = 1
 				if i == 0 {
-					chunkResult.Output = fmt.Sprintf("BOF execution failed: %v\n%s", err, chunk)
+					chunkResult.Output = ErrCtx(E25, chunk)
 				}
 			}
 
@@ -364,7 +365,7 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 
 		return CommandResult{
 			Command:     resultCmd,
-			Output:      fmt.Sprintf("[BOF completed - %d bytes output sent in %d chunks]", outputLen, totalChunks),
+			Output:      SuccCtx(S5, fmt.Sprintf("%d/%d", outputLen, totalChunks)),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -374,9 +375,9 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Command:     resultCmd,
-			Output:      fmt.Sprintf("BOF execution failed: %v\nOutput: %s", err, output),
+			Output:      ErrCtx(E25, output),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E25),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -427,9 +428,10 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 	// Check if all chunks received
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
 		return CommandResult{
-			Command:  cmd,
-			Output:   fmt.Sprintf("Received chunk %d/%d", cmd.CurrentChunk+1, cmd.TotalChunks),
-			ExitCode: 0,
+			Command:     cmd,
+			Output:      SuccCtx(S0, fmt.Sprintf("%d/%d", cmd.CurrentChunk+1, cmd.TotalChunks)),
+			ExitCode:    0,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -441,9 +443,10 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 		chunk, ok := chunkInfo.Chunks[i]
 		if !ok {
 			return CommandResult{
-				Command:  cmd,
-				Output:   fmt.Sprintf("Missing chunk %d", i),
-				ExitCode: 1,
+				Command:     cmd,
+				Output:      ErrCtx(E24, fmt.Sprintf("%d", i)),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 		fullData.WriteString(chunk)
@@ -482,9 +485,10 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
 		return CommandResult{
-			Command:  cmd,
-			Output:   fmt.Sprintf("Received async chunk %d/%d", cmd.CurrentChunk+1, cmd.TotalChunks),
-			ExitCode: 0,
+			Command:     cmd,
+			Output:      SuccCtx(S0, fmt.Sprintf("%d/%d", cmd.CurrentChunk+1, cmd.TotalChunks)),
+			ExitCode:    0,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -494,9 +498,10 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		chunk, ok := chunkInfo.Chunks[i]
 		if !ok {
 			return CommandResult{
-				Command:  cmd,
-				Output:   fmt.Sprintf("Missing chunk %d", i),
-				ExitCode: 1,
+				Command:     cmd,
+				Output:      ErrCtx(E24, fmt.Sprintf("%d", i)),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 		fullData.WriteString(chunk)
@@ -509,10 +514,11 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Command:     cmd,
-			Output:      fmt.Sprintf("Failed to decode reassembled BOF: %v", err),
+			Output:      Err(E18),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E18),
 			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 

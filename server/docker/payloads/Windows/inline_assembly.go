@@ -33,7 +33,7 @@ func InitializeExitPrevention() {
 		if err := exitPrevention.PatchAllExitMethods(); err != nil {
 		} else {
 			exitMethodsPatched = true
-			fmt.Println("[+] Exit prevention initialized successfully")
+			// fmt.Println("[+] Exit prevention initialized successfully")
 		}
 	})
 }

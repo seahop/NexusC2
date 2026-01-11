@@ -7,7 +7,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	// "log"
 	"os"
 	"time"
 )
@@ -58,8 +58,8 @@ func main() {
 	// Continue with normal payload initialization
 
 	// Initialize logging
-	//log.SetPrefix("[Payload] ")
-	log.SetFlags(log.LstdFlags) // Removed Lshortfile flag
+	// log.SetPrefix("[Payload] ")
+	// log.SetFlags(log.LstdFlags) // Removed Lshortfile flag
 
 	// Create HandshakeManager instance
 	var err error

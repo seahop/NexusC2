@@ -24,7 +24,7 @@ func cleanupBOFJobs() {
 	for {
 		select {
 		case <-pollingShutdown:
-			fmt.Println("[BOF Cleanup] Shutting down")
+			// fmt.Println("[BOF Cleanup] Shutting down")
 			return
 		case <-ticker.C:
 			// Clean up jobs that have been completed for more than 1 hour

@@ -97,7 +97,7 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&LinksCommand{})
 
 	// Print all registered commands
-	fmt.Println()
+	// fmt.Println()
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()

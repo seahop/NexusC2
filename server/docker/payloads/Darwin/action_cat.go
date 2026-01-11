@@ -27,8 +27,8 @@ func (c *CatCommand) Name() string {
 func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			ErrorString: "No file specified",
-			Output:      "Usage: cat <file> [-f|-i|--filter] [pattern]",
+			ErrorString: Err(E1),
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -39,8 +39,8 @@ func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: err.Error(),
-			Output:      fmt.Sprintf("Error: %v\nUsage: cat <file> [-f|-i|--filter] [pattern]", err),
+			ErrorString: Err(E2),
+			Output:      Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -87,8 +87,8 @@ func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("Failed to read file: %v", err),
-			Output:      fmt.Sprintf("Error: Cannot read '%s': %v", fileName, err),
+			ErrorString: Err(E10),
+			Output:      ErrCtx(E10, fileName),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -146,9 +146,9 @@ func (c *CatCommand) readFile(filePath string, opts catOptions) (string, error) 
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("file not found")
+			return "", fmt.Errorf(Err(E4))
 		} else if os.IsPermission(err) {
-			return "", fmt.Errorf("permission denied")
+			return "", fmt.Errorf(Err(E3))
 		}
 		return "", err
 	}
@@ -159,7 +159,7 @@ func (c *CatCommand) readFile(filePath string, opts catOptions) (string, error) 
 	peekBytes, _ := reader.Peek(512)
 	if len(peekBytes) > 0 {
 		if isBinary(peekBytes) {
-			return "", fmt.Errorf("file appears to be binary")
+			return "", fmt.Errorf(Err(E8))
 		}
 	}
 

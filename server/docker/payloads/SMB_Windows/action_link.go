@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -106,8 +105,6 @@ Use 'unlink %s' to disconnect.`, pipePath, routingID, handshakeResult, routingID
 // performImmediateHandshake handles the full handshake round-trip immediately
 // instead of waiting for the next poll cycle
 func performImmediateHandshake(lm *LinkManager, routingID string) string {
-	log.Printf("[SMB LinkCommand] Starting immediate handshake for routing_id %s", routingID)
-
 	// Wait briefly for the SMB agent's handshake to arrive in the outbound queue
 	// The handleIncomingData goroutine should receive it shortly after connection
 	const handshakeWaitTimeout = 5 * time.Second
@@ -136,17 +133,13 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	}
 
 	if handshakeData == nil {
-		log.Printf("[SMB LinkCommand] No handshake received from SMB agent within timeout")
 		return "pending (will complete on next callback)"
 	}
-
-	log.Printf("[SMB LinkCommand] Got handshake from SMB agent, queuing for parent")
 
 	// Queue the handshake data to be sent on the next response to parent.
 	// The handshake will be sent when the parent polls us for data.
 	lm.queueOutboundData(handshakeData)
 
-	log.Printf("[SMB LinkCommand] Handshake queued for routing_id %s, will be sent to parent", routingID)
 	return "queued (will complete on next callback)"
 }
 

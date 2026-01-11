@@ -482,7 +482,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		if outputLen == 0 && execErr == nil {
 			job.Output.WriteString("[*] Assembly executed successfully but produced no captured output\n")
 		}
-		fmt.Printf("[DEBUG ASYNC] Final output buffer size: %d bytes\n", job.Output.Len())
+		// fmt.Printf("[DEBUG ASYNC] Final output buffer size: %d bytes\n", job.Output.Len())
 		job.OutputMutex.Unlock()
 
 		// Send result back

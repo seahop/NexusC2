@@ -1323,7 +1323,7 @@ func applyRelocation(sectionAddress uintptr, reloc windef.Relocation, symbolAddr
 
 // BOF start function - initializes output buffer
 func bofStart() int {
-	fmt.Printf("[DEBUG bofstart] Called - initializing output buffer\n")
+	// fmt.Printf("[DEBUG bofstart] Called - initializing output buffer\n")
 	bofOutputMutex.Lock()
 	bofOutputBuffer = nil
 	bofOutputMutex.Unlock()
@@ -1332,11 +1332,11 @@ func bofStart() int {
 
 // Print output function - flushes output
 func printOutput(flush int) {
-	fmt.Printf("[DEBUG printoutput] Called with flush=%d\n", flush)
+	// fmt.Printf("[DEBUG printoutput] Called with flush=%d\n", flush)
 	if flush != 0 {
 		bofOutputMutex.Lock()
 		if len(bofOutputBuffer) > 0 {
-			fmt.Printf("[DEBUG printoutput] Flushing %d bytes of buffered output\n", len(bofOutputBuffer))
+			// fmt.Printf("[DEBUG printoutput] Flushing %d bytes of buffered output\n", len(bofOutputBuffer))
 			// Output is already being sent through the channel
 		}
 		bofOutputMutex.Unlock()
@@ -1465,7 +1465,7 @@ func GetInternalPrintfForChannel(channel chan<- interface{}) func(uintptr, uintp
 			}
 		}
 
-		fmt.Printf("[DEBUG internal_printf] Formatted output: %s\n", output)
+		// fmt.Printf("[DEBUG internal_printf] Formatted output: %s\n", output)
 
 		// CRITICAL: Add to global buffer for async BOF monitoring
 		outputBytes := []byte(output)

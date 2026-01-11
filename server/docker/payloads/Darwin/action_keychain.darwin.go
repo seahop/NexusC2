@@ -26,7 +26,7 @@ func (c *KeychainCommand) Name() string {
 func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: "Usage: keychain <action> [options]",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -49,7 +49,7 @@ func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		return c.unlockKeychain(args[1:])
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown action: %s", action),
+			Output:   ErrCtx(E21, action),
 			ExitCode: 1,
 		}
 	}
@@ -365,7 +365,7 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 
 	if service == "" || account == "" || password == "" {
 		return CommandResult{
-			Output:   "Error: --service, --account, and --password are required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -377,15 +377,15 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 		"-w", password,
 		"-T", "") // Allow access by all applications
 
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if _, err := cmd.CombinedOutput(); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to add item: %s", string(output)),
+			Output:   Err(E11),
 			ExitCode: 1,
 		}
 	}
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Successfully added password for %s:%s", service, account),
+		Output:      SuccCtx(S1, fmt.Sprintf("%s:%s", service, account)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -413,7 +413,7 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 
 	if service == "" && account == "" {
 		return CommandResult{
-			Output:   "Error: --service or --account required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -427,15 +427,15 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 		cmd.Args = append(cmd.Args, "-a", account)
 	}
 
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if _, err := cmd.CombinedOutput(); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to delete item: %s", string(output)),
+			Output:   Err(E11),
 			ExitCode: 1,
 		}
 	}
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Successfully deleted item (service:%s, account:%s)", service, account),
+		Output:      SuccCtx(S2, fmt.Sprintf("%s:%s", service, account)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -463,7 +463,7 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 
 	if outputPath == "" {
 		return CommandResult{
-			Output:   "Error: --output is required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -534,7 +534,7 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 
 	if password == "" {
 		return CommandResult{
-			Output:   "Error: --password is required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}

@@ -6,7 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	// "log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -121,7 +121,7 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 	// Start goroutine to handle incoming data from the SMB agent
 	go lm.handleIncomingData(link)
 
-	log.Printf("[LinkManager] Successfully linked to %s (routing_id: %s)", pipePath, routingID)
+	// log.Printf("[LinkManager] Successfully linked to %s (routing_id: %s)", pipePath, routingID)
 	return routingID, nil
 }
 
@@ -150,16 +150,16 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	// Queue unlink notification to be sent to server
 	select {
 	case lm.unlinkNotifications <- routingID:
-		log.Printf("[LinkManager] Queued unlink notification for routing_id: %s", routingID)
+		// log.Printf("[LinkManager] Queued unlink notification for routing_id: %s", routingID)
 	default:
-		log.Printf("[LinkManager] Warning: Unlink notification queue full, notification dropped for %s", routingID)
+		// log.Printf("[LinkManager] Warning: Unlink notification queue full, notification dropped for %s", routingID)
 	}
 
 	// Remove from maps
 	delete(lm.pipeToRoute, link.PipePath)
 	delete(lm.links, routingID)
 
-	log.Printf("[LinkManager] Unlinked from %s (routing_id: %s)", link.PipePath, routingID)
+	// log.Printf("[LinkManager] Unlinked from %s (routing_id: %s)", link.PipePath, routingID)
 	return nil
 }
 
@@ -249,10 +249,10 @@ func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload str
 	// Wait for response with timeout
 	select {
 	case response := <-respChan:
-		log.Printf("[LinkManager] Received synchronous response from %s", routingID)
+		// log.Printf("[LinkManager] Received synchronous response from %s", routingID)
 		return response, nil
 	case <-time.After(timeout):
-		log.Printf("[LinkManager] Timeout waiting for response from %s (waited %v)", routingID, timeout)
+		// log.Printf("[LinkManager] Timeout waiting for response from %s (waited %v)", routingID, timeout)
 		return nil, nil // Timeout is not an error - response will come later via normal queue
 	}
 }
@@ -277,7 +277,7 @@ func (lm *LinkManager) WaitForLinkData(routingID string, timeout time.Duration) 
 	// Wait for response with timeout
 	select {
 	case response := <-respChan:
-		log.Printf("[LinkManager] Received data for %s via wait channel", routingID)
+		// log.Printf("[LinkManager] Received data for %s via wait channel", routingID)
 		return response, nil
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("timeout waiting for data from %s", routingID)
@@ -307,11 +307,11 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 	for {
 		select {
 		case routingID := <-lm.unlinkNotifications:
-			log.Printf("[LinkManager] GetUnlinkNotifications: Drained routing_id %s from channel", routingID)
+			// log.Printf("[LinkManager] GetUnlinkNotifications: Drained routing_id %s from channel", routingID)
 			notifications = append(notifications, routingID)
 		default:
 			if len(notifications) > 0 {
-				log.Printf("[LinkManager] GetUnlinkNotifications: Returning %d notifications", len(notifications))
+				// log.Printf("[LinkManager] GetUnlinkNotifications: Returning %d notifications", len(notifications))
 			}
 			return notifications
 		}
@@ -324,21 +324,21 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 		link.mu.Lock()
 		link.IsActive = false
 		link.mu.Unlock()
-		log.Printf("[LinkManager] Link handler exited for routing_id: %s", link.RoutingID)
+		// log.Printf("[LinkManager] Link handler exited for routing_id: %s", link.RoutingID)
 	}()
 
 	for {
 		// Read length-prefixed message from pipe
 		data, err := readMessage(link.Conn)
 		if err != nil {
-			log.Printf("[LinkManager] Error reading from link %s: %v", link.RoutingID, err)
+			// log.Printf("[LinkManager] Error reading from link %s: %v", link.RoutingID, err)
 			return
 		}
 
 		// Parse the message
 		var message map[string]string
 		if err := json.Unmarshal(data, &message); err != nil {
-			log.Printf("[LinkManager] Invalid message from link %s: %v", link.RoutingID, err)
+			// log.Printf("[LinkManager] Invalid message from link %s: %v", link.RoutingID, err)
 			continue
 		}
 
@@ -359,15 +359,15 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 				// Send to synchronous waiter (non-blocking)
 				select {
 				case respChan <- outbound:
-					log.Printf("[LinkManager] Delivered data from %s to synchronous waiter", link.RoutingID)
+					// log.Printf("[LinkManager] Delivered data from %s to synchronous waiter", link.RoutingID)
 				default:
 					// Channel full or closed, fall back to async queue
-					log.Printf("[LinkManager] Sync channel full, queuing data from %s", link.RoutingID)
+					// log.Printf("[LinkManager] Sync channel full, queuing data from %s", link.RoutingID)
 					lm.queueOutboundData(outbound)
 				}
 			} else {
 				// No synchronous waiter, queue for normal async processing
-				log.Printf("[LinkManager] Received data response from link %s, queuing for server", link.RoutingID)
+				// log.Printf("[LinkManager] Received data response from link %s, queuing for server", link.RoutingID)
 				lm.queueOutboundData(outbound)
 			}
 
@@ -379,17 +379,17 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 			}
 			select {
 			case lm.outboundData <- outbound:
-				log.Printf("[LinkManager] Queued handshake from %s", link.RoutingID)
+				// log.Printf("[LinkManager] Queued handshake from %s", link.RoutingID)
 			default:
-				log.Printf("[LinkManager] Outbound queue full, dropping handshake from %s", link.RoutingID)
+				// log.Printf("[LinkManager] Outbound queue full, dropping handshake from %s", link.RoutingID)
 			}
 
 		case "disconnect":
-			log.Printf("[LinkManager] Received disconnect from %s", link.RoutingID)
+			// log.Printf("[LinkManager] Received disconnect from %s", link.RoutingID)
 			return
 
 		default:
-			log.Printf("[LinkManager] Unknown message type from %s: %s", link.RoutingID, message["type"])
+			// log.Printf("[LinkManager] Unknown message type from %s: %s", link.RoutingID, message["type"])
 		}
 
 		link.mu.Lock()
@@ -402,9 +402,9 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 func (lm *LinkManager) queueOutboundData(outbound *LinkDataOut) {
 	select {
 	case lm.outboundData <- outbound:
-		log.Printf("[LinkManager] Successfully queued data from %s for server", outbound.RoutingID)
+		// log.Printf("[LinkManager] Successfully queued data from %s for server", outbound.RoutingID)
 	default:
-		log.Printf("[LinkManager] Outbound queue full, dropping data from %s", outbound.RoutingID)
+		// log.Printf("[LinkManager] Outbound queue full, dropping data from %s", outbound.RoutingID)
 	}
 }
 

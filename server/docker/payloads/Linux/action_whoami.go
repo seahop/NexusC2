@@ -31,7 +31,7 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		if username != "" {
 			output.WriteString(fmt.Sprintf("%s@%s", username, hostname))
 		} else {
-			output.WriteString("Unknown user")
+			output.WriteString(Err(E19))
 		}
 	} else {
 		// Unix/Darwin format: username

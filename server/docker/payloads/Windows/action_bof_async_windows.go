@@ -451,8 +451,8 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			RevertToSelf()
 		}
 
-		fmt.Printf("[BOF Async] BOF execution completed for job %s, direct output length: %d\n",
-			job.ID, len(output))
+		// fmt.Printf("[BOF Async] BOF execution completed for job %s, direct output length: %d\n",
+		// 	job.ID, len(output))
 
 		// Send result
 		resultChan <- struct {
@@ -474,7 +474,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			existingOutput := job.Output.String()
 			if !strings.Contains(existingOutput, result.output) {
 				if job.TotalBytesSent+job.Output.Len()+len(result.output) <= MAX_TOTAL_OUTPUT {
-					fmt.Printf("[BOF Async] Adding %d bytes of uncaptured output\n", len(result.output))
+					// fmt.Printf("[BOF Async] Adding %d bytes of uncaptured output\n", len(result.output))
 					job.Output.WriteString(result.output)
 				}
 			}
@@ -617,8 +617,9 @@ func executeBOFJobsList() CommandResult {
 
 	if len(jobs) == 0 {
 		return CommandResult{
-			Output:   "No active BOF jobs",
-			ExitCode: 0,
+			Output:      Succ(S0),
+			ExitCode:    0,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -685,8 +686,9 @@ func executeBOFGetOutput(jobID string) CommandResult {
 
 	if matchedJob == nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job not found: %s", jobID),
-			ExitCode: 1,
+			Output:      ErrCtx(E47, jobID),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -736,15 +738,17 @@ func executeBOFKillJob(jobID string) CommandResult {
 
 	if matchedJob == nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job not found: %s", jobID),
-			ExitCode: 1,
+			Output:      ErrCtx(E47, jobID),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if matchedJob.Status != "running" {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job %s is not running (status: %s)", matchedJob.ID, matchedJob.Status),
-			ExitCode: 1,
+			Output:      ErrCtx(E25, matchedJob.Status),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -752,14 +756,16 @@ func executeBOFKillJob(jobID string) CommandResult {
 	case matchedJob.CancelChan <- true:
 		time.Sleep(100 * time.Millisecond)
 		return CommandResult{
-			Output:   fmt.Sprintf("Job %s terminated", matchedJob.ID),
-			ExitCode: 0,
-			JobID:    jobID,
+			Output:      SuccCtx(S2, matchedJob.ID),
+			ExitCode:    0,
+			JobID:       jobID,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	default:
 		return CommandResult{
-			Output:   "Failed to send kill signal to job",
-			ExitCode: 1,
+			Output:      Err(E25),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 }

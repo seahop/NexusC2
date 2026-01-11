@@ -24,8 +24,8 @@ func (c *UploadCommand) Name() string {
 func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Error:       fmt.Errorf("no arguments provided"),
-			ErrorString: "no arguments provided",
+			Error:       fmt.Errorf(Err(E1)),
+			ErrorString: Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -78,7 +78,7 @@ func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResul
 	// Simply return the parsed remote path - actual directory creation
 	// and file writing will happen when chunks are processed
 	return CommandResult{
-		Output:      fmt.Sprintf("Upload target: %s", remotePath),
+		Output:      SuccCtx(S4, remotePath),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -87,13 +87,13 @@ func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResul
 // HandleUploadChunk function from action_upload.go
 func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error) {
 	if cmd.Data == "" {
-		return nil, fmt.Errorf("no data in upload chunk")
+		return nil, fmt.Errorf(Err(E24))
 	}
 
 	// Decode chunk data
 	chunkData, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode chunk data: %v", err)
+		return nil, fmt.Errorf(Err(E18))
 	}
 
 	// Get or create upload info
@@ -138,12 +138,12 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 		// Create parent directories if needed
 		// Use NetworkAwareMkdirAll instead of os.MkdirAll
 		if err := NetworkAwareMkdirAll(filepath.Dir(finalPath), 0755); err != nil {
-			return nil, fmt.Errorf("failed to create directories: %v", err)
+			return nil, fmt.Errorf(Err(E11))
 		}
 
 		// Assemble and write file
 		if err := assembleAndWriteFile(uploadInfo, finalPath); err != nil {
-			return nil, fmt.Errorf("failed to assemble file: %v", err)
+			return nil, fmt.Errorf(Err(E11))
 		}
 
 		// Clean up memory
@@ -153,7 +153,7 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 
 		return &CommandResult{
 			Command:     cmd,
-			Output:      fmt.Sprintf("Upload complete: %s", finalPath),
+			Output:      SuccCtx(S5, finalPath),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}, nil
@@ -162,7 +162,7 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 	// Return success for intermediate chunk
 	return &CommandResult{
 		Command:     cmd,
-		Output:      fmt.Sprintf("Chunk %d/%d received", cmd.CurrentChunk+1, cmd.TotalChunks),
+		Output:      SuccCtx(S4, fmt.Sprintf("%d/%d", cmd.CurrentChunk+1, cmd.TotalChunks)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}, nil
@@ -175,7 +175,7 @@ func assembleAndWriteFile(info *UploadInfo, finalPath string) error {
 	// Use NetworkAwareOpenFile instead of os.Create
 	finalFile, err := NetworkAwareOpenFile(finalPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to create final file: %v", err)
+		return fmt.Errorf(Err(E11))
 	}
 	defer finalFile.Close()
 
@@ -183,10 +183,10 @@ func assembleAndWriteFile(info *UploadInfo, finalPath string) error {
 	for i := 0; i < info.TotalChunks; i++ {
 		chunk, exists := info.Chunks[i]
 		if !exists {
-			return fmt.Errorf("missing chunk %d", i)
+			return fmt.Errorf(Err(E24))
 		}
 		if _, err := finalFile.Write(chunk); err != nil {
-			return fmt.Errorf("failed to write chunk %d: %v", i, err)
+			return fmt.Errorf(Err(E11))
 		}
 
 		// Clear chunk from memory as we write
