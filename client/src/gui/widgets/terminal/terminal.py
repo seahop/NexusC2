@@ -781,12 +781,12 @@ class TerminalWidget(QWidget):
             # For 'queued' status messages, check if this command was sent from THIS client
             # If so, skip it (we already echoed locally). If not (API command), display it.
             if status == 'queued':
-                locally_sent = self.ws_thread.locally_sent_commands if self.ws_thread else set()
-                if command_id in locally_sent:
-                    # GUI command - we already echoed it locally, skip the server broadcast
-                    print(f"TerminalWidget: Skipping locally-sent command {command_id[:8] if command_id else 'N/A'}")
-                    locally_sent.discard(command_id)
-                    return
+                # Use thread-safe method to check and remove
+                if self.ws_thread and hasattr(self.ws_thread, 'check_and_remove_local_command'):
+                    if self.ws_thread.check_and_remove_local_command(command_id):
+                        # GUI command - we already echoed it locally, skip the server broadcast
+                        print(f"TerminalWidget: Skipping locally-sent command {command_id[:8] if command_id else 'N/A'}")
+                        return
                 # API command - display it since there was no local echo
                 print(f"TerminalWidget: Displaying API command for open terminal {agent_id[:8] if agent_id else 'N/A'}")
 

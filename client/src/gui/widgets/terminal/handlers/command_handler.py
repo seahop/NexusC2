@@ -441,8 +441,8 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
 
             # Track this command_id so we skip the server's command_queued broadcast
             # (we're echoing the command locally instead to avoid duplication)
-            if hasattr(self.ws_thread, 'locally_sent_commands'):
-                self.ws_thread.locally_sent_commands.add(command_id)
+            if hasattr(self.ws_thread, 'add_local_command'):
+                self.ws_thread.add_local_command(command_id)
                 print(f"DEBUG: Tracked locally sent command: {command_id[:8]}")
 
             # Echo the command locally in the terminal

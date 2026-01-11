@@ -9,6 +9,7 @@ from version import get_version_info, APP_NAME, APP_DESCRIPTION
 from utils.websocket_client import WebSocketClient
 import asyncio
 import json
+import threading
 from utils.database import StateDatabase
 from pathlib import Path
 
@@ -55,6 +56,20 @@ class WebSocketThread(QThread):
         self.shutdown_event = None  # Add shutdown event for clean stopping
         # Track command_ids sent from THIS client to skip duplicate command_queued displays
         self.locally_sent_commands = set()
+        self._commands_lock = threading.Lock()  # Thread safety for locally_sent_commands
+
+    def add_local_command(self, command_id):
+        """Thread-safe add to locally_sent_commands"""
+        with self._commands_lock:
+            self.locally_sent_commands.add(command_id)
+
+    def check_and_remove_local_command(self, command_id):
+        """Thread-safe check and remove from locally_sent_commands. Returns True if was present."""
+        with self._commands_lock:
+            if command_id in self.locally_sent_commands:
+                self.locally_sent_commands.discard(command_id)
+                return True
+            return False
 
     async def _run_async(self):
         """Async implementation of the run logic"""

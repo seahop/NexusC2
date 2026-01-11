@@ -46,7 +46,8 @@ RUN apk add --no-cache curl ca-certificates
 # Using a fixed version to avoid GitHub API rate limits
 ARG COMPOSE_VERSION=v2.32.4
 RUN mkdir -p /tmp/docker-cli-plugins && \
-    curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+    curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors \
+        "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
         -o /tmp/docker-cli-plugins/docker-compose && \
     chmod +x /tmp/docker-cli-plugins/docker-compose && \
     cp /tmp/docker-cli-plugins/docker-compose /tmp/docker-compose-standalone

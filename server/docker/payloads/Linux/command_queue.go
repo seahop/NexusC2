@@ -74,13 +74,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterCommand(&WhoamiCommand{})
 	queue.RegisterCommand(&PersistenceCommand{})
 	queue.RegisterCommand(&CronPersistenceCommand{})
-	queue.RegisterCommand(&ProcessInjectionCommand{})
-	queue.RegisterCommand(&MemoryDumpCommand{})
-	queue.RegisterCommand(&CapabilityCommand{})
-	queue.RegisterCommand(&SELinuxCommand{})
-	queue.RegisterCommand(&SUIDEnumCommand{})
-	queue.RegisterCommand(&ContainerDetectCommand{})
-	queue.RegisterCommand(&LDPreloadCommand{})
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()
