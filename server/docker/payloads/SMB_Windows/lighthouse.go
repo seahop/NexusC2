@@ -1,14 +1,29 @@
-// server/docker/payloads/Windows/lighthouse.go
+// server/docker/payloads/SMB_Windows/lighthouse.go
 //go:build windows
 // +build windows
 
 /*
-	Our Beacon* Function Compatibilty implementations. Code here is taken very liberally
-    from Ne0nd0g's go-coff project at https://github.com/Ne0nd0g/go-coff.
+Copyright 2023 Praetorian Security, Inc. (goffloader)
+Copyright 2021 Ne0nd0g (go-coff)
 
-	Beacon function names are signatured to hell and back in yara land so this package is
-    called "lighthouse" to avoid the presence of beacon/BOF strings in the generated binary.
-    Function names have also been replaced/reduced along to avoid detection.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+This file contains Beacon function compatibility implementations derived from:
+- https://github.com/praetorian-inc/goffloader (Apache 2.0)
+- https://github.com/Ne0nd0g/go-coff (Apache 2.0)
+
+The package is named "lighthouse" to avoid beacon/BOF string signatures.
+Function names have been modified to avoid detection.
 */
 
 package main

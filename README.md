@@ -316,6 +316,15 @@ For more details, see the [Setup Guide](docs/SETUP.md).
 
 MIT
 
+## Acknowledgments
+
+This project uses code from the following open source projects:
+
+- **[goffloader](https://github.com/praetorian-inc/goffloader)** by Praetorian - A pure Go implementation of Cobalt Strike's Beacon Object File (BOF) loader. Licensed under Apache 2.0. This project's BOF execution capabilities were built using goffloader as a foundation.
+- **[go-coff](https://github.com/Ne0nd0g/go-coff)** by Ne0nd0g - COFF loader and Beacon function compatibility layer. Licensed under Apache 2.0.
+
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for full license texts.
+
 ## Disclaimer
 
 This software is provided for authorized security testing purposes only. Users are responsible for complying with all applicable laws and regulations. The authors assume no liability for misuse or damage caused by this software.
