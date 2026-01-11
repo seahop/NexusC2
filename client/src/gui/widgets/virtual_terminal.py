@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QLabel, QApplicat
 from PyQt6.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 from PyQt6.QtGui import QWheelEvent, QTextCursor, QTextOption
 import math
+import threading
 
 class VirtualTerminal(QScrollArea):
     """
@@ -375,6 +376,7 @@ class VirtualTerminal(QScrollArea):
         self.all_content = []
         self.read_only = True
         self._is_updating = False  # Flag to prevent recursive updates
+        self._update_lock = threading.Lock()  # Thread-safe lock for updates
         
     def _initialize_scrolling(self):
         """Initialize scrolling system"""
@@ -397,34 +399,46 @@ class VirtualTerminal(QScrollArea):
         
     def _on_scroll_value_changed(self, value):
         """Handle scroll events"""
-        if self._is_updating:
+        # Quick non-blocking check - if locked, skip this event
+        if not self._update_lock.acquire(blocking=False):
             return
-            
-        max_value = self.scrollbar.maximum()
-        if max_value == 0:
-            return
-        
-        # Check if we're at the bottom
-        at_bottom = value >= (max_value - self.AUTO_SCROLL_THRESHOLD)
-        
-        # Update auto-scroll state based on position
-        if at_bottom and not self.user_has_scrolled:
-            self.auto_scroll = True
-        elif not self._is_updating:
-            # User has manually scrolled
-            if value < (max_value - self.AUTO_SCROLL_THRESHOLD):
-                self.auto_scroll = False
-                
+        try:
+            if self._is_updating:
+                return
+
+            max_value = self.scrollbar.maximum()
+            if max_value == 0:
+                return
+
+            # Check if we're at the bottom
+            at_bottom = value >= (max_value - self.AUTO_SCROLL_THRESHOLD)
+
+            # Update auto-scroll state based on position
+            if at_bottom and not self.user_has_scrolled:
+                self.auto_scroll = True
+            elif not self._is_updating:
+                # User has manually scrolled
+                if value < (max_value - self.AUTO_SCROLL_THRESHOLD):
+                    self.auto_scroll = False
+        finally:
+            self._update_lock.release()
+
         self.scrollPositionChanged.emit(value)
         
     def _on_scroll_range_changed(self, min_val, max_val):
         """Handle scrollbar range changes"""
-        if self._is_updating:
+        # Quick non-blocking check
+        if not self._update_lock.acquire(blocking=False):
             return
-            
-        # If auto-scrolling and content was added, scroll to bottom
-        if self.auto_scroll and max_val > 0:
-            QTimer.singleShot(0, lambda: self._scroll_to_bottom())
+        try:
+            if self._is_updating:
+                return
+
+            # If auto-scrolling and content was added, scroll to bottom
+            if self.auto_scroll and max_val > 0:
+                QTimer.singleShot(0, lambda: self._scroll_to_bottom())
+        finally:
+            self._update_lock.release()
             
     def _handle_wheel_event(self, event: QWheelEvent):
         """Custom wheel event handling"""
@@ -453,105 +467,114 @@ class VirtualTerminal(QScrollArea):
         
     def _scroll_to_bottom(self):
         """Scroll to the bottom of content"""
-        if self._is_updating:
+        # Quick non-blocking check
+        if not self._update_lock.acquire(blocking=False):
             return
-        self.scrollbar.setValue(self.scrollbar.maximum())
+        try:
+            if self._is_updating:
+                return
+            self.scrollbar.setValue(self.scrollbar.maximum())
+        finally:
+            self._update_lock.release()
         
     def setText(self, text):
         """Set new content and scroll to bottom"""
-        self._is_updating = True
-        
-        # Store content as lines
-        self.all_content = text.splitlines() if text else []
-        
-        # Trim if exceeds maximum
-        if len(self.all_content) > self.MAX_LINES:
-            self.all_content = self.all_content[-self.MAX_LINES:]
-        
-        # Update the text widget
-        self.text_widget.clear()
-        self.text_widget.setPlainText('\n'.join(self.all_content))
-        
-        # Always start at bottom for new content
-        self.auto_scroll = True
-        self.user_has_scrolled = False
-        
-        self._is_updating = False
-        
-        # Force scroll to bottom
+        with self._update_lock:
+            self._is_updating = True
+
+            # Store content as lines
+            self.all_content = text.splitlines() if text else []
+
+            # Trim if exceeds maximum
+            if len(self.all_content) > self.MAX_LINES:
+                self.all_content = self.all_content[-self.MAX_LINES:]
+
+            # Update the text widget
+            self.text_widget.clear()
+            self.text_widget.setPlainText('\n'.join(self.all_content))
+
+            # Always start at bottom for new content
+            self.auto_scroll = True
+            self.user_has_scrolled = False
+
+            self._is_updating = False
+
+        # Force scroll to bottom (outside lock to avoid deadlock with timer)
         QTimer.singleShot(10, self._scroll_to_bottom)
         
     def append(self, text):
         """Append new content with smooth scrolling"""
         if not text:
             return
-            
-        self._is_updating = True
-        
-        # Store current scroll state
-        scrollbar = self.text_widget.verticalScrollBar()
-        old_max = scrollbar.maximum()
-        old_value = scrollbar.value()
-        
-        # Check if we're at bottom before adding content
-        was_at_bottom = old_value >= (old_max - self.AUTO_SCROLL_THRESHOLD) if old_max > 0 else True
-        
-        # If we have no content and are appending, start at bottom
-        if not self.all_content:
-            was_at_bottom = True
-            self.auto_scroll = True
-        
-        # Add new lines to our buffer
-        new_lines = text.splitlines()
-        self.all_content.extend(new_lines)
-        
-        # Check if we need to trim old content
-        needs_full_refresh = False
-        if len(self.all_content) > self.MAX_LINES:
-            lines_to_remove = len(self.all_content) - self.MAX_LINES
-            self.all_content = self.all_content[lines_to_remove:]
-            needs_full_refresh = True
-        
-        # Update display
-        if needs_full_refresh:
-            # Only do full refresh if we trimmed content
-            self.text_widget.setPlainText('\n'.join(self.all_content))
-        else:
-            # Smooth append without clearing - prevents flash
-            cursor = self.text_widget.textCursor()
-            
-            # Block signals to prevent flashing
-            self.text_widget.blockSignals(True)
-            
-            # Move to end and insert
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            if self.text_widget.document().characterCount() > 1:  # Not empty
-                cursor.insertText('\n')
-            cursor.insertText('\n'.join(new_lines))
-            
-            # Re-enable signals
-            self.text_widget.blockSignals(False)
-        
-        self._is_updating = False
-        
-        # Handle scrolling based on previous position
-        if was_at_bottom:
-            # Stay at bottom
-            self.auto_scroll = True
-            # Immediate scroll to bottom, no delay needed for append
-            scrollbar.setValue(scrollbar.maximum())
-        else:
-            # Maintain position - the cursor operations shouldn't have moved us
-            self.auto_scroll = False
+
+        with self._update_lock:
+            self._is_updating = True
+
+            # Store current scroll state
+            scrollbar = self.text_widget.verticalScrollBar()
+            old_max = scrollbar.maximum()
+            old_value = scrollbar.value()
+
+            # Check if we're at bottom before adding content
+            was_at_bottom = old_value >= (old_max - self.AUTO_SCROLL_THRESHOLD) if old_max > 0 else True
+
+            # If we have no content and are appending, start at bottom
+            if not self.all_content:
+                was_at_bottom = True
+                self.auto_scroll = True
+
+            # Add new lines to our buffer
+            new_lines = text.splitlines()
+            self.all_content.extend(new_lines)
+
+            # Check if we need to trim old content
+            needs_full_refresh = False
+            if len(self.all_content) > self.MAX_LINES:
+                lines_to_remove = len(self.all_content) - self.MAX_LINES
+                self.all_content = self.all_content[lines_to_remove:]
+                needs_full_refresh = True
+
+            # Update display
+            if needs_full_refresh:
+                # Only do full refresh if we trimmed content
+                self.text_widget.setPlainText('\n'.join(self.all_content))
+            else:
+                # Smooth append without clearing - prevents flash
+                cursor = self.text_widget.textCursor()
+
+                # Block signals to prevent flashing
+                self.text_widget.blockSignals(True)
+
+                # Move to end and insert
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                if self.text_widget.document().characterCount() > 1:  # Not empty
+                    cursor.insertText('\n')
+                cursor.insertText('\n'.join(new_lines))
+
+                # Re-enable signals
+                self.text_widget.blockSignals(False)
+
+            self._is_updating = False
+
+            # Handle scrolling based on previous position
+            if was_at_bottom:
+                # Stay at bottom
+                self.auto_scroll = True
+                # Immediate scroll to bottom, no delay needed for append
+                scrollbar.setValue(scrollbar.maximum())
+            else:
+                # Maintain position - the cursor operations shouldn't have moved us
+                self.auto_scroll = False
         
     def clear(self):
         """Clear all content and reset state"""
-        self._is_updating = True
-        self.all_content = []
-        self.text_widget.clear()
-        self.auto_scroll = True
-        self.user_has_scrolled = False
-        self._is_updating = False
+        with self._update_lock:
+            self._is_updating = True
+            self.all_content = []
+            self.text_widget.clear()
+            self.auto_scroll = True
+            self.user_has_scrolled = False
+            self._is_updating = False
         
     def toPlainText(self):
         """Get all content as plain text"""
