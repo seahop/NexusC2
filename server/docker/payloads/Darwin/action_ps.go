@@ -318,33 +318,57 @@ func sortProcesses(processes []ProcessInfo, sortField string) {
 	}
 }
 
-// formatProcessTable formats the process list as a table
+// formatProcessTable formats the process list as a table with dynamic column widths
 func formatProcessTable(output *strings.Builder, processes []ProcessInfo, flags PSFlags) {
-	// Build header based on flags
-	header := "PID\tPPID\tNAME"
-
-	if flags.Extended {
-		header += "\tUSER\tCPU%\tMEM%\tMEM(MB)\tSTATUS"
+	// Calculate column widths based on data
+	widths := struct {
+		pid, ppid, name, user, cpu, mem, memMB, status, cmd int
+	}{
+		pid:    3, // "PID"
+		ppid:   4, // "PPID"
+		name:   4, // "NAME"
+		user:   4, // "USER"
+		cpu:    4, // "CPU%"
+		mem:    4, // "MEM%"
+		memMB:  7, // "MEM(MB)"
+		status: 6, // "STATUS"
+		cmd:    7, // "COMMAND"
 	}
 
-	if flags.Verbose {
-		header += "\tCOMMAND"
-	}
-
-	output.WriteString(header + "\n")
-	output.WriteString(strings.Repeat("-", 80) + "\n")
-
-	// Format each process
+	// First pass: calculate max widths
 	for _, p := range processes {
-		line := fmt.Sprintf("%d\t%d\t%s", p.PID, p.PPID, truncatePS(p.Name, 15, flags.NoTruncate))
+		if w := len(fmt.Sprintf("%d", p.PID)); w > widths.pid {
+			widths.pid = w
+		}
+		if w := len(fmt.Sprintf("%d", p.PPID)); w > widths.ppid {
+			widths.ppid = w
+		}
+		name := truncatePS(p.Name, 30, flags.NoTruncate)
+		if w := len(name); w > widths.name {
+			widths.name = w
+		}
 
 		if flags.Extended {
-			user := truncatePS(p.Username, 12, flags.NoTruncate)
+			user := truncatePS(p.Username, 20, flags.NoTruncate)
 			if user == "" {
 				user = "?"
 			}
-			line += fmt.Sprintf("\t%s\t%.1f\t%.1f\t%.1f\t%s",
-				user, p.CPU, p.Memory, p.MemoryMB, truncatePS(p.Status, 8, flags.NoTruncate))
+			if w := len(user); w > widths.user {
+				widths.user = w
+			}
+			if w := len(fmt.Sprintf("%.1f", p.CPU)); w > widths.cpu {
+				widths.cpu = w
+			}
+			if w := len(fmt.Sprintf("%.1f", p.Memory)); w > widths.mem {
+				widths.mem = w
+			}
+			if w := len(fmt.Sprintf("%.1f", p.MemoryMB)); w > widths.memMB {
+				widths.memMB = w
+			}
+			status := truncatePS(p.Status, 12, flags.NoTruncate)
+			if w := len(status); w > widths.status {
+				widths.status = w
+			}
 		}
 
 		if flags.Verbose {
@@ -355,7 +379,84 @@ func formatProcessTable(output *strings.Builder, processes []ProcessInfo, flags 
 			if cmd == "" {
 				cmd = "?"
 			}
-			line += "\t" + truncatePS(cmd, 50, flags.NoTruncate)
+			cmd = truncatePS(cmd, 100, flags.NoTruncate)
+			if w := len(cmd); w > widths.cmd {
+				widths.cmd = w
+			}
+		}
+	}
+
+	// Build format strings
+	baseFormat := fmt.Sprintf("%%-%dd  %%-%dd  %%-%ds", widths.pid, widths.ppid, widths.name)
+	headerFormat := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds", widths.pid, widths.ppid, widths.name)
+
+	extFormat := ""
+	extHeaderFormat := ""
+	if flags.Extended {
+		extFormat = fmt.Sprintf("  %%-%ds  %%%ds  %%%ds  %%%ds  %%-%ds",
+			widths.user, widths.cpu, widths.mem, widths.memMB, widths.status)
+		extHeaderFormat = fmt.Sprintf("  %%-%ds  %%%ds  %%%ds  %%%ds  %%-%ds",
+			widths.user, widths.cpu, widths.mem, widths.memMB, widths.status)
+	}
+
+	verboseFormat := ""
+	verboseHeaderFormat := ""
+	if flags.Verbose {
+		verboseFormat = "  %s"
+		verboseHeaderFormat = "  %s"
+	}
+
+	// Calculate total width for separator (cap at reasonable width)
+	totalWidth := widths.pid + 2 + widths.ppid + 2 + widths.name
+	if flags.Extended {
+		totalWidth += 2 + widths.user + 2 + widths.cpu + 2 + widths.mem + 2 + widths.memMB + 2 + widths.status
+	}
+	if flags.Verbose {
+		totalWidth += 2 + 7 // Just add "COMMAND" header width, not full command width
+	}
+	if totalWidth > 120 {
+		totalWidth = 120
+	}
+
+	// Write header
+	header := fmt.Sprintf(headerFormat, "PID", "PPID", "NAME")
+	if flags.Extended {
+		header += fmt.Sprintf(extHeaderFormat, "USER", "CPU%", "MEM%", "MEM(MB)", "STATUS")
+	}
+	if flags.Verbose {
+		header += fmt.Sprintf(verboseHeaderFormat, "COMMAND")
+	}
+	output.WriteString(header + "\n")
+	output.WriteString(strings.Repeat("-", totalWidth) + "\n")
+
+	// Format each process
+	for _, p := range processes {
+		name := truncatePS(p.Name, 30, flags.NoTruncate)
+		line := fmt.Sprintf(baseFormat, p.PID, p.PPID, name)
+
+		if flags.Extended {
+			user := truncatePS(p.Username, 20, flags.NoTruncate)
+			if user == "" {
+				user = "?"
+			}
+			status := truncatePS(p.Status, 12, flags.NoTruncate)
+			line += fmt.Sprintf(extFormat,
+				user,
+				fmt.Sprintf("%.1f", p.CPU),
+				fmt.Sprintf("%.1f", p.Memory),
+				fmt.Sprintf("%.1f", p.MemoryMB),
+				status)
+		}
+
+		if flags.Verbose {
+			cmd := p.CommandLine
+			if cmd == "" {
+				cmd = p.Executable
+			}
+			if cmd == "" {
+				cmd = "?"
+			}
+			line += fmt.Sprintf(verboseFormat, truncatePS(cmd, 100, flags.NoTruncate))
 		}
 
 		output.WriteString(line + "\n")

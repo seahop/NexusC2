@@ -1245,6 +1245,7 @@ ps                                      # Basic process list (PID, PPID, Name)
 ps -v                                   # Verbose mode with command line and executable path
 ps -x                                   # Extended mode with resource usage
 ps -j                                   # Output in JSON format
+ps --no-truncate                        # Show full names/paths without truncation
 ps -f <pattern>                         # Filter by process name
 ps -u <username>                        # Filter by username
 ps -s <field>                           # Sort by field (cpu, mem, pid, name, user, time)
@@ -1256,6 +1257,8 @@ examples = [
     "ps -x",
     "ps -v -x",
     "ps -j",
+    "ps --no-truncate",
+    "ps -v --no-truncate",
     "ps -f chrome",
     "ps -u root",
     "ps -s cpu",
@@ -1275,6 +1278,7 @@ FLAGS:
   -v, --verbose     Include command line arguments and executable path
   -x, --extended    Include resource usage (CPU%, memory, threads, status, user)
   -j, --json        Output in JSON format for parsing/scripting
+  --no-truncate     Don't truncate fields - show full process names, paths, and commands
 
 OPTIONS:
   -f, --filter <pattern>    Filter processes by name (partial match, case-insensitive)
