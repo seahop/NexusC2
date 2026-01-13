@@ -120,7 +120,7 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	globalTokenStore.Metadata[tokenName] = TokenMetadata{
 		User:      user,
 		Domain:    domain,
-		Source:    "created",
+		Source:    "c",
 		LogonType: logonTypeStr,
 		StoredAt:  time.Now(),
 		TokenType: "primary",
@@ -221,7 +221,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	globalTokenStore.Metadata[tokenName] = TokenMetadata{
 		User:      user,
 		Domain:    domain,
-		Source:    "created",
+		Source:    "c",
 		LogonType: "new_credentials",
 		StoredAt:  time.Now(),
 		TokenType: "primary",
@@ -440,41 +440,6 @@ func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, strin
 }
 
 func (c *MakeTokenCommand) getLogonErrorMessage(errorCode syscall.Errno) string {
-	// Common logon error codes
-	switch errorCode {
-	case 0x52E:
-		return "Logon failure: unknown user name or bad password"
-	case 0x52F:
-		return "Account restriction: account disabled, expired, or locked"
-	case 0x530:
-		return "Invalid logon hours"
-	case 0x531:
-		return "Account restriction: user not allowed to log on at this computer"
-	case 0x532:
-		return "Account disabled"
-	case 0x533:
-		return "Account has expired"
-	case 0x534:
-		return "User not allowed to log on at this computer"
-	case 0x535:
-		return "The specified account's password has expired"
-	case 0x536:
-		return "The NetLogon component is not active"
-	case 0x537:
-		return "Account locked out"
-	case 0x569:
-		return "Logon failure: user not granted the requested logon type"
-	case 0x56A:
-		return "Logon failure: the specified account password has expired"
-	case 0x56B:
-		return "Logon failure: user not allowed to log on from this computer"
-	case 0x6F7:
-		return "The domain controller is not available"
-	case 0x773:
-		return "The user's password must be changed"
-	case 0x774:
-		return "The user's password has been reset by administrator"
-	default:
-		return fmt.Sprintf("Windows error 0x%X", errorCode)
-	}
+	// Return error code with Windows error hex for client-side translation
+	return ErrCtx(E40, fmt.Sprintf("0x%X", errorCode))
 }

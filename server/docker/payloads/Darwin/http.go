@@ -41,7 +41,7 @@ func parseCustomHeaders(headerJSON string) (map[string]string, error) {
 	headers := make(map[string]string)
 	err := json.Unmarshal([]byte(headerJSON), &headers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse custom headers: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 	return headers, nil
 }
@@ -66,19 +66,19 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	// Convert post data to JSON
 	jsonData, err := json.Marshal(postData)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal post data: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Create the request with custom method
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	// Parse and set custom headers
 	customHeaders, err := parseCustomHeaders(decrypted["Custom Headers"])
 	if err != nil {
-		return "", fmt.Errorf("failed to parse custom headers: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Set headers
@@ -95,20 +95,20 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	// Send request
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to send request: %v", err)
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	// Read response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %v", err)
+		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
 	// Parse the signed response
 	var signedResponse SignedResponse
 	if err := json.Unmarshal(bodyBytes, &signedResponse); err != nil {
-		return "", fmt.Errorf("failed to parse response JSON: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Verify the server's signature
@@ -118,28 +118,28 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	// Parse server's public key
 	block, _ := pem.Decode([]byte(decrypted["Public Key"]))
 	if block == nil {
-		return "", fmt.Errorf("failed to parse server public key")
+		return "", fmt.Errorf(Err(E18))
 	}
 
 	publicKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse public key: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Decode signature
 	signature, err := base64.StdEncoding.DecodeString(signedResponse.Signature)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode signature: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Verify signature
 	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature); err != nil {
-		return "", fmt.Errorf("server signature verification failed: %v", err)
+		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
 	// Return the new client ID if everything is verified
 	if signedResponse.NewClientID == "" {
-		return "", fmt.Errorf("no new client ID received")
+		return "", fmt.Errorf(Err(E18))
 	}
 
 	return signedResponse.NewClientID, nil

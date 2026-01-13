@@ -37,21 +37,21 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		// Unix/Darwin format: username
 		output.WriteString(currentUser.Username)
 
-		// Add UID/GID info for verbose mode
-		if len(args) > 0 && (args[0] == "-v" || args[0] == "--verbose") {
-			output.WriteString(fmt.Sprintf("\nUID: %s", currentUser.Uid))
-			output.WriteString(fmt.Sprintf("\nGID: %s", currentUser.Gid))
-			output.WriteString(fmt.Sprintf("\nHome: %s", currentUser.HomeDir))
-			output.WriteString(fmt.Sprintf("\nShell: %s", os.Getenv("SHELL")))
+		// Add UID/GID info for verbose mode (compact format: v|uid|gid|home|shell)
+		if len(args) > 0 && args[0] == "-v" {
+			shell := os.Getenv(EnvShell())
+			if shell == "" {
+				shell = WUnknown
+			}
+			output.WriteString(fmt.Sprintf("\n%s|%s|%s|%s|%s", WVerbose, currentUser.Uid, currentUser.Gid, currentUser.HomeDir, shell))
 		}
 	}
 
-	// Add groups info if requested
-	if len(args) > 0 && (args[0] == "-g" || args[0] == "--groups") {
+	// Add groups info if requested (compact format: g|group1,group2,group3)
+	if len(args) > 0 && args[0] == "-g" {
 		if currentUser != nil {
 			if groups, err := currentUser.GroupIds(); err == nil && len(groups) > 0 {
-				output.WriteString("\nGroups: ")
-				output.WriteString(strings.Join(groups, ", "))
+				output.WriteString(fmt.Sprintf("\n%s|%s", WGroups, strings.Join(groups, ",")))
 			}
 		}
 	}
@@ -65,10 +65,10 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 
 // getUsernameFromEnv tries to get username from environment variables
 func (c *WhoamiCommand) getUsernameFromEnv() string {
-	if username := os.Getenv("USER"); username != "" {
+	if username := os.Getenv(EnvUser()); username != "" {
 		return username
 	}
-	if username := os.Getenv("LOGNAME"); username != "" {
+	if username := os.Getenv(EnvLogname()); username != "" {
 		return username
 	}
 	return ""
@@ -79,10 +79,10 @@ func (c *WhoamiCommand) getHostname() string {
 	hostname, err := os.Hostname()
 	if err != nil {
 		// Try environment variable
-		if hostname := os.Getenv("HOSTNAME"); hostname != "" {
+		if hostname := os.Getenv(EnvHostname()); hostname != "" {
 			return hostname
 		}
-		return "unknown"
+		return WUnknown
 	}
 	return hostname
 }

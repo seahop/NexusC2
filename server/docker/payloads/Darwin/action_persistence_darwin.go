@@ -166,7 +166,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 	}
 
 	if bytes.Contains(content, []byte(payload)) {
-		return fmt.Errorf("payload already exists in file")
+		return fmt.Errorf(Err(E5))
 	}
 
 	newContent := append(content, []byte("\n"+payload)...)

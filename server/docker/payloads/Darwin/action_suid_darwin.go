@@ -67,8 +67,7 @@ func (c *SUIDEnumCommand) findSUIDBinaries(args []string) CommandResult {
 		}
 	}
 
-	output := fmt.Sprintf("[*] Searching for SUID/SGID binaries in %s...\n", searchPath)
-	output += strings.Repeat("-", 60) + "\n\n"
+	output := fmt.Sprintf("Searching: %s\n", searchPath)
 
 	// Known interesting SUID binaries on macOS
 	interestingBinaries := map[string]string{
@@ -152,24 +151,24 @@ func (c *SUIDEnumCommand) findSUIDBinaries(args []string) CommandResult {
 	})
 
 	if err != nil {
-		output += fmt.Sprintf("[!] Error during search: %v\n\n", err)
+		output += fmt.Sprintf("Err: %v\n", err)
 	}
 
 	// Format output
-	output += fmt.Sprintf("[+] Found %d SUID binaries\n", len(suidBinaries))
-	output += fmt.Sprintf("[+] Found %d SGID binaries\n", len(sgidBinaries))
-	output += fmt.Sprintf("[+] Found %d potentially exploitable binaries\n\n", len(exploitableBinaries))
+	output += fmt.Sprintf("\nSUID: %d\n", len(suidBinaries))
+	output += fmt.Sprintf("SGID: %d\n", len(sgidBinaries))
+	output += fmt.Sprintf("Exploitable: %d\n\n", len(exploitableBinaries))
 
 	if len(exploitableBinaries) > 0 {
-		output += "=== POTENTIALLY EXPLOITABLE SUID BINARIES ===\n"
+		output += "Exploitable:\n"
 		for _, binary := range exploitableBinaries {
-			output += fmt.Sprintf("  [!] %s\n", binary)
+			output += fmt.Sprintf("  %s\n", binary)
 		}
 		output += "\n"
 	}
 
 	if len(suidBinaries) > 0 {
-		output += "=== ALL SUID BINARIES ===\n"
+		output += "SUID:\n"
 		for _, binary := range suidBinaries {
 			// Get file info for additional details
 			if stat, err := os.Stat(binary); err == nil {
@@ -185,7 +184,7 @@ func (c *SUIDEnumCommand) findSUIDBinaries(args []string) CommandResult {
 	}
 
 	if len(sgidBinaries) > 0 {
-		output += "=== SGID BINARIES ===\n"
+		output += "SGID:\n"
 		for _, binary := range sgidBinaries[:min(20, len(sgidBinaries))] {
 			output += fmt.Sprintf("  %s\n", binary)
 		}
@@ -203,8 +202,7 @@ func (c *SUIDEnumCommand) findSUIDBinaries(args []string) CommandResult {
 
 // checkSUIDBinary checks a specific binary for exploitation potential
 func (c *SUIDEnumCommand) checkSUIDBinary(binaryPath string) CommandResult {
-	output := fmt.Sprintf("[*] Checking SUID binary: %s\n", binaryPath)
-	output += strings.Repeat("-", 60) + "\n\n"
+	output := fmt.Sprintf("Checking: %s\n", binaryPath)
 
 	// Check if file exists
 	info, err := os.Stat(binaryPath)
@@ -217,26 +215,26 @@ func (c *SUIDEnumCommand) checkSUIDBinary(binaryPath string) CommandResult {
 
 	// Check SUID bit
 	if info.Mode()&os.ModeSetuid == 0 {
-		output += "[!] Warning: Binary does not have SUID bit set\n\n"
+		output += "SUID: no\n"
 	} else {
-		output += "[+] SUID bit is set\n"
+		output += "SUID: yes\n"
 	}
 
 	// Get system info
 	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-		output += fmt.Sprintf("[*] Owner UID: %d\n", sys.Uid)
-		output += fmt.Sprintf("[*] Group GID: %d\n", sys.Gid)
+		output += fmt.Sprintf("UID: %d\n", sys.Uid)
+		output += fmt.Sprintf("GID: %d\n", sys.Gid)
 	}
 
-	output += fmt.Sprintf("[*] Permissions: %s\n", info.Mode().String())
-	output += fmt.Sprintf("[*] Size: %d bytes\n\n", info.Size())
+	output += fmt.Sprintf("Perms: %s\n", info.Mode().String())
+	output += fmt.Sprintf("Size: %d\n\n", info.Size())
 
 	// Check for known exploitation methods
 	baseName := filepath.Base(binaryPath)
 	output += c.getExploitationMethods(baseName)
 
 	// Check shared libraries (macOS uses dylib)
-	output += "\n[*] Checking dynamic libraries...\n"
+	output += "\nLibs:\n"
 	cmd := exec.Command("otool", "-L", binaryPath)
 	if dylibOutput, err := cmd.Output(); err == nil {
 		lines := strings.Split(string(dylibOutput), "\n")
@@ -249,12 +247,12 @@ func (c *SUIDEnumCommand) checkSUIDBinary(binaryPath string) CommandResult {
 	}
 
 	// Check for code signing
-	output += "\n[*] Checking code signature...\n"
+	output += "\nSig:\n"
 	cmd = exec.Command("codesign", "-dv", binaryPath)
 	if sigOutput, err := cmd.CombinedOutput(); err == nil {
 		output += string(sigOutput)
 	} else {
-		output += "  No code signature or verification failed\n"
+		output += "  none\n"
 	}
 
 	return CommandResult{
@@ -328,14 +326,14 @@ func (c *SUIDEnumCommand) getExploitationMethods(binaryName string) string {
 	}
 
 	if exploits, found := methods[binaryName]; found {
-		output := "[+] Known exploitation methods:\n"
+		output := "Methods:\n"
 		for _, method := range exploits {
-			output += fmt.Sprintf("  -> %s\n", method)
+			output += fmt.Sprintf("  %s\n", method)
 		}
 		return output
 	}
 
-	return "[-] No known exploitation methods for this binary\n"
+	return "Methods: none\n"
 }
 
 // exploitSUIDBinary attempts to exploit a SUID binary
@@ -366,20 +364,19 @@ func (c *SUIDEnumCommand) exploitSUIDBinary(args []string) CommandResult {
 		}
 	}
 
-	output := fmt.Sprintf("[*] Attempting to exploit: %s\n", binaryPath)
+	output := fmt.Sprintf("Target: %s\n", binaryPath)
 	baseName := filepath.Base(binaryPath)
 
 	// Auto-detect method if not specified
 	if method == "" {
-		output += "[*] Auto-detecting exploitation method...\n"
 		method = c.autoDetectMethod(baseName)
 		if method == "" {
 			return CommandResult{
-				Output:   output + "[-] No known exploitation method for this binary",
+				Output:   ErrCtx(E4, baseName),
 				ExitCode: 1,
 			}
 		}
-		output += fmt.Sprintf("[+] Using method: %s\n", method)
+		output += fmt.Sprintf("Method: %s\n", method)
 	}
 
 	// Build exploitation command based on binary
@@ -405,14 +402,12 @@ func (c *SUIDEnumCommand) exploitSUIDBinary(args []string) CommandResult {
 		exploitCmd = fmt.Sprintf("%s /bin/sh", binaryPath)
 	default:
 		return CommandResult{
-			Output:   output + fmt.Sprintf("[-] No automatic exploitation available for %s", baseName),
+			Output:   ErrCtx(E4, baseName),
 			ExitCode: 1,
 		}
 	}
 
-	output += fmt.Sprintf("\n[*] Exploitation command:\n%s\n", exploitCmd)
-	output += "\n[!] Note: This would attempt to spawn a shell with elevated privileges\n"
-	output += "[!] In a real scenario, this would be executed directly\n"
+	output += fmt.Sprintf("\nCmd:\n%s\n", exploitCmd)
 
 	return CommandResult{
 		Output:      output,

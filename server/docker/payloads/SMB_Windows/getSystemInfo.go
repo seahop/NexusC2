@@ -62,7 +62,7 @@ func getProcessInfo() (int, string, error) {
 func getCurrentUser() (string, error) {
 	currentUser, err := user.Current()
 	if err != nil {
-		return "", fmt.Errorf("failed to get current user: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 	return currentUser.Username, nil
 }
@@ -71,7 +71,7 @@ func getCurrentUser() (string, error) {
 func getHostname() (string, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return "", fmt.Errorf("failed to get hostname: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 	return hostname, nil
 }
@@ -114,7 +114,7 @@ func isValidIP(ip string) bool {
 func getInternalIP() (string, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return "", fmt.Errorf("failed to get network interfaces: %v", err)
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	for _, iface := range interfaces {
@@ -142,7 +142,7 @@ func getInternalIP() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no valid internal IP address found")
+	return "", fmt.Errorf(Err(E12))
 }
 
 // generateSeed creates a random 24-character alphanumeric string
@@ -156,7 +156,7 @@ func generateSeed() (string, error) {
 	for i := 0; i < length; i++ {
 		randomIndex, err := rand.Int(rand.Reader, charsetLength)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate random index: %v", err)
+			return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 		}
 		result[i] = charset[randomIndex.Int64()]
 	}
@@ -177,31 +177,31 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 	// Generate seed
 	info.Seed, err = generateSeed()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate seed: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get process information
 	info.PID, info.ProcName, err = getProcessInfo()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get process info: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get username
 	info.Username, err = getCurrentUser()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get username: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get hostname
 	info.Hostname, err = getHostname()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get hostname: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get IP address
 	info.IP, err = getInternalIP()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get internal IP: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	// Get architecture
@@ -223,7 +223,7 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 func (r *SystemInfoReport) ToJSON() (string, error) {
 	jsonBytes, err := json.MarshalIndent(r, "", "    ")
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal JSON: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 	return string(jsonBytes), nil
 }

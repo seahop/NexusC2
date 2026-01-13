@@ -1532,14 +1532,12 @@ description = "Display current user information"
 syntax = """
 whoami                    # Show current username
 whoami -v                 # Show detailed user and system information
-whoami --verbose          # Same as -v
-whoami -h                 # Show help
-whoami --help             # Same as -h
+whoami -g                 # Show group memberships
 """
 examples = [
     "whoami",                               # Basic usage
     "whoami -v",                            # Verbose output
-    "whoami --verbose"                      # Long form verbose
+    "whoami -g"                             # Show groups
 ]
 help = """
 Displays information about the current user and system context.
@@ -1549,85 +1547,45 @@ MODES:
   Verbose:  Shows comprehensive user, system, and environment information
 
 FLAGS:
-  -v, --verbose    Display detailed information including:
-                   - User ID and Group ID
-                   - Home directory
-                   - System information (OS, architecture, hostname)
-                   - Process information (PID, PPID)
-                   - Privilege level
-                   - Environment variables
-                   - Session information
-                   - Group memberships (Unix/Linux)
-  
-  -h, --help       Show usage information
+  -v    Display detailed information including:
+        - User ID and Group ID
+        - Home directory
+        - Shell
+
+  -g    Display group memberships (group IDs)
 
 BASIC OUTPUT:
 Returns the current username in the format:
-  - Unix/Linux: username
+  - Unix/Linux/macOS: username
   - Windows: DOMAIN\\username or COMPUTER\\username
 
-VERBOSE OUTPUT SECTIONS:
+VERBOSE OUTPUT (-v):
+  - UID: User ID
+  - GID: Group ID
+  - Home: Home directory path
+  - Shell: Default shell (or "unknown" if not available)
 
-User Information:
-  - Username (full format on Windows with domain)
-  - User ID (UID on Unix, SID on Windows)
-  - Group ID (primary group)
-  - Home directory path
-  - Domain and account (Windows only)
+GROUPS OUTPUT (-g):
+  - Lists all group IDs the user belongs to
 
-System Information:
-  - Operating system type
-  - Architecture (x64, x86, arm64, etc.)
-  - Hostname
-  - Process ID of the agent
-  - Parent process ID
-  - Current working directory
+WINDOWS IMPERSONATION:
+When using an impersonated token (steal-token, make-token):
+  - Shows the impersonated user's identity
+  - With -v, indicates "(impersonated)" status
 
-Environment:
-  - Privilege level detection
-  - Key environment variables
-  - Shell information
-  - Terminal type
-
-Session Information:
-  - SSH connection details (if applicable)
-  - Remote desktop session (Windows)
-  - TTY/PTY information (Unix/Linux)
-  - Display server (X11)
-
-Group Memberships (Unix/Linux only):
-  - All groups the user belongs to
-  - Group IDs and names
-
-PRIVILEGE DETECTION:
-
-Windows:
-  - "Administrator (elevated)" - Running with admin rights
-  - "Possibly elevated" - May have admin in some contexts
-  - "Standard user" - No admin privileges
-
-Unix/Linux:
-  - "root (superuser)" - Running as root
-  - "Elevated via sudo" - Running with sudo
-  - "Standard user (with sudo capability)" - User in sudo/wheel group
-  - "Standard user" - No elevated privileges
-
-EXAMPLES BY USE CASE:
+EXAMPLES:
 
 Quick identity check:
   whoami                    # Just show who I am
 
-Privilege escalation check:
-  whoami -v | grep Privileges    # Check current privilege level
+Get user details:
+  whoami -v                 # Show UID, GID, home, shell
 
-Full context gathering:
-  whoami -v                      # Complete user and system context
+Check group memberships:
+  whoami -g                 # List all group IDs
 
 Domain information (Windows):
-  whoami                         # Shows DOMAIN\\username format
-
-SSH session detection:
-  whoami -v | grep SSH          # Check if in SSH session
+  whoami                    # Shows DOMAIN\\username format
 """
 
 [commands.rev2self]

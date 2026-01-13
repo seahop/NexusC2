@@ -244,10 +244,10 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		if r := recover(); r != nil {
 			job.OutputMutex.Lock()
 			job.Status = "crashed"
-			job.Error = fmt.Errorf("BOF crashed: %v", r)
+			job.Error = fmt.Errorf(ErrCtx(E51, fmt.Sprintf("%v", r)))
 			endTime := time.Now()
 			job.EndTime = &endTime
-			crashMsg := fmt.Sprintf("\n[!] BOF crashed: %v\n", r)
+			crashMsg := "\n" + ErrCtx(E51, fmt.Sprintf("%v", r)) + "\n"
 			job.Output.WriteString(crashMsg)
 
 			// Queue final chunk using ResultManager
@@ -318,7 +318,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 					// Truncate if exceeding max output
 					if job.TotalBytesSent+job.Output.Len()+len(capturedOutput) > MAX_TOTAL_OUTPUT {
 						if !job.OutputTruncated {
-							job.Output.WriteString("\n[!] Output truncated - exceeded 10MB limit\n")
+							job.Output.WriteString("\n" + Succ(S19) + "\n")
 							job.OutputTruncated = true
 						}
 						job.OutputMutex.Unlock()
@@ -483,7 +483,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		if result.err != nil {
 			job.Status = "crashed"
 			job.Error = result.err
-			job.Output.WriteString(fmt.Sprintf("\n[!] Error: %v\n", result.err))
+			job.Output.WriteString("\n" + Err(E51) + "\n")
 		} else {
 			job.Status = "completed"
 		}
@@ -505,7 +505,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		job.Status = "killed"
 		endTime := time.Now()
 		job.EndTime = &endTime
-		job.Output.WriteString("\n[!] Job terminated by user\n")
+		job.Output.WriteString("\n" + Succ(S16) + "\n")
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
@@ -520,7 +520,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		job.Status = "timeout"
 		endTime := time.Now()
 		job.EndTime = &endTime
-		job.Output.WriteString("\n[!] Job timeout after 30 minutes\n")
+		job.Output.WriteString("\n" + Err(E9) + "\n")
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
@@ -624,10 +624,7 @@ func executeBOFJobsList() CommandResult {
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Active BOF Jobs (%d):\n", len(jobs)))
-	output.WriteString("============================================================================================\n")
-	output.WriteString("Job ID                   | BOF Name            | Status      | Duration | Chunks | Truncated\n")
-	output.WriteString("--------------------------------------------------------------------------------------------\n")
+	output.WriteString(Table(TBof, len(jobs)) + "\n")
 
 	for _, job := range jobs {
 		job.OutputMutex.Lock()

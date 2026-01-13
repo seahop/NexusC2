@@ -36,15 +36,15 @@ func CreateHMAC(data, key string) string {
 func EncryptAES(data []byte, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to create AES cipher: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 	ciphertext := aesGCM.Seal(nonce, nonce, data, nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
@@ -55,23 +55,23 @@ func DecryptAES(combined string, key []byte) (string, error) {
 	// Step 1: Base64 Decode
 	allBytes, err := base64.StdEncoding.DecodeString(combined)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode base64: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Step 2: Extract Nonce and Ciphertext
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to create AES cipher: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	nonceSize := aesGCM.NonceSize()
 	if len(allBytes) < nonceSize {
-		return "", fmt.Errorf("data too short")
+		return "", fmt.Errorf(Err(E2))
 	}
 
 	nonce := allBytes[:nonceSize]
@@ -80,7 +80,7 @@ func DecryptAES(combined string, key []byte) (string, error) {
 	// Step 3: Decrypt
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf("decryption failed: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	return string(plaintext), nil
@@ -104,23 +104,23 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Generate a random AES key for this session
 	aesKey := make([]byte, 32) // 256-bit key
 	if _, err := rand.Read(aesKey); err != nil {
-		return "", fmt.Errorf("failed to generate random AES key: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt the actual data with the random AES key
 	aesBlock, err := aes.NewCipher(aesKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to create AES cipher: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(aesBlock)
 	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt the data
@@ -130,13 +130,13 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Parse the public key
 	pemBlock, _ := pem.Decode([]byte(pubKeyStr))
 	if pemBlock == nil {
-		return "", fmt.Errorf("failed to parse PEM block containing public key")
+		return "", fmt.Errorf(Err(E18))
 	}
 
 	// Parse PKCS1 format
 	pub, err := x509.ParsePKCS1PublicKey(pemBlock.Bytes)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse public key: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Encrypt the AES key with RSA
@@ -148,7 +148,7 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 		nil,
 	)
 	if err != nil {
-		return "", fmt.Errorf("RSA encryption of AES key failed: %v", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Create the hybrid structure
@@ -160,7 +160,7 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Convert to JSON
 	hybridJson, err := json.Marshal(hybrid)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal hybrid data: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	return string(hybridJson), nil

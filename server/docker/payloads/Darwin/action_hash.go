@@ -257,8 +257,8 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 		case "sha256":
 			hash, hashErr = calculateSHA256(path)
 		default:
-			hash = "unsupported algorithm"
-			hashErr = fmt.Errorf("unsupported algorithm: %s", algorithm)
+			hash = Err(E2)
+			hashErr = fmt.Errorf(Err(E2))
 		}
 
 		if hashErr != nil {

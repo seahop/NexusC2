@@ -211,7 +211,7 @@ func (cq *CommandQueue) AddCommands(jsonData string) error {
 
 	var commands []Command
 	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
-		return fmt.Errorf("failed to parse commands: %v", err)
+		return fmt.Errorf(Err(E18))
 	}
 
 	cq.mu.Lock()
@@ -250,8 +250,8 @@ func (cq *CommandQueue) executeExternalCommand(cmd Command, cmdType string, args
 	if err != nil {
 		return &CommandResult{
 			Command:     cmd,
-			Error:       fmt.Errorf("command not found: %v", err),
-			ErrorString: fmt.Sprintf("command not found: %v", err),
+			Error:       fmt.Errorf(ErrCtx(E4, cmdType)),
+			ErrorString: ErrCtx(E4, cmdType),
 			ExitCode:    127,
 		}, nil
 	}

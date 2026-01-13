@@ -13,7 +13,7 @@ import (
 func xorDecrypt(encoded, key string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf("base64 decode failed: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	var result []byte

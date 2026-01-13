@@ -157,7 +157,7 @@ func refreshHandshake() error {
 	// Collect system info for new polling session
 	sysInfoReport, err := CollectSystemInfo(clientID)
 	if err != nil {
-		return fmt.Errorf("failed to collect system information: %v", err)
+		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Initialize new polling config
@@ -169,7 +169,7 @@ func refreshHandshake() error {
 
 	// Start new polling with updated configuration
 	if err := startPolling(pollConfig, sysInfoReport); err != nil {
-		return fmt.Errorf("failed to restart polling: %v", err)
+		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	//log.Println("Fresh handshake completed successfully")

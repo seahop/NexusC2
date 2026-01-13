@@ -57,55 +57,48 @@ func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 // listKeychains lists all available keychains
 func (c *KeychainCommand) listKeychains() CommandResult {
-	output := "[*] Listing available keychains...\n"
-	output += strings.Repeat("-", 60) + "\n\n"
+	var output strings.Builder
 
 	// List default keychains
 	cmd := exec.Command("security", "list-keychains")
 	if result, err := cmd.Output(); err == nil {
-		output += "[+] System keychains:\n"
 		lines := strings.Split(string(result), "\n")
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			line = strings.Trim(line, "\"")
 			if line != "" {
-				output += fmt.Sprintf("  %s\n", line)
-
 				// Check if readable
 				if _, err := os.Stat(line); err == nil {
-					output += "    [Accessible]\n"
+					output.WriteString(fmt.Sprintf("%s (+)\n", line))
 				} else {
-					output += "    [Not accessible]\n"
+					output.WriteString(fmt.Sprintf("%s (-)\n", line))
 				}
 			}
 		}
 	}
 
 	// List login keychain
-	output += "\n[+] Default login keychain:\n"
 	cmd = exec.Command("security", "default-keychain")
 	if result, err := cmd.Output(); err == nil {
 		defaultKc := strings.TrimSpace(string(result))
 		defaultKc = strings.Trim(defaultKc, "\"")
-		output += fmt.Sprintf("  %s\n", defaultKc)
+		output.WriteString(fmt.Sprintf("D:%s\n", defaultKc))
 	}
 
 	// Check for additional keychains in user directory
 	if u, err := user.Current(); err == nil {
 		keychainDir := filepath.Join(u.HomeDir, "Library", "Keychains")
-		output += fmt.Sprintf("\n[+] Keychains in %s:\n", keychainDir)
-
 		if entries, err := os.ReadDir(keychainDir); err == nil {
 			for _, entry := range entries {
 				if !entry.IsDir() && strings.Contains(entry.Name(), "keychain") {
-					output += fmt.Sprintf("  %s\n", entry.Name())
+					output.WriteString(fmt.Sprintf("U:%s\n", entry.Name()))
 				}
 			}
 		}
 	}
 
 	return CommandResult{
-		Output:      output,
+		Output:      output.String(),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -126,12 +119,9 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 		}
 	}
 
-	output := "[*] Dumping keychain items...\n"
-	output += "[!] Note: This requires keychain to be unlocked\n"
-	output += strings.Repeat("-", 60) + "\n\n"
+	var dumpOutput strings.Builder
 
 	// Dump generic passwords
-	output += "[+] Generic Passwords:\n"
 	cmd := exec.Command("security", "dump-keychain", "-d")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
@@ -150,7 +140,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 
 			if strings.HasPrefix(line, "keychain:") {
 				if len(currentItem) > 0 {
-					output += c.formatKeychainItem(currentItem)
+					dumpOutput.WriteString(c.formatKeychainItem(currentItem))
 					currentItem = make(map[string]string)
 				}
 				currentItem["keychain"] = strings.TrimPrefix(line, "keychain:")
@@ -180,28 +170,29 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 
 		// Output last item
 		if len(currentItem) > 0 {
-			output += c.formatKeychainItem(currentItem)
+			dumpOutput.WriteString(c.formatKeychainItem(currentItem))
 		}
 	} else {
-		output += fmt.Sprintf("  Error: %s\n", stderr.String())
-		output += "  [!] Keychain may be locked. Use 'keychain unlock' first.\n"
+		return CommandResult{
+			Output:   ErrCtx(E3, stderr.String()),
+			ExitCode: 1,
+		}
 	}
 
 	// Dump internet passwords
-	output += "\n[+] Internet Passwords:\n"
 	cmd = exec.Command("security", "find-internet-password", "-g", "-a", "")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
 
+	stderr.Reset()
 	cmd.Stderr = &stderr
 	if _, err := cmd.Output(); err == nil {
 		// Parse stderr for passwords (security outputs passwords to stderr)
-		output += string(stderr.Bytes())
+		dumpOutput.Write(stderr.Bytes())
 	}
 
 	// List certificates
-	output += "\n[+] Certificates:\n"
 	cmd = exec.Command("security", "find-certificate", "-a")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
@@ -211,13 +202,13 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 		lines := strings.Split(string(result), "\n")
 		for _, line := range lines {
 			if strings.Contains(line, "labl") || strings.Contains(line, "subj") {
-				output += fmt.Sprintf("  %s\n", strings.TrimSpace(line))
+				dumpOutput.WriteString(fmt.Sprintf("%s\n", strings.TrimSpace(line)))
 			}
 		}
 	}
 
 	return CommandResult{
-		Output:      output,
+		Output:      dumpOutput.String(),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -225,28 +216,29 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 
 // formatKeychainItem formats a keychain item for display
 func (c *KeychainCommand) formatKeychainItem(item map[string]string) string {
-	output := "\n  === Item ===\n"
+	var output strings.Builder
+	output.WriteString("\n---\n")
 	if service, ok := item["service"]; ok {
-		output += fmt.Sprintf("  Service: %s\n", service)
+		output.WriteString(fmt.Sprintf("S:%s\n", service))
 	}
 	if account, ok := item["account"]; ok {
-		output += fmt.Sprintf("  Account: %s\n", account)
+		output.WriteString(fmt.Sprintf("A:%s\n", account))
 	}
 	if desc, ok := item["description"]; ok {
-		output += fmt.Sprintf("  Description: %s\n", desc)
+		output.WriteString(fmt.Sprintf("D:%s\n", desc))
 	}
 	if password, ok := item["password"]; ok {
-		output += fmt.Sprintf("  Password: %s\n", password)
+		output.WriteString(fmt.Sprintf("P:%s\n", password))
 	}
 	if data, ok := item["data"]; ok {
 		// Try to decode hex data
 		if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
-			output += fmt.Sprintf("  Data: %s\n", string(decoded))
+			output.WriteString(fmt.Sprintf("V:%s\n", string(decoded)))
 		} else {
-			output += fmt.Sprintf("  Data (raw): %s\n", data)
+			output.WriteString(fmt.Sprintf("V:%s\n", data))
 		}
 	}
-	return output
+	return output.String()
 }
 
 // searchKeychain searches for specific items
@@ -274,8 +266,7 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 		}
 	}
 
-	output := "[*] Searching keychain...\n"
-	output += strings.Repeat("-", 60) + "\n\n"
+	var searchOutput strings.Builder
 
 	// Search generic passwords
 	cmd := exec.Command("security", "find-generic-password")
@@ -294,18 +285,18 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 	cmd.Stderr = &stderr
 
 	if result, err := cmd.Output(); err == nil {
-		output += "[+] Found generic password:\n"
-		output += string(result)
+		searchOutput.WriteString(Succ(S6) + "\n")
+		searchOutput.Write(result)
 		// Password is in stderr
 		if stderr.Len() > 0 {
-			output += string(stderr.Bytes())
+			searchOutput.Write(stderr.Bytes())
 		}
 	} else {
-		output += "[-] No generic password found\n"
+		searchOutput.WriteString(Err(E4) + "\n")
 	}
 
 	// Search internet passwords
-	output += "\n"
+	searchOutput.WriteString("\n")
 	cmd = exec.Command("security", "find-internet-password")
 	if service != "" {
 		cmd.Args = append(cmd.Args, "-s", service)
@@ -322,17 +313,17 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 	cmd.Stderr = &stderr
 
 	if result, err := cmd.Output(); err == nil {
-		output += "[+] Found internet password:\n"
-		output += string(result)
+		searchOutput.WriteString(Succ(S6) + "\n")
+		searchOutput.Write(result)
 		if stderr.Len() > 0 {
-			output += string(stderr.Bytes())
+			searchOutput.Write(stderr.Bytes())
 		}
 	} else {
-		output += "[-] No internet password found\n"
+		searchOutput.WriteString(Err(E4) + "\n")
 	}
 
 	return CommandResult{
-		Output:      output,
+		Output:      searchOutput.String(),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -468,8 +459,6 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 		}
 	}
 
-	output := fmt.Sprintf("[*] Exporting keychain to %s...\n", outputPath)
-
 	// Use security command to export
 	cmd := exec.Command("security", "export")
 	if keychainPath != "" {
@@ -477,36 +466,35 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 	}
 	cmd.Args = append(cmd.Args, "-t", "identities", "-f", "pkcs12", "-o", outputPath)
 
-	if result, err := cmd.CombinedOutput(); err != nil {
-		// Try alternative export method
-		output += "[!] PKCS12 export failed, trying alternative method...\n"
-
-		// Dump keychain to text file
+	if _, err := cmd.CombinedOutput(); err != nil {
+		// Try alternative export method - dump keychain to text file
 		cmd = exec.Command("security", "dump-keychain", "-d")
 		if keychainPath != "" {
 			cmd.Args = append(cmd.Args, keychainPath)
 		}
 
-		if dumpOutput, err := cmd.Output(); err == nil {
-			if err := os.WriteFile(outputPath, dumpOutput, 0600); err != nil {
+		if dumpOutputBytes, err := cmd.Output(); err == nil {
+			if err := os.WriteFile(outputPath, dumpOutputBytes, 0600); err != nil {
 				return CommandResult{
-					Output:   fmt.Sprintf("Failed to write output: %v", err),
+					Output:   ErrCtx(E11, outputPath),
 					ExitCode: 1,
 				}
 			}
-			output += fmt.Sprintf("[+] Keychain dumped to %s\n", outputPath)
+			return CommandResult{
+				Output:      SuccCtx(S1, outputPath),
+				ExitCode:    0,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}
 		} else {
 			return CommandResult{
-				Output:   fmt.Sprintf("%sFailed to export: %s", output, string(result)),
+				Output:   ErrCtx(E11, outputPath),
 				ExitCode: 1,
 			}
 		}
-	} else {
-		output += fmt.Sprintf("[+] Keychain exported to %s\n", outputPath)
 	}
 
 	return CommandResult{
-		Output:      output,
+		Output:      SuccCtx(S1, outputPath),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -545,18 +533,18 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
 
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if _, err := cmd.CombinedOutput(); err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Failed to unlock keychain: %s", string(output)),
+			Output:   Err(E3),
 			ExitCode: 1,
 		}
 	}
 
-	result := "[+] Keychain unlocked successfully\n"
+	var result string
 	if keychainPath != "" {
-		result += fmt.Sprintf("    Keychain: %s\n", keychainPath)
+		result = SuccCtx(S29, keychainPath) + "\n"
 	} else {
-		result += "    Keychain: default\n"
+		result = Succ(S29) + "\n"
 	}
 
 	return CommandResult{

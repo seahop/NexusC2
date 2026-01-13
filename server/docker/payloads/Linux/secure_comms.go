@@ -62,7 +62,7 @@ func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
 	// Attempt decryption with current secret
 	decrypted, err := DecryptAES(encrypted, secretHash[:])
 	if err != nil {
-		return "", fmt.Errorf("decryption failed: %v", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 	//print(decrypted)
 	return decrypted, nil

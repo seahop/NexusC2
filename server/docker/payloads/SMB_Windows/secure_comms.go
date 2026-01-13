@@ -44,18 +44,18 @@ func (sc *SecureComms) EncryptMessage(plaintext string) (string, error) {
 	// Create cipher
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Generate nonce
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
+		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt
@@ -74,7 +74,7 @@ func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
 	// Decode base64
 	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode base64: %w", err)
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	// Try current secret first
@@ -87,7 +87,7 @@ func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
 		return plaintext, nil
 	}
 
-	return "", fmt.Errorf("failed to decrypt with any known secret")
+	return "", fmt.Errorf(Err(E18))
 }
 
 func (sc *SecureComms) decryptWithSecret(ciphertext []byte, secret string) (string, error) {
@@ -107,7 +107,7 @@ func (sc *SecureComms) decryptWithSecret(ciphertext []byte, secret string) (stri
 
 	nonceSize := gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
-		return "", fmt.Errorf("ciphertext too short")
+		return "", fmt.Errorf(Err(E2))
 	}
 
 	nonce := ciphertext[:nonceSize]

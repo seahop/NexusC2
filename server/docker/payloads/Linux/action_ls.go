@@ -265,8 +265,14 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 			output.WriteString(fmt.Sprintf("\n%s:\n", filepath.ToSlash(path)))
 		}
 
-		output.WriteString("Permissions  Type        Size         Modified Time         Name\n")
-		output.WriteString("------------ ----------- ------------ ------------------- ----------------------------------------\n")
+		// Count matching entries for table header
+		matchCount := 0
+		for _, e := range entries {
+			if matchesFilter(e.Name(), opts) {
+				matchCount++
+			}
+		}
+		output.WriteString(Table(TLS, matchCount) + "\n")
 
 		for _, entry := range entries {
 			// Skip entries that don't match the filter (including hidden files check)
@@ -291,10 +297,10 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 			// Get permissions string
 			perms := formatPermissions(info)
 
-			// Type indicator
-			typeStr := "file"
+			// Type indicator (0=file, 1=dir)
+			typeStr := RFile
 			if info.IsDir() {
-				typeStr = "dir "
+				typeStr = RDir
 			}
 
 			// Format size
@@ -431,17 +437,9 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		}
 	}
 
-	// Handle count-only output
+	// Handle count-only output - format: T:M:files,dirs
 	if opts.countOnly {
-		if len(opts.filters) > 0 || len(opts.filtersIgnore) > 0 {
-			total := stats.files + stats.directories
-			patterns := append(opts.filters, opts.filtersIgnore...)
-			output = fmt.Sprintf("Matching items for patterns %v: %d (Files: %d, Directories: %d)\n",
-				patterns, total, stats.files, stats.directories)
-		} else {
-			output = fmt.Sprintf("Files: %d\nDirectories: %d\nTotal: %d\n",
-				stats.files, stats.directories, stats.files+stats.directories)
-		}
+		output = fmt.Sprintf("%s%d,%d", TLSCount, stats.files, stats.directories)
 	} else if output == "" && (len(opts.filters) > 0 || len(opts.filtersIgnore) > 0) {
 		// If filtering is enabled and no results
 		output = SuccCtx(S0, "0")

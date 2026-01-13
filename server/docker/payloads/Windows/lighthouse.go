@@ -389,19 +389,19 @@ func PackArgs(data []string) ([]byte, error) {
 		case 'b':
 			data, err := PackBinary(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf("Binary packing error:\n INPUT: '%s'\n ERROR:%s\n", arg[1:], err)
+				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 'i':
 			data, err := PackIntString(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf("Int packing error:\n INPUT: '%s'\n ERROR:%s\n", arg[1:], err)
+				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 's':
 			data, err := PackShortString(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf("Short packing error:\n INPUT: '%s'\n ERROR:%s\n", arg[1:], err)
+				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 'z':
@@ -413,7 +413,7 @@ func PackArgs(data []string) ([]byte, error) {
 			} else {
 				packedData, err = PackString(arg[1:])
 				if err != nil {
-					return nil, fmt.Errorf("String packing error:\n INPUT: '%s'\n ERROR:%s\n", arg[1:], err)
+					return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
 				}
 			}
 			buff = append(buff, packedData...)
@@ -425,12 +425,12 @@ func PackArgs(data []string) ([]byte, error) {
 			} else {
 				packedData, err = PackWideString(arg[1:])
 				if err != nil {
-					return nil, fmt.Errorf("WString packing error:\n INPUT: '%s'\n ERROR:%s\n", arg[1:], err)
+					return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
 				}
 			}
 			buff = append(buff, packedData...)
 		default:
-			return nil, fmt.Errorf("Data must be prefixed with 'b', 'i', 's','z', or 'Z'\n")
+			return nil, fmt.Errorf(Err(E2))
 		}
 	}
 

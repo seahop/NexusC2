@@ -388,7 +388,7 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 
 	if err := ssh.Unmarshal(newChannel.ExtraData(), &req); err != nil {
 		// log.Printf("[SOCKS] Failed to parse channel request: %v", err)
-		newChannel.Reject(ssh.ConnectionFailed, "failed to parse request")
+		newChannel.Reject(ssh.ConnectionFailed, Err(E18))
 		return
 	}
 
@@ -400,7 +400,7 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
 		// log.Printf("[SOCKS] Failed to connect to %s: %v", target, err)
-		newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("failed to connect: %v", err))
+		newChannel.Reject(ssh.ConnectionFailed, Err(E12))
 		return
 	}
 

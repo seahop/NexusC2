@@ -254,6 +254,11 @@ class CommandValidator:
                 if agent_os and not self.is_command_compatible('inline-assembly', agent_os):
                     return False, "Inline-assembly commands are only available on Windows"
                 return True, None
+
+            # Check if it's a CNA-registered BOF command (needs 'bof' prefix)
+            if hasattr(self, 'cna_bof_commands') and base_cmd in self.cna_bof_commands:
+                return False, f"'{base_cmd}' is a CNA BOF command. Use: bof {base_cmd} [args]"
+
             return False, f"Unknown command: {base_cmd}"
             
         return True, None
@@ -261,16 +266,22 @@ class CommandValidator:
     def validate_bof_command(self, cmd_parts: list) -> Tuple[bool, Optional[str]]:
         """Validate BOF-specific commands"""
         base_cmd = cmd_parts[0].lower()
-        
+
         if base_cmd in ['bof', 'bof-async', 'bof-load']:
             if len(cmd_parts) < 2:
-                return False, f"{base_cmd} requires a BOF file path"
-            
-            # Check if file exists
-            bof_path = cmd_parts[1] if base_cmd != 'bof-load' else cmd_parts[2] if len(cmd_parts) > 2 else None
+                return False, f"{base_cmd} requires a BOF file path or CNA command name"
+
+            bof_arg = cmd_parts[1]
+
+            # Check if it's a CNA-registered BOF command (valid subcommand)
+            if hasattr(self, 'cna_bof_commands') and bof_arg in self.cna_bof_commands:
+                return True, None
+
+            # Otherwise, check if file exists
+            bof_path = bof_arg if base_cmd != 'bof-load' else cmd_parts[2] if len(cmd_parts) > 2 else None
             if bof_path and not Path(bof_path).exists():
                 return False, f"BOF file not found: {bof_path}"
-            
+
             # Check file extension
             if bof_path and not bof_path.endswith(('.o', '.obj')):
                 return False, f"Invalid BOF file extension. Expected .o or .obj"

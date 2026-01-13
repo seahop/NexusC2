@@ -249,25 +249,39 @@ class CommandHandler:
     
     def _handle_cna_list_command(self):
         """Handle the cna-list command to show loaded scripts and commands"""
-        self.terminal.terminal_output.append("\n=== Loaded CNA Scripts ===")
-        
+        output_lines = []
+
+        output_lines.append("\n" + "=" * 60)
+        output_lines.append("  LOADED CNA SCRIPTS")
+        output_lines.append("=" * 60)
+
         if not self.cna_interpreter.loaded_scripts:
-            self.terminal.terminal_output.append("No CNA scripts loaded")
+            output_lines.append("\n  (No CNA scripts loaded)")
+            output_lines.append("  Use 'cna-load <path>' to import BOF commands.")
         else:
             for script_path in self.cna_interpreter.loaded_scripts:
-                self.terminal.terminal_output.append(f"\n[+] {script_path}")
-        
+                output_lines.append(f"\n  [+] {script_path}")
+
         if self.cna_interpreter.commands:
-            self.terminal.terminal_output.append(f"\n=== Registered CNA BOF Commands ({len(self.cna_interpreter.commands)}) ===")
-            self.terminal.terminal_output.append("Use 'bof <command>' or 'bof-async <command>' to execute")
-            for cmd_name, cmd in self.cna_interpreter.commands.items():
-                if cmd.bof_path:  # Only show commands that have BOF files
-                    self.terminal.terminal_output.append(f"\n  bof {cmd_name:<20} - {cmd.description}")
+            bof_commands = {k: v for k, v in self.cna_interpreter.commands.items() if v.bof_path}
+            if bof_commands:
+                output_lines.append("\n\n" + "=" * 60)
+                output_lines.append(f"  IMPORTED CNA COMMANDS ({len(bof_commands)})")
+                output_lines.append("=" * 60)
+                output_lines.append("\n  Usage: bof <command> [args]  or  bof-async <command> [args]\n")
+
+                for cmd_name, cmd in sorted(bof_commands.items()):
+                    output_lines.append(f"  bof {cmd_name:<23} {cmd.description}")
                     if cmd.ttp:
-                        self.terminal.terminal_output.append(f"    MITRE ATT&CK: {cmd.ttp}")
+                        output_lines.append(f"      MITRE ATT&CK: {cmd.ttp}")
         else:
-            self.terminal.terminal_output.append("\nNo CNA commands registered")
-        
+            output_lines.append("\n\n  No CNA commands registered")
+
+        output_lines.append("\n" + "-" * 60)
+
+        for line in output_lines:
+            self.terminal.terminal_output.append(line)
+
         return True
     
     def _handle_help_command(self, command):
@@ -314,17 +328,23 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                 help_text = self.command_validator.get_help(cmd_parts[1])
         else:
             # Get general help filtered by OS
-            help_text = "Available commands"
+            help_text = ""
             if self.agent_os:
-                help_text += f" (filtered for {self.agent_os})"
-            help_text += ":\n\n"
-            
+                help_text += f"Commands filtered for: {self.agent_os}\n"
+
             # Get OS-compatible commands
             if self.agent_os:
                 compatible_commands = self.command_validator.get_commands_for_os(self.agent_os)
             else:
                 compatible_commands = None
-            
+
+            # ═══════════════════════════════════════════════════════════════════
+            # NATIVE COMMANDS SECTION
+            # ═══════════════════════════════════════════════════════════════════
+            help_text += "\n" + "=" * 60 + "\n"
+            help_text += "  NATIVE COMMANDS\n"
+            help_text += "=" * 60 + "\n"
+
             # Group commands by category
             categories = {
                 "Shell & System": ['shell', 'ps', 'whoami', 'sudo-session', 'env'],
@@ -349,37 +369,44 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                 "Job Management": ['jobs', 'jobkill'],
                 "Help": ['help']
             }
-            
+
             for category, cmds in categories.items():
                 category_has_commands = False
                 category_text = f"\n{category}:\n"
-                
+
                 for cmd in cmds:
                     # Skip if not compatible with agent OS
                     if compatible_commands is not None and cmd not in compatible_commands:
                         continue
-                    
+
                     category_has_commands = True
                     # Convert underscore to dash for display
                     display_cmd = cmd.replace('_', '-')
                     config_key = cmd.replace('-', '_')
-                    
+
                     if config_key in self.command_validator.commands:
                         desc = self.command_validator.commands[config_key].get('description', 'No description')
                         category_text += f"  {display_cmd:<30} {desc}\n"
                     elif cmd in self.command_validator.commands:
                         desc = self.command_validator.commands[cmd].get('description', 'No description')
                         category_text += f"  {display_cmd:<30} {desc}\n"
-                
+
                 # Only add the category if it has commands
                 if category_has_commands:
                     help_text += category_text
-            
+
             help_text += "\nType 'help <command>' for detailed information about a specific command."
-            
-            # Only show CNA BOF commands (no duplication with direct commands)
+
+            # ═══════════════════════════════════════════════════════════════════
+            # IMPORTED CNA COMMANDS SECTION
+            # ═══════════════════════════════════════════════════════════════════
             if hasattr(self.command_validator, 'cna_bof_commands') and self.command_validator.cna_bof_commands:
-                help_text += "\n\nCNA BOF Commands (use: bof <command> or bof-async <command>):"
+                help_text += "\n\n" + "=" * 60 + "\n"
+                help_text += "  IMPORTED CNA COMMANDS\n"
+                help_text += "=" * 60 + "\n"
+                help_text += "\nUsage: bof <command> [args]  or  bof-async <command> [args]\n"
+
+                # Group CNA commands by script if we have that info
                 for cmd_name in sorted(self.command_validator.cna_bof_commands.keys()):
                     cmd_info = self.command_validator.cna_bof_commands[cmd_name]
                     # Handle both dictionary and object cases
@@ -387,7 +414,13 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                         description = cmd_info.get('description', 'No description')
                     else:
                         description = getattr(cmd_info, 'description', 'No description')
-                    help_text += f"\n  {cmd_name:<25} {description}"
+                    help_text += f"\n  bof {cmd_name:<23} {description}"
+
+                help_text += "\n\nType 'help bof <command>' for detailed information about a CNA command."
+            else:
+                help_text += "\n\n" + "-" * 60 + "\n"
+                help_text += "No CNA scripts loaded. Use 'cna-load <path>' to import BOF commands.\n"
+                help_text += "-" * 60
         
         # Echo the command and show help
         # Use UTC timestamp to match server format for proper sorting

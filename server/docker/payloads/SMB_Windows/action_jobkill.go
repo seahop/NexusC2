@@ -20,8 +20,8 @@ func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	// Note: args is already split for us, we receive just the filename
 	if len(args) == 0 {
 		return CommandResult{
-			Error:       fmt.Errorf("no filename provided for jobkill"),
-			ErrorString: "no filename provided for jobkill",
+			Error:       fmt.Errorf(Err(E1)),
+			ErrorString: Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -60,8 +60,8 @@ func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	if !foundJob {
 		return CommandResult{
-			Error:       fmt.Errorf("no active job found for file %s", filename),
-			ErrorString: fmt.Sprintf("no active job found for file %s", filename),
+			Error:       fmt.Errorf(Err(E26)),
+			ErrorString: Err(E26),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

@@ -168,8 +168,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if !exists {
 			return &CommandResult{
 				Command:     cmd,
-				Error:       fmt.Errorf("no active download found for %s", cmd.Filename),
-				ErrorString: fmt.Sprintf("no active download found for %s", cmd.Filename),
+				Error:       fmt.Errorf(Err(E4)),
+				ErrorString: Err(E4),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -178,8 +178,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if !downloadInfo.InProgress {
 			return &CommandResult{
 				Command:     cmd,
-				Error:       fmt.Errorf("download for %s is no longer active", cmd.Filename),
-				ErrorString: fmt.Sprintf("download for %s is no longer active", cmd.Filename),
+				Error:       fmt.Errorf(Err(E4)),
+				ErrorString: Err(E4),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -232,8 +232,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		if len(args) == 0 {
 			return &CommandResult{
 				Command:     cmd,
-				Error:       fmt.Errorf("empty command"),
-				ErrorString: "empty command",
+				Error:       fmt.Errorf(Err(E1)),
+				ErrorString: Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil

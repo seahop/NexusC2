@@ -87,7 +87,7 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 
 		if !exists {
 			return CommandResult{
-				Output:      fmt.Sprintf("Job %s not found", jobID),
+				Output:      ErrCtx(E26, jobID),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -102,32 +102,31 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 	bufferSize := job.Output.Len()
 	job.OutputMutex.Unlock()
 
-	// Build the response based on status
+	// Build compact response - client formats
+	// Format: job_id|status|truncated(0/1)|duration_or_running|buffer_bytes|output
 	var result strings.Builder
 
-	// Add status header
-	result.WriteString(fmt.Sprintf("[*] Job %s - Status: %s\n", job.ID, status))
-
+	truncatedFlag := "0"
 	if truncated {
-		result.WriteString("[!] Output truncated - exceeded 10MB limit\n")
+		truncatedFlag = "1"
 	}
 
+	var durationStr string
 	if status == "running" {
 		duration := time.Since(job.StartTime).Round(time.Second)
-		result.WriteString(fmt.Sprintf("[*] Running for: %s\n", duration))
-		result.WriteString(fmt.Sprintf("[*] Current buffer size: %d bytes\n", bufferSize))
+		durationStr = fmt.Sprintf("r:%s:%d", duration, bufferSize)
+	} else if job.EndTime != nil {
+		duration := job.EndTime.Sub(job.StartTime).Round(time.Second)
+		durationStr = fmt.Sprintf("d:%s", duration)
 	} else {
-		if job.EndTime != nil {
-			duration := job.EndTime.Sub(job.StartTime).Round(time.Second)
-			result.WriteString(fmt.Sprintf("[*] Duration: %s\n", duration))
-		}
+		durationStr = "-"
 	}
 
-	result.WriteString("========================================\n")
+	result.WriteString(fmt.Sprintf("%s|%s|%s|%s\n", job.ID, status, truncatedFlag, durationStr))
 
 	// Add the actual output
 	if output == "" {
-		result.WriteString("[*] No output captured yet\n")
+		result.WriteString(Succ(S18))
 	} else {
 		result.WriteString(output)
 	}
@@ -149,7 +148,7 @@ func (c *InlineAssemblyKillCommand) Name() string {
 func (c *InlineAssemblyKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output:   "Usage: inline-assembly-kill <job_id>",
+			Output:   Err(E1),
 			ExitCode: 1,
 		}
 	}
@@ -164,16 +163,13 @@ func executeAssemblyJobsList() CommandResult {
 
 	if len(jobs) == 0 {
 		return CommandResult{
-			Output:   "No active inline assembly jobs",
+			Output:   Succ(S0),
 			ExitCode: 0,
 		}
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Active Inline Assembly Jobs (%d):\n", len(jobs)))
-	output.WriteString("================================================================================\n")
-	output.WriteString("Job ID                   | Assembly Name       | Status      | Duration         \n")
-	output.WriteString("--------------------------------------------------------------------------------\n")
+	output.WriteString(Table(TJobs, len(jobs)) + "\n")
 
 	now := time.Now()
 	for _, job := range jobs {
@@ -221,7 +217,7 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 
 	if job == nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job not found: %s", jobID),
+			Output:   ErrCtx(E26, jobID),
 			ExitCode: 1,
 		}
 	}
@@ -232,19 +228,18 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 	truncated := job.OutputTruncated
 	job.OutputMutex.Unlock()
 
-	truncatedMsg := ""
+	// Compact output format - client expands
+	// Format: status_code|job_id|truncated(0/1)|output
+	truncatedFlag := "0"
 	if truncated {
-		truncatedMsg = " (OUTPUT TRUNCATED - exceeded 10MB limit)"
+		truncatedFlag = "1"
 	}
 
 	if output == "" {
-		if status == "running" {
-			output = fmt.Sprintf("Job %s is still running%s", job.ID, truncatedMsg)
-		} else {
-			output = fmt.Sprintf("Job %s (%s) has no buffered output%s", job.ID, status, truncatedMsg)
-		}
+		// S18 = no output yet
+		output = fmt.Sprintf("%s|%s|%s|%s|", Succ(S18), job.ID, status, truncatedFlag)
 	} else {
-		output = fmt.Sprintf("Output for job %s%s:\n%s", job.ID, truncatedMsg, output)
+		output = fmt.Sprintf("%s|%s|%s|%s\n%s", Succ(S5), job.ID, status, truncatedFlag, output)
 	}
 
 	return CommandResult{
@@ -270,14 +265,14 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 
 	if job == nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job not found: %s", jobID),
+			Output:   ErrCtx(E26, jobID),
 			ExitCode: 1,
 		}
 	}
 
 	if job.Status != "running" {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job %s is not running (status: %s)", job.ID, job.Status),
+			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
 		}
 	}
@@ -295,7 +290,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 		assemblyJobManager.mu.Unlock()
 
 		return CommandResult{
-			Output:   fmt.Sprintf("Job %s terminated", job.ID),
+			Output:   SuccCtx(S2, job.ID),
 			ExitCode: 0,
 			JobID:    jobID,
 		}
@@ -388,13 +383,13 @@ func executeAssemblyJobsCleanAll() CommandResult {
 
 	if cleaned == 0 {
 		return CommandResult{
-			Output:   "No completed jobs to clean",
+			Output:   Succ(S0),
 			ExitCode: 0,
 		}
 	}
 
 	return CommandResult{
-		Output:   fmt.Sprintf("Cleaned %d completed/killed job(s)", cleaned),
+		Output:   SuccCtx(S17, fmt.Sprintf("%d", cleaned)),
 		ExitCode: 0,
 	}
 }
@@ -414,14 +409,14 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 
 	if job == nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Job not found: %s", jobID),
+			Output:   ErrCtx(E26, jobID),
 			ExitCode: 1,
 		}
 	}
 
 	if job.Status == "running" {
 		return CommandResult{
-			Output:   fmt.Sprintf("Cannot clean running job %s (use inline-assembly-kill first)", job.ID),
+			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
 		}
 	}
@@ -429,7 +424,7 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 	assemblyJobManager.RemoveJob(job.ID)
 
 	return CommandResult{
-		Output:   fmt.Sprintf("Cleaned job %s", job.ID),
+		Output:   SuccCtx(S2, job.ID),
 		ExitCode: 0,
 	}
 }
@@ -450,7 +445,7 @@ func executeAssemblyJobsStats() CommandResult {
 
 	if len(jobs) == 0 {
 		return CommandResult{
-			Output:   "No assembly jobs in memory",
+			Output:   Succ(S0),
 			ExitCode: 0,
 		}
 	}
@@ -482,8 +477,7 @@ func executeAssemblyJobsStats() CommandResult {
 	}
 
 	var output strings.Builder
-	output.WriteString("Assembly Job Statistics:\n")
-	output.WriteString("========================\n")
+	output.WriteString("Stats:\n")
 	output.WriteString(fmt.Sprintf("Total Jobs:     %d\n", stats.Total))
 	output.WriteString(fmt.Sprintf("Running:        %d\n", stats.Running))
 	output.WriteString(fmt.Sprintf("Completed:      %d\n", stats.Completed))

@@ -250,14 +250,12 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 	if globalTokenStore != nil {
 		globalTokenStore.mu.RLock()
 		if globalTokenStore.NetOnlyHandle != 0 {
-			output.WriteString(fmt.Sprintf("[*] Using network-only token: %s\n", globalTokenStore.NetOnlyToken))
-			output.WriteString("[*] This token will be used for network authentication\n")
+			output.WriteString(SuccCtx(S20, globalTokenStore.NetOnlyToken) + "\n")
 		} else if globalTokenStore.IsImpersonating {
-			output.WriteString(fmt.Sprintf("[*] Using impersonation token: %s\n", globalTokenStore.ActiveToken))
-			output.WriteString("[!] WARNING: Regular impersonation may not work for network shares\n")
-			output.WriteString("[!] Consider using 'make-token' with network-only flag for UNC paths\n")
+			output.WriteString(SuccCtx(S21, globalTokenStore.ActiveToken) + "\n")
+			output.WriteString(Succ(S24) + "\n")
 		} else {
-			output.WriteString("[!] No token context active - using current user context\n")
+			output.WriteString(Succ(S22) + "\n")
 		}
 		globalTokenStore.mu.RUnlock()
 	}
@@ -265,11 +263,11 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 	// Apply bypasses if needed
 	if config.BypassAMSI {
 		if err := patchAMSI(); err == nil {
-			output.WriteString("[+] AMSI bypass applied\n")
+			output.WriteString(Succ(S23) + "\n")
 		}
 	}
 
-	output.WriteString("[*] Executing assembly...\n")
+	output.WriteString(Succ(S25) + "\n")
 
 	// Try synchronous capture first
 	// removed debug log
@@ -281,22 +279,20 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 	}
 
 	if assemblyOutput != "" {
-		output.WriteString("\n========== Assembly Output ==========\n")
+		output.WriteString("\n")
 		output.WriteString(assemblyOutput)
 		if !strings.HasSuffix(assemblyOutput, "\n") {
 			output.WriteString("\n")
 		}
-		output.WriteString("=====================================\n")
 	} else {
-		output.WriteString("[!] No output captured (assembly may have executed successfully)\n")
+		output.WriteString(Succ(S18) + "\n")
 	}
 
 	if err != nil {
 		output.WriteString("\n" + Err(E46) + "\n")
 	}
 
-	output.WriteString(fmt.Sprintf("\n[*] Exit code: %d\n", exitCode))
-	output.WriteString(fmt.Sprintf("[*] Execution #%d completed\n", executionNumber))
+	output.WriteString(fmt.Sprintf("\n%s:%d\n", Succ(S5), exitCode))
 
 	return output.String(), exitCode
 }
@@ -464,7 +460,7 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	// The output we saw earlier suggests the assembly IS running
 	// but Console.WriteLine is going somewhere else
 
-	return "[Test execution completed - check debug console for actual output]", int(retCode), execErr
+	return Succ(S5), int(retCode), execErr
 }
 
 func verifyDirectoryAccess(path string) error {
@@ -477,11 +473,11 @@ func verifyDirectoryAccess(path string) error {
 	// Try to get file attributes (basic access check)
 	attrs, err := syscall.GetFileAttributes(pathPtr)
 	if err != nil {
-		return fmt.Errorf("cannot access path %s: %v", path, err)
+		return fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
 	if attrs == syscall.INVALID_FILE_ATTRIBUTES {
-		return fmt.Errorf("invalid path or access denied: %s", path)
+		return fmt.Errorf(Err(E3))
 	}
 
 	return nil

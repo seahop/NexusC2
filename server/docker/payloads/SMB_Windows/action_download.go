@@ -36,8 +36,8 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// But let's still handle the case where it might have been split
 	if len(args) == 0 {
 		return CommandResult{
-			Error:       fmt.Errorf("usage: download <filename>"),
-			ErrorString: "usage: download <filename>",
+			Error:       fmt.Errorf(Err(E1)),
+			ErrorString: Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

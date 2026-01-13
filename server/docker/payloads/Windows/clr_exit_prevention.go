@@ -85,7 +85,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 		clrDll, _ := syscall.UTF16PtrFromString("clr.dll")
 		hModule, _, _ = getModuleHandle.Call(uintptr(unsafe.Pointer(clrDll)))
 		if hModule == 0 {
-			return fmt.Errorf("CLR not loaded")
+			return fmt.Errorf(Err(E4))
 		}
 	}
 
@@ -117,7 +117,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(addr, 5, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf("failed to change memory protection")
+		return fmt.Errorf(Err(E3))
 	}
 
 	// Patch with RET instruction (0xC3)
@@ -151,7 +151,7 @@ func (c *CLRExitPrevention) PatchApplicationExit() error {
 	winforms, _ := syscall.UTF16PtrFromString("System.Windows.Forms.dll")
 	hModule, _, _ := getModuleHandle.Call(uintptr(unsafe.Pointer(winforms)))
 	if hModule == 0 {
-		return fmt.Errorf("Windows.Forms not loaded")
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Similar patching approach
@@ -174,7 +174,7 @@ func (c *CLRExitPrevention) PatchExitProcess() error {
 	virtualProtect := kernel32.NewProc("VirtualProtect")
 
 	if exitProcess.Addr() == 0 {
-		return fmt.Errorf("ExitProcess not found")
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Save original bytes
@@ -188,7 +188,7 @@ func (c *CLRExitPrevention) PatchExitProcess() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(exitProcess.Addr(), 5, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf("failed to change memory protection for ExitProcess")
+		return fmt.Errorf(Err(E3))
 	}
 
 	// Instead of just RET, we'll add a small stub that sets exit code to 0 and returns
@@ -212,7 +212,7 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 	getCurrentProcess := kernel32.NewProc("GetCurrentProcess")
 
 	if terminateProcess.Addr() == 0 {
-		return fmt.Errorf("TerminateProcess not found")
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Get current process handle for comparison
@@ -233,7 +233,7 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(terminateProcess.Addr(), 12, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf("failed to change memory protection for TerminateProcess")
+		return fmt.Errorf(Err(E3))
 	}
 
 	// For now, just return success (don't terminate)
@@ -266,7 +266,7 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 func (c *CLRExitPrevention) RestoreMethod(methodName string) error {
 	_, ok := c.originalBytes[methodName]
 	if !ok {
-		return fmt.Errorf("no original bytes saved for %s", methodName)
+		return fmt.Errorf(Err(E4))
 	}
 
 	// Implementation would restore the original bytes
@@ -314,7 +314,7 @@ func (c *CLRExitPrevention) RestoreAll() error {
 		}
 
 		if addr == 0 {
-			lastError = fmt.Errorf("could not find address for %s", methodName)
+			lastError = fmt.Errorf(Err(E4))
 			continue
 		}
 
@@ -328,7 +328,7 @@ func (c *CLRExitPrevention) RestoreAll() error {
 		)
 
 		if ret == 0 {
-			lastError = fmt.Errorf("failed to change protection for %s", methodName)
+			lastError = fmt.Errorf(Err(E3))
 			continue
 		}
 

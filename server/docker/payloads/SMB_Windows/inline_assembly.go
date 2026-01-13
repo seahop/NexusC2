@@ -124,36 +124,24 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	if isDLL {
 		assemblyType = "DLL"
 	}
-
-	// Build output header
-	output.WriteString(fmt.Sprintf("[*] Inline Assembly Execution #%d\n", executionNumber))
-	output.WriteString(fmt.Sprintf("[*] Assembly type: %s\n", assemblyType))
-	output.WriteString(fmt.Sprintf("[*] Assembly size: %d bytes\n", len(assemblyBytes)))
-	output.WriteString(fmt.Sprintf("[*] .NET version: v4.0.30319\n"))
+	_ = assemblyType // suppress unused warning
 
 	// Check for problematic patterns
 	for _, arg := range config.Arguments {
 		if strings.Contains(strings.ToLower(arg), "/runfor") {
-			output.WriteString("[!] Detected /runfor parameter - exit protection enabled\n")
+			output.WriteString(Succ(S26) + "\n")
 			break
 		}
 	}
 
-	if len(config.Arguments) > 0 {
-		output.WriteString(fmt.Sprintf("[*] Arguments: %v\n", config.Arguments))
-	}
-
 	if executionNumber > 1 {
-		output.WriteString(fmt.Sprintf("[!] Warning: This is execution #%d. CLR state may be corrupted.\n", executionNumber))
-		output.WriteString("[!] If execution fails, agent restart may be required.\n")
+		output.WriteString(SuccCtx(S27, fmt.Sprintf("%d", executionNumber)) + "\n")
 	}
 
 	// Show exit prevention status
 	if exitMethodsPatched {
-		output.WriteString(fmt.Sprintf("[+] Exit prevention active: %d methods patched\n", len(exitPrevention.GetPatchedMethods())))
+		output.WriteString(SuccCtx(S28, fmt.Sprintf("%d", len(exitPrevention.GetPatchedMethods()))) + "\n")
 	}
-
-	output.WriteString("========================================\n")
 
 	// Execute with protection (this method is defined in action_inline_assembly.go)
 	assemblyOutput, exitCode := c.executeWindowsAssembly(assemblyBytes, config, executionNumber)
@@ -252,10 +240,10 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			if r := recover(); r != nil {
 				job.OutputMutex.Lock()
 				job.Status = "failed"
-				job.Error = fmt.Errorf("Assembly execution crashed: %v", r)
+				job.Error = fmt.Errorf(ErrCtx(E52, fmt.Sprintf("%v", r)))
 				endTime := time.Now()
 				job.EndTime = &endTime
-				job.Output.WriteString(fmt.Sprintf("\n[!] Assembly crashed: %v\n", r))
+				job.Output.WriteString("\n" + ErrCtx(E52, fmt.Sprintf("%v", r)) + "\n")
 				finalOutput := job.Output.String()
 				job.OutputMutex.Unlock()
 
@@ -322,10 +310,10 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			exitCode, err = c.executeWindowsAssemblyAsync(assemblyBytes, config, job, tokenContext)
 		} else {
 			// Fail on non-Windows platforms
-			err = fmt.Errorf("inline assembly async is only supported on Windows")
+			err = fmt.Errorf(Err(E2))
 			exitCode = -1
 			job.OutputMutex.Lock()
-			job.Output.WriteString("[!] Inline assembly async is only supported on Windows\n")
+			job.Output.WriteString(Err(E2) + "\n")
 			job.OutputMutex.Unlock()
 		}
 
@@ -385,7 +373,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 	}()
 
 	return CommandResult{
-		Output:      fmt.Sprintf("[+] Async inline assembly execution started (Job ID: %s)\n[*] Use 'inline-assembly-output %s' to retrieve output", jobID, jobID),
+		Output:      fmt.Sprintf("Async inline assembly execution started (Job ID: %s)\nUse 'inline-assembly-output %s' to retrieve output", jobID, jobID),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		JobID:       jobID,

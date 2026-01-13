@@ -56,7 +56,7 @@ func ExecuteWithNetworkToken(cmdPath string, args []string) (*exec.Cmd, error) {
 
 	// Apply the network token to the command
 	if err := ApplyNetworkTokenToCommand(cmd, netContext.TokenHandle); err != nil {
-		return nil, fmt.Errorf("failed to apply network token: %v", err)
+		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
 	}
 
 	return cmd, nil
@@ -131,7 +131,7 @@ func WrapNetworkCommand(commandFunc func() CommandResult) CommandResult {
 	result := commandFunc()
 
 	// Prepend network token info to output
-	tokenInfo := fmt.Sprintf("[*] Using network-only token: %s\n", netContext.TokenName)
+	tokenInfo := fmt.Sprintf("Using network-only token: %s\n", netContext.TokenName)
 	result.Output = tokenInfo + result.Output
 
 	return result
@@ -147,7 +147,7 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 
 	if netContext != nil && netContext.UseNetOnlyToken {
 		// Execute with network-only token
-		output = fmt.Sprintf("[*] Executing with network-only token: %s\n", netContext.TokenName)
+		output = fmt.Sprintf("Executing with network-only token: %s\n", netContext.TokenName)
 
 		// Build full command line
 		fullCmd := command
@@ -207,7 +207,7 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 	if netContext != nil && netContext.UseNetOnlyToken {
 		// Prepare to execute with network token
 		var output strings.Builder
-		output.WriteString(fmt.Sprintf("[*] Using network-only token: %s\n", netContext.TokenName))
+		output.WriteString(fmt.Sprintf("Using network-only token: %s\n", netContext.TokenName))
 		output.WriteString(fmt.Sprintf("    User: %s\n\n", GetTokenUserString(netContext.TokenHandle)))
 
 		// Execute the actual net command with the token context
@@ -246,7 +246,7 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 		// Note: Getting output from the spawned process requires additional work
 		// with pipes, which would be implemented in a production version
 
-		output.WriteString("[+] Command executed with network-only token\n")
+		output.WriteString("Command executed with network-only token\n")
 
 		return CommandResult{
 			Output:      output.String(),

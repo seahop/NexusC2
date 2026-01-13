@@ -69,7 +69,7 @@ func PrepareNetworkOperation(path string) string {
 
 		if globalTokenStore.NetOnlyToken != "" {
 			metadata := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]
-			return fmt.Sprintf("[*] Using network-only token '%s' (%s\\%s) for: %s\n",
+			return fmt.Sprintf("Using network-only token '%s' (%s\\%s) for: %s\n",
 				globalTokenStore.NetOnlyToken,
 				metadata.Domain,
 				metadata.User,
@@ -337,13 +337,13 @@ func NetworkAwareCopyFile(src, dst string) error {
 	// Read from source
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return fmt.Errorf("failed to read source: %v", err)
+		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
 	// Get source file info for permissions
 	info, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("failed to stat source: %v", err)
+		return fmt.Errorf(ErrCtx(E4, err.Error()))
 	}
 
 	// Write to destination
@@ -387,7 +387,7 @@ func NetworkAwareMoveFile(src, dst string) error {
 	// Fall back to copy and delete
 	err = NetworkAwareCopyFile(src, dst)
 	if err != nil {
-		return fmt.Errorf("failed to copy during move: %v", err)
+		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
 	// Delete source

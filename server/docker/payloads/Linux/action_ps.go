@@ -268,22 +268,22 @@ func parsePSFlags(args []string) PSFlags {
 	return flags
 }
 
-// parseStatus converts status codes to readable format
+// parseStatus converts status codes to short markers (decoded client-side)
 func parseStatus(status []string) string {
 	if len(status) == 0 {
 		return "?"
 	}
 
-	// Map common status codes
+	// Map to short status codes - client expands these
 	statusMap := map[string]string{
-		"R": "Running",
-		"S": "Sleeping",
-		"D": "Disk sleep",
-		"T": "Stopped",
-		"Z": "Zombie",
-		"I": "Idle",
-		"W": "Paging",
-		"X": "Dead",
+		"R": VRunning,
+		"S": VSleeping,
+		"D": VDiskSleep,
+		"T": VStopped,
+		"Z": VZombie,
+		"I": VIdle,
+		"W": VPaging,
+		"X": VDead,
 	}
 
 	if mapped, ok := statusMap[status[0]]; ok {
@@ -389,46 +389,32 @@ func formatProcessTable(output *strings.Builder, processes []ProcessInfo, flags 
 
 	// Build format strings
 	baseFormat := fmt.Sprintf("%%-%dd  %%-%dd  %%-%ds", widths.pid, widths.ppid, widths.name)
-	headerFormat := fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds", widths.pid, widths.ppid, widths.name)
+	_ = fmt.Sprintf("%%-%ds  %%-%ds  %%-%ds", widths.pid, widths.ppid, widths.name) // headerFormat - client adds headers
 
 	extFormat := ""
-	extHeaderFormat := ""
 	if flags.Extended {
 		extFormat = fmt.Sprintf("  %%-%ds  %%%ds  %%%ds  %%%ds  %%-%ds",
-			widths.user, widths.cpu, widths.mem, widths.memMB, widths.status)
-		extHeaderFormat = fmt.Sprintf("  %%-%ds  %%%ds  %%%ds  %%%ds  %%-%ds",
 			widths.user, widths.cpu, widths.mem, widths.memMB, widths.status)
 	}
 
 	verboseFormat := ""
-	verboseHeaderFormat := ""
 	if flags.Verbose {
 		verboseFormat = "  %s"
-		verboseHeaderFormat = "  %s"
 	}
 
-	// Calculate total width for separator (cap at reasonable width)
-	totalWidth := widths.pid + 2 + widths.ppid + 2 + widths.name
-	if flags.Extended {
-		totalWidth += 2 + widths.user + 2 + widths.cpu + 2 + widths.mem + 2 + widths.memMB + 2 + widths.status
+	// Write table marker - client adds header based on type
+	// T:F = basic, T:G = extended, T:H = verbose, T:I = full (extended+verbose)
+	var tableType string
+	if flags.Extended && flags.Verbose {
+		tableType = TPSFull
+	} else if flags.Extended {
+		tableType = TPSExt
+	} else if flags.Verbose {
+		tableType = TPSVerb
+	} else {
+		tableType = TPS
 	}
-	if flags.Verbose {
-		totalWidth += 2 + 7 // Just add "COMMAND" header width, not full command width
-	}
-	if totalWidth > 120 {
-		totalWidth = 120
-	}
-
-	// Write header
-	header := fmt.Sprintf(headerFormat, "PID", "PPID", "NAME")
-	if flags.Extended {
-		header += fmt.Sprintf(extHeaderFormat, "USER", "CPU%", "MEM%", "MEM(MB)", "STATUS")
-	}
-	if flags.Verbose {
-		header += fmt.Sprintf(verboseHeaderFormat, "COMMAND")
-	}
-	output.WriteString(header + "\n")
-	output.WriteString(strings.Repeat("-", totalWidth) + "\n")
+	output.WriteString(Table(tableType, len(processes)) + "\n")
 
 	// Format each process
 	for _, p := range processes {
@@ -462,8 +448,6 @@ func formatProcessTable(output *strings.Builder, processes []ProcessInfo, flags 
 
 		output.WriteString(line + "\n")
 	}
-
-	output.WriteString(fmt.Sprintf("\n%d\n", len(processes)))
 }
 
 // truncatePS truncates a string to maxLen unless noTruncate is true

@@ -321,7 +321,7 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	err := RevertToSelf()
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to revert impersonation: %v", err),
+			Output:      ErrCtx(E42, err.Error()),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -368,7 +368,7 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		output = fmt.Sprintf("No active impersonation detected\nCurrent user: %s\\%s",
 			afterDomain, afterUser)
 	} else {
-		output = "[+] Successfully reverted all tokens\n"
+		output = Succ(S14) + "\n"
 
 		// Report on regular impersonation if it was active
 		if beforeUser != afterUser || beforeDomain != afterDomain {

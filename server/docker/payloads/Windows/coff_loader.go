@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -895,7 +894,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 // Load with default 30-second timeout for backward compatibility
 func Load(coffBytes []byte, argBytes []byte) (string, error) {
 	if len(coffBytes) < 20 {
-		return "", fmt.Errorf("invalid COFF file: too small (%d bytes)", len(coffBytes))
+		return "", fmt.Errorf(ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
 	}
 	return LoadWithTimeout(coffBytes, argBytes, 30*time.Second)
 }
@@ -903,7 +902,7 @@ func Load(coffBytes []byte, argBytes []byte) (string, error) {
 // LoadWithTimeout allows specifying a custom timeout
 func LoadWithTimeout(coffBytes []byte, argBytes []byte, timeout time.Duration) (string, error) {
 	if len(coffBytes) < 20 {
-		return "", fmt.Errorf("invalid COFF file: too small (%d bytes)", len(coffBytes))
+		return "", fmt.Errorf(ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
 	}
 	return LoadWithMethodAndTimeout(coffBytes, argBytes, "go", timeout)
 }
@@ -930,7 +929,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	parsedCoff.Seal()
 
 	if parsedCoff.Sections.Len() == 0 {
-		return "", fmt.Errorf("invalid COFF file: no sections found")
+		return "", fmt.Errorf(Err(E2))
 	}
 
 	// Calculate sizes for special sections
@@ -990,13 +989,14 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 		// Add upper bound check
 		if allocationSize > 0x10000000 { // 256MB limit
-			return "", fmt.Errorf("section %s too large: %d bytes", sectionName, allocationSize)
+			return "", fmt.Errorf(ErrCtx(E2, sectionName))
 		}
 
 		// Allocate memory
 		addr, _, err := procVirtualAlloc.Call(0, allocationSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 		if addr == 0 {
-			return "", fmt.Errorf("VirtualAlloc failed for section %s: %v", sectionName, err)
+			return "", fmt.Errorf(ErrCtx(E44, sectionName))
+			_ = err
 		}
 
 		allocatedMemory = append(allocatedMemory, addr)
@@ -1011,7 +1011,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				uintptr(copySize),
 			)
 			if !errors.Is(err, syscall.Errno(0)) {
-				return "", fmt.Errorf("failed to copy section data: %v", err)
+				return "", fmt.Errorf(Err(E44))
 			}
 		}
 
@@ -1026,7 +1026,8 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	if gotSize > 0 {
 		addr, _, err := procVirtualAlloc.Call(0, uintptr(gotSize), MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 		if addr == 0 {
-			return "", fmt.Errorf("VirtualAlloc failed for GOT: %v", err)
+			return "", fmt.Errorf(Err(E44))
+			_ = err
 		}
 		gotBaseAddress = addr
 		allocatedMemory = append(allocatedMemory, addr)
@@ -1073,7 +1074,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 						// Allocate GOT entry
 						if gotBaseAddress == 0 {
-							return "", fmt.Errorf("GOT not allocated but import symbol found")
+							return "", fmt.Errorf(Err(E44))
 						}
 
 						symbolDefAddress = gotBaseAddress + uintptr(gotOffset*8)
@@ -1131,7 +1132,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		defer close(output)
 		defer func() {
 			if r := recover(); r != nil {
-				output <- fmt.Sprintf("[BOF] Execution panic: %v\nStack:\n%s", r, debug.Stack())
+				output <- ErrCtx(E51, fmt.Sprintf("%v", r))
 			}
 
 			// Clean up BOF allocations
@@ -1149,7 +1150,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		for _, symbol := range parsedCoff.Symbols {
 			if symbol.NameString() == method {
 				if symbol.SectionNumber <= 0 || int(symbol.SectionNumber) > len(sectionAddresses) {
-					output <- fmt.Sprintf("[BOF] Invalid section number for entry point: %d", symbol.SectionNumber)
+					output <- Err(E2)
 					return
 				}
 
@@ -1217,7 +1218,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					ret, _, err := syscall.SyscallN(entryPoint, argPtr, uintptr(argLen))
 
 					if !errors.Is(err, syscall.Errno(0)) {
-						output <- fmt.Sprintf("[BOF] Entry point returned with error: %v (return: 0x%x)", err, ret)
+						output <- ErrCtx(E51, fmt.Sprintf("0x%x", ret))
 					} else {
 					}
 					done <- true
@@ -1230,11 +1231,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					// BOF completed normally
 				case <-time.After(timeout): // THIS LINE CHANGED - NOW USES THE TIMEOUT PARAMETER
 					// Provide helpful message based on timeout duration
-					if timeout == 30*time.Second {
-						output <- "[BOF] ERROR: BOF execution timed out after 30 seconds. For long-running BOFs, use 'bof-async' command instead."
-					} else {
-						output <- fmt.Sprintf("[BOF] Warning: BOF execution timed out after %v", timeout)
-					}
+					output <- Err(E9)
 				}
 
 				entryPointFound = true
@@ -1243,7 +1240,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		}
 
 		if !entryPointFound {
-			output <- fmt.Sprintf("[BOF] Entry point '%s' not found in COFF file", method)
+			output <- Err(E4)
 		}
 	}()
 
@@ -1313,7 +1310,7 @@ func applyRelocation(sectionAddress uintptr, reloc windef.Relocation, symbolAddr
 		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
 
 	default:
-		return fmt.Errorf("unsupported relocation type: %d", reloc.Type)
+		return fmt.Errorf(Err(E2))
 	}
 
 	return nil
