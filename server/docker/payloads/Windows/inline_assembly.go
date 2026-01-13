@@ -48,7 +48,7 @@ func (c *InlineAssemblyCommand) Name() string {
 func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != "windows" {
 		return CommandResult{
-			Output:   "Error: Inline assembly execution is only supported on Windows",
+			Output:   Err(E42),
 			ExitCode: 1,
 		}
 	}
@@ -75,7 +75,7 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 		configData = strings.Join(args, " ")
 	} else {
 		return CommandResult{
-			Output:   "Error: No assembly data provided",
+			Output:   Err(E43),
 			ExitCode: 1,
 		}
 	}
@@ -103,7 +103,7 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 			}
 		} else {
 			return CommandResult{
-				Output:   fmt.Sprintf("Error parsing configuration: %v", err),
+				Output:   Err(E44),
 				ExitCode: 1,
 			}
 		}
@@ -113,7 +113,7 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("Error decoding assembly: %v", err),
+			Output:   Err(E45),
 			ExitCode: 1,
 		}
 	}
@@ -292,7 +292,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 				job.OutputMutex.Lock()
 				job.Status = "failed"
 				job.Error = err
-				job.Output.WriteString(fmt.Sprintf("Failed to parse assembly config: %v", err))
+				job.Output.WriteString(Err(E44))
 				endTime := time.Now()
 				job.EndTime = &endTime
 				job.OutputMutex.Unlock()
@@ -306,7 +306,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			job.OutputMutex.Lock()
 			job.Status = "failed"
 			job.Error = err
-			job.Output.WriteString(fmt.Sprintf("Failed to decode assembly: %v", err))
+			job.Output.WriteString(Err(E45))
 			endTime := time.Now()
 			job.EndTime = &endTime
 			job.OutputMutex.Unlock()

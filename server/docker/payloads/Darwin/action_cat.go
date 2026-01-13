@@ -113,14 +113,14 @@ func (c *CatCommand) parseArgs(args []string) (string, catOptions, error) {
 		switch arg {
 		case "-f", "--filter":
 			if i+1 >= len(args) {
-				return "", opts, fmt.Errorf("flag %s requires a pattern", arg)
+				return "", opts, fmt.Errorf(Err(E20))
 			}
 			opts.grepPattern = args[i+1]
 			i += 2
 
 		case "-i":
 			if i+1 >= len(args) {
-				return "", opts, fmt.Errorf("flag -i requires a pattern")
+				return "", opts, fmt.Errorf(Err(E20))
 			}
 			opts.grepPattern = args[i+1]
 			opts.caseInsensitive = true
@@ -132,7 +132,7 @@ func (c *CatCommand) parseArgs(args []string) (string, catOptions, error) {
 				fileName = arg
 				i++
 			} else {
-				return "", opts, fmt.Errorf("unexpected argument: %s", arg)
+				return "", opts, fmt.Errorf(ErrCtx(E21, arg))
 			}
 		}
 	}
@@ -198,12 +198,12 @@ func (c *CatCommand) readFile(filePath string, opts catOptions) (string, error) 
 	}
 
 	if err := scanner.Err(); err != nil {
-		return output.String(), fmt.Errorf("error reading file: %v", err)
+		return output.String(), fmt.Errorf(Err(E10))
 	}
 
 	// If grep was used and nothing matched
 	if opts.grepPattern != "" && output.Len() == 0 {
-		return fmt.Sprintf("No lines matching '%s' found in %s\n", opts.grepPattern, filePath), nil
+		return ErrCtx(E4, opts.grepPattern), nil
 	}
 
 	return output.String(), nil
@@ -259,11 +259,11 @@ func (c *CatCommand) grepFile(file *os.File, opts catOptions) (string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading file: %v", err)
+		return "", fmt.Errorf(Err(E10))
 	}
 
 	if len(matchedLines) == 0 {
-		return fmt.Sprintf("No lines matching '%s' found", opts.grepPattern), nil
+		return ErrCtx(E4, opts.grepPattern), nil
 	}
 
 	return strings.Join(matchedLines, "\n"), nil

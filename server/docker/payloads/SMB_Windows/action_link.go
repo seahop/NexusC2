@@ -64,7 +64,7 @@ Note: The link agent must be running and listening on the target.`,
 
 	default:
 		return CommandResult{
-			Output:      fmt.Sprintf("Error: Unknown protocol '%s'. Supported protocols: smb", protocol),
+			Output:      ErrCtx(E29, protocol),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -79,7 +79,7 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 	routingID, err := lm.Link(pipePath)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error: Failed to link to %s: %v", pipePath, err),
+			Output:      ErrCtx(E30, pipePath),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -90,13 +90,7 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 	handshakeResult := performImmediateHandshake(lm, routingID)
 
 	return CommandResult{
-		Output: fmt.Sprintf(`Successfully linked to SMB agent
-  Pipe: %s
-  Routing ID: %s
-  Handshake: %s
-
-Use 'links' to see active connections.
-Use 'unlink %s' to disconnect.`, pipePath, routingID, handshakeResult, routingID),
+		Output:      fmt.Sprintf("S6|%s|%s|%s", pipePath, routingID, handshakeResult),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -133,14 +127,12 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	}
 
 	if handshakeData == nil {
-		return "pending (will complete on next callback)"
+		return "P"
 	}
 
-	// Queue the handshake data to be sent on the next response to parent.
-	// The handshake will be sent when the parent polls us for data.
+	// Queue the handshake data to be sent on the next response to parent
 	lm.queueOutboundData(handshakeData)
-
-	return "queued (will complete on next callback)"
+	return "Q"
 }
 
 // UnlinkCommand handles the 'unlink' command for disconnecting from SMB agents
@@ -168,14 +160,14 @@ Use 'links' to see active connections and their routing IDs.`,
 
 	if err := lm.Unlink(routingID); err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error: Failed to unlink %s: %v", routingID, err),
+			Output:      ErrCtx(E31, routingID),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	return CommandResult{
-		Output:      fmt.Sprintf("Successfully unlinked from routing ID: %s", routingID),
+		Output:      SuccCtx(S7, routingID),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

@@ -159,7 +159,7 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 		handle, pid, err := CreateProcessWithNetworkToken(fullCmd, netContext.TokenHandle)
 		if err != nil {
 			return CommandResult{
-				Output:      fmt.Sprintf("Failed to execute with network token: %v", err),
+				Output:      Err(E37),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -216,8 +216,7 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 		// Create process with network token
 		handle, _, err := CreateProcessWithNetworkToken(cmdStr, netContext.TokenHandle)
 		if err != nil {
-			output.WriteString(fmt.Sprintf("[!] Failed to execute with network token: %v\n", err))
-			output.WriteString("    Falling back to current context...\n\n")
+			output.WriteString(Err(E37) + "\n")
 
 			// Fallback to normal execution
 			cmd := exec.Command("net", args...)

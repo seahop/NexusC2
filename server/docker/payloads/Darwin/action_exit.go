@@ -53,7 +53,7 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		time.Sleep(1 * time.Second)
 
 		// Last resort - panic
-		panic("Failed to exit gracefully")
+		panic(E25)
 	}()
 
 	return result

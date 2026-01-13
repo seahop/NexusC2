@@ -64,7 +64,7 @@ func (c *InlineAssemblyOutputCommand) Name() string {
 func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{
-			Output:      "Error: Job ID required\nUsage: inline-assembly-output <job_id>",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -301,7 +301,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 		}
 	default:
 		return CommandResult{
-			Output:   "Failed to send kill signal to job",
+			Output:   Err(E47),
 			ExitCode: 1,
 		}
 	}

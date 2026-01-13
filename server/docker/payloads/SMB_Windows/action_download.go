@@ -105,9 +105,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error opening file '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -118,9 +118,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error getting file info for '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -128,18 +128,16 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
-		err := fmt.Errorf("'%s' is a directory, not a file", displayPath)
 		return CommandResult{
-			Output:      err.Error(),
-			Error:       err,
-			ErrorString: err.Error(),
+			Output:      ErrCtx(E6, displayPath),
+			ErrorString: Err(E6),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Generate context info
-	contextInfo := fmt.Sprintf("[*] File: %s\n[*] Size: %d bytes\n[*] Modified: %s",
+	contextInfo := fmt.Sprintf("%s|%d|%s",
 		displayPath,
 		fileInfo.Size(),
 		fileInfo.ModTime().Format("2006-01-02 15:04:05"))
@@ -152,9 +150,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error reading file '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -168,7 +166,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	if n < chunkSize && err == io.EOF {
 		encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 		return CommandResult{
-			Output:      contextInfo + fmt.Sprintf("\n[+] Downloaded %s (complete in single chunk)", baseFilename),
+			Output:      contextInfo + fmt.Sprintf("|%s", SuccCtx(S4, baseFilename)),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 			Command: Command{
@@ -194,7 +192,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	commandQueue.UpdateDownloadProgress(trackedFilename, 1)
 
 	result := CommandResult{
-		Output:      contextInfo + fmt.Sprintf("\n[*] Downloading %s - Chunk 1/%d", baseFilename, totalChunks),
+		Output:      contextInfo + fmt.Sprintf("|C1/%d|%s", totalChunks, baseFilename),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		Command: Command{
@@ -219,14 +217,14 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, fmt.Errorf(Err(E10))
 	}
 	defer file.Close()
 
 	// Get file information
 	_, err = file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat file: %w", err)
+		return nil, fmt.Errorf(Err(E10))
 	}
 
 	const chunkSize = 512 * 1024 // 512KB chunks
@@ -235,7 +233,7 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 	offset := int64(chunkNumber-1) * chunkSize
 	_, err = file.Seek(offset, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to seek to position %d: %w", offset, err)
+		return nil, fmt.Errorf(Err(E10))
 	}
 
 	// Read the chunk using buffer pool
@@ -244,19 +242,19 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 	chunk := *bufPtr
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read chunk: %w", err)
+		return nil, fmt.Errorf(Err(E10))
 	}
 
 	if n == 0 {
-		return nil, fmt.Errorf("no data read for chunk %d", chunkNumber)
+		return nil, fmt.Errorf(ErrCtx(E24, fmt.Sprintf("%d", chunkNumber)))
 	}
 
 	// Encode the chunk
 	encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 
-	// Create the result
+	// Create the result (compact format: chunk/total|filename)
 	result := &CommandResult{
-		Output:      fmt.Sprintf("Chunk %d/%d of %s", chunkNumber, originalCmd.TotalChunks, filepath.Base(filePath)),
+		Output:      fmt.Sprintf("C%d/%d|%s", chunkNumber, originalCmd.TotalChunks, filepath.Base(filePath)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		Command: Command{

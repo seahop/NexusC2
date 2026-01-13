@@ -16,6 +16,8 @@ const (
 	S5 = "S5" // Completed / finished
 	S6 = "S6" // Found / exists
 	S7 = "S7" // Listed / enumerated
+	S8 = "S8" // SOCKS started
+	S9 = "S9" // SOCKS stopped
 
 	// General errors (E0-E19)
 	E1  = "E1"  // No arguments provided
@@ -51,6 +53,14 @@ const (
 	E29 = "E29" // Invalid jitter value
 	E30 = "E30" // Session not active
 	E31 = "E31" // Authentication failed
+	E32 = "E32" // SOCKS no config data
+	E33 = "E33" // SOCKS parse error
+	E34 = "E34" // SOCKS websocket error
+	E35 = "E35" // SOCKS handshake error
+	E36 = "E36" // SOCKS unknown action
+	E37 = "E37" // Network token exec failed
+	E38 = "E38" // Failed to open process
+	E39 = "E39" // Failed to open process token
 
 	// Windows-specific errors (E40-E59)
 	E40 = "E40" // Logon failed - bad credentials

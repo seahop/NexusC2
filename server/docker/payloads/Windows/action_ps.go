@@ -101,7 +101,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	procs, err := process.Processes()
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("[-] Error getting process list: %v", err),
+			Output:   Err(E27),
 			ExitCode: 1,
 		}
 	}
@@ -224,7 +224,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		jsonData, err := json.MarshalIndent(processes, "", "  ")
 		if err != nil {
 			return CommandResult{
-				Output:   fmt.Sprintf("[-] Error encoding JSON: %v", err),
+				Output:   Err(E28),
 				ExitCode: 1,
 			}
 		}

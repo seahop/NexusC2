@@ -69,7 +69,7 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 
 		// Last resort - panic
-		panic("Failed to exit gracefully")
+		panic(E25)
 	}()
 
 	return result

@@ -128,7 +128,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process %d: %v", pid, err),
+			Output:      ErrCtx(E38, fmt.Sprintf("%d", pid)),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -140,7 +140,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process token: %v", err),
+			Output:      Err(E39),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -189,7 +189,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to duplicate token: %v", err),
+			Output:      Err(E40),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -255,7 +255,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		CloseHandle(impersonationToken)
 
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to impersonate token: %v", err),
+			Output:      Err(E41),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -296,7 +296,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process %d: %v", pid, err),
+			Output:      ErrCtx(E38, fmt.Sprintf("%d", pid)),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -308,7 +308,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to open process token: %v", err),
+			Output:      Err(E39),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -340,7 +340,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to duplicate token: %v", err),
+			Output:      Err(E40),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -423,7 +423,7 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 	err := ImpersonateLoggedOnUser(token)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Failed to impersonate token '%s': %v", name, err),
+			Output:      ErrCtx(E41, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}

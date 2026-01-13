@@ -23,7 +23,7 @@ func (c *SleepCommand) Name() string {
 func parseDuration(input string) (int, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return 0, fmt.Errorf("empty duration")
+		return 0, fmt.Errorf(E22)
 	}
 
 	var totalSeconds int
@@ -38,12 +38,12 @@ func parseDuration(input string) (int, error) {
 		}
 
 		if currentNumber == "" {
-			return 0, fmt.Errorf("invalid duration format")
+			return 0, fmt.Errorf(E22)
 		}
 
 		value, err := strconv.Atoi(currentNumber)
 		if err != nil {
-			return 0, fmt.Errorf("invalid number in duration: %v", err)
+			return 0, fmt.Errorf(E22)
 		}
 
 		switch char {
@@ -54,7 +54,7 @@ func parseDuration(input string) (int, error) {
 		case 's':
 			totalSeconds += value
 		default:
-			return 0, fmt.Errorf("invalid unit '%c' in duration", char)
+			return 0, fmt.Errorf(E22)
 		}
 
 		currentNumber = ""
@@ -64,7 +64,7 @@ func parseDuration(input string) (int, error) {
 	if currentNumber != "" {
 		value, err := strconv.Atoi(currentNumber)
 		if err != nil {
-			return 0, fmt.Errorf("invalid number in duration: %v", err)
+			return 0, fmt.Errorf(E22)
 		}
 		// Assume seconds if no unit specified
 		totalSeconds += value

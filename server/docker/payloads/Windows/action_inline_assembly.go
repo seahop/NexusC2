@@ -292,7 +292,7 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 	}
 
 	if err != nil {
-		output.WriteString(fmt.Sprintf("\n[-] Execution error: %v\n", err))
+		output.WriteString("\n" + Err(E46) + "\n")
 	}
 
 	output.WriteString(fmt.Sprintf("\n[*] Exit code: %d\n", exitCode))
