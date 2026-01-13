@@ -88,11 +88,7 @@ func GetCoffOutputForChannel(channel chan<- interface{}) func(int, uintptr, int)
 		// CRITICAL: Add to global buffer for async BOF monitoring
 		bofOutputMutex.Lock()
 		bofOutputBuffer = append(bofOutputBuffer, out...)
-		currentBufferSize := len(bofOutputBuffer)
 		bofOutputMutex.Unlock()
-
-		// fmt.Printf("[DEBUG BeaconOutput] Added %d bytes to global buffer (total: %d bytes)\n",
-			length, currentBufferSize)
 
 		// Also send to channel if provided (for non-async BOFs)
 		if channel != nil {

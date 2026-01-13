@@ -883,8 +883,7 @@ func (s *GRPCServer) BiDiStream(stream pb.AgentControl_BiDiStreamServer) error {
 				errChan <- err
 				return
 			}
-			//log.Printf("[BiDiStream] Successfully sent message to client %s: %s", clientID, msg.Type)
-			// ADD: Update activity on successful send
+			// Update activity on successful send
 			conn.mu.Lock()
 			conn.LastActivity = time.Now()
 			conn.mu.Unlock()
@@ -996,7 +995,6 @@ func (s *GRPCServer) BroadcastResult(result map[string]interface{}) error {
 	for clientID, ch := range subscriberSnapshot {
 		select {
 		case ch <- streamMsg:
-			//log.Printf("[BroadcastResult] Successfully sent to subscriber: %s", clientID)
 		default:
 			log.Printf("[BroadcastResult] Warning: Subscriber channel full, skipping: %s", clientID)
 		}
@@ -1644,8 +1642,8 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 		bufferSize := len(s.CommandBuffer[commandData.AgentID])
 		s.Mutex.Unlock()
 
-		log.Printf("[ProcessMessage] Command queued for agent %s (buffer size: %d)",
-			commandData.AgentID, bufferSize)
+		log.Printf("[ProcessMessage] Command queued for agent %s (buffer size: %d, command: %s)",
+			commandData.AgentID, bufferSize, commandData.Command)
 
 		// Send acknowledgment with DB ID for REST API to use
 		ackMsg := map[string]interface{}{

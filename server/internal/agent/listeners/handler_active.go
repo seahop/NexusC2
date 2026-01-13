@@ -280,7 +280,7 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 		for _, record := range outputBatch {
 			commandResult := map[string]interface{}{
 				"agent_id":   agentID,
-				"command_id": record.CommandID,
+				"command_id": fmt.Sprintf("%d", record.CommandID),
 				"output":     record.Output,
 				"timestamp":  time.Now().Format(time.RFC3339),
 				"status":     "completed",
