@@ -35,8 +35,8 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if args[0] == "-u" || args[0] == "--unset" {
 		if len(args) < 2 {
 			return CommandResult{
-				ErrorString: "Unset requires a variable name",
-				Output:      "Usage: env -u VAR_NAME or env --unset VAR_NAME",
+				ErrorString: Err(E1),
+				Output:      Err(E1),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -54,8 +54,8 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			return c.setEnvVar(ctx, parts[0], parts[1])
 		}
 		return CommandResult{
-			ErrorString: "Invalid syntax for setting environment variable",
-			Output:      "Usage: env VAR_NAME=VALUE",
+			ErrorString: Err(E2),
+			Output:      Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -86,7 +86,7 @@ func (c *EnvCommand) getEnvVar(name string) CommandResult {
 	if value == "" {
 		// Variable doesn't exist or is empty
 		return CommandResult{
-			Output:      fmt.Sprintf("Environment variable '%s' is not set", name),
+			Output:      ErrCtx(E4, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -103,8 +103,8 @@ func (c *EnvCommand) setEnvVar(ctx *CommandContext, name, value string) CommandR
 	// Validate variable name
 	if name == "" {
 		return CommandResult{
-			ErrorString: "Variable name cannot be empty",
-			Output:      "Error: Variable name cannot be empty",
+			ErrorString: Err(E2),
+			Output:      Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -115,8 +115,8 @@ func (c *EnvCommand) setEnvVar(ctx *CommandContext, name, value string) CommandR
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("Failed to set environment variable: %v", err),
-			Output:      fmt.Sprintf("Error: Failed to set %s: %v", name, err),
+			ErrorString: Err(E11),
+			Output:      ErrCtx(E11, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -131,7 +131,7 @@ func (c *EnvCommand) setEnvVar(ctx *CommandContext, name, value string) CommandR
 	ctx.mu.Unlock()
 
 	return CommandResult{
-		Output:      fmt.Sprintf("Set %s=%s", name, value),
+		Output:      SuccCtx(S1, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -141,8 +141,8 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 	// Validate variable name
 	if name == "" {
 		return CommandResult{
-			ErrorString: "Variable name cannot be empty",
-			Output:      "Error: Variable name cannot be empty",
+			ErrorString: Err(E2),
+			Output:      Err(E2),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -157,7 +157,7 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 
 		if !inSession {
 			return CommandResult{
-				Output:      fmt.Sprintf("Environment variable '%s' is not set", name),
+				Output:      ErrCtx(E4, name),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -169,8 +169,8 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("Failed to unset environment variable: %v", err),
-			Output:      fmt.Sprintf("Error: Failed to unset %s: %v", name, err),
+			ErrorString: Err(E11),
+			Output:      ErrCtx(E11, name),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -184,7 +184,7 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 	ctx.mu.Unlock()
 
 	return CommandResult{
-		Output:      fmt.Sprintf("Removed environment variable '%s'", name),
+		Output:      SuccCtx(S2, name),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

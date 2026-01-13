@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -314,36 +313,31 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 	return removedCount, nil
 }
 
-// parseRemovalError creates user-friendly error messages
+// parseRemovalError creates error codes for removal errors
 func parseRemovalError(target string, err error) string {
 	errStr := err.Error()
 
 	// Check for common error patterns
-	if strings.Contains(errStr, "permission denied") || os.IsPermission(err) {
-		// Provide OS-specific hints for permission issues
-		if runtime.GOOS == "windows" {
-			return fmt.Sprintf("rm: cannot remove '%s': Permission denied (file may be in use or require administrator privileges)", target)
-		} else {
-			return fmt.Sprintf("rm: cannot remove '%s': Permission denied (may require elevated privileges)", target)
-		}
+	if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, E3) || os.IsPermission(err) {
+		return ErrCtx(E3, target)
 	}
 
-	if strings.Contains(errStr, "directory not empty") {
-		return fmt.Sprintf("rm: cannot remove '%s': Directory not empty (some files could not be deleted)", target)
+	if strings.Contains(errStr, "directory not empty") || strings.Contains(errStr, E16) {
+		return ErrCtx(E16, target)
 	}
 
 	if strings.Contains(errStr, "resource busy") || strings.Contains(errStr, "device or resource busy") {
-		return fmt.Sprintf("rm: cannot remove '%s': Resource busy (file or directory is in use)", target)
+		return ErrCtx(E13, target)
 	}
 
 	if strings.Contains(errStr, "read-only file system") {
-		return fmt.Sprintf("rm: cannot remove '%s': Read-only file system", target)
+		return ErrCtx(E14, target)
 	}
 
 	if strings.Contains(errStr, "operation not permitted") {
-		return fmt.Sprintf("rm: cannot remove '%s': Operation not permitted (may be immutable or system file)", target)
+		return ErrCtx(E15, target)
 	}
 
 	// Default: return the original error with the target
-	return fmt.Sprintf("rm: cannot remove '%s': %v", target, err)
+	return ErrCtx(E11, target)
 }

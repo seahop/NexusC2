@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -24,7 +23,7 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Check if no arguments provided
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "Usage: rm [options] <file/directory>...",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -64,7 +63,7 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Check if we have any targets to remove
 	if len(targets) == 0 {
 		return CommandResult{
-			Output:      "rm: missing operand\nTry 'rm --help' for more information.",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -123,21 +122,18 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			if os.IsNotExist(err) {
 				if !force {
 					// Only report error if not in force mode
-					errors = append(errors, fmt.Sprintf("rm: cannot remove '%s': No such file or directory", target))
+					errors = append(errors, ErrCtx(E4, target))
 					hasErrors = true
-				} else {
-					// In force mode, count as success for non-existent files
-					output.WriteString(fmt.Sprintf("Skipped (does not exist): %s\n", target))
 				}
 				continue
 			} else if os.IsPermission(err) {
 				// Permission denied on stat
-				errors = append(errors, fmt.Sprintf("rm: cannot access '%s': Permission denied", target))
+				errors = append(errors, ErrCtx(E3, target))
 				hasErrors = true
 				continue
 			} else {
 				// Other stat errors
-				errors = append(errors, fmt.Sprintf("rm: cannot access '%s': %v", target, err))
+				errors = append(errors, ErrCtx(E10, target))
 				hasErrors = true
 				continue
 			}
@@ -146,7 +142,7 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		// Check if it's a directory
 		if info.IsDir() {
 			if !recursive {
-				errors = append(errors, fmt.Sprintf("rm: cannot remove '%s': Is a directory (use -r to remove directories)", target))
+				errors = append(errors, ErrCtx(E6, target))
 				hasErrors = true
 				continue
 			}
@@ -159,10 +155,10 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 				errors = append(errors, errMsg)
 				hasErrors = true
 				if removedCount > 0 {
-					output.WriteString(fmt.Sprintf("Partially removed directory '%s': %d items deleted before error\n", target, removedCount))
+					output.WriteString(fmt.Sprintf("P:%s|%d\n", target, removedCount))
 				}
 			} else {
-				output.WriteString(fmt.Sprintf("Removed directory '%s' and %d items within\n", target, removedCount))
+				output.WriteString(fmt.Sprintf("D:%s|%d\n", target, removedCount))
 				successCount++
 			}
 		} else {
@@ -171,14 +167,14 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			err = NetworkAwareRemove(targetPath)
 			if err != nil {
 				if os.IsPermission(err) {
-					errors = append(errors, fmt.Sprintf("rm: cannot remove '%s': Permission denied", target))
+					errors = append(errors, ErrCtx(E3, target))
 					hasErrors = true
 				} else if !force {
-					errors = append(errors, fmt.Sprintf("rm: cannot remove '%s': %v", target, err))
+					errors = append(errors, ErrCtx(E11, target))
 					hasErrors = true
 				}
 			} else {
-				output.WriteString(fmt.Sprintf("Removed file: %s\n", target))
+				output.WriteString(fmt.Sprintf("F:%s\n", target))
 				successCount++
 			}
 		}
@@ -190,24 +186,20 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Add summary if multiple targets
 	if len(targets) > 1 {
 		if successCount > 0 {
-			finalOutput += fmt.Sprintf("\nSummary: Successfully removed %d out of %d targets\n", successCount, len(targets))
+			finalOutput += fmt.Sprintf("\nS5:%d/%d\n", successCount, len(targets))
 		}
 	}
 
 	if len(errors) > 0 {
 		if finalOutput != "" {
-			finalOutput += "\nErrors encountered:\n"
+			finalOutput += "\n"
 		}
 		finalOutput += strings.Join(errors, "\n")
 	}
 
 	// If no output was generated and no errors, provide a success message
 	if finalOutput == "" && !hasErrors {
-		if len(targets) == 1 {
-			finalOutput = fmt.Sprintf("Successfully removed: %s", targets[0])
-		} else {
-			finalOutput = fmt.Sprintf("Successfully removed %d items", len(targets))
-		}
+		finalOutput = SuccCtx(S2, targets[0])
 	}
 
 	exitCode := 0
@@ -231,7 +223,7 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 	dir, err := NetworkAwareOpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf("permission denied")
+			return 0, fmt.Errorf(Err(E3))
 		}
 		return 0, err
 	}
@@ -242,7 +234,7 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf("permission denied reading directory contents")
+			return 0, fmt.Errorf(Err(E3))
 		}
 		return 0, err
 	}
@@ -263,7 +255,7 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 				lastError = err
 				if !force {
 					// In non-force mode, stop on first error
-					return removedCount, fmt.Errorf("failed to remove '%s': %v", entry.Name(), err)
+					return removedCount, fmt.Errorf(ErrCtx(E11, entry.Name()))
 				}
 				// In force mode, continue trying other items
 			} else {
@@ -275,14 +267,14 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 			err := NetworkAwareRemove(entryPath)
 			if err != nil {
 				if os.IsPermission(err) {
-					lastError = fmt.Errorf("permission denied on file '%s'", entry.Name())
+					lastError = fmt.Errorf(ErrCtx(E3, entry.Name()))
 				} else {
 					lastError = err
 				}
 
 				if !force {
 					// In non-force mode, stop on first error
-					return removedCount, fmt.Errorf("failed to remove '%s': %v", entry.Name(), err)
+					return removedCount, fmt.Errorf(ErrCtx(E11, entry.Name()))
 				}
 				// In force mode, continue trying other items
 			} else {
@@ -296,11 +288,11 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 	err = NetworkAwareRemove(path)
 	if err != nil {
 		if os.IsPermission(err) {
-			return removedCount, fmt.Errorf("permission denied removing directory after clearing contents")
+			return removedCount, fmt.Errorf(Err(E3))
 		}
 		// If we couldn't remove the directory but removed some contents, report partial success
 		if removedCount > 0 {
-			return removedCount, fmt.Errorf("removed %d items but couldn't remove directory itself: %v", removedCount, err)
+			return removedCount, fmt.Errorf(ErrCtx(E16, fmt.Sprintf("%d", removedCount)))
 		}
 		return removedCount, err
 	}
@@ -314,36 +306,31 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 	return removedCount, nil
 }
 
-// parseRemovalError creates user-friendly error messages
+// parseRemovalError creates error codes for removal errors
 func parseRemovalError(target string, err error) string {
 	errStr := err.Error()
 
 	// Check for common error patterns
-	if strings.Contains(errStr, "permission denied") || os.IsPermission(err) {
-		// Provide OS-specific hints for permission issues
-		if runtime.GOOS == "windows" {
-			return fmt.Sprintf("rm: cannot remove '%s': Permission denied (file may be in use or require administrator privileges)", target)
-		} else {
-			return fmt.Sprintf("rm: cannot remove '%s': Permission denied (may require elevated privileges)", target)
-		}
+	if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, E3) || os.IsPermission(err) {
+		return ErrCtx(E3, target)
 	}
 
-	if strings.Contains(errStr, "directory not empty") {
-		return fmt.Sprintf("rm: cannot remove '%s': Directory not empty (some files could not be deleted)", target)
+	if strings.Contains(errStr, "directory not empty") || strings.Contains(errStr, E16) {
+		return ErrCtx(E16, target)
 	}
 
 	if strings.Contains(errStr, "resource busy") || strings.Contains(errStr, "device or resource busy") {
-		return fmt.Sprintf("rm: cannot remove '%s': Resource busy (file or directory is in use)", target)
+		return ErrCtx(E13, target)
 	}
 
 	if strings.Contains(errStr, "read-only file system") {
-		return fmt.Sprintf("rm: cannot remove '%s': Read-only file system", target)
+		return ErrCtx(E14, target)
 	}
 
 	if strings.Contains(errStr, "operation not permitted") {
-		return fmt.Sprintf("rm: cannot remove '%s': Operation not permitted (may be immutable or system file)", target)
+		return ErrCtx(E15, target)
 	}
 
 	// Default: return the original error with the target
-	return fmt.Sprintf("rm: cannot remove '%s': %v", target, err)
+	return ErrCtx(E11, target)
 }

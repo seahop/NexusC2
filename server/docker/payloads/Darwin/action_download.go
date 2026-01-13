@@ -37,8 +37,8 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// But let's still handle the case where it might have been split
 	if len(args) == 0 {
 		return CommandResult{
-			Error:       fmt.Errorf("usage: download <filename>"),
-			ErrorString: "usage: download <filename>",
+			ErrorString: Err(E1),
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -106,9 +106,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error opening file '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -119,9 +119,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error getting file info for '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -129,18 +129,16 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
-		err := fmt.Errorf("'%s' is a directory, not a file", displayPath)
 		return CommandResult{
-			Output:      err.Error(),
-			Error:       err,
-			ErrorString: err.Error(),
+			Output:      ErrCtx(E6, displayPath),
+			ErrorString: Err(E6),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Generate context info
-	contextInfo := fmt.Sprintf("[*] File: %s\n[*] Size: %d bytes\n[*] Modified: %s",
+	contextInfo := fmt.Sprintf("%s|%d|%s",
 		displayPath,
 		fileInfo.Size(),
 		fileInfo.ModTime().Format("2006-01-02 15:04:05"))
@@ -153,9 +151,9 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
 		return CommandResult{
-			Output:      fmt.Sprintf("Error reading file '%s': %v", displayPath, err),
+			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E10),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -169,7 +167,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	if n < chunkSize && err == io.EOF {
 		encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 		return CommandResult{
-			Output:      contextInfo + fmt.Sprintf("\n[+] Downloaded %s (complete in single chunk)", baseFilename),
+			Output:      contextInfo + fmt.Sprintf("|%s", SuccCtx(S4, baseFilename)),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 			Command: Command{
@@ -195,7 +193,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	commandQueue.UpdateDownloadProgress(trackedFilename, 1)
 
 	result := CommandResult{
-		Output:      contextInfo + fmt.Sprintf("\n[*] Downloading %s - Chunk 1/%d", baseFilename, totalChunks),
+		Output:      contextInfo + fmt.Sprintf("|C1/%d|%s", totalChunks, baseFilename),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		Command: Command{
@@ -257,7 +255,7 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 
 	// Create the result
 	result := &CommandResult{
-		Output:      fmt.Sprintf("Chunk %d/%d of %s", chunkNumber, originalCmd.TotalChunks, filepath.Base(filePath)),
+		Output:      fmt.Sprintf("C%d/%d|%s", chunkNumber, originalCmd.TotalChunks, filepath.Base(filePath)),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		Command: Command{

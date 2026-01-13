@@ -93,8 +93,9 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	procs, err := process.Processes()
 	if err != nil {
 		return CommandResult{
-			Output:   fmt.Sprintf("[-] Error getting process list: %v", err),
-			ExitCode: 1,
+			Output:      Err(E10),
+			ErrorString: Err(E10),
+			ExitCode:    1,
 		}
 	}
 
@@ -216,8 +217,9 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		jsonData, err := json.MarshalIndent(processes, "", "  ")
 		if err != nil {
 			return CommandResult{
-				Output:   fmt.Sprintf("[-] Error encoding JSON: %v", err),
-				ExitCode: 1,
+				Output:      Err(E10),
+				ErrorString: Err(E10),
+				ExitCode:    1,
 			}
 		}
 		output.Write(jsonData)
@@ -462,7 +464,7 @@ func formatProcessTable(output *strings.Builder, processes []ProcessInfo, flags 
 		output.WriteString(line + "\n")
 	}
 
-	output.WriteString(fmt.Sprintf("\nTotal processes: %d\n", len(processes)))
+	output.WriteString(fmt.Sprintf("\nS5:%d\n", len(processes)))
 }
 
 // truncatePS truncates a string to maxLen unless noTruncate is true

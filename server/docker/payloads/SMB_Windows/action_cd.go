@@ -24,7 +24,7 @@ func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// If no args, stay in current directory
 	if len(args) == 0 {
 		return CommandResult{
-			Output:      fmt.Sprintf("Current directory: %s", ctx.WorkingDir),
+			Output:      ctx.WorkingDir,
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -50,20 +50,19 @@ func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	info, err := NetworkAwareStatFile(newDir)
 	if err != nil {
 		return CommandResult{
-			Output:      fmt.Sprintf("Cannot change directory: %v", err),
+			Output:      ErrCtx(E4, newDir),
 			Error:       err,
-			ErrorString: err.Error(),
+			ErrorString: Err(E4),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if !info.IsDir() {
-		err := fmt.Errorf("not a directory: %s", newDir)
 		return CommandResult{
-			Output:      err.Error(),
-			Error:       err,
-			ErrorString: err.Error(),
+			Output:      ErrCtx(E7, newDir),
+			Error:       fmt.Errorf(Err(E7)),
+			ErrorString: Err(E7),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -76,7 +75,7 @@ func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	displayPath := filepath.ToSlash(newDir)
 
 	return CommandResult{
-		Output:      fmt.Sprintf("Changed directory to: %s", displayPath),
+		Output:      displayPath,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

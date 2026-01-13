@@ -6,7 +6,6 @@
 package main
 
 import (
-	"fmt"
 	// "log"
 	"time"
 )
@@ -39,14 +38,15 @@ func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	if err != nil {
 		return CommandResult{
 			Error:       err,
-			ErrorString: fmt.Sprintf("rekey failed: %v", err),
+			ErrorString: Err(E31),
+			Output:      Err(E31),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	return CommandResult{
-		Output:      "Successfully rekeyed connection (via command queue)",
+		Output:      Err(S5),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
