@@ -117,6 +117,19 @@ class StateDatabase:
                     CREATE INDEX IF NOT EXISTS idx_command_outputs_timestamp ON command_outputs(timestamp);
                     CREATE INDEX IF NOT EXISTS idx_agent_tags_guid ON agent_tags(agent_guid);
                     CREATE INDEX IF NOT EXISTS idx_agent_tags_name ON agent_tags(tag_name);
+
+                    -- CNA scripts persistence table
+                    CREATE TABLE IF NOT EXISTS cna_scripts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        script_path TEXT NOT NULL UNIQUE,
+                        enabled INTEGER DEFAULT 1,
+                        load_order INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_error TEXT NULL,
+                        last_error_at TIMESTAMP NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_cna_scripts_path ON cna_scripts(script_path);
+                    CREATE INDEX IF NOT EXISTS idx_cna_scripts_enabled ON cna_scripts(enabled);
                 """)
 
                 # Schema migrations - add missing columns to existing tables
@@ -437,3 +450,119 @@ class StateDatabase:
                 print(f"- Listeners: {listener_count}")
                 print(f"- Connections: {connection_count}")
                 print(f"- Commands: {command_count}")
+
+    # CNA Script Persistence Methods
+    def add_cna_script(self, script_path: str) -> bool:
+        """Add a CNA script to the persistence store"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    # Get current max load_order
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT MAX(load_order) FROM cna_scripts")
+                    result = cursor.fetchone()
+                    next_order = (result[0] or 0) + 1
+
+                    conn.execute(
+                        """INSERT OR REPLACE INTO cna_scripts (script_path, enabled, load_order)
+                           VALUES (?, 1, ?)""",
+                        (script_path, next_order)
+                    )
+                    conn.commit()
+                    print(f"StateDatabase: Added CNA script: {script_path}")
+                    return True
+                except Exception as e:
+                    print(f"StateDatabase: Error adding CNA script: {e}")
+                    return False
+
+    def remove_cna_script(self, script_path: str) -> bool:
+        """Remove a CNA script from the persistence store"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    conn.execute("DELETE FROM cna_scripts WHERE script_path = ?", (script_path,))
+                    conn.commit()
+                    print(f"StateDatabase: Removed CNA script: {script_path}")
+                    return True
+                except Exception as e:
+                    print(f"StateDatabase: Error removing CNA script: {e}")
+                    return False
+
+    def get_cna_scripts(self, enabled_only: bool = True) -> list:
+        """Get all persisted CNA scripts"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if enabled_only:
+                    cursor.execute(
+                        """SELECT script_path, enabled, load_order, last_error, last_error_at
+                           FROM cna_scripts
+                           WHERE enabled = 1
+                           ORDER BY load_order ASC"""
+                    )
+                else:
+                    cursor.execute(
+                        """SELECT script_path, enabled, load_order, last_error, last_error_at
+                           FROM cna_scripts
+                           ORDER BY load_order ASC"""
+                    )
+                rows = cursor.fetchall()
+                return [
+                    {
+                        "script_path": row[0],
+                        "enabled": bool(row[1]),
+                        "load_order": row[2],
+                        "last_error": row[3],
+                        "last_error_at": row[4]
+                    }
+                    for row in rows
+                ]
+
+    def update_cna_script_error(self, script_path: str, error: str) -> bool:
+        """Update the last error for a CNA script (for startup load failures)"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    conn.execute(
+                        """UPDATE cna_scripts
+                           SET last_error = ?, last_error_at = CURRENT_TIMESTAMP
+                           WHERE script_path = ?""",
+                        (error, script_path)
+                    )
+                    conn.commit()
+                    return True
+                except Exception as e:
+                    print(f"StateDatabase: Error updating CNA script error: {e}")
+                    return False
+
+    def clear_cna_script_error(self, script_path: str) -> bool:
+        """Clear the last error for a CNA script (on successful load)"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    conn.execute(
+                        """UPDATE cna_scripts
+                           SET last_error = NULL, last_error_at = NULL
+                           WHERE script_path = ?""",
+                        (script_path,)
+                    )
+                    conn.commit()
+                    return True
+                except Exception as e:
+                    print(f"StateDatabase: Error clearing CNA script error: {e}")
+                    return False
+
+    def set_cna_script_enabled(self, script_path: str, enabled: bool) -> bool:
+        """Enable or disable a CNA script"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    conn.execute(
+                        "UPDATE cna_scripts SET enabled = ? WHERE script_path = ?",
+                        (1 if enabled else 0, script_path)
+                    )
+                    conn.commit()
+                    return True
+                except Exception as e:
+                    print(f"StateDatabase: Error updating CNA script enabled state: {e}")
+                    return False

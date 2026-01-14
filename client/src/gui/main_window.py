@@ -1,7 +1,7 @@
 #main_window.py
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QDialog,
                             QMenu, QSplitter, QMessageBox, QFileDialog, QApplication,
-                            QListWidget, QPushButton, QHBoxLayout, QLabel, QComboBox, QVBoxLayout)
+                            QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QLabel, QComboBox, QVBoxLayout)
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot, QTimer
 from PyQt6.QtGui import QPalette, QColor, QIcon
 
@@ -42,6 +42,9 @@ class C2ClientGUI(QMainWindow):
         self.notification_manager = NotificationManager(self)
         self.notification_manager.notification_clicked.connect(self.on_notification_clicked)
 
+        # Initialize CNA Manager with database for persistence
+        self._init_cna_manager()
+
         # Restore window geometry after UI is set up
         self.restore_window_state()
 
@@ -70,6 +73,37 @@ class C2ClientGUI(QMainWindow):
             except:
                 pass
         return defaults
+
+    def _init_cna_manager(self):
+        """Initialize CNA Manager with database and load persisted scripts"""
+        from .widgets.cna_manager import CNAManager
+
+        self.cna_manager = CNAManager()
+        self.cna_manager.set_database(self.state_db)
+
+        # Load persisted CNA scripts
+        result = self.cna_manager.load_persisted_scripts()
+
+        # If there were failures, show notification after UI is ready
+        if result['failed']:
+            # Use QTimer to show message after event loop starts
+            QTimer.singleShot(500, lambda: self._show_cna_startup_errors(result['failed']))
+
+    def _show_cna_startup_errors(self, failed_scripts):
+        """Show notification about CNA scripts that failed to load on startup"""
+        count = len(failed_scripts)
+        log_path = self.cna_manager.get_log_path()
+
+        msg = f"{count} CNA script(s) failed to load on startup.\n\n"
+        for item in failed_scripts[:3]:  # Show first 3
+            msg += f"- {os.path.basename(item['path'])}\n"
+            msg += f"  Error: {item['error'][:50]}...\n" if len(item['error']) > 50 else f"  Error: {item['error']}\n"
+        if count > 3:
+            msg += f"\n...and {count - 3} more.\n"
+        msg += f"\nFull details logged to:\n{log_path}\n\n"
+        msg += "You can manage these scripts via Tools > Manage CNA Scripts."
+
+        QMessageBox.warning(self, "CNA Script Load Errors", msg)
 
     def _apply_default_view(self):
         """Apply the default view setting on startup.
@@ -367,58 +401,99 @@ class C2ClientGUI(QMainWindow):
         self.cna_debug_console.activateWindow()
     
     def loadCNAScript(self):
-        """Load a CNA script file globally"""
+        """Load a CNA script file globally with persistence"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select CNA Script",
             "",
             "CNA Scripts (*.cna);;All Files (*)"
         )
-        
+
         if file_path:
-            from .widgets.cna_manager import CNAManager
-            cna_manager = CNAManager()
-            
-            if cna_manager.load_script(file_path):
+            # Use the shared CNA manager instance (initialized in __init__)
+            if self.cna_manager.load_script(file_path, persist=True):
                 # Apply to all existing terminals
                 for agent_guid, terminal in self.terminal.agent_terminals.items():
-                    cna_manager.apply_to_terminal(terminal)
-                
-                QMessageBox.information(self, "Success", 
-                    f"CNA script loaded and applied to all agents:\n{file_path}")
+                    self.cna_manager.apply_to_terminal(terminal)
+
+                QMessageBox.information(self, "Success",
+                    f"CNA script loaded and will be remembered for future sessions:\n{file_path}")
             else:
-                QMessageBox.warning(self, "Error", 
-                    f"Failed to load CNA script:\n{file_path}")
+                # Get the last error for more helpful message
+                errors = self.cna_manager.get_startup_errors()
+                error_msg = errors[-1]['error'] if errors else "Unknown error"
+                QMessageBox.warning(self, "Error",
+                    f"Failed to load CNA script:\n{file_path}\n\nError: {error_msg}")
             
     def manageCNAScripts(self):
-        """Manage loaded CNA scripts"""
-        
+        """Manage loaded CNA scripts with persistence info"""
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Manage CNA Scripts")
-        dialog.setMinimumWidth(500)
-        dialog.setMinimumHeight(400)
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(450)
         
         layout = QVBoxLayout()
-        
+
         # Info label
-        info_label = QLabel("Loaded CNA Scripts:")
+        info_label = QLabel("CNA Scripts (persisted for auto-load on startup):")
         layout.addWidget(info_label)
-        
+
         # List widget for scripts
         script_list = QListWidget()
-        
-        # Get current terminal and populate list
+
+        # Get persisted scripts from database (including failed ones)
+        persisted_scripts = self.cna_manager.get_persisted_scripts(include_disabled=True)
+        loaded_scripts = self.cna_manager.loaded_scripts
+
+        # Also check current terminal interpreter
         current_widget = self.terminal.tabs.currentWidget()
+        cmd_count = 0
         if hasattr(current_widget, 'command_handler') and hasattr(current_widget.command_handler, 'cna_interpreter'):
-            interpreter = current_widget.command_handler.cna_interpreter
-            
-            # Add loaded scripts
-            for script_path in interpreter.loaded_scripts:
-                script_list.addItem(script_path)
-            
-            # Show command count
-            cmd_count = len(interpreter.commands)
-            info_label.setText(f"Loaded CNA Scripts ({cmd_count} commands registered):")
+            cmd_count = len(current_widget.command_handler.cna_interpreter.commands)
+
+        # Add scripts with status indicators
+        for script_info in persisted_scripts:
+            script_path = script_info['script_path']
+            is_loaded = script_path in loaded_scripts
+            has_error = script_info.get('last_error') is not None
+            is_enabled = script_info.get('enabled', True)
+
+            # Build display text with status
+            basename = os.path.basename(script_path)
+            if not is_enabled:
+                display_text = f"[DISABLED] {script_path}"
+            elif has_error:
+                display_text = f"[FAILED] {script_path}"
+            elif is_loaded:
+                display_text = f"[LOADED] {script_path}"
+            else:
+                display_text = script_path
+
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, script_path)  # Store actual path
+
+            # Color code based on status
+            if not is_enabled:
+                item.setForeground(QColor(128, 128, 128))  # Gray
+            elif has_error:
+                item.setForeground(QColor(255, 100, 100))  # Red
+                item.setToolTip(f"Error: {script_info['last_error']}")
+            elif is_loaded:
+                item.setForeground(QColor(100, 255, 100))  # Green
+
+            script_list.addItem(item)
+
+        # Also add any loaded scripts not in persistence (edge case)
+        for script_path in loaded_scripts:
+            if not any(s['script_path'] == script_path for s in persisted_scripts):
+                item = QListWidgetItem(f"[LOADED-TEMP] {script_path}")
+                item.setData(Qt.ItemDataRole.UserRole, script_path)
+                item.setForeground(QColor(255, 200, 100))  # Orange
+                item.setToolTip("Loaded but not persisted - will not auto-load on restart")
+                script_list.addItem(item)
+
+        info_label.setText(f"CNA Scripts ({cmd_count} commands registered, {len(loaded_scripts)} loaded):")
         
         layout.addWidget(script_list)
         
@@ -457,14 +532,25 @@ class C2ClientGUI(QMainWindow):
         reload_button = QPushButton("Reload All")
         reload_button.clicked.connect(lambda: self._reload_cna_scripts(script_list))
         button_layout.addWidget(reload_button)
-        
+
+        # View Log button
+        log_button = QPushButton("View Log")
+        log_button.clicked.connect(self._view_cna_log)
+        log_button.setToolTip(f"View startup error log:\n{self.cna_manager.get_log_path()}")
+        button_layout.addWidget(log_button)
+
         # Close button
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)
         button_layout.addWidget(close_button)
-        
+
         layout.addLayout(button_layout)
-        
+
+        # Add log path info at bottom
+        log_info = QLabel(f"Startup log: {self.cna_manager.get_log_path()}")
+        log_info.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(log_info)
+
         dialog.setLayout(layout)
         dialog.exec()
     
@@ -487,54 +573,72 @@ class C2ClientGUI(QMainWindow):
                 f"Reload scripts for changes to take effect.")
     
     def _add_cna_script(self, script_list):
-        """Add a new CNA script"""
+        """Add a new CNA script with persistence"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select CNA Script to Add",
             "",
             "CNA Scripts (*.cna);;All Files (*)"
         )
-        
+
         if file_path:
-            current_widget = self.terminal.tabs.currentWidget()
-            if hasattr(current_widget, 'command_handler'):
-                success = current_widget.command_handler.load_cna_script(file_path)
-                if success:
-                    script_list.addItem(file_path)
-                    QMessageBox.information(self, "Success", "Script added successfully")
-                else:
-                    QMessageBox.warning(self, "Error", "Failed to add script")
+            # Use the shared CNA manager for persistence
+            if self.cna_manager.load_script(file_path, persist=True):
+                # Also load into the current terminal's interpreter
+                current_widget = self.terminal.tabs.currentWidget()
+                if hasattr(current_widget, 'command_handler'):
+                    current_widget.command_handler.load_cna_script(file_path)
+
+                # Apply to all terminals
+                for agent_guid, terminal in self.terminal.agent_terminals.items():
+                    self.cna_manager.apply_to_terminal(terminal)
+
+                script_list.addItem(file_path)
+                QMessageBox.information(self, "Success",
+                    "Script added and will load automatically on startup")
+            else:
+                errors = self.cna_manager.get_startup_errors()
+                error_msg = errors[-1]['error'] if errors else "Unknown error"
+                QMessageBox.warning(self, "Error",
+                    f"Failed to add script:\n{error_msg}")
     
     def _remove_cna_script(self, script_list):
         """Remove selected CNA script and clean up its registrations"""
         current_item = script_list.currentItem()
         if current_item:
-            script_path = current_item.text()
-            
+            # Get actual path from UserRole data (display text has status prefix)
+            script_path = current_item.data(Qt.ItemDataRole.UserRole)
+            if not script_path:
+                script_path = current_item.text()  # Fallback for old items
+
             reply = QMessageBox.question(self, 'Remove Script',
-                f'Remove CNA script and unregister its commands?\n{script_path}',
+                f'Remove CNA script and unregister its commands?\n\n'
+                f'{script_path}\n\n'
+                f'This will also remove it from auto-load on startup.',
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 # Get current terminal and interpreter
                 current_widget = self.terminal.tabs.currentWidget()
                 if hasattr(current_widget, 'command_handler') and \
                 hasattr(current_widget.command_handler, 'cna_interpreter'):
                     interpreter = current_widget.command_handler.cna_interpreter
-                    
-                    # Unload the script and clean up
-                    if interpreter.unload_script(script_path):
-                        script_list.takeItem(script_list.row(current_item))
-                        
-                        # Update debug console if open
-                        if hasattr(self, 'cna_debug_console') and self.cna_debug_console.isVisible():
-                            self.cna_debug_console.refresh_status()
-                        
-                        QMessageBox.information(self, "Removed", 
-                            f"Script removed and commands unregistered:\n{os.path.basename(script_path)}")
-                    else:
-                        QMessageBox.warning(self, "Error", 
-                            "Failed to remove script")
+
+                    # Unload the script from interpreter
+                    interpreter.unload_script(script_path)
+
+                    # Also unload from global CNA manager and database
+                    self.cna_manager.unload_script(script_path, remove_from_db=True)
+
+                    # Update UI
+                    script_list.takeItem(script_list.row(current_item))
+
+                    # Update debug console if open
+                    if hasattr(self, 'cna_debug_console') and self.cna_debug_console.isVisible():
+                        self.cna_debug_console.refresh_status()
+
+                    QMessageBox.information(self, "Removed",
+                        f"Script removed and will not load on future startups:\n{os.path.basename(script_path)}")
 
     def _reload_cna_scripts(self, script_list):
         """Reload all CNA scripts"""
@@ -561,12 +665,44 @@ class C2ClientGUI(QMainWindow):
                     failed_scripts.append(script_path)
             
             if failed_scripts:
-                QMessageBox.warning(self, "Reload Issues", 
-                    f"Failed to reload {len(failed_scripts)} script(s):\n" + 
+                QMessageBox.warning(self, "Reload Issues",
+                    f"Failed to reload {len(failed_scripts)} script(s):\n" +
                     "\n".join(failed_scripts))
             else:
-                QMessageBox.information(self, "Success", 
+                QMessageBox.information(self, "Success",
                     f"Successfully reloaded {len(script_paths)} script(s)")
+
+    def _view_cna_log(self):
+        """Open the CNA startup log file"""
+        import subprocess
+        import sys
+
+        log_path = self.cna_manager.get_log_path()
+
+        if not log_path.exists():
+            QMessageBox.information(self, "No Log File",
+                f"No CNA startup log exists yet.\n\n"
+                f"Log will be created at:\n{log_path}\n\n"
+                f"Errors during startup script loading will be logged here.")
+            return
+
+        try:
+            # Open with system default text editor
+            if sys.platform == 'win32':
+                os.startfile(str(log_path))
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', str(log_path)])
+            else:
+                # Linux - try common editors
+                for editor in ['xdg-open', 'gedit', 'kate', 'nano', 'vim']:
+                    try:
+                        subprocess.Popen([editor, str(log_path)])
+                        break
+                    except FileNotFoundError:
+                        continue
+        except Exception as e:
+            QMessageBox.warning(self, "Error",
+                f"Could not open log file:\n{e}\n\nLog path:\n{log_path}")
 
     def showDownloads(self):
         """Show the downloads tab and request latest manifest"""
