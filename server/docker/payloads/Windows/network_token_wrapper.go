@@ -56,7 +56,7 @@ func ExecuteWithNetworkToken(cmdPath string, args []string) (*exec.Cmd, error) {
 
 	// Apply the network token to the command
 	if err := ApplyNetworkTokenToCommand(cmd, netContext.TokenHandle); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("failed to apply network token: %v", err)
 	}
 
 	return cmd, nil
@@ -127,8 +127,14 @@ func WrapNetworkCommand(commandFunc func() CommandResult) CommandResult {
 		return commandFunc()
 	}
 
-	// Execute with network-only token
-	return commandFunc()
+	// Log that we're using network-only token
+	result := commandFunc()
+
+	// Prepend network token info to output
+	tokenInfo := fmt.Sprintf("[*] Using network-only token: %s\n", netContext.TokenName)
+	result.Output = tokenInfo + result.Output
+
+	return result
 }
 
 // ExecuteNetworkCommand is a helper for executing network-related commands
@@ -141,6 +147,7 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 
 	if netContext != nil && netContext.UseNetOnlyToken {
 		// Execute with network-only token
+		output = fmt.Sprintf("[*] Executing with network-only token: %s\n", netContext.TokenName)
 
 		// Build full command line
 		fullCmd := command
@@ -152,7 +159,7 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 		handle, pid, err := CreateProcessWithNetworkToken(fullCmd, netContext.TokenHandle)
 		if err != nil {
 			return CommandResult{
-				Output:      Err(E37),
+				Output:      fmt.Sprintf("Failed to execute with network token: %v", err),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -198,13 +205,19 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 	netContext := GetNetworkTokenContext()
 
 	if netContext != nil && netContext.UseNetOnlyToken {
-		// Execute with network token
+		// Prepare to execute with network token
 		var output strings.Builder
+		output.WriteString(fmt.Sprintf("[*] Using network-only token: %s\n", netContext.TokenName))
+		output.WriteString(fmt.Sprintf("    User: %s\n\n", GetTokenUserString(netContext.TokenHandle)))
+
+		// Execute the actual net command with the token context
 		cmdStr := "net " + strings.Join(args, " ")
 
+		// Create process with network token
 		handle, _, err := CreateProcessWithNetworkToken(cmdStr, netContext.TokenHandle)
 		if err != nil {
-			output.WriteString(Err(E37) + "\n")
+			output.WriteString(fmt.Sprintf("[!] Failed to execute with network token: %v\n", err))
+			output.WriteString("    Falling back to current context...\n\n")
 
 			// Fallback to normal execution
 			cmd := exec.Command("net", args...)
@@ -227,10 +240,14 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 			}
 		}
 
+		// Wait for completion and get output
 		syscall.WaitForSingleObject(handle, syscall.INFINITE)
 		CloseHandle(handle)
 
-		output.WriteString(Succ(S5) + "\n")
+		// Note: Getting output from the spawned process requires additional work
+		// with pipes, which would be implemented in a production version
+
+		output.WriteString("[+] Command executed with network-only token\n")
 
 		return CommandResult{
 			Output:      output.String(),

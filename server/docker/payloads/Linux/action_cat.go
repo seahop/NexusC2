@@ -112,7 +112,7 @@ func (c *CatCommand) parseArgs(args []string) (string, catOptions, error) {
 		arg := args[i]
 
 		switch arg {
-		case "-f", "--filter":
+		case "-f":
 			if i+1 >= len(args) {
 				return "", opts, fmt.Errorf(Err(E20))
 			}

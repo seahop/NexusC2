@@ -17,6 +17,44 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 )
 
+// PS strings (constructed to avoid static signatures)
+var (
+	// Flag arguments - short
+	psFlagV = string([]byte{0x2d, 0x76})       // -v
+	psFlagX = string([]byte{0x2d, 0x78})       // -x
+	psFlagJ = string([]byte{0x2d, 0x6a})       // -j
+	psFlagF = string([]byte{0x2d, 0x66})       // -f
+	psFlagU = string([]byte{0x2d, 0x75})       // -u
+	psFlagS = string([]byte{0x2d, 0x73})       // -s
+
+	// Flag arguments - long
+	psVerbose    = string([]byte{0x2d, 0x2d, 0x76, 0x65, 0x72, 0x62, 0x6f, 0x73, 0x65})                                     // --verbose
+	psExtended   = string([]byte{0x2d, 0x2d, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x64, 0x65, 0x64})                               // --extended
+	psJson       = string([]byte{0x2d, 0x2d, 0x6a, 0x73, 0x6f, 0x6e})                                                       // --json
+	psNoTruncate = string([]byte{0x2d, 0x2d, 0x6e, 0x6f, 0x2d, 0x74, 0x72, 0x75, 0x6e, 0x63, 0x61, 0x74, 0x65})             // --no-truncate
+	psFilter     = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72})                                           // --filter
+	psUser       = string([]byte{0x2d, 0x2d, 0x75, 0x73, 0x65, 0x72})                                                       // --user
+	psSort       = string([]byte{0x2d, 0x2d, 0x73, 0x6f, 0x72, 0x74})                                                       // --sort
+
+	// Sort field values
+	psSortCPU    = string([]byte{0x63, 0x70, 0x75})                               // cpu
+	psSortMem    = string([]byte{0x6d, 0x65, 0x6d})                               // mem
+	psSortMemory = string([]byte{0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79})             // memory
+	psSortName   = string([]byte{0x6e, 0x61, 0x6d, 0x65})                         // name
+	psSortUser   = string([]byte{0x75, 0x73, 0x65, 0x72})                         // user
+
+	// OS names
+	psOSLinux   = string([]byte{0x6c, 0x69, 0x6e, 0x75, 0x78})                   // linux
+	psOSWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})       // windows
+
+	// Proc paths
+	psProcCmdline = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x25, 0x64, 0x2f, 0x63, 0x6d, 0x64, 0x6c, 0x69, 0x6e, 0x65}) // /proc/%d/cmdline
+	psProcExe     = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x25, 0x64, 0x2f, 0x65, 0x78, 0x65})                         // /proc/%d/exe
+
+	// Command name
+	psCmdName = string([]byte{0x70, 0x73}) // ps
+)
+
 // ProcessInfo represents information about a process
 type ProcessInfo struct {
 	PID         int32   `json:"pid"`
@@ -48,9 +86,9 @@ type PSFlags struct {
 
 // getFullCommandLine attempts to get the full command line without truncation
 func getFullCommandLine(pid int32) string {
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == psOSLinux {
 		// On Linux, read directly from /proc/[pid]/cmdline
-		cmdlineFile := fmt.Sprintf("/proc/%d/cmdline", pid)
+		cmdlineFile := fmt.Sprintf(psProcCmdline, pid)
 		data, err := os.ReadFile(cmdlineFile)
 		if err == nil && len(data) > 0 {
 			// Replace null bytes with spaces and get FULL command line
@@ -64,9 +102,9 @@ func getFullCommandLine(pid int32) string {
 
 // getFullExecutablePath attempts to get the full executable path without truncation
 func getFullExecutablePath(pid int32) string {
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == psOSLinux {
 		// On Linux, use readlink on /proc/[pid]/exe
-		exeLink := fmt.Sprintf("/proc/%d/exe", pid)
+		exeLink := fmt.Sprintf(psProcExe, pid)
 		if path, err := os.Readlink(exeLink); err == nil {
 			return path
 		}
@@ -79,7 +117,7 @@ type PSCommand struct{}
 
 // Name returns the command name
 func (c *PSCommand) Name() string {
-	return "ps"
+	return psCmdName
 }
 
 // Execute runs the ps command with the given arguments
@@ -89,7 +127,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	var output strings.Builder
 
 	// Add security context info for Windows only
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == psOSWindows {
 		// Call Windows-specific function to add impersonation info
 		if contextInfo := getWindowsSecurityContext(); contextInfo != "" {
 			output.WriteString(contextInfo)
@@ -126,7 +164,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		// Get verbose info if requested
 		if flags.Verbose || flags.NoTruncate {
 			// Always try to get full data when NoTruncate is set
-			if runtime.GOOS == "linux" {
+			if runtime.GOOS == psOSLinux {
 				// On Linux, read directly from /proc to avoid any truncation
 				if fullCmd := getFullCommandLine(p.Pid); fullCmd != "" {
 					procInfo.CommandLine = fullCmd
@@ -186,7 +224,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			}
 
 			// File descriptors (Linux/Unix only)
-			if runtime.GOOS != "windows" {
+			if runtime.GOOS != psOSWindows {
 				if numFDs, err := p.NumFDs(); err == nil {
 					procInfo.NumFDs = numFDs
 				}
@@ -246,25 +284,25 @@ func parsePSFlags(args []string) PSFlags {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
-		case "-v", "--verbose":
+		case psFlagV, psVerbose:
 			flags.Verbose = true
-		case "-x", "--extended":
+		case psFlagX, psExtended:
 			flags.Extended = true
-		case "-j", "--json":
+		case psFlagJ, psJson:
 			flags.Json = true
-		case "--no-truncate":
+		case psNoTruncate:
 			flags.NoTruncate = true
-		case "-f", "--filter":
+		case psFlagF, psFilter:
 			if i+1 < len(args) {
 				flags.Filter = args[i+1]
 				i++
 			}
-		case "-u", "--user":
+		case psFlagU, psUser:
 			if i+1 < len(args) {
 				flags.User = args[i+1]
 				i++
 			}
-		case "-s", "--sort":
+		case psFlagS, psSort:
 			if i+1 < len(args) {
 				flags.Sort = args[i+1]
 				i++
@@ -303,19 +341,19 @@ func parseStatus(status []string) string {
 // sortProcesses sorts the process list based on the sort field
 func sortProcesses(processes []ProcessInfo, sortField string) {
 	switch strings.ToLower(sortField) {
-	case "cpu":
+	case psSortCPU:
 		sort.Slice(processes, func(i, j int) bool {
 			return processes[i].CPU > processes[j].CPU
 		})
-	case "mem", "memory":
+	case psSortMem, psSortMemory:
 		sort.Slice(processes, func(i, j int) bool {
 			return processes[i].Memory > processes[j].Memory
 		})
-	case "name":
+	case psSortName:
 		sort.Slice(processes, func(i, j int) bool {
 			return strings.ToLower(processes[i].Name) < strings.ToLower(processes[j].Name)
 		})
-	case "user":
+	case psSortUser:
 		sort.Slice(processes, func(i, j int) bool {
 			return strings.ToLower(processes[i].Username) < strings.ToLower(processes[j].Username)
 		})

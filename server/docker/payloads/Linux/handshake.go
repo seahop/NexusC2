@@ -42,8 +42,8 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 3: Double encrypt the JSON (AES + RSA)
 	encryptedJSON, err := EncryptInitialHandshake(
 		jsonOutput,
-		hm.decryptedValues["Secret"],
-		hm.decryptedValues["Public Key"],
+		hm.decryptedValues[geKeySecret],
+		hm.decryptedValues[geKeyPublicKey],
 	)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
@@ -51,14 +51,14 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Step 4: Build POST URL with initial clientID
 	baseURL := buildBaseURL(
-		hm.decryptedValues["Protocol"],
-		hm.decryptedValues["IP"],
-		hm.decryptedValues["Port"],
+		hm.decryptedValues[geKeyProtocol],
+		hm.decryptedValues[geKeyIP],
+		hm.decryptedValues[geKeyPort],
 	)
 	postURL := buildPostURL(
 		baseURL,
-		hm.decryptedValues["POST Route"],
-		hm.decryptedValues["POST Client ID Name"],
+		hm.decryptedValues[geKeyPostRoute],
+		hm.decryptedValues[geKeyPostClientIDName],
 		hm.initialClientID, // Use initial client ID for the handshake
 	)
 
@@ -80,14 +80,14 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 8: Build new URLs with new client ID for subsequent communications
 	hm.getURL = buildGetURL(
 		baseURL,
-		hm.decryptedValues["GET Route"],
-		hm.decryptedValues["GET Client ID Name"],
+		hm.decryptedValues[geKeyGetRoute],
+		hm.decryptedValues[geKeyGetClientIDName],
 		newClientID,
 	)
 	hm.postURL = buildPostURL(
 		baseURL,
-		hm.decryptedValues["POST Route"],
-		hm.decryptedValues["POST Client ID Name"],
+		hm.decryptedValues[geKeyPostRoute],
+		hm.decryptedValues[geKeyPostClientIDName],
 		newClientID,
 	)
 
@@ -100,7 +100,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Step 9: Initialize SecureComms with initial secret and new seed
 	hm.secureComms = NewSecureComms(
-		hm.decryptedValues["Secret"],
+		hm.decryptedValues[geKeySecret],
 		sysInfoReport.AgentInfo.Seed,
 	)
 

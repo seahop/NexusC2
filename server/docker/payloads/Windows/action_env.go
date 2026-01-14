@@ -32,7 +32,7 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	}
 
 	// Check for unset flags
-	if args[0] == "-u" || args[0] == "--unset" {
+	if args[0] == "-u" {
 		if len(args) < 2 {
 			return CommandResult{
 				ErrorString: Err(E1),

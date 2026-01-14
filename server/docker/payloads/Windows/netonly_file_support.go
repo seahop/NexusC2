@@ -13,9 +13,18 @@ import (
 	"unsafe"
 )
 
+// Netonly file support strings (constructed to avoid static signatures)
+var (
+	nfProcGetDriveType = string([]byte{0x47, 0x65, 0x74, 0x44, 0x72, 0x69, 0x76, 0x65, 0x54, 0x79, 0x70, 0x65, 0x57})                                                                                                                                                                         // GetDriveTypeW
+	nfUncPrefix        = string([]byte{0x5c, 0x5c})                                                                                                                                                                                                                                           // \\
+	nfUncPrefixAlt     = string([]byte{0x2f, 0x2f})                                                                                                                                                                                                                                           // //
+	nfDriveRootSuffix  = string([]byte{0x3a, 0x5c})                                                                                                                                                                                                                                           // :\
+	nfFmtNetOnlyToken  = string([]byte{0x55, 0x73, 0x69, 0x6e, 0x67, 0x20, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x6f, 0x6e, 0x6c, 0x79, 0x20, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x20, 0x27, 0x25, 0x73, 0x27, 0x20, 0x28, 0x25, 0x73, 0x5c, 0x25, 0x73, 0x29, 0x20, 0x66, 0x6f, 0x72, 0x3a, 0x20, 0x25, 0x73, 0x0a}) // Using network-only token '%s' (%s\%s) for: %s\n
+)
+
 // Windows API for checking drive type
 var (
-	procGetDriveTypeW = modKernel32.NewProc("GetDriveTypeW")
+	procGetDriveTypeW = modKernel32.NewProc(nfProcGetDriveType)
 )
 
 // Drive type constants
@@ -32,14 +41,14 @@ const (
 // IsNetworkPath checks if a path is a network path (UNC or mapped network drive)
 func IsNetworkPath(path string) bool {
 	// Check for UNC paths
-	if strings.HasPrefix(path, "\\\\") || strings.HasPrefix(path, "//") {
+	if strings.HasPrefix(path, nfUncPrefix) || strings.HasPrefix(path, nfUncPrefixAlt) {
 		return true
 	}
 
 	// Check if it's a mapped network drive
 	if len(path) >= 2 && path[1] == ':' {
 		driveLetter := strings.ToUpper(path[:1])
-		rootPath := driveLetter + ":\\"
+		rootPath := driveLetter + nfDriveRootSuffix
 
 		rootPathPtr, err := syscall.UTF16PtrFromString(rootPath)
 		if err != nil {
@@ -69,7 +78,7 @@ func PrepareNetworkOperation(path string) string {
 
 		if globalTokenStore.NetOnlyToken != "" {
 			metadata := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]
-			return fmt.Sprintf("Using network-only token '%s' (%s\\%s) for: %s\n",
+			return fmt.Sprintf(nfFmtNetOnlyToken,
 				globalTokenStore.NetOnlyToken,
 				metadata.Domain,
 				metadata.User,

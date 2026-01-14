@@ -16,6 +16,39 @@ import (
 	"time"
 )
 
+// Ls flag strings (constructed to avoid static signatures)
+var (
+	// Flag arguments
+	lsMaxDepthPfx   = string([]byte{0x2d, 0x2d, 0x6d, 0x61, 0x78, 0x2d, 0x64, 0x65, 0x70, 0x74, 0x68, 0x3d}) // --max-depth=
+	lsCount         = string([]byte{0x2d, 0x2d, 0x63, 0x6f, 0x75, 0x6e, 0x74})                               // --count
+	lsExclude       = string([]byte{0x2d, 0x2d, 0x65, 0x78, 0x63, 0x6c, 0x75, 0x64, 0x65})                   // --exclude
+	lsFilterLong    = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72})                         // --filter
+	lsFilterIgnore  = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x2d, 0x69, 0x67, 0x6e, 0x6f, 0x72, 0x65}) // --filter-ignore
+	lsFilterShort   = string([]byte{0x2d, 0x66})                                                             // -f
+	lsFilterIShort  = string([]byte{0x2d, 0x69})                                                             // -i
+
+	// Size format units
+	lsSizeUnits = string([]byte{0x4b, 0x4d, 0x47, 0x54, 0x50, 0x45}) // KMGTPE
+
+	// Windows system paths (skipped during listing)
+	lsSysVolInfo   = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x20, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // System Volume Information
+	lsRecycleBin   = string([]byte{0x24, 0x52, 0x65, 0x63, 0x79, 0x63, 0x6c, 0x65, 0x2e, 0x42, 0x69, 0x6e})                                                                               // $Recycle.Bin
+	lsConfigMsi    = string([]byte{0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x4d, 0x73, 0x69})                                                                                           // Config.Msi
+	lsRecovery     = string([]byte{0x52, 0x65, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x79})                                                                                                       // Recovery
+	lsProgramData  = string([]byte{0x50, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x44, 0x61, 0x74, 0x61})                                                                                     // ProgramData
+	lsPagefile     = string([]byte{0x70, 0x61, 0x67, 0x65, 0x66, 0x69, 0x6c, 0x65, 0x2e, 0x73, 0x79, 0x73})                                                                               // pagefile.sys
+	lsHiberfile    = string([]byte{0x68, 0x69, 0x62, 0x65, 0x72, 0x66, 0x69, 0x6c, 0x2e, 0x73, 0x79, 0x73})                                                                               // hiberfil.sys
+	lsSwapfile     = string([]byte{0x73, 0x77, 0x61, 0x70, 0x66, 0x69, 0x6c, 0x65, 0x2e, 0x73, 0x79, 0x73})                                                                               // swapfile.sys
+
+	// OS names
+	lsOSWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73}) // windows
+	lsOSLinux   = string([]byte{0x6c, 0x69, 0x6e, 0x75, 0x78})             // linux
+	lsOSDarwin  = string([]byte{0x64, 0x61, 0x72, 0x77, 0x69, 0x6e})       // darwin
+
+	// Windows root path
+	lsWinRoot = string([]byte{0x43, 0x3a, 0x5c}) // C:\
+)
+
 type LsCommand struct{}
 
 type lsOptions struct {
@@ -51,8 +84,8 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 
 		if strings.HasPrefix(arg, "-") {
 			// Check for --max-depth=N flag
-			if strings.HasPrefix(arg, "--max-depth=") {
-				depthStr := strings.TrimPrefix(arg, "--max-depth=")
+			if strings.HasPrefix(arg, lsMaxDepthPfx) {
+				depthStr := strings.TrimPrefix(arg, lsMaxDepthPfx)
 				depth, err := strconv.Atoi(depthStr)
 				if err != nil || depth < 0 {
 					return nil, opts, fmt.Errorf(ErrCtx(E22, depthStr))
@@ -63,14 +96,14 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 			}
 
 			// Check for --count flag
-			if arg == "--count" {
+			if arg == lsCount {
 				opts.countOnly = true
 				i++
 				continue
 			}
 
 			// Check for --exclude flag
-			if arg == "--exclude" {
+			if arg == lsExclude {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
@@ -80,14 +113,14 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 			}
 
 			// Check if it's a flag that requires a value
-			if arg == "-f" || arg == "--filter" {
+			if arg == lsFilterShort || arg == lsFilterLong {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
 				opts.filters = append(opts.filters, args[i+1])
 				i += 2
 				continue
-			} else if arg == "-i" || arg == "--filter-ignore" {
+			} else if arg == lsFilterIShort || arg == lsFilterIgnore {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
@@ -191,7 +224,7 @@ func formatSize(size int64, humanReadable bool) string {
 		exp++
 	}
 
-	return fmt.Sprintf("%9.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf("%9.1f %cB", float64(size)/float64(div), lsSizeUnits[exp])
 }
 
 func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStats) (string, error) {
@@ -243,10 +276,10 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 				}
 
 				// Skip system directories on Windows
-				if runtime.GOOS == "windows" && currentDepth == 0 {
+				if runtime.GOOS == lsOSWindows && currentDepth == 0 {
 					name := entry.Name()
-					if name == "System Volume Information" || name == "$Recycle.Bin" ||
-						name == "Config.Msi" || name == "Recovery" || name == "ProgramData" {
+					if name == lsSysVolInfo || name == lsRecycleBin ||
+						name == lsConfigMsi || name == lsRecovery || name == lsProgramData {
 						continue
 					}
 				}
@@ -281,10 +314,10 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 			}
 
 			// Skip system files on Windows root
-			if runtime.GOOS == "windows" && currentDepth == 0 {
+			if runtime.GOOS == lsOSWindows && currentDepth == 0 {
 				name := entry.Name()
-				if name == "System Volume Information" || name == "$Recycle.Bin" ||
-					name == "pagefile.sys" || name == "hiberfil.sys" || name == "swapfile.sys" {
+				if name == lsSysVolInfo || name == lsRecycleBin ||
+					name == lsPagefile || name == lsHiberfile || name == lsSwapfile {
 					continue
 				}
 			}
@@ -340,10 +373,10 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 				}
 
 				// Skip system directories on Windows
-				if runtime.GOOS == "windows" && currentDepth == 0 {
+				if runtime.GOOS == lsOSWindows && currentDepth == 0 {
 					name := entry.Name()
-					if name == "System Volume Information" || name == "$Recycle.Bin" ||
-						name == "Config.Msi" || name == "Recovery" || name == "ProgramData" {
+					if name == lsSysVolInfo || name == lsRecycleBin ||
+						name == lsConfigMsi || name == lsRecovery || name == lsProgramData {
 						continue
 					}
 				}
@@ -416,7 +449,7 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	}
 
 	// Special handling for root directory listing
-	if (filepath.Clean(targetDir) == "/" || filepath.Clean(targetDir) == "C:\\") && opts.recursive && opts.maxDepth == -1 {
+	if (filepath.Clean(targetDir) == "/" || filepath.Clean(targetDir) == lsWinRoot) && opts.recursive && opts.maxDepth == -1 {
 		// Skip warning in production builds
 	}
 
@@ -455,7 +488,7 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 // formatPermissions handles permission formatting
 func formatPermissions(info os.FileInfo) string {
 	switch runtime.GOOS {
-	case "linux", "darwin":
+	case lsOSLinux, lsOSDarwin:
 		// Unix-like permission format (e.g., rwxr-xr-x)
 		mode := info.Mode()
 		var perms strings.Builder
@@ -486,7 +519,7 @@ func formatPermissions(info os.FileInfo) string {
 
 		return perms.String()
 
-	case "windows":
+	case lsOSWindows:
 		mode := info.Mode()
 		attrs := make([]string, 4)
 

