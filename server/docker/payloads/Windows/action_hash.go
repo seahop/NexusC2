@@ -29,10 +29,6 @@ var (
 // HashCommand implements the CommandInterface for file hashing
 type HashCommand struct{}
 
-func (h *HashCommand) Name() string {
-	return "hash"
-}
-
 func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
@@ -199,10 +195,6 @@ func calculateSHA256(filePath string) (string, error) {
 
 // HashDirCommand implements CommandInterface for directory hashing
 type HashDirCommand struct{}
-
-func (h *HashDirCommand) Name() string {
-	return "hashdir"
-}
 
 func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {

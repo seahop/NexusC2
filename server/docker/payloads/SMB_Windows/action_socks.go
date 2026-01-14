@@ -65,10 +65,6 @@ type TunnelInfo struct {
 	BytesRecv    int64
 }
 
-func (c *SocksCommand) Name() string {
-	return socksCmdName
-}
-
 func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// removed debug log
 

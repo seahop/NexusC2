@@ -66,10 +66,6 @@ type dirStats struct {
 	directories int
 }
 
-func (c *LsCommand) Name() string {
-	return "ls"
-}
-
 // parseFlags parses command line flags for ls
 func parseFlags(args []string) ([]string, lsOptions, error) {
 	opts := lsOptions{

@@ -24,10 +24,6 @@ var (
 
 type WhoamiCommand struct{}
 
-func (c *WhoamiCommand) Name() string {
-	return waCmdName
-}
-
 func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	var output strings.Builder
 

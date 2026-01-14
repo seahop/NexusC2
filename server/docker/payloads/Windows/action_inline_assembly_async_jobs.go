@@ -84,20 +84,12 @@ var assemblyJobManager = &AssemblyJobManager{
 // InlineAssemblyJobsCommand lists running assembly jobs
 type InlineAssemblyJobsCommand struct{}
 
-func (c *InlineAssemblyJobsCommand) Name() string {
-	return iasCmdJobs
-}
-
 func (c *InlineAssemblyJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	return executeAssemblyJobsList()
 }
 
 // InlineAssemblyOutputCommand retrieves output from an assembly job
 type InlineAssemblyOutputCommand struct{}
-
-func (c *InlineAssemblyOutputCommand) Name() string {
-	return iasCmdOutput
-}
 
 func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
@@ -178,10 +170,6 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 
 // InlineAssemblyKillCommand terminates an assembly job
 type InlineAssemblyKillCommand struct{}
-
-func (c *InlineAssemblyKillCommand) Name() string {
-	return iasCmdKill
-}
 
 func (c *InlineAssemblyKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
@@ -402,10 +390,6 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 // InlineAssemblyJobsCleanCommand cleans up completed/killed assembly jobs
 type InlineAssemblyJobsCleanCommand struct{}
 
-func (c *InlineAssemblyJobsCleanCommand) Name() string {
-	return iasCmdClean
-}
-
 func (c *InlineAssemblyJobsCleanCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		// Clean all non-running jobs
@@ -468,10 +452,6 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 
 // InlineAssemblyJobsStatsCommand shows job statistics
 type InlineAssemblyJobsStatsCommand struct{}
-
-func (c *InlineAssemblyJobsStatsCommand) Name() string {
-	return iasCmdStats
-}
 
 func (c *InlineAssemblyJobsStatsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	return executeAssemblyJobsStats()

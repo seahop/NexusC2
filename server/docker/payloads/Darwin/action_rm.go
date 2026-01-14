@@ -34,10 +34,6 @@ var (
 // RmCommand handles file and directory removal
 type RmCommand struct{}
 
-func (c *RmCommand) Name() string {
-	return rmCmdName
-}
-
 func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Check if no arguments provided
 	if len(args) == 0 {

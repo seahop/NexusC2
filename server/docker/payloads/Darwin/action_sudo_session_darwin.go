@@ -29,10 +29,6 @@ var (
 
 type SudoSessionCommand struct{}
 
-func (c *SudoSessionCommand) Name() string {
-	return sudoSessCmdName
-}
-
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{

@@ -15,10 +15,6 @@ import (
 
 type SleepCommand struct{}
 
-func (c *SleepCommand) Name() string {
-	return "sleep"
-}
-
 // parseDuration parses duration strings like "1h2m3s", "5m30s", "60s"
 func parseDuration(input string) (int, error) {
 	input = strings.TrimSpace(input)

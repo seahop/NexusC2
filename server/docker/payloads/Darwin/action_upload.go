@@ -16,10 +16,6 @@ import (
 
 type UploadCommand struct{}
 
-func (c *UploadCommand) Name() string {
-	return "upload"
-}
-
 // Execute function from action_upload.go
 func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {

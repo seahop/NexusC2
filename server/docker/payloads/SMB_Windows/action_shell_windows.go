@@ -18,10 +18,6 @@ import (
 
 type ShellCommand struct{}
 
-func (c *ShellCommand) Name() string {
-	return "shell"
-}
-
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{

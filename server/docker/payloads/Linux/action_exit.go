@@ -12,10 +12,6 @@ import (
 
 type ExitCommand struct{}
 
-func (c *ExitCommand) Name() string {
-	return "exit"
-}
-
 func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Clean up active jobs
 	commandQueue.mu.Lock()

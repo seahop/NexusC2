@@ -13,10 +13,6 @@ import (
 
 type CdCommand struct{}
 
-func (c *CdCommand) Name() string {
-	return "cd"
-}
-
 // Modified Execute function from action_cd.go
 func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	ctx.mu.Lock()

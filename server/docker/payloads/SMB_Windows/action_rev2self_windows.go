@@ -315,10 +315,6 @@ func DisconnectAllNetworkConnections() []string {
 // Rev2SelfCommand handles reverting impersonation
 type Rev2SelfCommand struct{}
 
-func (c *Rev2SelfCommand) Name() string {
-	return r2sCmdName
-}
-
 func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Get current user info before reverting
 	beforeUser, beforeDomain := c.getCurrentUserInfo()

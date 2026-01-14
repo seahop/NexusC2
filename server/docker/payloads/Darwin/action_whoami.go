@@ -14,10 +14,6 @@ import (
 
 type WhoamiCommand struct{}
 
-func (c *WhoamiCommand) Name() string {
-	return "whoami"
-}
-
 func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	var output strings.Builder
 

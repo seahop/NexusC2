@@ -42,10 +42,6 @@ var (
 // TokenCommand consolidates all token management functionality
 type TokenCommand struct{}
 
-func (c *TokenCommand) Name() string {
-	return tokCmdName
-}
-
 func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{

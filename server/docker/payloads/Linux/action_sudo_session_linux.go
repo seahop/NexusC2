@@ -36,10 +36,6 @@ var (
 
 type SudoSessionCommand struct{}
 
-func (c *SudoSessionCommand) Name() string {
-	return sudoSessCmdName
-}
-
 // getActiveSession retrieves and validates the sudo session from context.
 // Returns the session and an error message if not available or inactive.
 func getActiveSession(ctx *CommandContext) (*SudoSession, string) {

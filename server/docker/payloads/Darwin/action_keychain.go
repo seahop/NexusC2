@@ -79,10 +79,6 @@ var (
 // KeychainCommand manages macOS keychain operations
 type KeychainCommand struct{}
 
-func (c *KeychainCommand) Name() string {
-	return "keychain"
-}
-
 func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{

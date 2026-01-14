@@ -29,10 +29,6 @@ var (
 // LinkCommand handles the 'link' command for connecting to other SMB agents
 type LinkCommand struct{}
 
-func (c *LinkCommand) Name() string {
-	return lnkCmdLink
-}
-
 func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 2 {
 		return CommandResult{
@@ -137,10 +133,6 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 // UnlinkCommand handles the 'unlink' command for disconnecting from SMB agents
 type UnlinkCommand struct{}
 
-func (c *UnlinkCommand) Name() string {
-	return lnkCmdUnlink
-}
-
 func (c *UnlinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{
@@ -170,10 +162,6 @@ func (c *UnlinkCommand) Execute(ctx *CommandContext, args []string) CommandResul
 
 // LinksCommand handles the 'links' command for listing active SMB links
 type LinksCommand struct{}
-
-func (c *LinksCommand) Name() string {
-	return lnkCmdLinks
-}
 
 func (c *LinksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	lm := GetLinkManager()

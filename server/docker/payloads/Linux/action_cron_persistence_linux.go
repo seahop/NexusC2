@@ -77,10 +77,6 @@ var (
 // CronPersistenceCommand handles cron-based persistence
 type CronPersistenceCommand struct{}
 
-func (c *CronPersistenceCommand) Name() string {
-	return cronCmdName
-}
-
 func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{

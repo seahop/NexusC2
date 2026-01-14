@@ -278,12 +278,12 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		cmdArgs = args[1:]
 	}
 
-	// Look up command handler
-	if handler, exists := cq.cmdRegistry[cmdType]; exists {
-		result := handler.Execute(cq.cmdContext, cmdArgs)
+	// Look up command handler by numeric ID
+	if handler, exists := cq.cmdHandlers[cmd.CommandType]; exists {
+		result := handler(cq.cmdContext, cmdArgs)
 
 		// For file operations (download/upload), preserve the data from the handler
-		if (cmdType == cpCmdDownload || cmdType == cpCmdUpload) &&
+		if (cmd.CommandType == CmdDownload || cmd.CommandType == CmdUpload) &&
 			(result.Command.Filename != "" || result.Command.Data != "") {
 			// The handler set file operation data, merge with original command metadata
 			result.Command.CommandID = cmd.CommandID
@@ -300,7 +300,7 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		return &result, nil
 	}
 
-	// If no handler found, try to execute as shell command
+	// If no handler found (CommandType == CmdUnknown or unregistered), try shell command
 	output, err := executeShellCommand(cmd.Command)
 	if err != nil {
 		return &CommandResult{

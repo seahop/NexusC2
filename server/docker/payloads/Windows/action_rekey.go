@@ -11,10 +11,6 @@ import (
 
 type RekeyCommand struct{}
 
-func (c *RekeyCommand) Name() string {
-	return "rekey"
-}
-
 func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// log.Println("Executing rekey command from command queue...")
 

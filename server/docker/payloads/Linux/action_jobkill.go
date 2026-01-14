@@ -12,10 +12,6 @@ import (
 
 type JobKillCommand struct{}
 
-func (c *JobKillCommand) Name() string {
-	return "jobkill"
-}
-
 func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Parse command line into arguments
 	// Note: args is already split for us, we receive just the filename

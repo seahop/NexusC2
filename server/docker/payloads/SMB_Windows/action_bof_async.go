@@ -23,10 +23,6 @@ var (
 // BOFAsyncCommand handles async BOF execution
 type BOFAsyncCommand struct{}
 
-func (c *BOFAsyncCommand) Name() string {
-	return bofCmdAsync
-}
-
 func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != bofOSWindows {
 		return CommandResult{
@@ -46,10 +42,6 @@ func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandRes
 // BOFJobsCommand lists async BOF jobs
 type BOFJobsCommand struct{}
 
-func (c *BOFJobsCommand) Name() string {
-	return bofCmdJobs
-}
-
 func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != bofOSWindows {
 		return CommandResult{
@@ -65,10 +57,6 @@ func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 // BOFOutputCommand retrieves output from an async BOF job
 type BOFOutputCommand struct{}
-
-func (c *BOFOutputCommand) Name() string {
-	return bofCmdOutput
-}
 
 func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != bofOSWindows {
@@ -93,10 +81,6 @@ func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandRe
 
 // BOFKillCommand terminates an async BOF job
 type BOFKillCommand struct{}
-
-func (c *BOFKillCommand) Name() string {
-	return bofCmdKill
-}
 
 func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != bofOSWindows {

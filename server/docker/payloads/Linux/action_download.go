@@ -27,10 +27,6 @@ var downloadBufferPool = sync.Pool{
 
 type DownloadCommand struct{}
 
-func (c *DownloadCommand) Name() string {
-	return "download"
-}
-
 // Modified Execute function from action_download.go
 func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// With the improved parsing, we should receive exactly one argument (the full path)

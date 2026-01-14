@@ -42,10 +42,6 @@ var (
 
 type ShellCommand struct{}
 
-func (c *ShellCommand) Name() string {
-	return shellCmdName
-}
-
 // getUnixShell determines the appropriate shell to use on Unix-like systems
 func getUnixShell() string {
 	// Try to get the user's default shell from SHELL environment variable

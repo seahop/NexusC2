@@ -97,10 +97,6 @@ var (
 // PersistenceCommand handles various persistence mechanisms
 type PersistenceCommand struct{}
 
-func (c *PersistenceCommand) Name() string {
-	return persistCmdName
-}
-
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{

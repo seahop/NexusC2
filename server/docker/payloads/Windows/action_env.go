@@ -14,10 +14,6 @@ import (
 
 type EnvCommand struct{}
 
-func (c *EnvCommand) Name() string {
-	return "env"
-}
-
 func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Apply any session environment variables first
 	ctx.mu.RLock()

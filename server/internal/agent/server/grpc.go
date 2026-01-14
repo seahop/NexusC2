@@ -4,6 +4,7 @@ package server
 import (
 	"c2/internal/agent/listeners"
 	"c2/internal/agent/socks"
+	"c2/internal/common/commands"
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
 	"c2/internal/common/logging" // ADD THIS IMPORT
@@ -129,7 +130,8 @@ func (s *GRPCServer) SetManager(m *listeners.Manager) {
 }
 
 type Command struct {
-	Command      string `json:"command"`
+	CommandType  int    `json:"command_type"`  // Numeric command ID (see commands.registry)
+	Command      string `json:"command"`       // Full command string with args (for parsing)
 	CommandID    string `json:"command_id"`
 	CommandDBID  int    `json:"command_db_id"`
 	AgentID      string `json:"agent_id"`
@@ -202,7 +204,10 @@ func (c *GRPCServer) StoreCommand(clientID string, command string, username stri
 	}
 
 	// Create command object without trying to parse the command as JSON
+	// Translate command name to numeric ID for payload dispatch
+	cmdType := commands.GetCommandID(command)
 	cmd := Command{
+		CommandType: cmdType,
 		Command:     command,
 		AgentID:     clientID,
 		CommandDBID: commandDBID,
@@ -1143,8 +1148,11 @@ func (s *GRPCServer) QueueDownloadCommand(clientID string, downloadCmd map[strin
 		log.Printf("[QueueDownloadCommand] Initialized new command buffer for client %s", clientID)
 	}
 
+	cmdStr := downloadCmd["command"].(string)
+	cmdType := commands.GetCommandID(cmdStr)
 	cmd := Command{
-		Command:      downloadCmd["command"].(string),
+		CommandType:  cmdType,
+		Command:      cmdStr,
 		CommandID:    "", // No command_id needed for chunks
 		CommandDBID:  downloadCmd["command_db_id"].(int),
 		AgentID:      clientID,
@@ -1446,8 +1454,11 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 		}
 
 		// Create command with processed (stripped) command for the agent
+		// Translate command name to numeric ID for payload dispatch
+		cmdType := commands.GetCommandID(processedCommand)
 		cmd := Command{
-			Command:      processedCommand, // Use the processed command without local path
+			CommandType:  cmdType,           // Numeric ID for payload dispatch
+			Command:      processedCommand,  // Use the processed command without local path
 			CommandID:    commandData.CommandID,
 			CommandDBID:  commandDBID,
 			AgentID:      commandData.AgentID,

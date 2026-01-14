@@ -62,10 +62,6 @@ func InitializeExitPrevention() {
 // InlineAssemblyCommand handles synchronous inline .NET assembly execution
 type InlineAssemblyCommand struct{}
 
-func (c *InlineAssemblyCommand) Name() string {
-	return iaCmdName
-}
-
 func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if runtime.GOOS != iaOsWindows {
 		return CommandResult{
@@ -205,10 +201,6 @@ func (c *InlineAssemblyCommand) isDLLAssembly(assemblyBytes []byte) bool {
 // InlineAssemblyAsyncCommand handles async inline .NET assembly execution
 type InlineAssemblyAsyncCommand struct {
 	InlineAssemblyCommand
-}
-
-func (c *InlineAssemblyAsyncCommand) Name() string {
-	return iaCmdNameAsync
 }
 
 // Execute method for InlineAssemblyAsyncCommand to use the new async execution

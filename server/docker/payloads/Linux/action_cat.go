@@ -21,10 +21,6 @@ type catOptions struct {
 	caseInsensitive bool
 }
 
-func (c *CatCommand) Name() string {
-	return "cat"
-}
-
 func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) == 0 {
 		return CommandResult{

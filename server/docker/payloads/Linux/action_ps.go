@@ -117,11 +117,6 @@ func getFullExecutablePath(pid int32) string {
 // PSCommand implements the command interface for process listing
 type PSCommand struct{}
 
-// Name returns the command name
-func (c *PSCommand) Name() string {
-	return psCmdName
-}
-
 // Execute runs the ps command with the given arguments
 func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	flags := parsePSFlags(args)

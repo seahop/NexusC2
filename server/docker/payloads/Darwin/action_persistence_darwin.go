@@ -101,10 +101,6 @@ var (
 // PersistenceCommand handles various persistence methods on macOS
 type PersistenceCommand struct{}
 
-func (c *PersistenceCommand) Name() string {
-	return pCmdName
-}
-
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
 		return CommandResult{

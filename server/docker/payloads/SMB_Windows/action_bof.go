@@ -19,10 +19,6 @@ var (
 // BOFCommand handles BOF execution
 type BOFCommand struct{}
 
-func (c *BOFCommand) Name() string {
-	return bofCmdName
-}
-
 func (c *BOFCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// For Windows only - BOF is Windows-specific
 	if runtime.GOOS != bofOSWindows {
