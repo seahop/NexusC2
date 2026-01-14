@@ -20,7 +20,7 @@ RUN mkdir -p /preload && cd /preload && \
     echo '    _ "golang.org/x/crypto/ssh"' >> dummy.go && \
     echo '    _ "golang.org/x/net/proxy"' >> dummy.go && \
     echo '    _ "github.com/gorilla/websocket"' >> dummy.go && \
-    echo '    _ "github.com/shirou/gopsutil/v4/process"' >> dummy.go && \
+    echo '    _ "github.com/shirou/gopsutil/v3/process"' >> dummy.go && \
     echo '    _ "github.com/go-ldap/ldap/v3"' >> dummy.go && \
     echo '    _ "golang.org/x/sys/windows"' >> dummy.go && \
     echo '    _ "golang.org/x/sys/unix"' >> dummy.go && \
@@ -50,7 +50,7 @@ RUN mkdir -p /preload && cd /preload && \
         -require=golang.org/x/crypto@v0.35.0 \
         -require=golang.org/x/net@v0.35.0 \
         -require=github.com/gorilla/websocket@v1.5.1 \
-        -require=github.com/shirou/gopsutil/v4@v4.25.1 \
+        -require=github.com/shirou/gopsutil/v3@v3.24.5 \
         -require=github.com/go-ldap/ldap/v3@v3.4.6 \
         -require=golang.org/x/sys@v0.35.0 \
         -require=github.com/stretchr/testify@v1.8.4 \

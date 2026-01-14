@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/process"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // Build-time variables that will be set via ldflags

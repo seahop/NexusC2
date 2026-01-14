@@ -5,8 +5,6 @@
 
 package main
 
-import "fmt"
-
 type PwdCommand struct{}
 
 func (c *PwdCommand) Name() string {

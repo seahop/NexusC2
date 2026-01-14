@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/process"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // PS strings (constructed to avoid static signatures)

@@ -11,7 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.10.9
-	github.com/shirou/gopsutil/v4 v4.25.1
+	github.com/shirou/gopsutil/v3 v3.24.5
 	golang.org/x/crypto v0.35.0
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.4
