@@ -2,9 +2,11 @@
   <img src="client/src/gui/resources/nexus.png" alt="Nexus Logo" width="400"/>
 </p>
 
-# C2 Command & Control Framework
+# NexusC2 - Command & Control Framework
 
 A modern, distributed Command & Control (C2) framework designed for secure remote administration and red team operations. Built with Go for the backend services and Python for the operator interface.
+
+**Documentation: [nexusc2.io](https://nexusc2.io)**
 
 ## Overview
 
@@ -333,7 +335,8 @@ This software is provided for authorized security testing purposes only. Users a
 
 ## Additional Resources
 
-- **[Setup Guide](docs/SETUP.md)** - Comprehensive installation and configuration guide
+- **[Full Documentation](https://nexusc2.io)** - Comprehensive guides, command reference, and architecture docs
+- **[Setup Guide](docs/SETUP.md)** - Installation and configuration guide
 - **[REST API Documentation](docs/API.md)** - Complete API endpoint reference with examples
 - **[Log Viewer](docs/LOGVIEWER.md)** - Command log analysis tool documentation
 - **[Docker Documentation](server/docker/README.md)** - Container deployment details

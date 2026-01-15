@@ -94,3 +94,13 @@ server/docker/downloads/*
 server/docker/uploads/*
 !server/docker/uploads/.gitkeep
 *.bak
+
+# Website - Hugo generated/build files
+website/public/
+website/resources/
+website/.hugo_build.lock
+
+# Website - Private deployment (kept in NexusC2-private/)
+website/docker-hosting/
+website/nginx.conf.example
+website/scripts/

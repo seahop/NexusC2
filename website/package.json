@@ -1,0 +1,26 @@
+{
+  "name": "nexusc2-website",
+  "version": "1.0.0",
+  "description": "NexusC2 documentation and marketing website",
+  "scripts": {
+    "dev": "hugo server -D --bind 0.0.0.0",
+    "build": "hugo --minify",
+    "build:search": "hugo --minify && npx pagefind --site public",
+    "css:dev": "npx tailwindcss -i ./assets/css/main.css -o ./static/css/styles.css --watch",
+    "css:build": "npx tailwindcss -i ./assets/css/main.css -o ./static/css/styles.css --minify",
+    "parse-commands": "python3 scripts/parse-commands.py"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0",
+    "pagefind": "^1.0.0",
+    "@tailwindcss/typography": "^0.5.10"
+  },
+  "keywords": [
+    "nexusc2",
+    "c2",
+    "documentation",
+    "security"
+  ],
+  "author": "NexusC2",
+  "license": "UNLICENSED"
+}

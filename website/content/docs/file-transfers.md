@@ -1,5 +1,8 @@
-# File Transfers
-
+---
+title: "File Transfers"
+description: "Upload and download files with chunked transfer and integrity verification."
+weight: 8
+---
 ## Overview
 
 NexusC2 implements bidirectional file transfer between the server and agents using a chunked transfer protocol. This allows efficient transfer of large files while maintaining progress tracking and supporting resumption on network interruptions.

@@ -1,0 +1,339 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Alpine.js cloak - hide elements until Alpine loads */
+[x-cloak] {
+  display: none !important;
+}
+
+/* Custom CSS Variables */
+:root {
+  --nexus-green-500: #00ff00;
+  --nexus-green-400: #4ade80;
+  --nexus-black-500: #000000;
+  --nexus-surface-primary: #0d0d0d;
+  --nexus-surface-secondary: #1a1a1a;
+  --nexus-text-primary: #ffffff;
+  --nexus-text-secondary: #a3a3a3;
+  --nexus-border-default: rgba(0, 255, 0, 0.2);
+  --nexus-border-strong: rgba(0, 255, 0, 0.4);
+}
+
+/* Base styles */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-nexus-black-500 text-white font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse at top, rgba(0, 255, 0, 0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom, rgba(0, 255, 0, 0.02) 0%, transparent 50%);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-nexus-green-500 text-black;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-nexus-black-400;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-nexus-black-100 rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-nexus-green-700;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Terminal-style card */
+  .terminal-card {
+    @apply bg-nexus-black-400 border border-nexus-green-500/20 rounded-lg overflow-hidden;
+  }
+
+  .terminal-header {
+    @apply bg-nexus-black-300 px-4 py-2 flex items-center gap-2 border-b border-nexus-green-500/20;
+  }
+
+  .terminal-dot {
+    @apply w-3 h-3 rounded-full;
+  }
+
+  .terminal-body {
+    @apply p-4 font-mono text-sm;
+  }
+
+  /* Glowing button */
+  .btn-primary {
+    @apply inline-flex items-center px-6 py-3 bg-nexus-green-500 text-black font-semibold rounded-lg
+           transition-all duration-300 hover:bg-nexus-green-400 hover:shadow-glow;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center px-6 py-3 border border-nexus-green-500 text-nexus-green-500
+           font-semibold rounded-lg transition-all duration-300
+           hover:bg-nexus-green-500/10 hover:shadow-glow-sm;
+  }
+
+  /* Navigation link */
+  .nav-link {
+    @apply text-gray-300 hover:text-nexus-green-500 transition-colors duration-200 font-medium;
+  }
+
+  .nav-link-active {
+    @apply text-nexus-green-500;
+  }
+
+  /* Feature card */
+  .feature-card {
+    @apply bg-nexus-black-400 border border-nexus-green-500/20 rounded-lg p-6
+           transition-all duration-300 hover:border-nexus-green-500/40 hover:shadow-glow-sm;
+  }
+
+  /* Command card */
+  .command-card {
+    @apply bg-nexus-black-400 border border-nexus-green-500/20 rounded-lg overflow-hidden
+           transition-all duration-200;
+  }
+
+  .command-card:hover {
+    @apply border-nexus-green-500/40;
+  }
+
+  .command-header {
+    @apply px-4 py-3 flex items-center justify-between cursor-pointer
+           hover:bg-nexus-black-300/50;
+  }
+
+  .command-body {
+    @apply px-4 pb-4 border-t border-nexus-green-500/10;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded;
+  }
+
+  .badge-green {
+    @apply bg-nexus-green-500/20 text-nexus-green-400 border border-nexus-green-500/30;
+  }
+
+  .badge-gray {
+    @apply bg-gray-500/20 text-gray-400 border border-gray-500/30;
+  }
+
+  /* Sidebar navigation */
+  .sidebar-link {
+    @apply block px-3 py-2 text-gray-400 hover:text-nexus-green-500 hover:bg-nexus-black-300/50
+           rounded transition-colors duration-150;
+  }
+
+  .sidebar-link-active {
+    @apply text-nexus-green-500 bg-nexus-green-500/10;
+  }
+
+  /* Search modal */
+  .search-backdrop {
+    @apply fixed inset-0 bg-black/80 backdrop-blur-sm z-50;
+  }
+
+  .search-modal {
+    @apply fixed top-1/4 left-1/2 -translate-x-1/2 w-full max-w-2xl
+           bg-nexus-black-400 border border-nexus-green-500/30 rounded-xl shadow-2xl z-50;
+  }
+
+  .search-input {
+    @apply w-full bg-transparent border-none outline-none text-white text-lg
+           placeholder-gray-500 font-mono;
+  }
+
+  /* Code blocks */
+  .code-block {
+    @apply relative bg-nexus-black-400 border border-nexus-green-500/20 rounded-lg;
+  }
+
+  .code-block pre {
+    @apply p-4 overflow-x-auto;
+  }
+
+  .copy-button {
+    @apply absolute top-2 right-2 px-2 py-1 text-xs text-gray-400
+           bg-nexus-black-300 rounded hover:text-nexus-green-500
+           transition-colors duration-150;
+  }
+
+  /* Callout boxes */
+  .callout {
+    @apply border-l-4 pl-4 py-3 my-4 bg-nexus-black-400/50 rounded-r;
+  }
+
+  .callout-info {
+    @apply border-blue-500;
+  }
+
+  .callout-warning {
+    @apply border-yellow-500;
+  }
+
+  .callout-danger {
+    @apply border-red-500;
+  }
+
+  .callout-tip {
+    @apply border-nexus-green-500;
+  }
+}
+
+/* Utility styles */
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+  }
+
+  .border-glow {
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.2), inset 0 0 10px rgba(0, 255, 0, 0.1);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-nexus-green-500 to-nexus-green-400 bg-clip-text text-transparent;
+  }
+
+  /* Line clamp */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Prism.js code highlighting overrides */
+code[class*="language-"],
+pre[class*="language-"] {
+  @apply text-gray-100 font-mono text-sm;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  @apply text-gray-500;
+}
+
+.token.punctuation {
+  @apply text-gray-400;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  @apply text-nexus-green-400;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  @apply text-nexus-green-500;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  @apply text-yellow-400;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  @apply text-purple-400;
+}
+
+.token.function,
+.token.class-name {
+  @apply text-blue-400;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  @apply text-orange-400;
+}
+
+/* Mermaid diagram styling */
+.mermaid {
+  @apply bg-nexus-black-400 rounded-lg p-4 my-4;
+}
+
+/* Pagefind search result styling */
+.pagefind-ui__result {
+  @apply bg-nexus-black-300 border border-nexus-green-500/20 rounded-lg p-4 mb-2;
+}
+
+.pagefind-ui__result-link {
+  @apply text-nexus-green-500 hover:text-nexus-green-400;
+}
+
+.pagefind-ui__result-excerpt {
+  @apply text-gray-400;
+}
+
+/* Animation for page load */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Responsive table wrapper */
+.table-wrapper {
+  @apply overflow-x-auto;
+}
+
+.table-wrapper table {
+  @apply min-w-full;
+}
+
+/* Mobile menu */
+.mobile-menu {
+  @apply fixed inset-0 bg-nexus-black-500 z-40 transform transition-transform duration-300;
+}
+
+.mobile-menu.hidden {
+  @apply -translate-x-full;
+}
+
+.mobile-menu.visible {
+  @apply translate-x-0;
+}

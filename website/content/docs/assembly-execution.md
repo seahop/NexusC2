@@ -1,5 +1,8 @@
-# .NET Assembly Execution
-
+---
+title: ".NET Assembly Execution"
+description: "Run .NET assemblies in-memory without touching disk."
+weight: 7
+---
 ## Overview
 
 NexusC2 supports in-memory execution of .NET assemblies (EXE and DLL) directly within the agent process. This capability allows running .NET tools like Rubeus, Seatbelt, SharpHound, and custom tooling without dropping files to disk.

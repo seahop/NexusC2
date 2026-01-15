@@ -1,0 +1,82 @@
+<footer class="border-t border-nexus-green-500/20 bg-nexus-black-400/50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+      <!-- Brand -->
+      <div class="col-span-1 md:col-span-2">
+        <a href="/" class="flex items-center gap-3 mb-4">
+          <img src="/images/logo/n.png" alt="NexusC2" class="h-8 w-auto">
+          <span class="text-xl font-bold text-white">
+            Nexus<span class="text-nexus-green-500">C2</span>
+          </span>
+        </a>
+        <p class="text-gray-400 text-sm max-w-md">
+          A modern, cross-platform command and control framework with encrypted communications,
+          in-memory execution, and comprehensive pivoting capabilities.
+        </p>
+      </div>
+
+      <!-- Quick Links -->
+      <div>
+        <h3 class="text-nexus-green-500 font-semibold mb-4">Documentation</h3>
+        <ul class="space-y-2">
+          <li>
+            <a href="/docs/setup/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              Getting Started
+            </a>
+          </li>
+          <li>
+            <a href="/docs/api/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              API Reference
+            </a>
+          </li>
+          <li>
+            <a href="/commands/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              Command Reference
+            </a>
+          </li>
+          <li>
+            <a href="/docs/encryption/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              Security & Encryption
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Resources -->
+      <div>
+        <h3 class="text-nexus-green-500 font-semibold mb-4">Resources</h3>
+        <ul class="space-y-2">
+          <li>
+            <a href="/features/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              Features
+            </a>
+          </li>
+          <li>
+            <a href="/howto/" class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              How-To Guides
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/nexusc2/nexusc2"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="text-gray-400 hover:text-nexus-green-500 text-sm transition-colors">
+              GitHub
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Bottom bar -->
+    <div class="mt-12 pt-8 border-t border-nexus-green-500/10 flex flex-col md:flex-row justify-between items-center gap-4">
+      <p class="text-gray-500 text-sm">
+        &copy; {{ now.Year }} NexusC2. All rights reserved.
+      </p>
+      <p class="text-gray-600 text-xs">
+        Built with <span class="text-nexus-green-500">Hugo</span> &bull;
+        Powered by <span class="text-nexus-green-500">Tailwind CSS</span>
+      </p>
+    </div>
+  </div>
+</footer>

@@ -1,5 +1,8 @@
-# SOCKS5 Proxy Tunneling
-
+---
+title: "SOCKS Proxy"
+description: "Create SOCKS5 proxy tunnels through agents for network pivoting."
+weight: 9
+---
 ## Overview
 
 NexusC2 provides SOCKS5 proxy capability that tunnels network traffic through deployed agents. This enables operators to route traffic through compromised hosts, accessing internal network resources that aren't directly reachable from the C2 server.

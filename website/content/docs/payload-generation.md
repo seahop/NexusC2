@@ -1,5 +1,8 @@
-# Payload Generation
-
+---
+title: "Payload Generation"
+description: "Generate custom payloads for Windows, Linux, and macOS targets."
+weight: 4
+---
 ## Overview
 
 NexusC2 generates agent payloads using a Docker-based build system. Payloads are compiled Go binaries with configurable options for network communication, obfuscation, and anti-analysis features.

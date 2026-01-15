@@ -1,0 +1,192 @@
+<!-- Search Modal -->
+<div x-show="searchOpen"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="search-backdrop"
+     @click="searchOpen = false"
+     x-cloak>
+</div>
+
+<div x-show="searchOpen"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0 scale-95"
+     x-transition:enter-end="opacity-100 scale-100"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100 scale-100"
+     x-transition:leave-end="opacity-0 scale-95"
+     class="search-modal"
+     @click.stop
+     x-cloak>
+
+  <!-- Pagefind Search Container -->
+  <div id="pagefind-container"></div>
+
+  <!-- Search Footer -->
+  <div class="px-4 py-3 border-t border-nexus-green-500/20 bg-nexus-black-300/50">
+    <div class="flex items-center justify-between text-xs text-gray-500">
+      <div class="flex items-center gap-4">
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 bg-nexus-black-200 rounded border border-nexus-green-500/10">↑</kbd>
+          <kbd class="px-1.5 py-0.5 bg-nexus-black-200 rounded border border-nexus-green-500/10">↓</kbd>
+          to navigate
+        </span>
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 bg-nexus-black-200 rounded border border-nexus-green-500/10">↵</kbd>
+          to select
+        </span>
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 bg-nexus-black-200 rounded border border-nexus-green-500/10">ESC</kbd>
+          to close
+        </span>
+      </div>
+      <span>Powered by <span class="text-nexus-green-500">Pagefind</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Pagefind CSS and JS -->
+<link href="/pagefind/pagefind-ui.css" rel="stylesheet">
+<script src="/pagefind/pagefind-ui.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  let pagefindInstance = null;
+
+  // Initialize Pagefind UI
+  function initPagefind() {
+    if (pagefindInstance) return;
+
+    const container = document.getElementById('pagefind-container');
+    if (!container) return;
+
+    try {
+      pagefindInstance = new PagefindUI({
+        element: "#pagefind-container",
+        showSubResults: true,
+        showImages: false,
+        showEmptyFilters: false,
+        resetStyles: false,
+        bundlePath: "/pagefind/",
+        debounceTimeoutMs: 200
+      });
+      console.log('Pagefind initialized successfully');
+    } catch (e) {
+      console.error('Pagefind initialization failed:', e);
+      container.innerHTML = '<div class="p-4 text-center text-gray-400">Search index not available. Please rebuild the site.</div>';
+    }
+  }
+
+  // Initialize when page loads
+  initPagefind();
+
+  // Focus input when modal opens
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      setTimeout(() => {
+        const input = document.querySelector('#pagefind-container input');
+        if (input) input.focus();
+      }, 100);
+    }
+  });
+});
+</script>
+
+<style>
+/* Override Pagefind UI styles for dark theme */
+#pagefind-container {
+  --pagefind-ui-scale: 1;
+  --pagefind-ui-primary: #00ff00;
+  --pagefind-ui-text: #ffffff;
+  --pagefind-ui-background: #1a1a1a;
+  --pagefind-ui-border: rgba(0, 255, 0, 0.2);
+  --pagefind-ui-tag: rgba(0, 255, 0, 0.1);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 8px;
+  --pagefind-ui-image-border-radius: 8px;
+  --pagefind-ui-image-box-ratio: 3 / 2;
+  --pagefind-ui-font: inherit;
+}
+
+#pagefind-container .pagefind-ui__search-input {
+  background-color: #0d0d0d;
+  color: #ffffff;
+  border-color: rgba(0, 255, 0, 0.3);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+#pagefind-container .pagefind-ui__search-input:focus {
+  border-color: rgba(0, 255, 0, 0.5);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 255, 0, 0.1);
+}
+
+#pagefind-container .pagefind-ui__search-input::placeholder {
+  color: #6b7280;
+}
+
+#pagefind-container .pagefind-ui__result {
+  background-color: #0d0d0d;
+  border-color: rgba(0, 255, 0, 0.2);
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+}
+
+#pagefind-container .pagefind-ui__result:hover {
+  border-color: rgba(0, 255, 0, 0.4);
+}
+
+#pagefind-container .pagefind-ui__result-link {
+  color: #00ff00;
+  text-decoration: none;
+}
+
+#pagefind-container .pagefind-ui__result-link:hover {
+  text-decoration: underline;
+}
+
+#pagefind-container .pagefind-ui__result-title {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+#pagefind-container .pagefind-ui__result-excerpt {
+  color: #9ca3af;
+}
+
+#pagefind-container .pagefind-ui__result-excerpt mark {
+  background-color: rgba(0, 255, 0, 0.2);
+  color: #00ff00;
+}
+
+#pagefind-container .pagefind-ui__message {
+  color: #9ca3af;
+  padding: 2rem;
+  text-align: center;
+}
+
+#pagefind-container .pagefind-ui__results-area {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 1rem;
+}
+
+#pagefind-container .pagefind-ui__button {
+  background-color: rgba(0, 255, 0, 0.1);
+  color: #00ff00;
+  border: 1px solid rgba(0, 255, 0, 0.3);
+}
+
+#pagefind-container .pagefind-ui__button:hover {
+  background-color: rgba(0, 255, 0, 0.2);
+}
+
+/* Hide the Pagefind branding since we have our own footer */
+#pagefind-container .pagefind-ui__suppressed {
+  display: none;
+}
+</style>

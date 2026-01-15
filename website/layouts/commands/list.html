@@ -1,0 +1,276 @@
+{{ define "main" }}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+  <!-- Header -->
+  <header class="mb-8">
+    <h1 class="text-3xl md:text-4xl font-bold text-white mb-4">Command Reference</h1>
+    <p class="text-xl text-gray-400">
+      {{ .Site.Data.commands.total }} commands available across Windows, Linux, and macOS.
+    </p>
+  </header>
+
+  <!-- Search and Filters -->
+  <div class="mb-8 space-y-4" id="filters">
+    <!-- Search -->
+    <div class="relative">
+      <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input type="text"
+             id="search-input"
+             placeholder="Search commands..."
+             class="w-full pl-12 pr-4 py-3 bg-nexus-black-400 border border-nexus-green-500/20 rounded-lg
+                    text-white placeholder-gray-500 focus:outline-none focus:border-nexus-green-500/50
+                    transition-colors">
+    </div>
+
+    <!-- Category Filters -->
+    <div class="flex flex-wrap gap-2" id="category-filters">
+      <button data-category="all" class="category-btn active px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-nexus-green-500 text-black">
+        All
+      </button>
+      {{ range .Site.Data.commands.categories }}
+        <button data-category="{{ . }}" class="category-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-nexus-black-300 text-gray-400 hover:text-white capitalize">
+          {{ . }}
+        </button>
+      {{ end }}
+    </div>
+
+    <!-- Platform Filters -->
+    <div class="flex flex-wrap gap-4">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="filter-windows" checked
+               class="w-4 h-4 rounded border-nexus-green-500/30 bg-nexus-black-300 text-nexus-green-500 focus:ring-nexus-green-500">
+        <span class="text-gray-400 text-sm">Windows</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="filter-linux" checked
+               class="w-4 h-4 rounded border-nexus-green-500/30 bg-nexus-black-300 text-nexus-green-500 focus:ring-nexus-green-500">
+        <span class="text-gray-400 text-sm">Linux</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="filter-macos" checked
+               class="w-4 h-4 rounded border-nexus-green-500/30 bg-nexus-black-300 text-nexus-green-500 focus:ring-nexus-green-500">
+        <span class="text-gray-400 text-sm">macOS</span>
+      </label>
+    </div>
+
+    <!-- Results count -->
+    <div class="text-sm text-gray-500">
+      Showing <span id="visible-count" class="text-nexus-green-500">{{ len .Site.Data.commands.commands }}</span> commands
+    </div>
+  </div>
+
+  <!-- Commands List using native HTML details/summary -->
+  <div class="space-y-4" id="commands-list">
+    {{ range .Site.Data.commands.commands }}
+      <details class="cmd-accordion group"
+               data-name="{{ .name | lower }}"
+               data-category="{{ .category }}"
+               data-description="{{ .description | lower }}"
+               data-windows="{{ .platforms.windows }}"
+               data-linux="{{ .platforms.linux }}"
+               data-macos="{{ .platforms.macos }}">
+
+        <summary class="list-none cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-white/5">
+          <div class="flex items-center gap-3">
+            <code class="text-nexus-green-500 font-mono font-semibold">{{ .name }}</code>
+            <span class="badge badge-gray capitalize">{{ .category }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <!-- Platform badges -->
+            <div class="hidden sm:flex items-center gap-1">
+              {{ if .platforms.windows }}
+                <span class="badge badge-green text-xs">Win</span>
+              {{ end }}
+              {{ if .platforms.linux }}
+                <span class="badge badge-green text-xs">Linux</span>
+              {{ end }}
+              {{ if .platforms.macos }}
+                <span class="badge badge-green text-xs">macOS</span>
+              {{ end }}
+            </div>
+            <!-- Expand icon -->
+            <svg class="w-5 h-5 text-gray-500 transition-transform duration-200 group-open:rotate-180"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </summary>
+
+        <!-- Command Description -->
+        <div class="cmd-content px-4 py-2 text-gray-400 text-sm border-t border-nexus-green-500/10">
+          {{ .description }}
+        </div>
+
+        <!-- Expandable Content -->
+        <div class="cmd-content px-4 pb-4">
+          <!-- Syntax -->
+          {{ with .syntax }}
+            <div class="mb-4">
+              <h4 class="text-xs font-semibold text-nexus-green-500 uppercase tracking-wider mb-2">Syntax</h4>
+              <pre class="bg-nexus-black-500 rounded p-3 text-sm overflow-x-auto"><code class="text-gray-300">{{ . }}</code></pre>
+            </div>
+          {{ end }}
+
+          <!-- Examples -->
+          {{ with .examples }}
+            <div class="mb-4">
+              <h4 class="text-xs font-semibold text-nexus-green-500 uppercase tracking-wider mb-2">Examples</h4>
+              <div class="space-y-1">
+                {{ range . }}
+                  <code class="block bg-nexus-black-500 rounded px-3 py-2 text-sm text-nexus-green-400 font-mono">{{ . }}</code>
+                {{ end }}
+              </div>
+            </div>
+          {{ end }}
+
+          <!-- Help -->
+          {{ with .help }}
+            <div>
+              <h4 class="text-xs font-semibold text-nexus-green-500 uppercase tracking-wider mb-2">Details</h4>
+              <div class="text-gray-400 text-sm whitespace-pre-wrap font-mono bg-nexus-black-500 rounded p-3 overflow-x-auto">{{ . }}</div>
+            </div>
+          {{ end }}
+        </div>
+      </details>
+    {{ end }}
+  </div>
+
+  <!-- No results message -->
+  <div id="no-results" class="hidden text-center py-12 text-gray-500">
+    <svg class="w-12 h-12 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <p>No commands match your filters.</p>
+    <button id="reset-filters" class="mt-4 text-nexus-green-500 hover:underline">
+      Reset filters
+    </button>
+  </div>
+</div>
+
+<style>
+/* Accordion styling */
+details.cmd-accordion {
+  background-color: #1a1a1a;
+  border: 1px solid rgba(0, 255, 0, 0.2);
+  border-radius: 0.5rem;
+}
+
+details.cmd-accordion:hover {
+  border-color: rgba(0, 255, 0, 0.4);
+}
+
+details.cmd-accordion[open] {
+  border-color: rgba(0, 255, 0, 0.4);
+}
+
+/* Hide the default marker */
+details.cmd-accordion > summary {
+  list-style: none;
+}
+
+details.cmd-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.cmd-accordion > summary::marker {
+  display: none;
+  content: "";
+}
+
+/* Let native details behavior handle visibility - just style the content */
+details.cmd-accordion > .cmd-content {
+  display: none;
+}
+
+details.cmd-accordion[open] > .cmd-content {
+  display: block !important;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const searchInput = document.getElementById('search-input');
+  const categoryBtns = document.querySelectorAll('.category-btn');
+  const filterWindows = document.getElementById('filter-windows');
+  const filterLinux = document.getElementById('filter-linux');
+  const filterMacos = document.getElementById('filter-macos');
+  const commandCards = document.querySelectorAll('.cmd-accordion');
+  const visibleCount = document.getElementById('visible-count');
+  const noResults = document.getElementById('no-results');
+  const resetBtn = document.getElementById('reset-filters');
+
+  let activeCategory = 'all';
+
+  function filterCommands() {
+    const query = searchInput.value.toLowerCase();
+    const showWindows = filterWindows.checked;
+    const showLinux = filterLinux.checked;
+    const showMacos = filterMacos.checked;
+
+    let count = 0;
+
+    commandCards.forEach(card => {
+      const name = card.dataset.name;
+      const category = card.dataset.category;
+      const description = card.dataset.description;
+      const isWindows = card.dataset.windows === 'true';
+      const isLinux = card.dataset.linux === 'true';
+      const isMacos = card.dataset.macos === 'true';
+
+      const matchesSearch = !query || name.includes(query) || description.includes(query);
+      const matchesCategory = activeCategory === 'all' || category === activeCategory;
+      const matchesPlatform = (showWindows && isWindows) || (showLinux && isLinux) || (showMacos && isMacos);
+
+      if (matchesSearch && matchesCategory && matchesPlatform) {
+        card.style.display = '';
+        count++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    visibleCount.textContent = count;
+    noResults.classList.toggle('hidden', count > 0);
+  }
+
+  // Search input
+  searchInput.addEventListener('input', filterCommands);
+
+  // Category buttons
+  categoryBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      categoryBtns.forEach(b => {
+        b.classList.remove('active', 'bg-nexus-green-500', 'text-black');
+        b.classList.add('bg-nexus-black-300', 'text-gray-400');
+      });
+      this.classList.add('active', 'bg-nexus-green-500', 'text-black');
+      this.classList.remove('bg-nexus-black-300', 'text-gray-400');
+      activeCategory = this.dataset.category;
+      filterCommands();
+    });
+  });
+
+  // Platform checkboxes
+  filterWindows.addEventListener('change', filterCommands);
+  filterLinux.addEventListener('change', filterCommands);
+  filterMacos.addEventListener('change', filterCommands);
+
+  // Reset button
+  resetBtn.addEventListener('click', function() {
+    searchInput.value = '';
+    filterWindows.checked = true;
+    filterLinux.checked = true;
+    filterMacos.checked = true;
+    categoryBtns.forEach(b => {
+      b.classList.remove('active', 'bg-nexus-green-500', 'text-black');
+      b.classList.add('bg-nexus-black-300', 'text-gray-400');
+    });
+    categoryBtns[0].classList.add('active', 'bg-nexus-green-500', 'text-black');
+    categoryBtns[0].classList.remove('bg-nexus-black-300', 'text-gray-400');
+    activeCategory = 'all';
+    filterCommands();
+  });
+});
+</script>
+{{ end }}

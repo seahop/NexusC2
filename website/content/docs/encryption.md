@@ -1,5 +1,8 @@
-# Encryption & Communication Protocol
-
+---
+title: "Encryption"
+description: "Deep dive into NexusC2 encryption protocols, key exchange, and secure communications."
+weight: 3
+---
 ## Overview
 
 NexusC2 implements a multi-layer encryption scheme for secure communication between payloads (agents) and the server. The protocol uses industry-standard cryptographic algorithms with automatic key rotation to maintain forward secrecy.

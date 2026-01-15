@@ -1,5 +1,8 @@
-# Beacon Object File (BOF) Execution
-
+---
+title: "BOF Execution"
+description: "Execute Beacon Object Files (BOF) in-memory on Windows agents."
+weight: 6
+---
 ## Overview
 
 NexusC2 supports execution of Beacon Object Files (BOFs), which are position-independent COFF (Common Object File Format) objects that run directly in the agent's process memory. BOFs provide a lightweight mechanism for executing post-exploitation capabilities without dropping executables to disk.

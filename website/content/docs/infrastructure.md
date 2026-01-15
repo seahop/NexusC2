@@ -1,5 +1,8 @@
-# Docker Infrastructure & Services
-
+---
+title: "Infrastructure"
+description: "Understanding the NexusC2 server architecture, components, and deployment options."
+weight: 2
+---
 ## Overview
 
 NexusC2 runs as a containerized microservices architecture using Docker Compose. The system consists of five services that communicate via an internal bridge network and gRPC.

@@ -1,0 +1,161 @@
+{{ define "main" }}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+  <!-- Header -->
+  <header class="mb-12 text-center">
+    <h1 class="text-3xl md:text-4xl font-bold text-white mb-4">Documentation</h1>
+    <p class="text-xl text-gray-400 max-w-2xl mx-auto">
+      Everything you need to know about deploying and operating NexusC2.
+    </p>
+  </header>
+
+  <!-- Documentation Sections -->
+  <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+    <!-- Getting Started -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">Getting Started</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/setup/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Setup Guide
+          </a>
+        </li>
+        <li>
+          <a href="/docs/infrastructure/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Infrastructure
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Core Concepts -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">Core Concepts</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/encryption/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Encryption
+          </a>
+        </li>
+        <li>
+          <a href="/docs/payload-generation/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Payload Generation
+          </a>
+        </li>
+        <li>
+          <a href="/docs/api/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            REST API
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Execution -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">Execution</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/bof-execution/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            BOF Execution
+          </a>
+        </li>
+        <li>
+          <a href="/docs/assembly-execution/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            .NET Assembly Execution
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Pivoting -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">Pivoting</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/socks-proxy/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            SOCKS Proxy
+          </a>
+        </li>
+        <li>
+          <a href="/docs/linked-agents/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Linked Agents (SMB)
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- File Operations -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">File Operations</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/file-transfers/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            File Transfers
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Tools -->
+    <div class="feature-card">
+      <div class="text-nexus-green-500 mb-4">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-semibold text-white mb-4">Tools</h2>
+      <ul class="space-y-2">
+        <li>
+          <a href="/docs/logviewer/" class="text-gray-400 hover:text-nexus-green-500 transition-colors">
+            Log Viewer
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Quick Links -->
+  <div class="mt-16 text-center">
+    <p class="text-gray-400 mb-4">Looking for something specific?</p>
+    <div class="flex flex-wrap gap-4 justify-center">
+      <a href="/commands/" class="btn-secondary">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        Command Reference
+      </a>
+      <a href="/howto/" class="btn-secondary">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+        How-To Guides
+      </a>
+    </div>
+  </div>
+</div>
+{{ end }}
