@@ -4,7 +4,6 @@ package metrics
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"runtime"
 	"sync"
