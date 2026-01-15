@@ -191,6 +191,7 @@ graph TB
     WS --> DB
     REST -->|gRPC| WS
     REST -->|Query| DB
+    WS -->|gRPC| LS
     LS --> DB
 
     LS -->|HTTP/HTTPS| A1
