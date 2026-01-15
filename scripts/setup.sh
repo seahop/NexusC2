@@ -340,31 +340,58 @@ setup_docker_permissions() {
 
 setup_firewall_rules() {
     print_info "============================================================"
-    print_status "Setting Up Firewall Rules for gRPC Security"
+    print_status "Setting Up Firewall Rules"
     print_info "============================================================"
 
     FIREWALL_SCRIPT="$SCRIPT_DIR/../server/docker/setup-firewall.sh"
 
+    # First, secure the gRPC port
     if [ -f "$FIREWALL_SCRIPT" ]; then
         print_status "Applying firewall rules to secure gRPC port 50051..."
         bash "$FIREWALL_SCRIPT"
 
         if [ $? -eq 0 ]; then
-            print_status "Firewall rules applied successfully!"
+            print_status "gRPC firewall rules applied successfully!"
             print_info "  - Port 50051: Blocked from external networks"
             print_info "  - Port 50051: Accessible from localhost and Docker containers"
-            return 0
         else
-            print_error "Failed to apply firewall rules"
+            print_error "Failed to apply gRPC firewall rules"
             print_warning "gRPC port 50051 may be exposed to external networks!"
-            return 1
         fi
     else
         print_warning "Firewall script not found at: $FIREWALL_SCRIPT"
-        print_warning "Skipping firewall setup. Run manually with:"
-        print_warning "  cd $SCRIPT_DIR/../server/docker && sudo ./setup-firewall.sh"
-        return 1
+        print_warning "Skipping gRPC firewall setup."
     fi
+
+    # Open WebSocket port (3131) for external client connections
+    print_status "Opening WebSocket port 3131 for external client connections..."
+
+    # Check if ufw is available and active
+    if command -v ufw &> /dev/null; then
+        UFW_STATUS=$(ufw status 2>/dev/null | head -1)
+        if [[ "$UFW_STATUS" == *"active"* ]]; then
+            print_status "UFW is active, adding rule for port 3131..."
+            ufw allow 3131/tcp comment 'NexusC2 WebSocket'
+            print_status "UFW rule added for port 3131"
+        else
+            print_info "UFW is installed but not active, skipping UFW rule"
+        fi
+    fi
+
+    # Also add iptables rule for systems not using ufw
+    # Check if there's already a rule for port 3131
+    if ! iptables -C INPUT -p tcp --dport 3131 -j ACCEPT &>/dev/null 2>&1; then
+        print_status "Adding iptables rule to allow port 3131..."
+        iptables -I INPUT -p tcp --dport 3131 -j ACCEPT
+        print_status "iptables rule added for port 3131"
+    else
+        print_info "iptables rule for port 3131 already exists"
+    fi
+
+    print_status "Firewall configuration complete!"
+    print_info "  - Port 3131 (WebSocket): Open for external client connections"
+    print_info "  - Port 50051 (gRPC): Restricted to localhost and Docker"
+    return 0
 }
 
 setup_python_client() {
