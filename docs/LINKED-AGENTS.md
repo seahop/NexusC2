@@ -18,23 +18,24 @@ NexusC2 supports linking agents together via SMB named pipes, enabling command a
 ## Architecture
 
 {{< mermaid >}}
-flowchart TB
+flowchart LR
     subgraph Internet["Internet"]
-        SRV[NexusC2 Server<br/>HTTP/HTTPS]
+        SRV[NexusC2 Server]
     end
 
-    subgraph DMZ["DMZ / Edge"]
-        EDGE[Edge Agent<br/>Windows]
+    subgraph DMZ["DMZ"]
+        EDGE[Edge Agent<br/>HTTP/HTTPS]
     end
 
     subgraph Internal["Internal Network"]
+        direction TB
         SMB1[SMB Agent 1<br/>hop_count=1]
         SMB2[SMB Agent 2<br/>hop_count=2]
+        SMB1 <-->|Named Pipe| SMB2
     end
 
     SRV <-->|HTTP/HTTPS| EDGE
-    EDGE <-->|SMB Named Pipe| SMB1
-    SMB1 <-->|SMB Named Pipe| SMB2
+    EDGE <-->|Named Pipe| SMB1
 {{< /mermaid >}}
 
 ---
@@ -163,8 +164,18 @@ go lm.handleIncomingData(link)
 
 {{< mermaid >}}
 flowchart LR
-    SRV[Server] -->|GET Response| EDGE[Edge Agent]
-    EDGE -->|Named Pipe| SMB[SMB Agent]
+    subgraph Server
+        SRV[NexusC2]
+    end
+    subgraph Edge["Edge Host"]
+        EDGE[Edge Agent]
+    end
+    subgraph Internal["Internal Host"]
+        SMB[SMB Agent]
+    end
+
+    SRV -->|GET Response| EDGE
+    EDGE -->|Named Pipe| SMB
 {{< /mermaid >}}
 
 **Flow:**
@@ -185,9 +196,19 @@ flowchart LR
 ### Results (SMB Agent → Server)
 
 {{< mermaid >}}
-flowchart LR
-    SMB[SMB Agent] -->|Named Pipe| EDGE[Edge Agent]
-    EDGE -->|POST Request| SRV[Server]
+flowchart RL
+    subgraph Internal["Internal Host"]
+        SMB[SMB Agent]
+    end
+    subgraph Edge["Edge Host"]
+        EDGE[Edge Agent]
+    end
+    subgraph Server
+        SRV[NexusC2]
+    end
+
+    SMB -->|Named Pipe| EDGE
+    EDGE -->|POST Request| SRV
 {{< /mermaid >}}
 
 **Flow:**

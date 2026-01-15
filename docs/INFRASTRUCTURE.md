@@ -34,6 +34,7 @@ graph TB
 
     WS -->|gRPC :50051| AH
     REST -->|gRPC :50051| AH
+    REST -->|WS Proxy| WS
     WS --> DB
     REST --> DB
     AH --> DB

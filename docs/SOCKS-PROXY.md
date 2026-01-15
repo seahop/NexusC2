@@ -19,30 +19,32 @@ NexusC2 provides SOCKS5 proxy capability that tunnels network traffic through de
 ## Architecture
 
 {{< mermaid >}}
-flowchart TB
+flowchart LR
     subgraph Operator["Operator Workstation"]
         TOOL[Operator Tool<br/>nmap, curl, etc.]
     end
 
     subgraph Server["NexusC2 Server"]
+        direction TB
         SOCKS[SOCKS5 Listener<br/>0.0.0.0:PORT]
         SSH_SRV[SSH Server]
+        SOCKS --> SSH_SRV
     end
 
-    subgraph Agent["Agent Process"]
-        SSH_CLI[SSH Client]
+    subgraph Agent["Compromised Host"]
+        direction TB
         WSS[WSS Connection]
+        SSH_CLI[SSH Client]
+        WSS --> SSH_CLI
     end
 
     subgraph Target["Internal Network"]
         RES[Target Resource<br/>internal host:port]
     end
 
-    TOOL -->|SOCKS5 connect<br/>127.0.0.1:PORT| SOCKS
-    SOCKS --> SSH_SRV
-    SSH_SRV <-->|SSH-over-WebSocket<br/>tunnel| WSS
-    WSS --> SSH_CLI
-    SSH_CLI -->|TCP connection| RES
+    TOOL -->|SOCKS5| SOCKS
+    SSH_SRV <-->|SSH-over-WSS| WSS
+    SSH_CLI -->|TCP| RES
 {{< /mermaid >}}
 
 ---
