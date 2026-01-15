@@ -230,14 +230,6 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 	outputBatch := make([]OutputRecord, 0, len(results))
 
 	for _, result := range results {
-		// ADD THIS DEBUG LOGGING
-		log.Printf("[DEBUG] Processing result: command=%v, filename=%v, data length=%v, currentChunk=%v, totalChunks=%v",
-			result["command"],
-			result["filename"],
-			len(fmt.Sprintf("%v", result["data"])),
-			result["currentChunk"],
-			result["totalChunks"])
-
 		// Get the command type first to determine how to process
 		command, hasCommand := result["command"].(string)
 
@@ -251,7 +243,6 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 				outputBatch = append(outputBatch, *record)
 			}
 		} else if hasCommand && (strings.HasPrefix(command, "upload") || strings.HasPrefix(command, "download")) {
-			log.Printf("[DEBUG] Detected file operation for command: %s", command)
 			// File operations don't produce command_outputs, skip
 			if err := m.processFileOperationResult(ctx, tx, agentID, result, processedChunks); err != nil {
 				log.Printf("[Process Results] Failed to process file operation: %v", err)
@@ -462,9 +453,6 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 		}
 
 	case "download":
-		log.Printf("[DEBUG] Processing download chunk %d/%d for file %s",
-			int(currentChunk), int(totalChunks), filename)
-
 		// Handle download chunk
 		chunk := DownloadChunk{
 			Filename:     filename,
@@ -485,7 +473,7 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 				int(commandDBID),
 				fmt.Sprintf("Downloaded chunk %d/%d of %s", int(currentChunk), int(totalChunks), filename),
 			); err != nil {
-				log.Printf("[DEBUG] Failed to insert progress: %v", err)
+				// Silently ignore progress insert failures
 			}
 		}
 
@@ -502,15 +490,9 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 				"timestamp":     time.Now().Format("2006-01-02T15:04:05.000000"),
 			}
 
-			log.Printf("[DEBUG] Created next chunk command: %+v", nextChunkCmd)
-
 			if err := m.commandBuffer.QueueDownloadCommand(agentID, nextChunkCmd); err != nil {
 				log.Printf("[ERROR] Failed to queue next download chunk: %v", err)
-			} else {
-				log.Printf("[DEBUG] Successfully queued next chunk request")
 			}
-		} else {
-			log.Printf("[DEBUG] Final chunk received, download complete")
 		}
 
 	default:

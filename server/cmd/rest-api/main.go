@@ -4,6 +4,7 @@ package main
 import (
 	"c2/internal/common/config"
 	"c2/internal/database/postgres"
+	"c2/internal/logging"
 	"c2/internal/rest/server"
 	"c2/internal/rest/sse"
 	"c2/internal/websocket/agent"
@@ -50,6 +51,14 @@ func retryWithExponentialBackoff(operation func() error) error {
 }
 
 func main() {
+	// Initialize persistent file logging
+	logger, err := logging.SetupDefaultLogger("rest-api")
+	if err != nil {
+		log.Printf("Warning: Failed to setup file logging: %v", err)
+	} else {
+		defer logger.Close()
+	}
+
 	log.Println("Starting NexusC2 REST API Service...")
 
 	// Configure runtime

@@ -192,13 +192,7 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 
 // setupTLSConfig sets up the TLS configuration for HTTPS
 func (m *Manager) setupTLSConfig(cfg config.ListenerConfig) (*tls.Config, error) {
-	certPath := m.webCerts.CertFile
-	keyPath := m.webCerts.KeyFile
-
-	log.Printf("[StartListener] Loading certificate and key for HTTPS listener %s", cfg.Name)
-	log.Printf("[StartListener] Cert Path: %s, Key Path: %s", certPath, keyPath)
-
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	cert, err := tls.LoadX509KeyPair(m.webCerts.CertFile, m.webCerts.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load cert and key: %v", err)
 	}
@@ -229,7 +223,7 @@ func (m *Manager) createServer(cfg config.ListenerConfig, handler http.Handler) 
 // startServerGoroutine starts the server in a goroutine
 func (m *Manager) startServerGoroutine(server *http.Server, cfg config.ListenerConfig) {
 	go func() {
-		log.Printf("[StartListener] Starting listener %s on %s:%d", cfg.Name, cfg.BindIP, cfg.Port)
+		log.Printf("[LISTENER] %s started on %s:%d (%s)", cfg.Name, cfg.BindIP, cfg.Port, cfg.Protocol)
 		var err error
 
 		if cfg.Protocol == "HTTPS" {
@@ -239,11 +233,7 @@ func (m *Manager) startServerGoroutine(server *http.Server, cfg config.ListenerC
 		}
 
 		if err != nil && err != http.ErrServerClosed {
-			log.Printf("[StartListener] Failed to start %s listener %s: %v",
-				cfg.Protocol, cfg.Name, err)
-		} else {
-			log.Printf("[StartListener] %s listener %s stopped",
-				cfg.Protocol, cfg.Name)
+			log.Printf("[LISTENER] %s failed: %v", cfg.Name, err)
 		}
 	}()
 }
@@ -261,8 +251,6 @@ func (m *Manager) StartListener(cfg config.ListenerConfig) error {
 	// Set allowed methods if not already set
 	if len(cfg.AllowedMethods) == 0 {
 		cfg.AllowedMethods = m.routes.GetAllowedMethods(cfg.Protocol)
-		log.Printf("[StartListener] Setting allowed methods for %s: %v",
-			cfg.Name, cfg.AllowedMethods)
 	}
 
 	// Set default headers if not already set
@@ -284,7 +272,6 @@ func (m *Manager) StartListener(cfg config.ListenerConfig) error {
 
 	// Store the listener
 	m.listeners[cfg.Name] = server
-	log.Printf("[StartListener] Listener %s added to active listeners map", cfg.Name)
 
 	return nil
 }
@@ -296,25 +283,20 @@ func (m *Manager) StopListener(name string) error {
 
 	listener, exists := m.listeners[name]
 	if !exists {
-		log.Printf("[StopListener] Listener %s does not exist", name)
 		return fmt.Errorf("listener %s does not exist", name)
 	}
-
-	log.Printf("[StopListener] Stopping listener %s", name)
 
 	// Gracefully shut down the server
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	log.Printf("[StopListener] Initiating shutdown for listener %s", name)
 	if err := listener.Shutdown(ctx); err != nil {
-		log.Printf("[StopListener] Failed to gracefully stop listener %s: %v", name, err)
+		log.Printf("[LISTENER] %s stop failed: %v", name, err)
 		return err
 	}
 
-	log.Printf("[StopListener] Shutdown complete for listener %s", name)
 	delete(m.listeners, name)
-	log.Printf("[StopListener] Listener %s removed from active listeners map", name)
+	log.Printf("[LISTENER] %s stopped", name)
 	return nil
 }
 
@@ -323,25 +305,16 @@ func (m *Manager) StopAll() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	log.Println("[StopAll] Stopping all listeners...")
 	for name, listener := range m.listeners {
-		log.Printf("[StopAll] Stopping listener %s", name)
-
-		// Gracefully shut down each server
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		log.Printf("[StopAll] Initiating shutdown for listener %s", name)
 		if err := listener.Shutdown(ctx); err != nil {
-			log.Printf("[StopAll] Failed to gracefully stop listener %s: %v", name, err)
+			log.Printf("[LISTENER] %s stop failed: %v", name, err)
 		} else {
-			log.Printf("[StopAll] Listener %s stopped successfully", name)
+			log.Printf("[LISTENER] %s stopped", name)
 		}
-
+		cancel()
 		delete(m.listeners, name)
-		log.Printf("[StopAll] Listener %s removed from active listeners map", name)
 	}
-	log.Println("[StopAll] All listeners stopped successfully")
 }
 
 // Helper function to check if the HTTP method is allowed

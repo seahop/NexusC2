@@ -11,9 +11,10 @@ import (
 	"c2/internal/agent/tasks"
 	"c2/internal/common/config"
 	"c2/internal/database/postgres"
+	"c2/internal/logging"
 	"c2/internal/websocket/agent"
 	"context"
-	"encoding/json" // ADD: for JSON encoding
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -25,6 +26,14 @@ import (
 )
 
 func main() {
+	// Initialize persistent file logging
+	logger, err := logging.SetupDefaultLogger("agent-handler")
+	if err != nil {
+		log.Printf("Warning: Failed to setup file logging: %v", err)
+	} else {
+		defer logger.Close()
+	}
+
 	// Initialize configuration
 	cfg, err := config.LoadAgentConfig()
 	if err != nil {
@@ -251,32 +260,54 @@ func main() {
 	log.Printf("✓ Result Cache (Size: 1000, TTL: 5m)")
 	log.Printf("✓ Circuit Breaker (Max Failures: 5)")
 	log.Printf("✓ Priority Queue Processing")
-	log.Printf("✓ Metrics Collection (Interval: 30s)")
+	log.Printf("✓ Metrics Collection (Interval: 5m, on-activity)")
 	log.Printf("✓ Health Checks (Interval: 30s)")
 	log.Printf("✓ Async Processing (Workers: %d-%d)", processorConfig.MinWorkers, processorConfig.MaxWorkers)
 	log.Printf("✓ Stream Monitoring (Ping Interval: 10s)")
 	log.Println("===========================================")
 
-	// Start metrics reporter
+	// Start metrics reporter (only logs when there's activity or errors)
 	go func() {
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// Get comprehensive metrics
+			// Get collector summary to check for activity
+			summary := metricsCollector.GetSummary()
+
+			// Only log metrics if there are active agents, errors, or significant activity
+			agentMetrics, _ := summary["agents"].(map[string]interface{})
+			errorMetrics, _ := summary["errors"].(map[string]interface{})
+
+			activeAgents := 0
+			if agentMetrics != nil {
+				if v, ok := agentMetrics["active"].(int); ok {
+					activeAgents = v
+				}
+			}
+
+			hasErrors := errorMetrics != nil && len(errorMetrics) > 0
+
+			// Skip logging if idle (no active agents and no errors)
+			if activeAgents == 0 && !hasErrors {
+				continue
+			}
+
+			// Get comprehensive metrics only when needed
 			metrics := map[string]interface{}{
 				"listeners": listenerManager.GetMetrics(),
-				"cache":     resultCache.GetMetrics(),
-				"db_pool":   dbOptimizer.GetMetrics(),
-				"collector": metricsCollector.GetSummary(),
+				"collector": summary,
 			}
 
-			// Add circuit breaker metrics if available
+			// Add circuit breaker metrics if there were failures
 			if enhancedClient != nil {
-				metrics["circuit_breaker"] = enhancedClient.GetMetrics()
+				cbMetrics := enhancedClient.GetMetrics()
+				if failures, ok := cbMetrics["failures"].(int); ok && failures > 0 {
+					metrics["circuit_breaker"] = cbMetrics
+				}
 			}
 
-			log.Printf("[Metrics] System Status: %+v", metrics)
+			log.Printf("[Metrics] Active agents: %d, Status: %+v", activeAgents, metrics)
 		}
 	}()
 

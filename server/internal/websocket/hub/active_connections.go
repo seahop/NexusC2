@@ -156,9 +156,7 @@ func (acm *ActiveConnectionManager) PrintConnectionState() {
 	//log.Printf("[STATE] Total Active Connections: %d", connectionsCount)
 
 	if connectionsCount == 0 {
-		log.Printf("[STATE] No active connections")
-		log.Printf("[STATE] ==========================================")
-		log.Printf("[DEBUG] PrintConnectionState: Step 6a - Completed (no connections)")
+		// No active connections - silent return
 		return
 	}
 
@@ -171,8 +169,7 @@ func (acm *ActiveConnectionManager) PrintConnectionState() {
 	}
 	//log.Printf("[DEBUG] PrintConnectionState: Step 7 - Found keys: %v", keys)
 
-	for i, newClientID := range keys {
-		//log.Printf("[DEBUG] PrintConnectionState: Step 8 - Processing connection %d/%d", i+1, len(keys))
+	for _, newClientID := range keys {
 
 		conn := acm.connections[newClientID]
 		if conn == nil {
@@ -207,7 +204,6 @@ func (acm *ActiveConnectionManager) PrintConnectionState() {
 			log.Printf("[STATE] Last Seen: %s", conn.LastSeen.Format(time.RFC3339))
 		}
 
-		log.Printf("[DEBUG] PrintConnectionState: Step 9 - Completed connection %d", i+1)
 	}
 
 	//log.Printf("[DEBUG] PrintConnectionState: Step 10 - Completed all connections")

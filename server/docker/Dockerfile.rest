@@ -76,9 +76,9 @@ RUN apk add --no-cache \
     ca-certificates && \
     # Create docker group with GID 124 (matches host docker group)
     addgroup -g 124 docker && \
-    # Create non-root user for security
-    addgroup -g 1000 nexus && \
-    adduser -D -u 1000 -G nexus nexus && \
+    # Create non-root user for security (UID 1001 matches agent-handler for shared volumes)
+    addgroup -g 1001 nexus && \
+    adduser -D -u 1001 -G nexus nexus && \
     # Add nexus user to docker group for Docker socket access
     adduser nexus docker && \
     # Create necessary directories

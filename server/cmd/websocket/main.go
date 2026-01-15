@@ -4,6 +4,7 @@ package main
 import (
 	"c2/internal/common/config"
 	"c2/internal/database/postgres"
+	"c2/internal/logging"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/handlers"
 	"c2/internal/websocket/hub"
@@ -118,6 +119,14 @@ func handleHealthCheck(streamManager *reconnect.StreamManager) http.HandlerFunc 
 }
 
 func main() {
+	// Initialize persistent file logging
+	logger, err := logging.SetupDefaultLogger("websocket")
+	if err != nil {
+		log.Printf("Warning: Failed to setup file logging: %v", err)
+	} else {
+		defer logger.Close()
+	}
+
 	// Optimize runtime settings
 	configureRuntime()
 

@@ -344,6 +344,13 @@ func (c *Client) registerMessageHandlers() {
 	c.messageHandlers["upload_complete"] = c.handleUploadComplete
 	c.messageHandlers["link_update"] = c.handleLinkUpdate
 	c.messageHandlers["command_ack"] = c.handleCommandAck
+	c.messageHandlers["pong"] = c.handlePong // Silent keepalive response
+}
+
+// handlePong silently handles pong keepalive responses
+func (c *Client) handlePong(msg *pb.StreamMessage) error {
+	// Pong is just a keepalive acknowledgment - no action needed
+	return nil
 }
 
 func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool) (*pb.ListenerResponse, error) {
@@ -415,16 +422,12 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 				return
 			}
 
-			log.Printf("[BiDiStream] Received message - Type: %s, Sender: %s, Timestamp: %d",
-				msg.Type, msg.Sender, msg.Timestamp)
-
 			if handler, exists := c.messageHandlers[msg.Type]; exists {
 				if err := handler(msg); err != nil {
-					log.Printf("Error handling message type '%s': %v", msg.Type, err)
-				} else {
-					log.Printf("[BiDiStream] Successfully handled message type: %s", msg.Type)
+					log.Printf("[BiDiStream] Error handling message type '%s': %v", msg.Type, err)
 				}
 			} else {
+				// Only log truly unhandled message types (not common ones)
 				log.Printf("[BiDiStream] Unhandled message type: %s", msg.Type)
 			}
 		}

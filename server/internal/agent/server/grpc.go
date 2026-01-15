@@ -322,7 +322,6 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 	cmds, exists := s.CommandBuffer[clientID]
 	if !exists || len(cmds) == 0 {
 		s.Mutex.Unlock()
-		log.Printf("[GetCommand] No commands found for clientID: %q", clientID)
 		return nil, false
 	}
 
@@ -333,31 +332,12 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 	// Clear the buffer immediately while we still have the lock
 	s.CommandBuffer[clientID] = []Command{}
 
-	bufferSize := len(s.CommandBuffer)
 	s.Mutex.Unlock()
 	// ========== CRITICAL SECTION END (lock held for ~5 lines instead of 50+) ==========
 
-	// All processing now happens OUTSIDE the lock (no contention)
-	log.Printf("[GetCommand] Getting commands for client %s", clientID)
-	log.Printf("[GetCommand] Command buffer has %d agents with commands", bufferSize)
-	log.Printf("[GetCommand] Retrieved %d commands for client %s:", len(cmdsCopy), clientID)
-
-	// Log commands using the helper function for truncated output
-	if len(cmdsCopy) <= 3 {
-		// For small number of commands, log them individually with truncated data
-		for i, cmd := range cmdsCopy {
-			log.Printf("[GetCommand]   Command %d: %s", i+1, formatCommandForLog(cmd))
-		}
-	} else {
-		// For many commands, just log summary info
-		for i, cmd := range cmdsCopy {
-			dataInfo := ""
-			if len(cmd.Data) > 0 {
-				dataInfo = fmt.Sprintf(", DataLen=%d bytes", len(cmd.Data))
-			}
-			log.Printf("[GetCommand]   Command %d: Type=%s, Chunk=%d/%d%s",
-				i+1, cmd.Command, cmd.CurrentChunk, cmd.TotalChunks, dataInfo)
-		}
+	// Log command dispatch concisely
+	for _, cmd := range cmdsCopy {
+		log.Printf("[CMD] agent=%s cmd_id=%s type=%d (dispatched)", clientID, cmd.CommandID, cmd.CommandType)
 	}
 
 	// Strip file paths from commands before sending to agent
@@ -367,11 +347,9 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 
 	cmdJSON, err := json.Marshal(cmdsCopy)
 	if err != nil {
-		log.Printf("[GetCommand] Failed to marshal commands: %v", err)
+		log.Printf("[CMD] Failed to marshal commands for agent=%s: %v", clientID, err)
 		return nil, false
 	}
-
-	log.Printf("[GetCommand] Marshaled %d bytes of command data for transmission", len(cmdJSON))
 
 	return []string{string(cmdJSON)}, true
 }
@@ -583,8 +561,6 @@ func (s *GRPCServer) GetStreamStatus() map[string]interface{} {
 }
 
 func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest) (*pb.ListenerResponse, error) {
-	log.Printf("[StartListener] Received StartListener request: %+v", req)
-
 	listenerCfg := config.ListenerConfig{
 		Name:     req.Name,
 		Protocol: req.Type.String(),
@@ -593,10 +569,8 @@ func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest)
 		BindIP:   req.BindIp,
 	}
 
-	log.Printf("[StartListener] Attempting to start listener with config: %+v", listenerCfg)
 	err := s.manager.StartListener(listenerCfg)
 	if err != nil {
-		log.Printf("[StartListener] Failed to start listener %s: %v", req.Name, err)
 		return &pb.ListenerResponse{
 			Success:   false,
 			Message:   err.Error(),
@@ -604,7 +578,6 @@ func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest)
 		}, nil
 	}
 
-	log.Printf("[StartListener] Listener %s started successfully", req.Name)
 	return &pb.ListenerResponse{
 		Success: true,
 		Message: fmt.Sprintf("Listener %s started successfully on port %d", req.Name, req.Port),
@@ -612,10 +585,7 @@ func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest)
 }
 
 func (s *GRPCServer) StopListener(ctx context.Context, req *pb.ListenerRequest) (*pb.ListenerResponse, error) {
-	log.Printf("[StopListener] Received StopListener request for listener: %s", req.Name)
-
 	if req.Name == "" {
-		log.Printf("[StopListener] Listener name is missing")
 		return &pb.ListenerResponse{
 			Success:   false,
 			Message:   "Listener name is required",
@@ -625,7 +595,6 @@ func (s *GRPCServer) StopListener(ctx context.Context, req *pb.ListenerRequest) 
 
 	err := s.manager.StopListener(req.Name)
 	if err != nil {
-		log.Printf("[StopListener] Failed to stop listener %s: %v", req.Name, err)
 		return &pb.ListenerResponse{
 			Success:   false,
 			Message:   err.Error(),
@@ -633,7 +602,6 @@ func (s *GRPCServer) StopListener(ctx context.Context, req *pb.ListenerRequest) 
 		}, nil
 	}
 
-	log.Printf("[StopListener] Listener %s stopped successfully", req.Name)
 	return &pb.ListenerResponse{
 		Success: true,
 		Message: fmt.Sprintf("Listener %s stopped successfully", req.Name),

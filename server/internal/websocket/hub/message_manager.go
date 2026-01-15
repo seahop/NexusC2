@@ -3,7 +3,6 @@ package hub
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"sync"
@@ -63,52 +62,38 @@ func (mm *MessageManager) SendMessage(ctx context.Context, target *Client, data 
 	// Try to queue the message with context timeout
 	select {
 	case mm.messageQueue <- msg:
-		log.Printf("[DEBUG] SendMessage: Message queued successfully")
+		// Message queued successfully
 	case <-ctx.Done():
-		log.Printf("[DEBUG] SendMessage: Context cancelled while queueing")
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
-		log.Printf("[DEBUG] SendMessage: Timeout while queueing message")
+		log.Printf("[WARN] SendMessage: Queue full, message dropped")
 		return ErrQueueFull
 	}
 
-	//log.Printf("[DEBUG] SendMessage: Waiting for processing result")
 	// Wait for message to be processed or context cancellation
 	select {
 	case err := <-errChan:
-		log.Printf("[DEBUG] SendMessage: Received processing result: %v", err)
 		return err
 	case <-ctx.Done():
-		log.Printf("[DEBUG] SendMessage: Context cancelled while waiting for result")
 		return ctx.Err()
 	}
 }
 
 func (mm *MessageManager) processQueue() {
-	//log.Printf("[DEBUG] Message manager starting process queue")
 	for msg := range mm.messageQueue {
-		//log.Printf("[DEBUG] Processing queued message (target: %v)", msg.Target != nil)
-
 		// Check context before processing
 		if msg.ctx.Err() != nil {
-			log.Printf("[DEBUG] Message context cancelled")
 			msg.errChan <- msg.ctx.Err()
 			continue
 		}
 
 		var err error
 		if msg.Target != nil {
-			// Single client message
-			log.Printf("[DEBUG] Sending to single client")
 			err = mm.sendToClient(msg.Target, msg.Data)
 		} else {
-			// Broadcast message
-			log.Printf("[DEBUG] Broadcasting to all clients")
 			err = mm.broadcast(msg.Data)
 		}
 
-		// Report back the result
-		//log.Printf("[DEBUG] Message processing complete, err: %v", err)
 		msg.errChan <- err
 	}
 }
@@ -144,25 +129,12 @@ func (mm *MessageManager) broadcast(data []byte) error {
 	clientSnapshot := make([]*Client, 0, clientCount)
 	for client := range mm.clients {
 		clientSnapshot = append(clientSnapshot, client)
-		log.Printf("[DEBUG] broadcast: Registered client: ID=%s, Username=%s",
-			client.ID, client.Username)
 	}
 	mm.mu.RUnlock()
-
-	// Debug log message type (optional, remove in production)
-	var msgData map[string]interface{}
-	if err := json.Unmarshal(data, &msgData); err != nil {
-		log.Printf("[DEBUG] broadcast: Failed to unmarshal message for debug: %v", err)
-	} else {
-		log.Printf("[DEBUG] broadcast: Broadcasting message type: %v", msgData["type"])
-	}
 
 	// Now broadcast without holding the lock
 	var failed int
 	for _, client := range clientSnapshot {
-		log.Printf("[DEBUG] broadcast: Attempting send to client: %s (ID: %s)",
-			client.Username, client.ID)
-
 		if client.Send == nil {
 			log.Printf("[ERROR] broadcast: Client %s has nil Send channel", client.Username)
 			failed++
@@ -171,10 +143,8 @@ func (mm *MessageManager) broadcast(data []byte) error {
 
 		select {
 		case client.Send <- data:
-			log.Printf("[DEBUG] broadcast: Successfully sent to client: %s", client.Username)
+			// Sent successfully
 		default:
-			log.Printf("[DEBUG] broadcast: Failed to send to client: %s (buffer full)",
-				client.Username)
 			failed++
 		}
 	}
@@ -189,7 +159,7 @@ func (mm *MessageManager) broadcast(data []byte) error {
 	return nil
 }
 
-// Add logging to client registration
+// RegisterClient adds a client to the manager
 func (mm *MessageManager) RegisterClient(client *Client) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -199,11 +169,7 @@ func (mm *MessageManager) RegisterClient(client *Client) {
 		return
 	}
 
-	log.Printf("[DEBUG] RegisterClient: Registering client ID=%s, Username=%s",
-		client.ID, client.Username)
 	mm.clients[client] = true
-	log.Printf("[DEBUG] RegisterClient: Total clients after registration: %d",
-		len(mm.clients))
 }
 
 // UnregisterClient removes a client from the manager

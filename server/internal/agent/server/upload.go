@@ -17,9 +17,6 @@ import (
 )
 
 func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadRequest) (*pb.HandleUploadResponse, error) {
-	log.Printf("[HandleUpload] Received upload notification - Agent: %s, File: %s -> %s",
-		req.AgentId, req.OriginalFilename, req.CurrentFilename)
-
 	// Read the file
 	data, err := os.ReadFile(filepath.Join("/app/uploads", req.CurrentFilename))
 	if err != nil {
@@ -33,7 +30,8 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 	const chunkSize = 512 * 1024 // 512KB chunks
 	totalChunks := (len(data) + chunkSize - 1) / chunkSize
 
-	log.Printf("[HandleUpload] File size: %d bytes, will be split into %d chunks", len(data), totalChunks)
+	log.Printf("[TRANSFER] Upload to agent=%s: %s (%d bytes, %d chunks)",
+		req.AgentId, req.OriginalFilename, len(data), totalChunks)
 
 	// Start database transaction
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
@@ -100,18 +98,13 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 
 	// Check if this is a single-chunk upload
 	if totalChunks == 1 {
-		// Single chunk upload - don't create temp directory
-		log.Printf("[HandleUpload] Single chunk upload - no temp storage needed")
-
 		if err := tx.Commit(); err != nil {
-			log.Printf("[HandleUpload] Failed to commit transaction: %v", err)
+			log.Printf("[TRANSFER] Upload commit failed for agent=%s: %v", req.AgentId, err)
 			return &pb.HandleUploadResponse{
 				Success: false,
 				Message: fmt.Sprintf("Database error: %v", err),
 			}, nil
 		}
-
-		log.Printf("[HandleUpload] Successfully queued single chunk for agent %s", req.AgentId)
 
 		return &pb.HandleUploadResponse{
 			Success: true,
@@ -121,10 +114,9 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 
 	// Multi-chunk upload - store remaining chunks
 	chunkDir := filepath.Join("/app/temp", req.CurrentFilename)
-	log.Printf("[HandleUpload] Creating chunk directory: %s", chunkDir)
 
 	if err := os.MkdirAll(chunkDir, 0755); err != nil {
-		log.Printf("[HandleUpload] Failed to create chunk directory: %v", err)
+		log.Printf("[TRANSFER] Upload chunk dir creation failed: %v", err)
 		return &pb.HandleUploadResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to prepare chunks: %v", err),
@@ -132,7 +124,6 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 	}
 
 	// Save remaining chunks to disk (start from chunk 1, not 0)
-	log.Printf("[HandleUpload] Saving chunks 1 through %d to disk", totalChunks-1)
 	for i := 1; i < totalChunks; i++ {
 		start := i * chunkSize
 		end := start + chunkSize
@@ -142,25 +133,15 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 
 		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d", i))
 		chunkData := data[start:end]
-		log.Printf("[HandleUpload] Writing chunk %d (size: %d bytes) to %s", i, len(chunkData), chunkPath)
 
 		if err := os.WriteFile(chunkPath, chunkData, 0644); err != nil {
-			log.Printf("[HandleUpload] Failed to write chunk %d: %v", i, err)
-			// Clean up on failure
+			log.Printf("[TRANSFER] Upload chunk %d write failed: %v", i, err)
 			os.RemoveAll(chunkDir)
 			return &pb.HandleUploadResponse{
 				Success: false,
 				Message: fmt.Sprintf("Failed to prepare chunk %d: %v", i, err),
 			}, nil
 		}
-	}
-
-	// List directory contents for debugging
-	files, _ := os.ReadDir(chunkDir)
-	log.Printf("[HandleUpload] Chunk directory contents after writing:")
-	for _, file := range files {
-		info, _ := file.Info()
-		log.Printf("  - %s (size: %d bytes)", file.Name(), info.Size())
 	}
 
 	// Store metadata for next chunks
@@ -187,10 +168,8 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 	// Store metadata
 	metadataPath := filepath.Join(chunkDir, "metadata.json")
 	metadataJSON, _ := json.Marshal(uploadInfo)
-	log.Printf("[HandleUpload] Writing metadata to %s", metadataPath)
 	if err := os.WriteFile(metadataPath, metadataJSON, 0644); err != nil {
-		log.Printf("[HandleUpload] Failed to write metadata: %v", err)
-		// Clean up on failure
+		log.Printf("[TRANSFER] Upload metadata write failed: %v", err)
 		os.RemoveAll(chunkDir)
 		return &pb.HandleUploadResponse{
 			Success: false,
@@ -199,17 +178,13 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("[HandleUpload] Failed to commit transaction: %v", err)
-		// Clean up on failure
+		log.Printf("[TRANSFER] Upload commit failed: %v", err)
 		os.RemoveAll(chunkDir)
 		return &pb.HandleUploadResponse{
 			Success: false,
 			Message: fmt.Sprintf("Database error: %v", err),
 		}, nil
 	}
-
-	log.Printf("[HandleUpload] Successfully queued first chunk for agent %s. Total chunks: %d, Chunks stored: %d",
-		req.AgentId, totalChunks, totalChunks-1)
 
 	return &pb.HandleUploadResponse{
 		Success: true,
@@ -219,27 +194,15 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 
 // Add this method to the GRPCServer struct
 func (s *GRPCServer) queueNextChunk(agentID string, chunkDir string) error {
-	log.Printf("[QueueNextChunk] Starting for agent %s, chunk dir: %s", agentID, chunkDir)
-
 	// Check if directory exists
 	if _, err := os.Stat(chunkDir); os.IsNotExist(err) {
-		log.Printf("[QueueNextChunk] ERROR: Chunk directory does not exist: %s", chunkDir)
 		return fmt.Errorf("chunk directory does not exist: %s", chunkDir)
-	}
-
-	// List directory contents for debugging
-	files, _ := os.ReadDir(chunkDir)
-	log.Printf("[QueueNextChunk] Chunk directory contents:")
-	for _, file := range files {
-		log.Printf("  - %s", file.Name())
 	}
 
 	// Read metadata
 	metadataPath := filepath.Join(chunkDir, "metadata.json")
 	metadataBytes, err := os.ReadFile(metadataPath)
 	if err != nil {
-		log.Printf("[QueueNextChunk] ERROR: Failed to read metadata from %s: %v", metadataPath, err)
-		// If we can't read metadata, try to clean up
 		os.RemoveAll(chunkDir)
 		return fmt.Errorf("failed to read metadata: %v", err)
 	}
@@ -256,51 +219,28 @@ func (s *GRPCServer) queueNextChunk(agentID string, chunkDir string) error {
 	}
 
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		log.Printf("[QueueNextChunk] ERROR: Failed to parse metadata: %v", err)
-		// Clean up on parse error
 		os.RemoveAll(chunkDir)
 		return fmt.Errorf("failed to parse metadata: %v", err)
 	}
 
-	log.Printf("[QueueNextChunk] Current metadata: CurrentChunk=%d, TotalChunks=%d",
-		metadata.CurrentChunk, metadata.TotalChunks)
-
 	// Increment the current chunk
 	metadata.CurrentChunk++
 
-	// If we've sent all chunks, clean up
+	// If we've sent all chunks, clean up and log completion
 	if metadata.CurrentChunk >= metadata.TotalChunks {
-		log.Printf("[QueueNextChunk] All chunks sent (%d/%d), cleaning up",
-			metadata.CurrentChunk, metadata.TotalChunks)
-		if err := os.RemoveAll(chunkDir); err != nil {
-			log.Printf("[QueueNextChunk] Warning: Failed to clean up chunk directory: %v", err)
-		} else {
-			log.Printf("[QueueNextChunk] Successfully cleaned up chunk directory for %s", metadata.CurrentFilename)
-		}
+		log.Printf("[TRANSFER] Upload complete: agent=%s file=%s", agentID, metadata.OriginalFilename)
+		os.RemoveAll(chunkDir)
 		return nil
 	}
 
 	// Read next chunk
 	chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%d", metadata.CurrentChunk))
-	log.Printf("[QueueNextChunk] Attempting to read chunk from: %s", chunkPath)
 
 	chunkData, err := os.ReadFile(chunkPath)
 	if err != nil {
-		log.Printf("[QueueNextChunk] ERROR: Failed to read chunk %d from %s: %v",
-			metadata.CurrentChunk, chunkPath, err)
-		// List what files are actually there
-		files, _ := os.ReadDir(chunkDir)
-		log.Printf("[QueueNextChunk] Available files in directory:")
-		for _, file := range files {
-			log.Printf("  - %s", file.Name())
-		}
-		// If we can't read the chunk, clean up everything
 		os.RemoveAll(chunkDir)
 		return fmt.Errorf("failed to read chunk %d: %v", metadata.CurrentChunk, err)
 	}
-
-	log.Printf("[QueueNextChunk] Successfully read chunk %d (size: %d bytes)",
-		metadata.CurrentChunk, len(chunkData))
 
 	// Base64 encode chunk
 	encodedChunk := base64.StdEncoding.EncodeToString(chunkData)
@@ -336,9 +276,6 @@ func (s *GRPCServer) queueNextChunk(agentID string, chunkDir string) error {
 	if err := os.WriteFile(metadataPath, updatedMetadataBytes, 0644); err != nil {
 		return fmt.Errorf("failed to save updated metadata: %v", err)
 	}
-
-	log.Printf("[QueueNextChunk] Successfully queued chunk %d/%d for agent %s",
-		metadata.CurrentChunk, metadata.TotalChunks, agentID)
 
 	return nil
 }
