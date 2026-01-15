@@ -427,8 +427,10 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 					log.Printf("[BiDiStream] Error handling message type '%s': %v", msg.Type, err)
 				}
 			} else {
-				// Only log truly unhandled message types (not common ones)
-				log.Printf("[BiDiStream] Unhandled message type: %s", msg.Type)
+				// Silently ignore ping messages (expected, no handler needed)
+				if msg.Type != "ping" {
+					log.Printf("[BiDiStream] Unhandled message type: %s", msg.Type)
+				}
 			}
 		}
 	}()

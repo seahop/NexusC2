@@ -331,12 +331,7 @@ func (c *Collector) StartBackgroundCollector(interval time.Duration) {
 
 			c.SetCustomMetric("memory_heap_mb", memStats.HeapAlloc/1024/1024)
 			c.SetCustomMetric("goroutines", runtime.NumGoroutine())
-
-			// Log summary every 5 minutes
-			if time.Since(c.startTime).Minutes() > 0 &&
-				int(time.Since(c.startTime).Minutes())%5 == 0 {
-				log.Printf("[Metrics] Summary: %+v", c.GetSummary())
-			}
+			// Metrics are collected silently - available via /metrics endpoint
 		}
 	}()
 }

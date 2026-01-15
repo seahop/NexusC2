@@ -471,14 +471,12 @@ func (s *GRPCServer) monitorStreams() {
 
 			// Check if connection is stale (no activity for 2 minutes)
 			if now.Sub(lastActivity) > 2*time.Minute {
-				log.Printf("[StreamMonitor] Connection %s inactive for %v, sending ping",
-					conn.ClientID, now.Sub(lastActivity))
 				s.sendPing(conn)
 			}
 
 			// Remove connections with too many failed pings
 			if failedPings >= 3 {
-				log.Printf("[StreamMonitor] Removing inactive connection: %s", conn.ClientID)
+				log.Printf("[STREAM] Removing inactive connection: %s (3 failed pings)", conn.ClientID)
 				s.removeStreamConnection(conn.ClientID)
 			}
 		}
@@ -503,13 +501,13 @@ func (s *GRPCServer) sendPing(conn *StreamConnection) {
 			conn.mu.Lock()
 			conn.LastPing = time.Now()
 			conn.mu.Unlock()
-			log.Printf("[StreamMonitor] Ping sent to %s", conn.ClientID)
+			// Successful ping - no logging needed
 		case <-time.After(5 * time.Second):
 			conn.mu.Lock()
 			conn.FailedPings++
+			failures := conn.FailedPings
 			conn.mu.Unlock()
-			log.Printf("[StreamMonitor] Ping timeout for %s (failures: %d)",
-				conn.ClientID, conn.FailedPings)
+			log.Printf("[STREAM] Ping timeout for %s (failures: %d/3)", conn.ClientID, failures)
 		}
 	}
 }

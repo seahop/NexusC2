@@ -56,7 +56,7 @@ func configureRuntime() {
 }
 
 func monitorServerHealth(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -67,21 +67,18 @@ func monitorServerHealth(ctx context.Context) {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 
-			log.Printf("Health: Goroutines=%d, Heap=%dMB, GC=%d, NextGC=%dMB",
-				runtime.NumGoroutine(),
-				m.HeapAlloc/1024/1024,
-				m.NumGC,
-				m.NextGC/1024/1024)
+			goroutines := runtime.NumGoroutine()
+			heapMB := m.HeapAlloc / 1024 / 1024
 
 			// Trigger GC if memory usage is high
 			if m.HeapAlloc > 500*1024*1024 { // 500MB
 				runtime.GC()
-				log.Println("Manual GC triggered due to high memory usage")
+				log.Printf("[HEALTH] High memory, GC triggered: Heap=%dMB, Goroutines=%d", heapMB, goroutines)
 			}
 
 			// Check for goroutine leaks
-			if runtime.NumGoroutine() > 10000 {
-				log.Printf("WARNING: High goroutine count: %d", runtime.NumGoroutine())
+			if goroutines > 10000 {
+				log.Printf("[HEALTH] WARNING: High goroutine count: %d", goroutines)
 			}
 		}
 	}

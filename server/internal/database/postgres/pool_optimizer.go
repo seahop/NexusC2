@@ -121,16 +121,7 @@ func (po *PoolOptimizer) startHealthMonitor() {
 func (po *PoolOptimizer) performHealthCheck() {
 	stats := po.db.Stats()
 
-	// Log current stats
-	log.Printf("[PoolOptimizer] Stats: Open=%d/%d, InUse=%d, Idle=%d, WaitCount=%d",
-		stats.OpenConnections,
-		stats.MaxOpenConnections,
-		stats.InUse,
-		stats.Idle,
-		stats.WaitCount,
-	)
-
-	// Update metrics
+	// Update metrics (silently)
 	po.metrics.WaitCount.Store(uint64(stats.WaitCount))
 	if stats.WaitDuration > 0 {
 		waitMs := stats.WaitDuration.Milliseconds()
@@ -143,13 +134,14 @@ func (po *PoolOptimizer) performHealthCheck() {
 		}
 	}
 
-	// Check for issues
+	// Only log when there are issues
 	if stats.OpenConnections >= stats.MaxOpenConnections {
-		log.Printf("[PoolOptimizer] WARNING: Connection pool at capacity")
+		log.Printf("[DB] WARNING: Connection pool at capacity (%d/%d)",
+			stats.OpenConnections, stats.MaxOpenConnections)
 	}
 
 	if stats.WaitCount > 100 {
-		log.Printf("[PoolOptimizer] WARNING: High wait count: %d", stats.WaitCount)
+		log.Printf("[DB] WARNING: High connection wait count: %d", stats.WaitCount)
 	}
 }
 
