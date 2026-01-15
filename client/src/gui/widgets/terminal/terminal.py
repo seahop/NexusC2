@@ -21,6 +21,9 @@ from ..virtual_terminal import VirtualTerminal
 from ..bof_handler import BOFHandler
 from ..inline_assembly_handler import InlineAssemblyHandler
 
+# Import error code translation for database-loaded outputs
+from utils.error_codes import translate_code
+
 
 class AgentTerminal(QWidget):
     def __init__(self, agent_name, agent_guid=None, ws_thread=None, agent_os=None):
@@ -627,9 +630,11 @@ class TerminalWidget(QWidget):
                     # Add corresponding outputs immediately after the command (preserving grouping)
                     command_outputs = self.outputs_by_command.get(command_id, [])
                     for output in command_outputs:
+                        # Apply error code translation to database-loaded outputs
+                        translated_output = translate_code(output[2]) if output[2] else output[2]
                         formatted_output = {
                             "timestamp": output[3],
-                            "output": output[2]
+                            "output": translated_output
                         }
                         agent_terminal.command_buffer.add_output(formatted_output)
 
@@ -639,9 +644,12 @@ class TerminalWidget(QWidget):
                 pending = self.pending_outputs[agent_guid]
                 print(f"TerminalWidget: Adding {len(pending)} pending outputs for agent {agent_guid[:8]}")
                 for pending_output in pending:
+                    # Apply error code translation to pending outputs
+                    raw_output = pending_output.get('output', '')
+                    translated_output = translate_code(raw_output) if raw_output else raw_output
                     formatted_output = {
                         "timestamp": pending_output.get('timestamp', ''),
-                        "output": pending_output.get('output', '')
+                        "output": translated_output
                     }
                     agent_terminal.command_buffer.add_output(formatted_output)
                 # Clear the pending outputs now that they're added
