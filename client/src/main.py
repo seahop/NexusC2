@@ -11,6 +11,17 @@ from utils.logger import get_logger, install_exception_hooks, flush_logs, get_lo
 # Initialize logger early
 logger = get_logger('main')
 
+# Windows-specific: Set AppUserModelID for proper taskbar icon
+# This must be done BEFORE creating QApplication
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        # Set a unique AppUserModelID so Windows shows our icon instead of Python's
+        app_id = 'NexusC2.Client.GUI.1'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception as e:
+        print(f"Warning: Could not set Windows AppUserModelID: {e}")
+
 def setup_dark_theme_hints():
     """Set environment variables to hint dark theme to window managers"""
     # For GTK-based window managers (GNOME, XFCE, etc.)
@@ -96,8 +107,17 @@ def main():
     logger.debug("Creating QApplication")
     app = QApplication(sys.argv)
 
-    # Set application-wide icon (required for Linux taskbar)
-    icon_path = Path(__file__).parent / 'gui' / 'resources' / 'n.png'
+    # Set application-wide icon
+    # On Windows, prefer .ico file if available for better taskbar integration
+    icon_dir = Path(__file__).parent / 'gui' / 'resources'
+    icon_path = None
+    if sys.platform == 'win32':
+        ico_path = icon_dir / 'n.ico'
+        if ico_path.exists():
+            icon_path = ico_path
+    if icon_path is None:
+        icon_path = icon_dir / 'n.png'
+
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
