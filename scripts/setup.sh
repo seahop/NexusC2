@@ -129,9 +129,10 @@ install_minimal_packages() {
     print_status "Installing Minimal System Packages"
     print_info "============================================================"
 
-    # Create shared directory
+    # Create shared directory with proper ownership for container cleanup
     print_status "Creating /shared"
     mkdir -p /shared
+    chown 1001:1001 /shared
 
     # Update package list
     print_status "Updating package list"

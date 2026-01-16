@@ -62,6 +62,7 @@ if [ "$EXPORT_PROJECT" = "TRUE" ]; then
     zip -r "/shared/${OUTPUT_FILENAME}" app/
     # Make file deletable by other containers (websocket runs as non-root user)
     chmod 666 "/shared/${OUTPUT_FILENAME}"
+    chown 1001:1001 "/shared/${OUTPUT_FILENAME}"
 
     echo "Project exported to /shared/${OUTPUT_FILENAME}"
     rm -f /shared/${PROJECT_ID}_*
@@ -328,6 +329,7 @@ if [ -f "/output/${OUTPUT_FILENAME}" ]; then
     cp "/output/${OUTPUT_FILENAME}" "/shared/${OUTPUT_FILENAME}"
     # Make file deletable by other containers (websocket runs as non-root user)
     chmod 666 "/shared/${OUTPUT_FILENAME}"
+    chown 1001:1001 "/shared/${OUTPUT_FILENAME}"
     echo "Binary available at: /shared/${OUTPUT_FILENAME}"
     exit 0
 else
