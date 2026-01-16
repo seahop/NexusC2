@@ -24,6 +24,10 @@ requests_per_minute = 100
 # Allowed origins for CORS (use ["*"] to allow all)
 allowed_origins = ["*"]
 
+# =============================================================================
+# URL CONFIGURATION
+# =============================================================================
+
 [web_server]
 cert_file = "/app/certs/web_server.crt"
 key_file = "/app/certs/web_server.key"
@@ -76,6 +80,11 @@ strict_transport_security = "max-age=31536000; includeSubDomains"
 x_frame_options = "DENY"
 x_content_type_options = "nosniff"
 
+
+# =============================================================================
+# PAYLOAD CONFIGURATION
+# =============================================================================
+
 [payload_config]
 sleep = 20
 jitter = 10
@@ -125,37 +134,6 @@ value = "close"
 connection_timeout = 30        # Timeout for pipe connections in seconds
 max_message_size = 1048576     # Maximum message size in bytes (1MB)
 heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
-
-# Pipe name presets that look like legitimate Windows services
-# The actual pipe name is chosen at SMB agent build time
-# These are suggestions - you can use any name that blends with the environment
-[[smb_link.pipe_presets]]
-name = "spoolss"
-description = "Print Spooler Service"
-
-[[smb_link.pipe_presets]]
-name = "srvsvc"
-description = "Server Service"
-
-[[smb_link.pipe_presets]]
-name = "wkssvc"
-description = "Workstation Service"
-
-[[smb_link.pipe_presets]]
-name = "netlogon"
-description = "Netlogon Service"
-
-[[smb_link.pipe_presets]]
-name = "lsarpc"
-description = "LSA RPC"
-
-[[smb_link.pipe_presets]]
-name = "samr"
-description = "SAM RPC"
-
-[[smb_link.pipe_presets]]
-name = "browser"
-description = "Computer Browser"
 
 # Malleable field names for link protocol (inside encrypted layer)
 # Customize these to avoid structural fingerprinting
