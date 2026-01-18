@@ -19,7 +19,7 @@ type Manager struct {
 	db              *sql.DB
 	listeners       map[uuid.UUID]*Listener
 	ListenersByName map[string]*Listener
-	listenersByPort map[int]*Listener
+	listenersByPort map[int][]*Listener // Multiple listeners can share a port
 	mu              sync.RWMutex
 }
 
@@ -52,7 +52,7 @@ func NewManager(db *sql.DB) *Manager {
 		db:              db,
 		listeners:       make(map[uuid.UUID]*Listener),
 		ListenersByName: make(map[string]*Listener),
-		listenersByPort: make(map[int]*Listener),
+		listenersByPort: make(map[int][]*Listener),
 	}
 
 	if err := m.loadExistingListeners(); err != nil {
@@ -63,13 +63,19 @@ func NewManager(db *sql.DB) *Manager {
 }
 
 func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener, error) {
-	return m.CreateWithPipe(name, protocol, port, ip, "")
+	return m.CreateWithProfiles(name, protocol, port, ip, "", "default-get", "default-post", "default-response")
 }
 
-// CreateWithPipe creates a listener with optional pipe name for SMB listeners
+// CreateWithPipe creates a listener with optional pipe name (uses default profiles)
 func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pipeName string) (*Listener, error) {
-	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s",
-		name, protocol, port, ip, pipeName)
+	return m.CreateWithProfiles(name, protocol, port, ip, pipeName, "default-get", "default-post", "default-response")
+}
+
+// CreateWithProfiles creates a listener with optional pipe name and bound profiles
+func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string, pipeName string,
+	getProfile, postProfile, serverResponseProfile string) (*Listener, error) {
+	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s, Profiles: GET=%s POST=%s Response=%s",
+		name, protocol, port, ip, pipeName, getProfile, postProfile, serverResponseProfile)
 
 	// Normalize protocol to uppercase
 	protocol = strings.ToUpper(protocol)
@@ -94,10 +100,21 @@ func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pip
 			return nil, err
 		}
 	} else {
-		if err := m.checkAvailability(name, port); err != nil {
+		if err := m.checkAvailability(name, port, protocol); err != nil {
 			log.Printf("Resource check failed: %v", err)
 			return nil, err
 		}
+	}
+
+	// Set default profile names if not provided
+	if getProfile == "" {
+		getProfile = "default-get"
+	}
+	if postProfile == "" {
+		postProfile = "default-post"
+	}
+	if serverResponseProfile == "" {
+		serverResponseProfile = "default-response"
 	}
 
 	m.mu.Lock()
@@ -105,13 +122,16 @@ func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pip
 
 	listenerID := uuid.New()
 	l := &Listener{
-		ID:       listenerID,
-		Name:     name,
-		Protocol: protocol,
-		Port:     port,
-		IP:       ip,
-		PipeName: pipeName,
-		Created:  time.Now(),
+		ID:                    listenerID,
+		Name:                  name,
+		Protocol:              protocol,
+		Port:                  port,
+		IP:                    ip,
+		PipeName:              pipeName,
+		GetProfile:            getProfile,
+		PostProfile:           postProfile,
+		ServerResponseProfile: serverResponseProfile,
+		Created:               time.Now(),
 	}
 
 	// For SMB, use port 0 to indicate no port binding
@@ -135,7 +155,7 @@ func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pip
 	m.listeners[l.ID] = l
 	m.ListenersByName[l.Name] = l
 	if l.Port > 0 {
-		m.listenersByPort[l.Port] = l
+		m.listenersByPort[l.Port] = append(m.listenersByPort[l.Port], l)
 	}
 
 	return l, nil
@@ -197,7 +217,7 @@ func (m *Manager) validateInput(name, protocol string, port int, ip string) erro
 	return nil
 }
 
-func (m *Manager) checkAvailability(name string, port int) error {
+func (m *Manager) checkAvailability(name string, port int, protocol string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -209,12 +229,19 @@ func (m *Manager) checkAvailability(name string, port int) error {
 		}
 	}
 
-	// Check if port is already in use
-	if _, exists := m.listenersByPort[port]; exists {
-		return &ValidationError{
-			Field:   "port",
-			Message: fmt.Sprintf("port %d already in use", port),
+	// Check if port is already in use by a listener with a different protocol
+	// We allow multiple listeners on the same port if they use the same protocol
+	// (HTTP with HTTP, HTTPS with HTTPS) - the actual path conflict detection
+	// happens at the agent handler level when starting the listener
+	if existingListeners, exists := m.listenersByPort[port]; exists && len(existingListeners) > 0 {
+		existingProtocol := existingListeners[0].Protocol
+		if existingProtocol != protocol {
+			return &ValidationError{
+				Field:   "port",
+				Message: fmt.Sprintf("port %d already in use by %s listener (cannot mix protocols)", port, existingProtocol),
+			}
 		}
+		log.Printf("Port %d already has %d %s listener(s), allowing shared port", port, len(existingListeners), protocol)
 	}
 
 	return nil
@@ -305,7 +332,11 @@ func isValidIP(ip string) bool {
 func (m *Manager) loadExistingListeners() error {
 	log.Println("Loading existing listeners from database...")
 
-	rows, err := m.db.Query("SELECT id, name, protocol, port, ip, COALESCE(pipe_name, '') FROM listeners")
+	rows, err := m.db.Query(`SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
+		COALESCE(get_profile, 'default-get'),
+		COALESCE(post_profile, 'default-post'),
+		COALESCE(server_response_profile, 'default-response')
+		FROM listeners`)
 	if err != nil {
 		log.Printf("Error querying listeners: %v", err)
 		return err
@@ -316,7 +347,8 @@ func (m *Manager) loadExistingListeners() error {
 	for rows.Next() {
 		var l Listener
 		var idStr string
-		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName); err != nil {
+		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile); err != nil {
 			log.Printf("Error scanning listener row: %v", err)
 			return err
 		}
@@ -333,12 +365,12 @@ func (m *Manager) loadExistingListeners() error {
 		m.ListenersByName[l.Name] = &l
 		// Only add to port map if port > 0 (SMB listeners have port 0)
 		if l.Port > 0 {
-			m.listenersByPort[l.Port] = &l
+			m.listenersByPort[l.Port] = append(m.listenersByPort[l.Port], &l)
 		}
 
 		count++
-		log.Printf("Loaded listener: ID=%s, Name=%s, Protocol=%s, Port=%d, IP=%s, PipeName=%s",
-			l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName)
+		log.Printf("Loaded listener: ID=%s, Name=%s, Protocol=%s, Port=%d, IP=%s, PipeName=%s, Profiles: GET=%s POST=%s Response=%s",
+			l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile)
 	}
 
 	log.Printf("Successfully loaded %d listeners from database", count)
@@ -394,7 +426,23 @@ func (m *Manager) DeleteByName(name string) error {
 	log.Printf("Removing listener from memory maps")
 	delete(m.listeners, listener.ID)
 	delete(m.ListenersByName, listener.Name)
-	delete(m.listenersByPort, listener.Port)
+
+	// Remove from port list (filter out this listener)
+	if listener.Port > 0 {
+		if portListeners, exists := m.listenersByPort[listener.Port]; exists {
+			newList := make([]*Listener, 0, len(portListeners)-1)
+			for _, l := range portListeners {
+				if l.ID != listener.ID {
+					newList = append(newList, l)
+				}
+			}
+			if len(newList) > 0 {
+				m.listenersByPort[listener.Port] = newList
+			} else {
+				delete(m.listenersByPort, listener.Port)
+			}
+		}
+	}
 
 	// Log final state
 	log.Printf("Deletion complete - New state - Total listeners: %d", len(m.listeners))
@@ -448,6 +496,44 @@ func (lm *Manager) IsPortInUse(port int) bool {
 	return false
 }
 
+// CanSharePort checks if a new listener can share a port with existing listeners
+// Returns true if the port is free OR if it's already used by listeners with matching protocol
+// Returns false if the port is used by an external process OR by a listener with different protocol
+func (lm *Manager) CanSharePort(port int, protocol string) bool {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	// Check if we already have listeners on this port
+	existingListeners := lm.listenersByPort[port]
+	if len(existingListeners) > 0 {
+		// Port is managed by us - check if protocols match
+		existingProtocol := existingListeners[0].Protocol
+		if existingProtocol == protocol {
+			log.Printf("[CanSharePort] Port %d already has %s listeners, allowing shared port", port, protocol)
+			return true
+		}
+		log.Printf("[CanSharePort] Port %d in use by %s listener, cannot add %s listener", port, existingProtocol, protocol)
+		return false
+	}
+
+	// Port not managed by us - check if it's available for binding
+	// For privileged ports, defer to agent-handler
+	if port < 1024 {
+		log.Printf("[CanSharePort] Skipping bind test for privileged port %d (agent-handler will handle bind)", port)
+		return true
+	}
+
+	// Try to bind to see if port is externally in use
+	addr := fmt.Sprintf(":%d", port)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("[CanSharePort] Port %d appears to be in use externally: %v", port, err)
+		return false
+	}
+	l.Close()
+	return true
+}
+
 func withRetry(op func() error, maxRetries int, backoff time.Duration) error {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
@@ -476,9 +562,9 @@ func (m *Manager) saveToDB(l *Listener) error {
 		defer tx.Rollback()
 
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name)
-            VALUES ($1, $2, $3, $4, $5, $6)
-        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName); err != nil {
+            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile); err != nil {
 			return fmt.Errorf("failed to insert listener: %v", err)
 		}
 

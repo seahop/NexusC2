@@ -18,6 +18,7 @@ func (h *WSHandler) handleCreatePayload(client *hub.Client, message []byte) erro
 
 	// Send an acknowledgment to the client that the payload request has been received
 	response := Response{
+		Type:    "payload_status",
 		Status:  "in_progress",
 		Message: "Payload creation in progress",
 	}

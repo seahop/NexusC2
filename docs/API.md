@@ -563,7 +563,10 @@ List all configured listeners.
       "protocol": "HTTPS",
       "port": "443",
       "ip": "0.0.0.0",
-      "pipe_name": ""
+      "pipe_name": "",
+      "get_profile": "microsoft-graph-get",
+      "post_profile": "microsoft-graph-post",
+      "server_response_profile": "microsoft-graph-response"
     },
     {
       "id": "660e8400-e29b-41d4-a716-446655440001",
@@ -571,7 +574,10 @@ List all configured listeners.
       "protocol": "SMB",
       "port": "",
       "ip": "",
-      "pipe_name": "spoolss"
+      "pipe_name": "spoolss",
+      "get_profile": "default-get",
+      "post_profile": "default-post",
+      "server_response_profile": "default-response"
     }
   ]
 }
@@ -596,7 +602,10 @@ Get a specific listener by name.
   "protocol": "HTTPS",
   "port": "443",
   "ip": "0.0.0.0",
-  "pipe_name": ""
+  "pipe_name": "",
+  "get_profile": "microsoft-graph-get",
+  "post_profile": "microsoft-graph-post",
+  "server_response_profile": "microsoft-graph-response"
 }
 ```
 
@@ -607,28 +616,44 @@ Get a specific listener by name.
 
 #### POST /api/v1/listeners
 
-Create a new listener.
+Create a new listener with optional malleable profile bindings.
 
 **Authentication:** Required
 
 **Request Body:**
 ```json
 {
-  "name": "string",        // Required: Unique listener name
-  "protocol": "string",    // Required: "HTTP", "HTTPS", "SMB", or "RPC"
-  "port": 443,             // Required for HTTP/HTTPS: Port number (1-65535)
-  "ip": "string",          // Optional: Bind IP (default: "0.0.0.0")
-  "pipe_name": "string"    // Required for SMB: Named pipe name
+  "name": "string",                    // Required: Unique listener name
+  "protocol": "string",                // Required: "HTTP", "HTTPS", "SMB", or "RPC"
+  "port": 443,                         // Required for HTTP/HTTPS: Port number (1-65535)
+  "ip": "string",                      // Optional: Bind IP (default: "0.0.0.0")
+  "pipe_name": "string",               // Required for SMB: Named pipe name
+  "get_profile": "string",             // Optional: GET malleable profile name (default: "default-get")
+  "post_profile": "string",            // Optional: POST malleable profile name (default: "default-post")
+  "server_response_profile": "string"  // Optional: Server response profile name (default: "default-response")
 }
 ```
 
-**Example (HTTPS):**
+**Example (HTTPS with default profiles):**
 ```json
 {
   "name": "https-listener",
   "protocol": "HTTPS",
   "port": 443,
   "ip": "0.0.0.0"
+}
+```
+
+**Example (HTTPS with Microsoft Graph profiles):**
+```json
+{
+  "name": "ms-graph-listener",
+  "protocol": "HTTPS",
+  "port": 443,
+  "ip": "0.0.0.0",
+  "get_profile": "microsoft-graph-get",
+  "post_profile": "microsoft-graph-post",
+  "server_response_profile": "microsoft-graph-response"
 }
 ```
 
@@ -647,17 +672,20 @@ Create a new listener.
   "message": "listener created successfully",
   "listener": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "https-listener",
+    "name": "ms-graph-listener",
     "protocol": "HTTPS",
     "port": "443",
     "ip": "0.0.0.0",
-    "pipe_name": ""
+    "pipe_name": "",
+    "get_profile": "microsoft-graph-get",
+    "post_profile": "microsoft-graph-post",
+    "server_response_profile": "microsoft-graph-response"
   }
 }
 ```
 
 **Errors:**
-- `400 Bad Request`: Invalid protocol, port, or missing required fields
+- `400 Bad Request`: Invalid protocol, port, missing required fields, or unknown profile name
 
 ---
 
@@ -679,6 +707,256 @@ Delete a listener.
 
 **Errors:**
 - `404 Not Found`: Listener not found
+
+---
+
+### Malleable Profiles
+
+Malleable profiles define HTTP request/response patterns for agent communication. Profiles are defined in `config.toml` and can be bound to listeners at creation time.
+
+#### GET /api/v1/profiles
+
+List all available malleable profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "get_profiles": [
+    {
+      "name": "default-get",
+      "path": "/api/v1/status",
+      "method": "GET"
+    },
+    {
+      "name": "microsoft-graph-get",
+      "path": "/v1.0/me/drive/root/children",
+      "method": "GET"
+    }
+  ],
+  "post_profiles": [
+    {
+      "name": "default-post",
+      "path": "/api/v1/data",
+      "method": "POST"
+    },
+    {
+      "name": "microsoft-graph-post",
+      "path": "/v1.0/me/drive/items",
+      "method": "PUT"
+    }
+  ],
+  "server_response_profiles": [
+    {
+      "name": "default-response",
+      "content_type": "application/json"
+    },
+    {
+      "name": "microsoft-graph-response",
+      "content_type": "application/json; odata.metadata=minimal"
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/get
+
+List all GET request profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-get",
+      "path": "/api/v1/status",
+      "method": "GET",
+      "headers": [
+        {"name": "Accept", "value": "application/json"}
+      ],
+      "params": [
+        {"name": "client", "location": "query", "type": "clientID_param", "format": "%CLIENTID%"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-get",
+      "path": "/v1.0/me/drive/root/children",
+      "method": "GET",
+      "headers": [
+        {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+      ],
+      "params": [
+        {"name": "Authorization", "location": "header", "type": "clientID_param", "format": "Bearer %CLIENTID%"}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/get/:name
+
+Get a specific GET profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-get",
+  "path": "/v1.0/me/drive/root/children",
+  "method": "GET",
+  "headers": [
+    {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+  ],
+  "params": [
+    {"name": "Authorization", "location": "header", "type": "clientID_param", "format": "Bearer %CLIENTID%"}
+  ]
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/post
+
+List all POST request profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-post",
+      "path": "/api/v1/data",
+      "method": "POST",
+      "content_type": "application/json",
+      "headers": [],
+      "params": [
+        {"name": "client", "location": "query", "type": "clientID_param", "format": "%CLIENTID%"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-post",
+      "path": "/v1.0/me/drive/items",
+      "method": "PUT",
+      "content_type": "application/json",
+      "headers": [
+        {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+      ],
+      "params": []
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/post/:name
+
+Get a specific POST profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-post",
+  "path": "/v1.0/me/drive/items",
+  "method": "PUT",
+  "content_type": "application/json",
+  "headers": [
+    {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+  ],
+  "params": []
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/server-response
+
+List all server response profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-response",
+      "content_type": "application/json",
+      "status_field": "status",
+      "data_field": "data",
+      "command_id_field": "id",
+      "rekey_value": "refresh",
+      "headers": [
+        {"name": "Cache-Control", "value": "no-store"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-response",
+      "content_type": "application/json; odata.metadata=minimal",
+      "status_field": "@odata.context",
+      "data_field": "value",
+      "command_id_field": "@odata.nextLink",
+      "rekey_value": "TokenExpired",
+      "headers": [
+        {"name": "x-ms-ags-diagnostic", "value": "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/server-response/:name
+
+Get a specific server response profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-response",
+  "content_type": "application/json; odata.metadata=minimal",
+  "status_field": "@odata.context",
+  "data_field": "value",
+  "command_id_field": "@odata.nextLink",
+  "rekey_value": "TokenExpired",
+  "headers": [
+    {"name": "x-ms-ags-diagnostic", "value": "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"}
+  ]
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
 
 ---
 

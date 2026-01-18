@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/hub"
 	"c2/internal/websocket/reconnect"
@@ -25,6 +26,7 @@ type WSHandler struct {
 	hub           *hub.Hub
 	db            *sql.DB
 	agentClient   *agent.Client // Persistent gRPC client
+	agentConfig   *config.AgentConfig // Agent configuration for malleable profiles
 	mu            sync.Mutex
 	activeUploads sync.Map
 	// Worker pool for processing large messages
@@ -40,7 +42,7 @@ type WSHandler struct {
 }
 
 // NewWSHandler creates a new WebSocket handler
-func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client) (*WSHandler, error) {
+func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*WSHandler, error) {
 	// Dynamic worker pool configuration
 	minWorkers := 3
 	maxWorkers := runtime.NumCPU() * 2
@@ -52,6 +54,7 @@ func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client) (*WSHandler
 		hub:            h,
 		db:             db,
 		agentClient:    agentClient,
+		agentConfig:    agentCfg,
 		resultWorkers:  make(chan messageJob, 100), // Buffer up to 100 jobs
 		minWorkers:     minWorkers,
 		maxWorkers:     maxWorkers,

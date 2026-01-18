@@ -27,6 +27,9 @@ message ListenerRequest {
   ListenerType type = 3;
   bool secure = 4;
   string bind_ip = 5;
+  string get_profile = 6;
+  string post_profile = 7;
+  string server_response_profile = 8;
 }
 
 message ListenerResponse {

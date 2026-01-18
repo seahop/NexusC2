@@ -21,28 +21,41 @@ func (h *WSHandler) StartExistingListeners() error {
 	}
 
 	log.Println("Checking for existing listeners in the database...")
-	rows, err := h.db.Query("SELECT name, protocol, port, ip FROM listeners")
+	rows, err := h.db.Query(`
+		SELECT name, protocol, port, ip,
+			COALESCE(get_profile, 'default-get'),
+			COALESCE(post_profile, 'default-post'),
+			COALESCE(server_response_profile, 'default-response')
+		FROM listeners
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to query existing listeners: %v", err)
 	}
 	defer rows.Close()
 
 	var listeners []struct {
-		name     string
-		protocol string
-		port     int
-		bindIP   string
+		name                  string
+		protocol              string
+		port                  int
+		bindIP                string
+		getProfile            string
+		postProfile           string
+		serverResponseProfile string
 	}
 
 	// First collect all listeners
 	for rows.Next() {
 		var l struct {
-			name     string
-			protocol string
-			port     int
-			bindIP   string
+			name                  string
+			protocol              string
+			port                  int
+			bindIP                string
+			getProfile            string
+			postProfile           string
+			serverResponseProfile string
 		}
-		if err := rows.Scan(&l.name, &l.protocol, &l.port, &l.bindIP); err != nil {
+		if err := rows.Scan(&l.name, &l.protocol, &l.port, &l.bindIP,
+			&l.getProfile, &l.postProfile, &l.serverResponseProfile); err != nil {
 			logMessage(LOG_NORMAL, "Failed to scan listener row: %v", err)
 			continue
 		}
@@ -73,11 +86,12 @@ func (h *WSHandler) StartExistingListeners() error {
 
 		// Try with retries
 		for attempt := 0; attempt < maxRetries; attempt++ {
-			logMessage(LOG_NORMAL, "Attempting to start existing listener: %s on %s:%d (attempt %d/%d)",
-				l.name, l.bindIP, l.port, attempt+1, maxRetries)
+			logMessage(LOG_NORMAL, "Attempting to start existing listener: %s on %s:%d (attempt %d/%d), profiles: GET=%s POST=%s Response=%s",
+				l.name, l.bindIP, l.port, attempt+1, maxRetries, l.getProfile, l.postProfile, l.serverResponseProfile)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			resp, err := h.agentClient.StartListener(ctx, l.name, int32(l.port), listenerType, false)
+			resp, err := h.agentClient.StartListener(ctx, l.name, int32(l.port), listenerType, false,
+				l.getProfile, l.postProfile, l.serverResponseProfile)
 			cancel()
 
 			if err == nil && resp.Success {
@@ -195,6 +209,7 @@ func (h *WSHandler) handleDeleteListener(client *hub.Client, message []byte) err
 	if err := h.hub.ListenerManager.DeleteByName(listenerName); err != nil {
 		logMessage(LOG_NORMAL, "Failed to delete listener: %v", err)
 		response := Response{
+			Type:    "listener_delete",
 			Status:  "error",
 			Message: err.Error(),
 		}
@@ -205,6 +220,7 @@ func (h *WSHandler) handleDeleteListener(client *hub.Client, message []byte) err
 
 	// Send success response to requesting client
 	response := Response{
+		Type:    "listener_delete",
 		Status:  "success",
 		Message: "Listener deleted successfully",
 	}

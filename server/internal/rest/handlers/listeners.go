@@ -39,20 +39,26 @@ func (h *ListenerHandler) SetAgentClient(client *agent.Client) {
 }
 
 type Listener struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Protocol string `json:"protocol"`
-	Port     string `json:"port"`
-	IP       string `json:"ip"`
-	PipeName string `json:"pipe_name,omitempty"`
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	Protocol              string `json:"protocol"`
+	Port                  string `json:"port"`
+	IP                    string `json:"ip"`
+	PipeName              string `json:"pipe_name,omitempty"`
+	GetProfile            string `json:"get_profile"`
+	PostProfile           string `json:"post_profile"`
+	ServerResponseProfile string `json:"server_response_profile"`
 }
 
 type CreateListenerRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Protocol string `json:"protocol" binding:"required"`
-	Port     int    `json:"port"`
-	IP       string `json:"ip"`
-	PipeName string `json:"pipe_name,omitempty"`
+	Name                  string `json:"name" binding:"required"`
+	Protocol              string `json:"protocol" binding:"required"`
+	Port                  int    `json:"port"`
+	IP                    string `json:"ip"`
+	PipeName              string `json:"pipe_name,omitempty"`
+	GetProfile            string `json:"get_profile,omitempty"`
+	PostProfile           string `json:"post_profile,omitempty"`
+	ServerResponseProfile string `json:"server_response,omitempty"`
 }
 
 // ListListeners returns all configured listeners
@@ -62,7 +68,10 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 	defer cancel()
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, '')
+		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
+		       COALESCE(get_profile, 'default-get'),
+		       COALESCE(post_profile, 'default-post'),
+		       COALESCE(server_response_profile, 'default-response')
 		FROM listeners
 		ORDER BY name
 	`)
@@ -75,7 +84,8 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 	listeners := make([]Listener, 0)
 	for rows.Next() {
 		var l Listener
-		if err := rows.Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName); err == nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile); err == nil {
 			listeners = append(listeners, l)
 		}
 	}
@@ -92,9 +102,13 @@ func (h *ListenerHandler) GetListener(c *gin.Context) {
 
 	var l Listener
 	err := h.db.QueryRowContext(ctx, `
-		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, '')
+		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
+		       COALESCE(get_profile, 'default-get'),
+		       COALESCE(post_profile, 'default-post'),
+		       COALESCE(server_response_profile, 'default-response')
 		FROM listeners WHERE name = $1
-	`, name).Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName)
+	`, name).Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
+		&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile)
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
@@ -150,8 +164,20 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		req.IP = ""
 	}
 
-	// Create via listener manager
-	listener, err := h.listenerManager.CreateWithPipe(req.Name, protocol, req.Port, req.IP, req.PipeName)
+	// Set default profile names if not provided
+	if req.GetProfile == "" {
+		req.GetProfile = "default-get"
+	}
+	if req.PostProfile == "" {
+		req.PostProfile = "default-post"
+	}
+	if req.ServerResponseProfile == "" {
+		req.ServerResponseProfile = "default-response"
+	}
+
+	// Create via listener manager with profiles
+	listener, err := h.listenerManager.CreateWithProfiles(req.Name, protocol, req.Port, req.IP, req.PipeName,
+		req.GetProfile, req.PostProfile, req.ServerResponseProfile)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -162,7 +188,8 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		listenerType := parseListenerType(protocol)
 		secure := protocol == "HTTPS"
 
-		resp, err := h.agentClient.StartListener(ctx, req.Name, int32(req.Port), listenerType, secure)
+		resp, err := h.agentClient.StartListener(ctx, req.Name, int32(req.Port), listenerType, secure,
+			req.GetProfile, req.PostProfile, req.ServerResponseProfile)
 		if err != nil {
 			// Rollback the database entry
 			h.listenerManager.DeleteByName(req.Name)
@@ -178,12 +205,15 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 	}
 
 	createdListener := Listener{
-		ID:       listener.ID.String(),
-		Name:     listener.Name,
-		Protocol: listener.Protocol,
-		Port:     strconv.Itoa(listener.Port),
-		IP:       listener.IP,
-		PipeName: listener.PipeName,
+		ID:                    listener.ID.String(),
+		Name:                  listener.Name,
+		Protocol:              listener.Protocol,
+		Port:                  strconv.Itoa(listener.Port),
+		IP:                    listener.IP,
+		PipeName:              listener.PipeName,
+		GetProfile:            listener.GetProfile,
+		PostProfile:           listener.PostProfile,
+		ServerResponseProfile: listener.ServerResponseProfile,
 	}
 
 	// Broadcast listener creation via SSE

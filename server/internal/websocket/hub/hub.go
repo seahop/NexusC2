@@ -18,11 +18,14 @@ import (
 type ListenerMessage struct {
 	Type string `json:"type"`
 	Data struct {
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
-		Port     int    `json:"port"`
-		Host     string `json:"host"`
-		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
+		Name                  string `json:"name"`
+		Protocol              string `json:"protocol"`
+		Port                  int    `json:"port"`
+		Host                  string `json:"host"`
+		PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
+		GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
+		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
+		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
 	} `json:"data"`
 }
 
@@ -30,12 +33,15 @@ type ListenerResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	Data    struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
-		Port     string `json:"port"`
-		IP       string `json:"ip"`
-		PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
+		ID                    string `json:"id"`
+		Name                  string `json:"name"`
+		Protocol              string `json:"protocol"`
+		Port                  string `json:"port"`
+		IP                    string `json:"ip"`
+		PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
+		GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
+		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
+		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
 	} `json:"data,omitempty"`
 }
 

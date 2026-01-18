@@ -59,13 +59,21 @@ func (e *DBOperationError) Error() string {
 	return fmt.Sprintf("database operation '%s' failed: %v", e.Operation, e.Err)
 }
 
+// AvailableProfiles represents the available profiles for listener configuration
+type AvailableProfiles struct {
+	Get            []string `json:"get"`
+	Post           []string `json:"post"`
+	ServerResponse []string `json:"server_response"`
+}
+
 // StateExport represents the complete state export
 type StateExport struct {
-	Connections    []Connection     `json:"connections"`
-	Commands       []Command        `json:"commands"`
-	CommandOutputs []CommandOutput  `json:"command_outputs"`
-	Listeners      []Listener       `json:"listeners"`
-	AgentTags      map[string][]Tag `json:"agent_tags"` // Map of agent_guid -> tags
+	Connections       []Connection       `json:"connections"`
+	Commands          []Command          `json:"commands"`
+	CommandOutputs    []CommandOutput    `json:"command_outputs"`
+	Listeners         []Listener         `json:"listeners"`
+	AgentTags         map[string][]Tag   `json:"agent_tags"`         // Map of agent_guid -> tags
+	AvailableProfiles *AvailableProfiles `json:"available_profiles"` // Available malleable profiles
 }
 
 // Connection represents a connection record
@@ -111,12 +119,15 @@ type CommandOutput struct {
 
 // Listener represents a listener configuration
 type Listener struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Protocol string `json:"protocol"`
-	Port     string `json:"port"`
-	IP       string `json:"ip"`
-	PipeName string `json:"pipe_name,omitempty"` // For SMB listeners
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	Protocol              string `json:"protocol"`
+	Port                  string `json:"port"`
+	IP                    string `json:"ip"`
+	PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
+	GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
+	PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
+	ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
 }
 
 // messageJob represents a message processing job

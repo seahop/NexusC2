@@ -70,7 +70,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-	log.Println("Configuration loaded successfully")
+	log.Println("REST API configuration loaded successfully")
+
+	// Load agent configuration (for malleable profiles)
+	log.Println("Loading agent configuration for malleable profiles...")
+	agentCfg, err := config.LoadAgentConfig()
+	if err != nil {
+		log.Printf("Warning: Failed to load agent config (profiles will be unavailable): %v", err)
+		agentCfg = nil // Allow REST API to start without profiles
+	} else {
+		log.Printf("Agent configuration loaded - %d GET profiles, %d POST profiles, %d server response profiles",
+			len(agentCfg.HTTPProfiles.Get),
+			len(agentCfg.HTTPProfiles.Post),
+			len(agentCfg.HTTPProfiles.ServerResponse))
+	}
 
 	// Connect to database
 	log.Println("Connecting to database...")
@@ -99,7 +112,7 @@ func main() {
 
 	// Create server
 	log.Println("Creating REST API server...")
-	srv, err := server.NewServer(cfg, db)
+	srv, err := server.NewServer(cfg, agentCfg, db)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

@@ -341,31 +341,36 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		log.Printf("Failed to unmarshal listener message: %v", err)
 		return err
 	}
-	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s",
-		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName)
+	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s",
+		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName,
+		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile)
 
 	// Check if this is an SMB listener - handle specially
 	isSMB := msg.Data.Protocol == "SMB" || msg.Data.Protocol == "smb"
 
 	// Only check port availability for non-SMB listeners
-	if !isSMB && h.ListenerManager.IsPortInUse(msg.Data.Port) {
-		log.Printf("Port %d is already in use", msg.Data.Port)
+	// Use CanSharePort to allow multiple listeners on same port with matching protocol
+	if !isSMB && !h.ListenerManager.CanSharePort(msg.Data.Port, msg.Data.Protocol) {
+		log.Printf("Port %d cannot be used for %s listener", msg.Data.Port, msg.Data.Protocol)
 		response := ListenerResponse{
 			Status:  "error",
-			Message: fmt.Sprintf("Port %d is already in use", msg.Data.Port),
+			Message: fmt.Sprintf("Port %d is not available for %s listener", msg.Data.Port, msg.Data.Protocol),
 		}
 		responseJSON, _ := json.Marshal(response)
 		client.Send <- responseJSON
-		return fmt.Errorf("port %d is already in use", msg.Data.Port)
+		return fmt.Errorf("port %d is not available for %s listener", msg.Data.Port, msg.Data.Protocol)
 	}
 
-	// Use CreateWithPipe to support SMB listeners with pipe names
-	l, err := h.ListenerManager.CreateWithPipe(
+	// Use CreateWithProfiles to support profile bindings
+	l, err := h.ListenerManager.CreateWithProfiles(
 		msg.Data.Name,
 		msg.Data.Protocol,
 		msg.Data.Port,
 		msg.Data.Host,
 		msg.Data.PipeName,
+		msg.Data.GetProfile,
+		msg.Data.PostProfile,
+		msg.Data.ServerResponseProfile,
 	)
 	if err != nil {
 		log.Printf("Listener creation failed: %v", err)
@@ -402,7 +407,8 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		defer cancel()
 
 		listenerType := agentClient.GetListenerType(msg.Data.Protocol)
-		resp, err := agentClient.StartListener(ctx, msg.Data.Name, int32(msg.Data.Port), listenerType, false)
+		resp, err := agentClient.StartListener(ctx, msg.Data.Name, int32(msg.Data.Port), listenerType, false,
+			msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile)
 		if err != nil {
 			log.Printf("gRPC StartListener failed: %v", err)
 			response := ListenerResponse{
@@ -436,12 +442,15 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		Data struct {
 			Event    string `json:"event"`
 			Listener struct {
-				ID       string `json:"id"`
-				Name     string `json:"name"`
-				Protocol string `json:"protocol"`
-				Port     int    `json:"port"`
-				IP       string `json:"ip"`
-				PipeName string `json:"pipe_name,omitempty"`
+				ID                    string `json:"id"`
+				Name                  string `json:"name"`
+				Protocol              string `json:"protocol"`
+				Port                  int    `json:"port"`
+				IP                    string `json:"ip"`
+				PipeName              string `json:"pipe_name,omitempty"`
+				GetProfile            string `json:"get_profile,omitempty"`
+				PostProfile           string `json:"post_profile,omitempty"`
+				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 			} `json:"listener"`
 		} `json:"data"`
 	}{
@@ -449,29 +458,38 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		Data: struct {
 			Event    string `json:"event"`
 			Listener struct {
-				ID       string `json:"id"`
-				Name     string `json:"name"`
-				Protocol string `json:"protocol"`
-				Port     int    `json:"port"`
-				IP       string `json:"ip"`
-				PipeName string `json:"pipe_name,omitempty"`
+				ID                    string `json:"id"`
+				Name                  string `json:"name"`
+				Protocol              string `json:"protocol"`
+				Port                  int    `json:"port"`
+				IP                    string `json:"ip"`
+				PipeName              string `json:"pipe_name,omitempty"`
+				GetProfile            string `json:"get_profile,omitempty"`
+				PostProfile           string `json:"post_profile,omitempty"`
+				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 			} `json:"listener"`
 		}{
 			Event: "created",
 			Listener: struct {
-				ID       string `json:"id"`
-				Name     string `json:"name"`
-				Protocol string `json:"protocol"`
-				Port     int    `json:"port"`
-				IP       string `json:"ip"`
-				PipeName string `json:"pipe_name,omitempty"`
+				ID                    string `json:"id"`
+				Name                  string `json:"name"`
+				Protocol              string `json:"protocol"`
+				Port                  int    `json:"port"`
+				IP                    string `json:"ip"`
+				PipeName              string `json:"pipe_name,omitempty"`
+				GetProfile            string `json:"get_profile,omitempty"`
+				PostProfile           string `json:"post_profile,omitempty"`
+				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 			}{
-				ID:       l.ID.String(),
-				Name:     l.Name,
-				Protocol: l.Protocol,
-				Port:     l.Port,
-				IP:       l.IP,
-				PipeName: l.PipeName,
+				ID:                    l.ID.String(),
+				Name:                  l.Name,
+				Protocol:              l.Protocol,
+				Port:                  l.Port,
+				IP:                    l.IP,
+				PipeName:              l.PipeName,
+				GetProfile:            l.GetProfile,
+				PostProfile:           l.PostProfile,
+				ServerResponseProfile: l.ServerResponseProfile,
 			},
 		},
 	}
@@ -488,19 +506,25 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		Status:  "success",
 		Message: "Listener created successfully",
 		Data: struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Protocol string `json:"protocol"`
-			Port     string `json:"port"`
-			IP       string `json:"ip"`
-			PipeName string `json:"pipe_name,omitempty"`
+			ID                    string `json:"id"`
+			Name                  string `json:"name"`
+			Protocol              string `json:"protocol"`
+			Port                  string `json:"port"`
+			IP                    string `json:"ip"`
+			PipeName              string `json:"pipe_name,omitempty"`
+			GetProfile            string `json:"get_profile,omitempty"`
+			PostProfile           string `json:"post_profile,omitempty"`
+			ServerResponseProfile string `json:"server_response_profile,omitempty"`
 		}{
-			ID:       l.ID.String(),
-			Name:     l.Name,
-			Protocol: l.Protocol,
-			Port:     fmt.Sprintf("%d", l.Port),
-			IP:       l.IP,
-			PipeName: l.PipeName,
+			ID:                    l.ID.String(),
+			Name:                  l.Name,
+			Protocol:              l.Protocol,
+			Port:                  fmt.Sprintf("%d", l.Port),
+			IP:                    l.IP,
+			PipeName:              l.PipeName,
+			GetProfile:            l.GetProfile,
+			PostProfile:           l.PostProfile,
+			ServerResponseProfile: l.ServerResponseProfile,
 		},
 	}
 

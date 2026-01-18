@@ -3,6 +3,14 @@ port = "3131"
 cert_file = "/app/certs/ws_server.crt"
 key_file = "/app/certs/ws_server.key"
 
+[web_server]
+cert_file = "/app/certs/web_server.crt"
+key_file = "/app/certs/web_server.key"
+
+[rpc_server]
+cert_file = "/app/certs/rpc_server.crt"
+key_file = "/app/certs/rpc_server.key"
+
 # =============================================================================
 # REST API CONFIGURATION
 # =============================================================================
@@ -28,51 +36,14 @@ allowed_origins = ["*"]
 # URL CONFIGURATION
 # =============================================================================
 
-[web_server]
-cert_file = "/app/certs/web_server.crt"
-key_file = "/app/certs/web_server.key"
-
-[rpc_server]
-cert_file = "/app/certs/rpc_server.crt"
-key_file = "/app/certs/rpc_server.key"
-
 [redirect_site]
 url = "https://google.com"
 
-# GET-type handler with custom method PUT
-[[http_routes.get_handlers]]
-path = "/api/v1/myget"
-method = "PUT"  # Custom HTTP verb - defaults to "GET" if not specified
-enabled = true
-auth_required = true
-[[http_routes.get_handlers.params]]
-name = "client"
-type = "clientID_param"
-format = "%CLIENTID%"
-
-# POST-type handler with custom method BLAH
-[[http_routes.post_handlers]]
-path = "/api/v1/mypost"
-method = "BLAH"  # Custom HTTP verb - defaults to "POST" if not specified
-enabled = true
-auth_required = true
-[[http_routes.post_handlers.params]]
-name = "client"
-type = "clientID_param"
-format = "%CLIENTID%"
-
-# You can add more handlers with different custom methods
-# [[http_routes.get_handlers]]
-# path = "/api/v1/status"
-# method = "HEAD"
-# enabled = true
-# auth_required = false
-
-# [[http_routes.post_handlers]]
-# path = "/api/v1/update"
-# method = "PATCH"
-# enabled = true
-# auth_required = true
+# =============================================================================
+# SERVER HEADERS - Global default headers applied to ALL listener responses
+# =============================================================================
+# These are base-layer security/identity headers applied to every response.
+# Profile-specific headers (from http_profiles.server_response) are applied on top.
 
 [server_headers]
 server = "nginx/1.18.0"
@@ -80,6 +51,144 @@ strict_transport_security = "max-age=31536000; includeSubDomains"
 x_frame_options = "DENY"
 x_content_type_options = "nosniff"
 
+# =============================================================================
+# HTTP PROFILES - Named profiles for malleable traffic patterns
+# =============================================================================
+# Define multiple GET, POST, and server response profiles
+# When creating a listener, bind specific profiles together
+# Payloads built for that listener will use the bound configuration
+
+# -----------------------------------------------------------------------------
+# GET PROFILES - Define how agents poll for commands
+# -----------------------------------------------------------------------------
+
+[[http_profiles.get]]
+name = "default-get"
+path = "/api/v1/status"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+[[http_profiles.get.params]]
+name = "client"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.get]]
+name = "microsoft-graph-get"
+path = "/v1.0/me/drive/root/children"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Authorization"
+value = "Bearer %CLIENTID%"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+[[http_profiles.get.params]]
+name = "Authorization"
+location = "header"
+type = "clientID_param"
+format = "Bearer %CLIENTID%"
+
+[[http_profiles.get]]
+name = "aws-s3-get"
+path = "/bucket/objects"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "x-amz-content-sha256"
+value = "UNSIGNED-PAYLOAD"
+[[http_profiles.get.params]]
+name = "continuation-token"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+# -----------------------------------------------------------------------------
+# POST PROFILES - Define how agents send results
+# -----------------------------------------------------------------------------
+
+[[http_profiles.post]]
+name = "default-post"
+path = "/api/v1/data"
+method = "POST"
+content_type = "application/json"
+[[http_profiles.post.headers]]
+name = "Content-Type"
+value = "application/json"
+[[http_profiles.post.params]]
+name = "client"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.post]]
+name = "microsoft-graph-post"
+path = "/v1.0/me/drive/items"
+method = "PUT"
+content_type = "application/json"
+[[http_profiles.post.headers]]
+name = "Authorization"
+value = "Bearer %CLIENTID%"
+[[http_profiles.post.headers]]
+name = "Content-Type"
+value = "application/json"
+[[http_profiles.post.params]]
+name = "Authorization"
+location = "header"
+type = "clientID_param"
+format = "Bearer %CLIENTID%"
+
+[[http_profiles.post]]
+name = "aws-s3-post"
+path = "/bucket/objects"
+method = "PUT"
+content_type = "application/octet-stream"
+[[http_profiles.post.headers]]
+name = "x-amz-date"
+value = "%TIMESTAMP%"
+[[http_profiles.post.params]]
+name = "x-amz-meta-id"
+location = "header"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+# -----------------------------------------------------------------------------
+# SERVER RESPONSE PROFILES - Define how server responds to agents
+# -----------------------------------------------------------------------------
+
+[[http_profiles.server_response]]
+name = "default-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "no-store"
+
+[[http_profiles.server_response]]
+name = "microsoft-graph-response"
+content_type = "application/json; odata.metadata=minimal"
+status_field = "@odata.context"
+data_field = "value"
+command_id_field = "@odata.nextLink"
+rekey_value = "TokenExpired"
+[[http_profiles.server_response.headers]]
+name = "x-ms-ags-diagnostic"
+value = "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"
+
+[[http_profiles.server_response]]
+name = "aws-s3-response"
+content_type = "application/xml"
+status_field = "Code"
+data_field = "Contents"
+command_id_field = "NextContinuationToken"
+rekey_value = "ExpiredToken"
+[[http_profiles.server_response.headers]]
+name = "x-amz-request-id"
+value = "%UUID%"
 
 # =============================================================================
 # PAYLOAD CONFIGURATION

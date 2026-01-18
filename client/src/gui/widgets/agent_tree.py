@@ -547,8 +547,9 @@ class AgentTreeWidget(QWidget):
         """Get agent data using the GUID - O(1) lookup with dictionary"""
         return self.agent_by_guid.get(guid, None)
 
-    def add_listener(self, name, protocol, host, port, pipe_name=""):
-        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}")
+    def add_listener(self, name, protocol, host, port, pipe_name="",
+                     get_profile="", post_profile="", server_response_profile=""):
+        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}, Profiles: GET={get_profile} POST={post_profile} Response={server_response_profile}")
 
         # Check for existing listener to avoid duplicates
         for listener in self.listener_data:
@@ -563,7 +564,10 @@ class AgentTreeWidget(QWidget):
                 'name': name,
                 'details': [
                     f'Protocol: {protocol}',
-                    f'Pipe: {pipe}'
+                    f'Pipe: {pipe}',
+                    f'GET Profile: {get_profile or "default-get"}',
+                    f'POST Profile: {post_profile or "default-post"}',
+                    f'Response Profile: {server_response_profile or "default-response"}'
                 ]
             }
         else:
@@ -572,7 +576,10 @@ class AgentTreeWidget(QWidget):
                 'details': [
                     f'Protocol: {protocol}',
                     f'Host: {host}',
-                    f'Port: {port}'
+                    f'Port: {port}',
+                    f'GET Profile: {get_profile or "default-get"}',
+                    f'POST Profile: {post_profile or "default-post"}',
+                    f'Response Profile: {server_response_profile or "default-response"}'
                 ]
             }
         self.listener_data.append(new_listener)
@@ -864,7 +871,8 @@ class AgentTreeWidget(QWidget):
                 # Load listeners first
                 print("\nAgentTreeWidget: Loading listeners from database")
                 cursor = conn.execute("""
-                    SELECT id, name, protocol, port, ip, pipe_name
+                    SELECT id, name, protocol, port, ip, pipe_name,
+                           get_profile, post_profile, server_response_profile
                     FROM listeners
                     ORDER BY name ASC
                 """)
@@ -874,6 +882,11 @@ class AgentTreeWidget(QWidget):
                 for row in listeners:
                     print(f"AgentTreeWidget: Processing listener {row[1]}")
                     protocol = row[2]
+                    # Get profile values with defaults
+                    get_profile = row[6] if len(row) > 6 and row[6] else "default-get"
+                    post_profile = row[7] if len(row) > 7 and row[7] else "default-post"
+                    response_profile = row[8] if len(row) > 8 and row[8] else "default-response"
+
                     # For SMB listeners, show pipe name instead of port/host
                     if protocol == "SMB":
                         pipe_name = row[5] if len(row) > 5 and row[5] else "spoolss"
@@ -881,7 +894,10 @@ class AgentTreeWidget(QWidget):
                             'name': row[1],
                             'details': [
                                 f'Protocol: {protocol}',
-                                f'Pipe: {pipe_name}'
+                                f'Pipe: {pipe_name}',
+                                f'GET Profile: {get_profile}',
+                                f'POST Profile: {post_profile}',
+                                f'Response Profile: {response_profile}'
                             ]
                         }
                     else:
@@ -890,7 +906,10 @@ class AgentTreeWidget(QWidget):
                             'details': [
                                 f'Protocol: {protocol}',
                                 f'Host: {row[4]}',
-                                f'Port: {row[3]}'
+                                f'Port: {row[3]}',
+                                f'GET Profile: {get_profile}',
+                                f'POST Profile: {post_profile}',
+                                f'Response Profile: {response_profile}'
                             ]
                         }
                     self.listener_data.append(listener)

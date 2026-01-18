@@ -2,6 +2,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget,
                            QTableWidgetItem, QHeaderView, QMenu, QMessageBox)
 from PyQt6.QtCore import Qt
+import asyncio
 import json
 
 
@@ -17,10 +18,13 @@ class ListenersWidget(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
 
-        # Create table widget
+        # Create table widget with profile columns
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['Name', 'Protocol', 'Host/Pipe', 'Port'])
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            'Name', 'Protocol', 'Host/Pipe', 'Port',
+            'GET Profile', 'POST Profile', 'Response Profile'
+        ])
 
         # Set table properties
         header = self.table.horizontalHeader()
@@ -28,6 +32,9 @@ class ListenersWidget(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
 
         # Enable context menu
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -60,6 +67,9 @@ class ListenersWidget(QWidget):
         host = ''
         port = ''
         pipe_name = ''
+        get_profile = ''
+        post_profile = ''
+        response_profile = ''
 
         for detail in listener.get('details', []):
             if detail.startswith('Protocol:'):
@@ -70,6 +80,12 @@ class ListenersWidget(QWidget):
                 port = detail.split(':', 1)[1].strip()
             elif detail.startswith('Pipe:'):
                 pipe_name = detail.split(':', 1)[1].strip()
+            elif detail.startswith('GET Profile:'):
+                get_profile = detail.split(':', 1)[1].strip()
+            elif detail.startswith('POST Profile:'):
+                post_profile = detail.split(':', 1)[1].strip()
+            elif detail.startswith('Response Profile:'):
+                response_profile = detail.split(':', 1)[1].strip()
 
         # For SMB listeners, show pipe name in Host/Pipe column
         host_or_pipe = pipe_name if protocol == 'SMB' else host
@@ -96,6 +112,16 @@ class ListenersWidget(QWidget):
         # Set Port (empty for SMB)
         port_item = QTableWidgetItem(port if protocol != 'SMB' else '-')
         self.table.setItem(row_position, 3, port_item)
+
+        # Set Profile columns
+        get_profile_item = QTableWidgetItem(get_profile or 'default-get')
+        self.table.setItem(row_position, 4, get_profile_item)
+
+        post_profile_item = QTableWidgetItem(post_profile or 'default-post')
+        self.table.setItem(row_position, 5, post_profile_item)
+
+        response_profile_item = QTableWidgetItem(response_profile or 'default-response')
+        self.table.setItem(row_position, 6, response_profile_item)
 
     def show_context_menu(self, position):
         """Show context menu for listener actions."""
@@ -143,7 +169,10 @@ class ListenersWidget(QWidget):
         }
 
         try:
-            self.ws_thread.send_message_sync(json.dumps(message))
+            asyncio.run_coroutine_threadsafe(
+                self.ws_thread.ws_client.send_message(json.dumps(message)),
+                self.ws_thread.loop
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to delete listener: {e}")
 
@@ -154,3 +183,34 @@ class ListenersWidget(QWidget):
     def set_ws_thread(self, ws_thread):
         """Set the websocket thread reference."""
         self.ws_thread = ws_thread
+
+    def add_listener(self, listener_data):
+        """Add a new listener to the table from broadcast data."""
+        # Convert broadcast data format to internal format
+        protocol = listener_data.get('protocol', '').upper()
+        is_smb = protocol == 'SMB'
+
+        listener = {
+            'name': listener_data.get('name', ''),
+            'details': [
+                f"Protocol: {protocol}",
+                f"Host: {listener_data.get('ip', '')}" if not is_smb else f"Pipe: {listener_data.get('pipe_name', 'spoolss')}",
+                f"Port: {listener_data.get('port', '')}" if not is_smb else "",
+                f"GET Profile: {listener_data.get('get_profile', 'default-get')}",
+                f"POST Profile: {listener_data.get('post_profile', 'default-post')}",
+                f"Response Profile: {listener_data.get('server_response_profile', 'default-response')}"
+            ]
+        }
+        # Filter out empty details
+        listener['details'] = [d for d in listener['details'] if d]
+
+        self.add_listener_row(listener)
+        self.table.resizeColumnsToContents()
+
+    def remove_listener_row(self, listener_name):
+        """Remove a listener row from the table by name."""
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == listener_name:
+                self.table.removeRow(row)
+                break

@@ -135,6 +135,19 @@ func main() {
 	}
 	log.Println("Successfully loaded WebSocket configuration")
 
+	// Load agent configuration (for malleable profiles)
+	log.Println("Loading agent configuration for malleable profiles...")
+	agentCfg, err := config.LoadAgentConfig()
+	if err != nil {
+		log.Printf("Warning: Failed to load agent config (profiles will be unavailable): %v", err)
+		agentCfg = nil // Allow service to start without profiles
+	} else {
+		log.Printf("Agent configuration loaded - %d GET profiles, %d POST profiles, %d server response profiles",
+			len(agentCfg.HTTPProfiles.Get),
+			len(agentCfg.HTTPProfiles.Post),
+			len(agentCfg.HTTPProfiles.ServerResponse))
+	}
+
 	// Initialize database with connection pooling
 	log.Println("Connecting to the database...")
 	var db *sql.DB
@@ -179,7 +192,7 @@ func main() {
 
 	// Create WebSocket handler first (with nil agent client)
 	log.Println("Creating WebSocket handler...")
-	wsHandler, err := handlers.NewWSHandler(h, db, nil)
+	wsHandler, err := handlers.NewWSHandler(h, db, nil, agentCfg)
 	if err != nil {
 		log.Fatalf("Failed to create WebSocket handler: %v", err)
 	}

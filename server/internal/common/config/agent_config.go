@@ -6,16 +6,27 @@ import (
 )
 
 type ListenerConfig struct {
-	Name           string
-	Protocol       string
-	Port           int
-	Secure         bool
-	URLPath        string
-	AllowedMethods []string
-	Headers        map[string]string
-	BindIP         string
-	Timeout        int
-	EnableLogging  bool
+	Name                  string
+	Protocol              string
+	Port                  int
+	Secure                bool
+	URLPath               string
+	AllowedMethods        []string
+	Headers               map[string]string
+	BindIP                string
+	Timeout               int
+	EnableLogging         bool
+	GetProfile            string // Bound GET profile name
+	PostProfile           string // Bound POST profile name
+	ServerResponseProfile string // Bound server response profile name
+}
+
+// ServerHeadersConfig holds global default headers for all listeners
+type ServerHeadersConfig struct {
+	Server                  string `toml:"server"`
+	StrictTransportSecurity string `toml:"strict_transport_security"`
+	XFrameOptions           string `toml:"x_frame_options"`
+	XContentTypeOptions     string `toml:"x_content_type_options"`
 }
 
 type AgentConfig struct {
@@ -23,10 +34,8 @@ type AgentConfig struct {
 		CertFile string `toml:"cert_file"`
 		KeyFile  string `toml:"key_file"`
 	} `toml:"web_server"`
-	Routes struct {
-		Get  []Handler `toml:"get_handlers"`
-		Post []Handler `toml:"post_handlers"`
-	} `toml:"http_routes"`
+	ServerHeaders        ServerHeadersConfig `toml:"server_headers"`
+	HTTPProfiles         HTTPProfiles        `toml:"http_profiles"`
 	Database             *DatabaseConfig
 	Listeners            []ListenerConfig
 	DefaultTimeout       int  `toml:"default_timeout"`
@@ -48,9 +57,53 @@ type Handler struct {
 }
 
 type Param struct {
-	Name   string `toml:"name"`
-	Type   string `toml:"type"`
-	Format string `toml:"format"`
+	Name     string `toml:"name"`
+	Type     string `toml:"type"`
+	Format   string `toml:"format"`
+	Location string `toml:"location"` // query, header, cookie
+}
+
+// Header represents a configurable HTTP header
+type Header struct {
+	Name  string `toml:"name" json:"name"`
+	Value string `toml:"value" json:"value"`
+}
+
+// GetProfile defines a named GET request profile
+type GetProfile struct {
+	Name    string   `toml:"name" json:"name"`
+	Path    string   `toml:"path" json:"path"`
+	Method  string   `toml:"method" json:"method"`
+	Headers []Header `toml:"headers" json:"headers"`
+	Params  []Param  `toml:"params" json:"params"`
+}
+
+// PostProfile defines a named POST request profile
+type PostProfile struct {
+	Name        string   `toml:"name" json:"name"`
+	Path        string   `toml:"path" json:"path"`
+	Method      string   `toml:"method" json:"method"`
+	ContentType string   `toml:"content_type" json:"content_type"`
+	Headers     []Header `toml:"headers" json:"headers"`
+	Params      []Param  `toml:"params" json:"params"`
+}
+
+// ServerResponseProfile defines how the server responds to agents
+type ServerResponseProfile struct {
+	Name           string   `toml:"name" json:"name"`
+	ContentType    string   `toml:"content_type" json:"content_type"`
+	StatusField    string   `toml:"status_field" json:"status_field"`
+	DataField      string   `toml:"data_field" json:"data_field"`
+	CommandIDField string   `toml:"command_id_field" json:"command_id_field"`
+	RekeyValue     string   `toml:"rekey_value" json:"rekey_value"`
+	Headers        []Header `toml:"headers" json:"headers"`
+}
+
+// HTTPProfiles holds all named profiles for GET, POST, and server responses
+type HTTPProfiles struct {
+	Get            []GetProfile            `toml:"get" json:"get_profiles"`
+	Post           []PostProfile           `toml:"post" json:"post_profiles"`
+	ServerResponse []ServerResponseProfile `toml:"server_response" json:"server_response_profiles"`
 }
 
 // LoadAgentConfig loads the configuration from a TOML file
@@ -66,19 +119,6 @@ func LoadAgentConfig() (*AgentConfig, error) {
 	}
 	config.Database = dbConfig
 
-	// Set default HTTP methods if not specified
-	for i := range config.Routes.Get {
-		if config.Routes.Get[i].Method == "" {
-			config.Routes.Get[i].Method = "GET"
-		}
-	}
-
-	for i := range config.Routes.Post {
-		if config.Routes.Post[i].Method == "" {
-			config.Routes.Post[i].Method = "POST"
-		}
-	}
-
 	// Set default values if not provided in the config
 	if config.DefaultTimeout == 0 {
 		config.DefaultTimeout = 30
@@ -87,54 +127,117 @@ func LoadAgentConfig() (*AgentConfig, error) {
 		config.DefaultEnableLogging = true
 	}
 
+	// Set default server headers if not specified
+	if config.ServerHeaders.Server == "" {
+		config.ServerHeaders.Server = "nginx/1.18.0"
+	}
+	if config.ServerHeaders.StrictTransportSecurity == "" {
+		config.ServerHeaders.StrictTransportSecurity = "max-age=31536000; includeSubDomains"
+	}
+	if config.ServerHeaders.XFrameOptions == "" {
+		config.ServerHeaders.XFrameOptions = "DENY"
+	}
+	if config.ServerHeaders.XContentTypeOptions == "" {
+		config.ServerHeaders.XContentTypeOptions = "nosniff"
+	}
+
+	// Set default methods for profiles if not specified
+	for i := range config.HTTPProfiles.Get {
+		if config.HTTPProfiles.Get[i].Method == "" {
+			config.HTTPProfiles.Get[i].Method = "GET"
+		}
+	}
+	for i := range config.HTTPProfiles.Post {
+		if config.HTTPProfiles.Post[i].Method == "" {
+			config.HTTPProfiles.Post[i].Method = "POST"
+		}
+	}
+
+	// Set default values for server response profiles
+	for i := range config.HTTPProfiles.ServerResponse {
+		if config.HTTPProfiles.ServerResponse[i].ContentType == "" {
+			config.HTTPProfiles.ServerResponse[i].ContentType = "application/json"
+		}
+		if config.HTTPProfiles.ServerResponse[i].StatusField == "" {
+			config.HTTPProfiles.ServerResponse[i].StatusField = "status"
+		}
+		if config.HTTPProfiles.ServerResponse[i].DataField == "" {
+			config.HTTPProfiles.ServerResponse[i].DataField = "data"
+		}
+		if config.HTTPProfiles.ServerResponse[i].CommandIDField == "" {
+			config.HTTPProfiles.ServerResponse[i].CommandIDField = "id"
+		}
+		if config.HTTPProfiles.ServerResponse[i].RekeyValue == "" {
+			config.HTTPProfiles.ServerResponse[i].RekeyValue = "rekey"
+		}
+	}
+
 	return &config, nil
 }
 
-// GetAllowedMethods returns all configured methods from handlers
-func (cfg *AgentConfig) GetAllowedMethods(listenerType string) []string {
-	methodMap := make(map[string]bool)
-
-	// Collect all unique methods from GET handlers
-	for _, handler := range cfg.Routes.Get {
-		if handler.Enabled && handler.Method != "" {
-			methodMap[handler.Method] = true
-		}
-	}
-
-	// Collect all unique methods from POST handlers
-	for _, handler := range cfg.Routes.Post {
-		if handler.Enabled && handler.Method != "" {
-			methodMap[handler.Method] = true
-		}
-	}
-
-	// Convert map to slice
-	methods := make([]string, 0, len(methodMap))
-	for method := range methodMap {
-		methods = append(methods, method)
-	}
-
-	// If no methods found, return defaults based on listener type
-	if len(methods) == 0 {
-		switch listenerType {
-		case "HTTP", "HTTPS":
-			return []string{"GET", "POST"}
-		case "TCP", "UDP":
-			return []string{}
-		default:
-			return []string{"GET"}
-		}
-	}
-
-	return methods
-}
-
-// GetHeaders returns default headers to be applied to listeners
+// GetHeaders returns default headers to be applied to listeners (loaded from config)
 func (cfg *AgentConfig) GetHeaders() map[string]string {
 	return map[string]string{
-		"Server":                    "nginx/1.18.0",
-		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-		"X-Frame-Options":           "DENY",
-		"X-Content-Type-Options":    "nosniff",
+		"Server":                    cfg.ServerHeaders.Server,
+		"Strict-Transport-Security": cfg.ServerHeaders.StrictTransportSecurity,
+		"X-Frame-Options":           cfg.ServerHeaders.XFrameOptions,
+		"X-Content-Type-Options":    cfg.ServerHeaders.XContentTypeOptions,
 	}
+}
+
+// GetGetProfile returns a GET profile by name, or nil if not found
+func (cfg *AgentConfig) GetGetProfile(name string) *GetProfile {
+	for i := range cfg.HTTPProfiles.Get {
+		if cfg.HTTPProfiles.Get[i].Name == name {
+			return &cfg.HTTPProfiles.Get[i]
+		}
+	}
+	return nil
+}
+
+// GetPostProfile returns a POST profile by name, or nil if not found
+func (cfg *AgentConfig) GetPostProfile(name string) *PostProfile {
+	for i := range cfg.HTTPProfiles.Post {
+		if cfg.HTTPProfiles.Post[i].Name == name {
+			return &cfg.HTTPProfiles.Post[i]
+		}
+	}
+	return nil
+}
+
+// GetServerResponseProfile returns a server response profile by name, or nil if not found
+func (cfg *AgentConfig) GetServerResponseProfile(name string) *ServerResponseProfile {
+	for i := range cfg.HTTPProfiles.ServerResponse {
+		if cfg.HTTPProfiles.ServerResponse[i].Name == name {
+			return &cfg.HTTPProfiles.ServerResponse[i]
+		}
+	}
+	return nil
+}
+
+// GetGetProfileNames returns a list of all GET profile names
+func (cfg *AgentConfig) GetGetProfileNames() []string {
+	names := make([]string, len(cfg.HTTPProfiles.Get))
+	for i, profile := range cfg.HTTPProfiles.Get {
+		names[i] = profile.Name
+	}
+	return names
+}
+
+// GetPostProfileNames returns a list of all POST profile names
+func (cfg *AgentConfig) GetPostProfileNames() []string {
+	names := make([]string, len(cfg.HTTPProfiles.Post))
+	for i, profile := range cfg.HTTPProfiles.Post {
+		names[i] = profile.Name
+	}
+	return names
+}
+
+// GetServerResponseProfileNames returns a list of all server response profile names
+func (cfg *AgentConfig) GetServerResponseProfileNames() []string {
+	names := make([]string, len(cfg.HTTPProfiles.ServerResponse))
+	for i, profile := range cfg.HTTPProfiles.ServerResponse {
+		names[i] = profile.Name
+	}
+	return names
 }

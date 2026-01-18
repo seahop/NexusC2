@@ -841,21 +841,34 @@ class C2ClientGUI(QMainWindow):
                     protocol=listener_details['protocol'],
                     host=listener_details.get('ip', ''),
                     port=str(listener_details.get('port', '')),
-                    pipe_name=listener_details.get('pipe_name', '')
+                    pipe_name=listener_details.get('pipe_name', ''),
+                    get_profile=listener_details.get('get_profile', ''),
+                    post_profile=listener_details.get('post_profile', ''),
+                    server_response_profile=listener_details.get('server_response_profile', '')
                 )
                 self.terminal.log_message(f"New listener added: {listener_details['name']}")
                 # Mark this listener as processed
                 self.processed_listener_ids.add(listener_id)
+
+                # Also update ListenersWidget if it exists and is visible
+                if hasattr(self, 'listeners_widget'):
+                    print("MainWindow: Updating ListenersWidget with new listener")
+                    self.listeners_widget.add_listener(listener_details)
             else:
                 print(f"MainWindow: Listener '{listener_details['name']}' already exists. Skipping addition.")
 
         elif event == "deleted":
-            listener_name = listener_details['name']
+            listener_name = listener_details.get('name', listener_details.get('name', ''))
             print(f"MainWindow: Removing listener: {listener_name}")
             self.agent_display.remove_listener(listener_name)
             self.terminal.log_message(f"Listener {listener_name} has been deleted")
             # Remove the listener ID from the processed set if it was stored
             self.processed_listener_ids.discard(listener_name)
+
+            # Also update ListenersWidget if it exists
+            if hasattr(self, 'listeners_widget'):
+                print("MainWindow: Removing listener from ListenersWidget")
+                self.listeners_widget.remove_listener_row(listener_name)
 
     def onLogMessage(self, message):
         """Handle log messages emitted from the WebSocketThread."""
@@ -1092,8 +1105,10 @@ class C2ClientGUI(QMainWindow):
         if not self.ws_thread or not self.ws_thread.is_connected():
             QMessageBox.warning(self, "Warning", "Please connect to server first")
             return
-            
-        dialog = CreateListenerDialog(self, self.ws_thread)
+
+        # Pass database reference for profile dropdown population
+        db = self.ws_thread.db if self.ws_thread else None
+        dialog = CreateListenerDialog(self, self.ws_thread, db)
         dialog.exec()
 
     def showCreatePayload(self):

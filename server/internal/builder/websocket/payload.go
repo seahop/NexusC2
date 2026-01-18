@@ -121,6 +121,7 @@ type Builder struct {
 	listener        *listeners.Listener
 	db              *sql.DB
 	agentClient     *agent.Client
+	agentConfig     *config.AgentConfig // For profile lookups
 }
 
 type PayloadConfigWrapper struct {
@@ -148,12 +149,20 @@ func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agen
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %v", err)
 	}
+
+	// Load agent config for profile lookups
+	agentCfg, err := config.LoadAgentConfig()
+	if err != nil {
+		log.Printf("[Builder] Warning: Failed to load agent config for profiles: %v", err)
+	}
+
 	return &Builder{
 		dockerClient:    cli,
 		listenerManager: manager,
 		hubClient:       hubClient,
 		db:              db,
 		agentClient:     agentClient,
+		agentConfig:     agentCfg,
 	}, nil
 }
 
@@ -331,15 +340,24 @@ func (b *Builder) logSafetyChecks(safetyChecks SafetyChecks, username string, li
 	}
 }
 
-// Updated writeProjectFiles to include safety checks in the generated code
+// Updated writeProjectFiles to include safety checks and profile configuration
 func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfigWrapper) error {
-	// Load malleable config for rekey command
+	// Load malleable config for rekey command (fallback)
 	malleableConfig, err := config.GetMalleableConfig()
 	if err != nil {
 		log.Printf("[Builder] Warning: Failed to load malleable config: %v", err)
 	}
 	rekeyCommand := "rekey_required" // Default
-	if malleableConfig != nil {
+
+	// Check if listener has a bound server response profile
+	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
+		responseProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile)
+		if responseProfile != nil && responseProfile.RekeyValue != "" {
+			rekeyCommand = responseProfile.RekeyValue
+			log.Printf("[Builder] Using server response profile %q rekey command: %q",
+				b.listener.ServerResponseProfile, rekeyCommand)
+		}
+	} else if malleableConfig != nil {
 		rekeyCommand = malleableConfig.GetRekeyCommand()
 		log.Printf("[Builder] Using malleable rekey command: %q", rekeyCommand)
 	}
@@ -351,7 +369,7 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	}
 	headersJSON, _ := json.Marshal(customHeaders)
 
-	// Extract GET handler details including custom method
+	// Extract GET handler details - use bound profile if available
 	getMethod := "GET" // Default
 	var getRoute string
 	var getClientIDParam struct {
@@ -359,25 +377,47 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 		Format string
 	}
 
-	for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
-		if handler.Enabled {
-			getRoute = handler.Path
-			// Check for custom method
-			if handler.Method != "" {
-				getMethod = handler.Method
+	// Check if listener has a bound GET profile
+	if b.listener.GetProfile != "" && b.agentConfig != nil {
+		getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile)
+		if getProfile != nil {
+			getRoute = getProfile.Path
+			if getProfile.Method != "" {
+				getMethod = getProfile.Method
 			}
-			for _, param := range handler.Params {
+			for _, param := range getProfile.Params {
 				if param.Type == "clientID_param" {
 					getClientIDParam.Name = param.Name
 					getClientIDParam.Format = param.Format
 					break
 				}
 			}
-			break
+			log.Printf("[Builder] Project export using GET profile %q: path=%s, method=%s",
+				b.listener.GetProfile, getRoute, getMethod)
 		}
 	}
 
-	// Extract POST handler details including custom method
+	// Fallback to global routes if no profile matched
+	if getRoute == "" {
+		for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
+			if handler.Enabled {
+				getRoute = handler.Path
+				if handler.Method != "" {
+					getMethod = handler.Method
+				}
+				for _, param := range handler.Params {
+					if param.Type == "clientID_param" {
+						getClientIDParam.Name = param.Name
+						getClientIDParam.Format = param.Format
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Extract POST handler details - use bound profile if available
 	postMethod := "POST" // Default
 	var postRoute string
 	var postClientIDParam struct {
@@ -389,14 +429,15 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 		Format string
 	}
 
-	for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
-		if handler.Enabled {
-			postRoute = handler.Path
-			// Check for custom method
-			if handler.Method != "" {
-				postMethod = handler.Method
+	// Check if listener has a bound POST profile
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile)
+		if postProfile != nil {
+			postRoute = postProfile.Path
+			if postProfile.Method != "" {
+				postMethod = postProfile.Method
 			}
-			for _, param := range handler.Params {
+			for _, param := range postProfile.Params {
 				switch param.Type {
 				case "clientID_param":
 					postClientIDParam.Name = param.Name
@@ -406,11 +447,37 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 					secretParam.Format = param.Format
 				}
 			}
-			break
+			log.Printf("[Builder] Project export using POST profile %q: path=%s, method=%s",
+				b.listener.PostProfile, postRoute, postMethod)
+		}
+	}
+
+	// Fallback to global routes if no profile matched
+	if postRoute == "" {
+		for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
+			if handler.Enabled {
+				postRoute = handler.Path
+				if handler.Method != "" {
+					postMethod = handler.Method
+				}
+				for _, param := range handler.Params {
+					switch param.Type {
+					case "clientID_param":
+						postClientIDParam.Name = param.Name
+						postClientIDParam.Format = param.Format
+					case "secret_param":
+						secretParam.Name = param.Name
+						secretParam.Format = param.Format
+					}
+				}
+				break
+			}
 		}
 	}
 
 	log.Printf("Project export with HTTP methods: GET=%s, POST=%s", getMethod, postMethod)
+	log.Printf("Project export with profiles: GET=%s, POST=%s, Response=%s",
+		b.listener.GetProfile, b.listener.PostProfile, b.listener.ServerResponseProfile)
 
 	// Values that should be encrypted (matching prepareBuildEnvironment)
 	encryptedValues := map[string]string{
@@ -938,9 +1005,9 @@ func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData)
 	return b.agentClient.RegisterInit(grpcCtx, initData)
 }
 
-// Updated prepareBuildEnvironment function to support custom HTTP methods
+// Updated prepareBuildEnvironment function to support profile-based HTTP methods
 func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *PayloadConfigWrapper) ([]string, error) {
-	// Load malleable config for rekey command
+	// Load malleable config for rekey command (fallback)
 	malleableConfig, err := config.GetMalleableConfig()
 	if err != nil {
 		log.Printf("[Builder] Warning: Failed to load malleable config: %v", err)
@@ -950,7 +1017,26 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 	rekeyDataField := "data"
 	rekeyIDField := "command_db_id"
 
-	if malleableConfig != nil {
+	// Check if listener has a bound server response profile
+	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
+		responseProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile)
+		if responseProfile != nil {
+			if responseProfile.RekeyValue != "" {
+				rekeyCommand = responseProfile.RekeyValue
+			}
+			if responseProfile.StatusField != "" {
+				rekeyStatusField = responseProfile.StatusField
+			}
+			if responseProfile.DataField != "" {
+				rekeyDataField = responseProfile.DataField
+			}
+			if responseProfile.CommandIDField != "" {
+				rekeyIDField = responseProfile.CommandIDField
+			}
+			log.Printf("[Builder] Using server response profile %q - rekey: %q, fields: {%s, %s, %s}",
+				b.listener.ServerResponseProfile, rekeyCommand, rekeyStatusField, rekeyDataField, rekeyIDField)
+		}
+	} else if malleableConfig != nil {
 		rekeyCommand = malleableConfig.RekeyCommand
 		rekeyStatusField = malleableConfig.RekeyStatusField
 		rekeyDataField = malleableConfig.RekeyDataField
@@ -969,35 +1055,59 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		return nil, fmt.Errorf("failed to marshal custom headers: %v", err)
 	}
 
-	// Extract GET handler details including custom method
+	// Extract GET handler details - use bound profile if available
 	getMethod := "GET" // Default
 	var getClientIDParam struct {
 		Name   string
 		Format string
 	}
-
-	// Find first enabled GET handler
 	var getRoute string
-	for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
-		if handler.Enabled {
-			getRoute = handler.Path
-			// Check if handler has a custom method field
-			if handler.Method != "" {
-				getMethod = handler.Method
+
+	// Check if listener has a bound GET profile
+	if b.listener.GetProfile != "" && b.agentConfig != nil {
+		getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile)
+		if getProfile != nil {
+			getRoute = getProfile.Path
+			if getProfile.Method != "" {
+				getMethod = getProfile.Method
 			}
-			// Extract clientID param
-			for _, param := range handler.Params {
+			// Extract clientID param from profile
+			for _, param := range getProfile.Params {
 				if param.Type == "clientID_param" {
 					getClientIDParam.Name = param.Name
 					getClientIDParam.Format = param.Format
 					break
 				}
 			}
-			break
+			log.Printf("[Builder] Using GET profile %q: path=%s, method=%s",
+				b.listener.GetProfile, getRoute, getMethod)
+		} else {
+			log.Printf("[Builder] Warning: GET profile %q not found, falling back to global routes",
+				b.listener.GetProfile)
 		}
 	}
 
-	// Extract POST handler details including custom method
+	// Fallback to global routes if no profile matched
+	if getRoute == "" {
+		for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
+			if handler.Enabled {
+				getRoute = handler.Path
+				if handler.Method != "" {
+					getMethod = handler.Method
+				}
+				for _, param := range handler.Params {
+					if param.Type == "clientID_param" {
+						getClientIDParam.Name = param.Name
+						getClientIDParam.Format = param.Format
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Extract POST handler details - use bound profile if available
 	postMethod := "POST" // Default
 	var postClientIDParam struct {
 		Name   string
@@ -1007,18 +1117,18 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		Name   string
 		Format string
 	}
-
-	// Find first enabled POST handler
 	var postRoute string
-	for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
-		if handler.Enabled {
-			postRoute = handler.Path
-			// Check if handler has a custom method field
-			if handler.Method != "" {
-				postMethod = handler.Method
+
+	// Check if listener has a bound POST profile
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile)
+		if postProfile != nil {
+			postRoute = postProfile.Path
+			if postProfile.Method != "" {
+				postMethod = postProfile.Method
 			}
-			// Extract params
-			for _, param := range handler.Params {
+			// Extract params from profile
+			for _, param := range postProfile.Params {
 				switch param.Type {
 				case "clientID_param":
 					postClientIDParam.Name = param.Name
@@ -1028,11 +1138,40 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 					secretParam.Format = param.Format
 				}
 			}
-			break
+			log.Printf("[Builder] Using POST profile %q: path=%s, method=%s",
+				b.listener.PostProfile, postRoute, postMethod)
+		} else {
+			log.Printf("[Builder] Warning: POST profile %q not found, falling back to global routes",
+				b.listener.PostProfile)
+		}
+	}
+
+	// Fallback to global routes if no profile matched
+	if postRoute == "" {
+		for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
+			if handler.Enabled {
+				postRoute = handler.Path
+				if handler.Method != "" {
+					postMethod = handler.Method
+				}
+				for _, param := range handler.Params {
+					switch param.Type {
+					case "clientID_param":
+						postClientIDParam.Name = param.Name
+						postClientIDParam.Format = param.Format
+					case "secret_param":
+						secretParam.Name = param.Name
+						secretParam.Format = param.Format
+					}
+				}
+				break
+			}
 		}
 	}
 
 	log.Printf("Building payload with HTTP methods: GET=%s, POST=%s", getMethod, postMethod)
+	log.Printf("Building payload with profiles: GET=%s, POST=%s, Response=%s",
+		b.listener.GetProfile, b.listener.PostProfile, b.listener.ServerResponseProfile)
 
 	// Values that should be encrypted
 	encryptedValues := map[string]string{

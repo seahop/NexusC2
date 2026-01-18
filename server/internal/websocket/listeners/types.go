@@ -8,14 +8,17 @@ import (
 )
 
 type Listener struct {
-	ID       uuid.UUID
-	Name     string
-	Protocol string
-	Port     int
-	IP       string
-	PipeName string // For SMB listeners - the named pipe to listen on
-	Active   bool
-	Created  time.Time
+	ID                    uuid.UUID
+	Name                  string
+	Protocol              string
+	Port                  int
+	IP                    string
+	PipeName              string // For SMB listeners - the named pipe to listen on
+	GetProfile            string // Bound GET profile name
+	PostProfile           string // Bound POST profile name
+	ServerResponseProfile string // Bound server response profile name
+	Active                bool
+	Created               time.Time
 }
 
 type Message struct {

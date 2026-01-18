@@ -84,7 +84,10 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	// 2. Query all listeners
 	rows, err = tx.QueryContext(ctx, `
         SELECT
-            id, name, protocol, port, ip, COALESCE(pipe_name, '')
+            id, name, protocol, port, ip, COALESCE(pipe_name, ''),
+            COALESCE(get_profile, 'default-get'),
+            COALESCE(post_profile, 'default-post'),
+            COALESCE(server_response_profile, 'default-response')
         FROM listeners
         ORDER BY name ASC
     `)
@@ -98,15 +101,17 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 
 	for rows.Next() {
 		var listener Listener
-		if err := rows.Scan(&listener.ID, &listener.Name, &listener.Protocol, &listener.Port, &listener.IP, &listener.PipeName); err != nil {
+		if err := rows.Scan(&listener.ID, &listener.Name, &listener.Protocol, &listener.Port, &listener.IP, &listener.PipeName,
+			&listener.GetProfile, &listener.PostProfile, &listener.ServerResponseProfile); err != nil {
 			return nil, &DBOperationError{
 				Operation: "scan listener",
 				Err:       err,
 			}
 		}
 		export.Listeners = append(export.Listeners, listener)
-		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s, PipeName=%s",
-			listener.Name, listener.Protocol, listener.Port, listener.PipeName)
+		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s, PipeName=%s, Profiles: GET=%s POST=%s Response=%s",
+			listener.Name, listener.Protocol, listener.Port, listener.PipeName,
+			listener.GetProfile, listener.PostProfile, listener.ServerResponseProfile)
 	}
 
 	// 3. Query recent commands
@@ -207,6 +212,34 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 		logMessage(LOG_VERBOSE, "Exported tag: Agent=%s, Tag=%s", agentGUID, tag.Name)
 	}
 
+	// 6. Populate available profiles from agent configuration
+	if h.agentConfig != nil {
+		profiles := &AvailableProfiles{
+			Get:            make([]string, 0),
+			Post:           make([]string, 0),
+			ServerResponse: make([]string, 0),
+		}
+
+		// Extract GET profile names
+		for _, p := range h.agentConfig.HTTPProfiles.Get {
+			profiles.Get = append(profiles.Get, p.Name)
+		}
+
+		// Extract POST profile names
+		for _, p := range h.agentConfig.HTTPProfiles.Post {
+			profiles.Post = append(profiles.Post, p.Name)
+		}
+
+		// Extract Server Response profile names
+		for _, p := range h.agentConfig.HTTPProfiles.ServerResponse {
+			profiles.ServerResponse = append(profiles.ServerResponse, p.Name)
+		}
+
+		export.AvailableProfiles = profiles
+		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d",
+			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse))
+	}
+
 	// Log summary of exported data
 	logMessage(LOG_NORMAL, "Export state summary:")
 	logMessage(LOG_NORMAL, "- Connections: %d", len(export.Connections))
@@ -214,6 +247,10 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	logMessage(LOG_NORMAL, "- Commands: %d", len(export.Commands))
 	logMessage(LOG_NORMAL, "- Command Outputs: %d", len(export.CommandOutputs))
 	logMessage(LOG_NORMAL, "- Agent Tags: %d agents with tags", len(export.AgentTags))
+	if export.AvailableProfiles != nil {
+		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d",
+			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse))
+	}
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {

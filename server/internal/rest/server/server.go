@@ -25,6 +25,7 @@ import (
 
 type Server struct {
 	config          *config.RESTConfig
+	agentConfig     *config.AgentConfig
 	router          *gin.Engine
 	httpServer      *http.Server
 	db              *sql.DB
@@ -45,9 +46,10 @@ type Server struct {
 	commandHandler  *handlers.CommandHandler
 	listenerHandler *handlers.ListenerHandler
 	payloadHandler  *handlers.PayloadHandler
+	profileHandler  *handlers.ProfileHandler
 }
 
-func NewServer(cfg *config.RESTConfig, db *sql.DB) (*Server, error) {
+func NewServer(cfg *config.RESTConfig, agentCfg *config.AgentConfig, db *sql.DB) (*Server, error) {
 	// Create JWT manager
 	jwtManager := auth.NewJWTManager(
 		cfg.JWT.SecretKey,
@@ -67,6 +69,7 @@ func NewServer(cfg *config.RESTConfig, db *sql.DB) (*Server, error) {
 
 	s := &Server{
 		config:          cfg,
+		agentConfig:     agentCfg,
 		db:              db,
 		jwtManager:      jwtManager,
 		sseHub:          sseHub,
@@ -102,6 +105,11 @@ func NewServer(cfg *config.RESTConfig, db *sql.DB) (*Server, error) {
 	s.agentHandler = handlers.NewAgentHandler(db)
 	s.commandHandler = handlers.NewCommandHandler(db, nil) // agentClient set later
 	s.listenerHandler = handlers.NewListenerHandler(db, listenerManager, nil, sseHub)
+
+	// Create profile handler for malleable profile discovery
+	if agentCfg != nil {
+		s.profileHandler = handlers.NewProfileHandler(agentCfg)
+	}
 
 	payloadHandler, err := handlers.NewPayloadHandler(db, listenerManager, nil)
 	if err != nil {
@@ -193,6 +201,21 @@ func (s *Server) setupRouter() {
 				protected.POST("/payloads/build", s.wsProxyHandlers.CreatePayload)
 			} else {
 				protected.POST("/payloads/build", s.payloadHandler.BuildPayload)
+			}
+
+			// Profiles - malleable profile discovery endpoints
+			if s.profileHandler != nil {
+				profiles := protected.Group("/profiles")
+				{
+					profiles.GET("", s.profileHandler.ListAllProfiles)
+					profiles.GET("/names", s.profileHandler.GetProfileNames)
+					profiles.GET("/get", s.profileHandler.ListGetProfiles)
+					profiles.GET("/get/:name", s.profileHandler.GetGetProfile)
+					profiles.GET("/post", s.profileHandler.ListPostProfiles)
+					profiles.GET("/post/:name", s.profileHandler.GetPostProfile)
+					profiles.GET("/server-response", s.profileHandler.ListServerResponseProfiles)
+					profiles.GET("/server-response/:name", s.profileHandler.GetServerResponseProfile)
+				}
 			}
 
 			// Events (SSE)

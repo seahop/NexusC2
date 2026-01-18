@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS listeners (
     protocol VARCHAR NOT NULL,
     port VARCHAR NOT NULL,
     ip VARCHAR NOT NULL,
-    pipe_name VARCHAR DEFAULT ''
+    pipe_name VARCHAR DEFAULT '',
+    get_profile VARCHAR(100) DEFAULT 'default-get',
+    post_profile VARCHAR(100) DEFAULT 'default-post',
+    server_response_profile VARCHAR(100) DEFAULT 'default-response'
 );
 
 CREATE TABLE IF NOT EXISTS inits (
@@ -236,3 +239,26 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id
 
 CREATE INDEX IF NOT EXISTS idx_api_tokens_expires
     ON api_tokens(expires_at);
+
+-- =============================================================================
+-- LISTENER PROFILE COLUMNS (Migration for existing databases)
+-- =============================================================================
+-- Add profile columns to listeners table if they don't exist
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'listeners' AND column_name = 'get_profile') THEN
+        ALTER TABLE listeners ADD COLUMN get_profile VARCHAR(100) DEFAULT 'default-get';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'listeners' AND column_name = 'post_profile') THEN
+        ALTER TABLE listeners ADD COLUMN post_profile VARCHAR(100) DEFAULT 'default-post';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'listeners' AND column_name = 'server_response_profile') THEN
+        ALTER TABLE listeners ADD COLUMN server_response_profile VARCHAR(100) DEFAULT 'default-response';
+    END IF;
+END $$;

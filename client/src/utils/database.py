@@ -34,6 +34,22 @@ class StateDatabase:
             conn.execute("ALTER TABLE listeners ADD COLUMN pipe_name TEXT DEFAULT ''")
             print("StateDatabase: Migration complete - pipe_name column added")
 
+        # Migration: Add profile columns to listeners if missing
+        if 'get_profile' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding get_profile column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN get_profile TEXT DEFAULT 'default-get'")
+            print("StateDatabase: Migration complete - get_profile column added")
+
+        if 'post_profile' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding post_profile column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN post_profile TEXT DEFAULT 'default-post'")
+            print("StateDatabase: Migration complete - post_profile column added")
+
+        if 'server_response_profile' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding server_response_profile column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN server_response_profile TEXT DEFAULT 'default-response'")
+            print("StateDatabase: Migration complete - server_response_profile column added")
+
         # Get existing columns for connections table
         cursor = conn.execute("PRAGMA table_info(connections)")
         conn_columns = {row[1] for row in cursor.fetchall()}
@@ -94,7 +110,10 @@ class StateDatabase:
                         protocol TEXT NOT NULL,
                         port TEXT NOT NULL,
                         ip TEXT NOT NULL,
-                        pipe_name TEXT DEFAULT ''
+                        pipe_name TEXT DEFAULT '',
+                        get_profile TEXT DEFAULT 'default-get',
+                        post_profile TEXT DEFAULT 'default-post',
+                        server_response_profile TEXT DEFAULT 'default-response'
                     );
                     CREATE TABLE IF NOT EXISTS agent_tags (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +149,15 @@ class StateDatabase:
                     );
                     CREATE INDEX IF NOT EXISTS idx_cna_scripts_path ON cna_scripts(script_path);
                     CREATE INDEX IF NOT EXISTS idx_cna_scripts_enabled ON cna_scripts(enabled);
+
+                    -- Available malleable profiles (from server config)
+                    CREATE TABLE IF NOT EXISTS available_profiles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        profile_type TEXT NOT NULL,
+                        profile_name TEXT NOT NULL,
+                        UNIQUE(profile_type, profile_name)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_available_profiles_type ON available_profiles(profile_type);
                 """)
 
                 # Schema migrations - add missing columns to existing tables
@@ -173,9 +201,14 @@ class StateDatabase:
                         if state_data.get("listeners"):
                             print("Upserting listeners in database")
                             conn.executemany(
-                                """INSERT OR REPLACE INTO listeners (id, name, protocol, port, ip, pipe_name)
-                                   VALUES (?,?,?,?,?,?)""",
-                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"], l.get("pipe_name", ""))
+                                """INSERT OR REPLACE INTO listeners
+                                   (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile)
+                                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                                [(l["id"], l["name"], l["protocol"], l["port"], l["ip"],
+                                  l.get("pipe_name", ""),
+                                  l.get("get_profile", "default-get"),
+                                  l.get("post_profile", "default-post"),
+                                  l.get("server_response_profile", "default-response"))
                                 for l in state_data["listeners"] if l is not None]
                             )
                             print(f"Upserted {len(state_data['listeners'])} listeners")
@@ -280,6 +313,39 @@ class StateDatabase:
                             # Server sent no tags - clear local tags
                             conn.execute("DELETE FROM agent_tags")
                             print("StateDatabase: Cleared agent tags (no tags in initial state)")
+
+                        # Store available profiles if present
+                        if state_data.get("available_profiles"):
+                            print("Storing available profiles in database")
+                            # Clear existing profiles first
+                            conn.execute("DELETE FROM available_profiles")
+
+                            profiles = state_data["available_profiles"]
+                            profile_rows = []
+
+                            # Store GET profiles
+                            for name in profiles.get("get", []):
+                                profile_rows.append(("get", name))
+
+                            # Store POST profiles
+                            for name in profiles.get("post", []):
+                                profile_rows.append(("post", name))
+
+                            # Store Server Response profiles
+                            for name in profiles.get("server_response", []):
+                                profile_rows.append(("server_response", name))
+
+                            if profile_rows:
+                                conn.executemany(
+                                    """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
+                                       VALUES (?,?)""",
+                                    profile_rows
+                                )
+                                print(f"Stored {len(profile_rows)} available profiles")
+                        elif is_initial_state:
+                            # Clear profiles if not provided in initial state
+                            conn.execute("DELETE FROM available_profiles")
+                            print("StateDatabase: Cleared available profiles (none in initial state)")
 
                         # Commit transaction
                         conn.commit()
@@ -394,6 +460,41 @@ class StateDatabase:
 
                 return tags_dict
 
+    def get_available_profiles(self):
+        """Get available malleable profiles as a dictionary with lists by type"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT profile_type, profile_name
+                    FROM available_profiles
+                    ORDER BY profile_type, profile_name ASC
+                """)
+                rows = cursor.fetchall()
+
+                # Build dictionary with lists
+                profiles = {
+                    "get": [],
+                    "post": [],
+                    "server_response": []
+                }
+
+                for row in rows:
+                    profile_type = row[0]
+                    profile_name = row[1]
+                    if profile_type in profiles:
+                        profiles[profile_type].append(profile_name)
+
+                # Ensure we have at least default profiles if empty
+                if not profiles["get"]:
+                    profiles["get"] = ["default-get"]
+                if not profiles["post"]:
+                    profiles["post"] = ["default-post"]
+                if not profiles["server_response"]:
+                    profiles["server_response"] = ["default-response"]
+
+                return profiles
+
     def update_agent_tags(self, agent_guid, tags):
         """Update all tags for a specific agent (replaces existing)"""
         with self._db_lock:
@@ -437,6 +538,12 @@ class StateDatabase:
                     print(f"  IP: {listener[4]}")
                     if len(listener) > 5 and listener[5]:
                         print(f"  Pipe Name: {listener[5]}")
+                    if len(listener) > 6:
+                        print(f"  GET Profile: {listener[6]}")
+                    if len(listener) > 7:
+                        print(f"  POST Profile: {listener[7]}")
+                    if len(listener) > 8:
+                        print(f"  Response Profile: {listener[8]}")
                 
                 # Get counts
                 cursor.execute("SELECT COUNT(*) FROM listeners")

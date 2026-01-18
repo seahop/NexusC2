@@ -353,13 +353,16 @@ func (c *Client) handlePong(msg *pb.StreamMessage) error {
 	return nil
 }
 
-func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool) (*pb.ListenerResponse, error) {
+func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool, getProfile, postProfile, serverResponseProfile string) (*pb.ListenerResponse, error) {
 	req := &pb.ListenerRequest{
-		Name:   name,
-		Port:   port,
-		Type:   listenerType,
-		Secure: secure,
-		BindIp: "0.0.0.0", // Optional, can be taken from default if empty
+		Name:                  name,
+		Port:                  port,
+		Type:                  listenerType,
+		Secure:                secure,
+		BindIp:                "0.0.0.0", // Optional, can be taken from default if empty
+		GetProfile:            getProfile,
+		PostProfile:           postProfile,
+		ServerResponseProfile: serverResponseProfile,
 	}
 
 	resp, err := c.client.StartListener(ctx, req)

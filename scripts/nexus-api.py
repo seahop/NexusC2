@@ -348,8 +348,10 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
         return self._handle_response(response)
 
     def create_listener(self, name: str, protocol: str, port: int = None,
-                        ip: str = None, pipe_name: str = None) -> Dict:
-        """Create a new listener."""
+                        ip: str = None, pipe_name: str = None,
+                        get_profile: str = None, post_profile: str = None,
+                        server_response_profile: str = None) -> Dict:
+        """Create a new listener with optional malleable profile bindings."""
         data = {
             "name": name,
             "protocol": protocol
@@ -360,6 +362,12 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
             data["ip"] = ip
         if pipe_name:
             data["pipe_name"] = pipe_name
+        if get_profile:
+            data["get_profile"] = get_profile
+        if post_profile:
+            data["post_profile"] = post_profile
+        if server_response_profile:
+            data["server_response"] = server_response_profile  # API expects "server_response"
 
         response = self._request("POST", "/listeners", data)
         return self._handle_response(response)
@@ -367,6 +375,45 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
     def delete_listener(self, name: str) -> Dict:
         """Delete a listener."""
         response = self._request("DELETE", f"/listeners/{name}")
+        return self._handle_response(response)
+
+    # -------------------------------------------------------------------------
+    # Profiles
+    # -------------------------------------------------------------------------
+
+    def list_profiles(self) -> Dict:
+        """List all available malleable profiles."""
+        response = self._request("GET", "/profiles")
+        return self._handle_response(response)
+
+    def list_get_profiles(self) -> Dict:
+        """List GET profiles."""
+        response = self._request("GET", "/profiles/get")
+        return self._handle_response(response)
+
+    def get_get_profile(self, name: str) -> Dict:
+        """Get a specific GET profile by name."""
+        response = self._request("GET", f"/profiles/get/{name}")
+        return self._handle_response(response)
+
+    def list_post_profiles(self) -> Dict:
+        """List POST profiles."""
+        response = self._request("GET", "/profiles/post")
+        return self._handle_response(response)
+
+    def get_post_profile(self, name: str) -> Dict:
+        """Get a specific POST profile by name."""
+        response = self._request("GET", f"/profiles/post/{name}")
+        return self._handle_response(response)
+
+    def list_server_response_profiles(self) -> Dict:
+        """List server response profiles."""
+        response = self._request("GET", "/profiles/server-response")
+        return self._handle_response(response)
+
+    def get_server_response_profile(self, name: str) -> Dict:
+        """Get a specific server response profile by name."""
+        response = self._request("GET", f"/profiles/server-response/{name}")
         return self._handle_response(response)
 
     # -------------------------------------------------------------------------
@@ -518,17 +565,19 @@ def print_listeners_table(listeners: list) -> None:
         print("No listeners found.")
         return
 
-    print(f"\n{'Name':<25} {'Protocol':<10} {'Port':<8} {'IP':<16} {'Pipe Name':<15}")
-    print("-" * 80)
+    print(f"\n{'Name':<20} {'Protocol':<8} {'Port':<6} {'IP':<15} {'GET Profile':<20} {'POST Profile':<20} {'Response':<20}")
+    print("-" * 115)
 
     for listener in listeners:
-        name = listener.get("name", "")[:23]
-        protocol = listener.get("protocol", "")[:8]
-        port = str(listener.get("port", ""))[:6]
-        ip = listener.get("ip", "")[:14]
-        pipe = listener.get("pipe_name", "")[:13]
+        name = listener.get("name", "")[:18]
+        protocol = listener.get("protocol", "")[:6]
+        port = str(listener.get("port", ""))[:4]
+        ip = listener.get("ip", "")[:13]
+        get_profile = listener.get("get_profile", "default-get")[:18]
+        post_profile = listener.get("post_profile", "default-post")[:18]
+        response_profile = listener.get("server_response_profile", "default-response")[:18]
 
-        print(f"{name:<25} {protocol:<10} {port:<8} {ip:<16} {pipe:<15}")
+        print(f"{name:<20} {protocol:<8} {port:<6} {ip:<15} {get_profile:<20} {post_profile:<20} {response_profile:<20}")
 
     print()
 
@@ -667,9 +716,25 @@ Environment Variables:
     listeners_create.add_argument("-p", "--port", type=int, help="Port number")
     listeners_create.add_argument("-i", "--ip", help="Bind IP")
     listeners_create.add_argument("--pipe", help="Pipe name (for SMB)")
+    listeners_create.add_argument("--get-profile", help="GET malleable profile name")
+    listeners_create.add_argument("--post-profile", help="POST malleable profile name")
+    listeners_create.add_argument("--response-profile", help="Server response profile name")
 
     listeners_del = listeners_sub.add_parser("delete", help="Delete listener")
     listeners_del.add_argument("name", help="Listener name")
+
+    # Profiles
+    profiles_parser = subparsers.add_parser("profiles", help="Malleable profile operations")
+    profiles_sub = profiles_parser.add_subparsers(dest="action")
+
+    profiles_sub.add_parser("list", help="List all profiles")
+    profiles_sub.add_parser("list-get", help="List GET profiles")
+    profiles_sub.add_parser("list-post", help="List POST profiles")
+    profiles_sub.add_parser("list-response", help="List server response profiles")
+
+    profiles_get = profiles_sub.add_parser("get", help="Get profile details")
+    profiles_get.add_argument("type", choices=["get", "post", "response"], help="Profile type")
+    profiles_get.add_argument("name", help="Profile name")
 
     # Payload
     payload_parser = subparsers.add_parser("payload", help="Payload operations")
@@ -893,7 +958,10 @@ Environment Variables:
                 protocol=args.protocol,
                 port=args.port,
                 ip=args.ip,
-                pipe_name=args.pipe
+                pipe_name=args.pipe,
+                get_profile=args.get_profile,
+                post_profile=args.post_profile,
+                server_response_profile=args.response_profile
             )
             print(color(data.get("message", "Listener created"), Colors.GREEN))
             print_json(data.get("listener", {}))
@@ -901,6 +969,68 @@ Environment Variables:
         elif args.action == "delete":
             data = client.delete_listener(args.name)
             print(color(data.get("message", "Listener deleted"), Colors.GREEN))
+
+    elif args.command == "profiles":
+        if args.action == "list":
+            data = client.list_profiles()
+            if output_json:
+                print_json(data)
+            else:
+                print(color("\nGET Profiles:", Colors.CYAN))
+                for p in data.get("get_profiles", []):
+                    print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
+                print(color("\nPOST Profiles:", Colors.CYAN))
+                for p in data.get("post_profiles", []):
+                    print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
+                print(color("\nServer Response Profiles:", Colors.CYAN))
+                for p in data.get("server_response_profiles", []):
+                    print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
+                print()
+
+        elif args.action == "list-get":
+            data = client.list_get_profiles()
+            if output_json:
+                print_json(data)
+            else:
+                print(color("\nGET Profiles:", Colors.CYAN))
+                for p in data.get("profiles", []):
+                    name = p.get("name", "") if isinstance(p, dict) else p
+                    path = p.get("path", "") if isinstance(p, dict) else ""
+                    print(f"  {name:<25} {path}")
+                print()
+
+        elif args.action == "list-post":
+            data = client.list_post_profiles()
+            if output_json:
+                print_json(data)
+            else:
+                print(color("\nPOST Profiles:", Colors.CYAN))
+                for p in data.get("profiles", []):
+                    name = p.get("name", "") if isinstance(p, dict) else p
+                    path = p.get("path", "") if isinstance(p, dict) else ""
+                    print(f"  {name:<25} {path}")
+                print()
+
+        elif args.action == "list-response":
+            data = client.list_server_response_profiles()
+            if output_json:
+                print_json(data)
+            else:
+                print(color("\nServer Response Profiles:", Colors.CYAN))
+                for p in data.get("profiles", []):
+                    name = p.get("name", "") if isinstance(p, dict) else p
+                    content_type = p.get("content_type", "") if isinstance(p, dict) else ""
+                    print(f"  {name:<25} {content_type}")
+                print()
+
+        elif args.action == "get":
+            if args.type == "get":
+                data = client.get_get_profile(args.name)
+            elif args.type == "post":
+                data = client.get_post_profile(args.name)
+            elif args.type == "response":
+                data = client.get_server_response_profile(args.name)
+            print_json(data)
 
     elif args.command == "payload":
         if args.action == "build":

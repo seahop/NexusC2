@@ -248,7 +248,6 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 	// Get init data to derive XOR key
 	initData, err := m.GetInitData(conn.ClientID)
 	if err != nil {
-		log.Printf("[GetRequest] Failed to get init data for XOR encryption: %v", err)
 		// Fallback to unencrypted for backward compatibility
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -333,4 +332,17 @@ func xorEncryptBytes(data []byte, key []byte) []byte {
 		result[i] = data[i] ^ key[i%len(key)]
 	}
 	return result
+}
+
+// handleGetRequestWithProfile wraps handleGetRequest for profile-bound listeners
+// It applies profile headers before delegating to the original handler
+func (m *Manager) handleGetRequestWithProfile(w http.ResponseWriter, clientID string, cmdBuffer interfaces.CommandBuffer, responseProfile *config.ServerResponseProfile) {
+	// Apply profile headers if provided
+	if responseProfile != nil {
+		for _, header := range responseProfile.Headers {
+			w.Header().Set(header.Name, header.Value)
+		}
+	}
+	// Delegate to original handler - no changes to core logic
+	m.handleGetRequest(w, clientID, cmdBuffer)
 }

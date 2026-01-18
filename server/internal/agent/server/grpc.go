@@ -560,11 +560,14 @@ func (s *GRPCServer) GetStreamStatus() map[string]interface{} {
 
 func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest) (*pb.ListenerResponse, error) {
 	listenerCfg := config.ListenerConfig{
-		Name:     req.Name,
-		Protocol: req.Type.String(),
-		Port:     int(req.Port),
-		Secure:   req.Secure,
-		BindIP:   req.BindIp,
+		Name:                  req.Name,
+		Protocol:              req.Type.String(),
+		Port:                  int(req.Port),
+		Secure:                req.Secure,
+		BindIP:                req.BindIp,
+		GetProfile:            req.GetGetProfile(),
+		PostProfile:           req.GetPostProfile(),
+		ServerResponseProfile: req.GetServerResponseProfile(),
 	}
 
 	err := s.manager.StartListener(listenerCfg)

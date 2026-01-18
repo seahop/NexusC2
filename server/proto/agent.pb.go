@@ -77,14 +77,17 @@ func (ListenerType) EnumDescriptor() ([]byte, []int) {
 }
 
 type ListenerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Port          int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	Type          ListenerType           `protobuf:"varint,3,opt,name=type,proto3,enum=service.ListenerType" json:"type,omitempty"`
-	Secure        bool                   `protobuf:"varint,4,opt,name=secure,proto3" json:"secure,omitempty"`
-	BindIp        string                 `protobuf:"bytes,5,opt,name=bind_ip,json=bindIp,proto3" json:"bind_ip,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Name                  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Port                  int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	Type                  ListenerType           `protobuf:"varint,3,opt,name=type,proto3,enum=service.ListenerType" json:"type,omitempty"`
+	Secure                bool                   `protobuf:"varint,4,opt,name=secure,proto3" json:"secure,omitempty"`
+	BindIp                string                 `protobuf:"bytes,5,opt,name=bind_ip,json=bindIp,proto3" json:"bind_ip,omitempty"`
+	GetProfile            string                 `protobuf:"bytes,6,opt,name=get_profile,json=getProfile,proto3" json:"get_profile,omitempty"`
+	PostProfile           string                 `protobuf:"bytes,7,opt,name=post_profile,json=postProfile,proto3" json:"post_profile,omitempty"`
+	ServerResponseProfile string                 `protobuf:"bytes,8,opt,name=server_response_profile,json=serverResponseProfile,proto3" json:"server_response_profile,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ListenerRequest) Reset() {
@@ -148,6 +151,27 @@ func (x *ListenerRequest) GetSecure() bool {
 func (x *ListenerRequest) GetBindIp() string {
 	if x != nil {
 		return x.BindIp
+	}
+	return ""
+}
+
+func (x *ListenerRequest) GetGetProfile() string {
+	if x != nil {
+		return x.GetProfile
+	}
+	return ""
+}
+
+func (x *ListenerRequest) GetPostProfile() string {
+	if x != nil {
+		return x.PostProfile
+	}
+	return ""
+}
+
+func (x *ListenerRequest) GetServerResponseProfile() string {
+	if x != nil {
+		return x.ServerResponseProfile
 	}
 	return ""
 }

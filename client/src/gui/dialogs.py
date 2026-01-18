@@ -585,6 +585,16 @@ class WebSocketThread(QThread):
                 self.log_message.emit(f"Error received: {error_message}")
                 self.ws_client.connected = False
 
+            elif message_type in ['payload_status', 'listener_delete']:
+                # Status messages from server operations - handle based on status field
+                status = message_data.get('status')
+                if status == 'error' and self.current_dialog:
+                    self.current_dialog.error_signal.emit(message_data.get('message', 'Unknown error'))
+                elif status == 'success' and self.current_dialog:
+                    self.current_dialog.success_signal.emit()
+                    self.current_dialog = None
+                # 'in_progress' status is informational, no action needed
+
             elif message_data.get('status') in ['success', 'error']:
                 if self.current_dialog:
                     if message_data['status'] == 'error':
@@ -594,8 +604,10 @@ class WebSocketThread(QThread):
                         self.current_dialog = None
 
             else:
-                print(f"WebSocketThread: Unrecognized message type: {message_type}")
-                self.log_message.emit(f"Unrecognized message type received: {message_type}")
+                # Only warn for truly unrecognized message types (not empty/None)
+                if message_type:
+                    print(f"WebSocketThread: Unrecognized message type: {message_type}")
+                    self.log_message.emit(f"Unrecognized message type received: {message_type}")
 
         except Exception as e:
             print(f"WebSocketThread: Error processing message: {e}")
@@ -870,12 +882,13 @@ class CreateListenerDialog(QDialog):
     success_signal = pyqtSignal()
     error_signal = pyqtSignal(str)
 
-    def __init__(self, parent=None, ws_thread=None):
+    def __init__(self, parent=None, ws_thread=None, db=None):
         super().__init__(parent)
         self.setWindowTitle("Create Listener")
         self.setMinimumWidth(400)
         self.setMinimumHeight(250)
         self.ws_thread = ws_thread
+        self.db = db  # Database for profile lookup
         self.listener_name = None  # Keep track of the listener being created
 
         # Connect our signals to the slots
@@ -891,6 +904,7 @@ class CreateListenerDialog(QDialog):
             print("CreateListenerDialog: Connected listener_update signal to handle_listener_update")
 
         self.setup_ui()
+        self.populate_profiles()
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -962,6 +976,32 @@ class CreateListenerDialog(QDialog):
         self.pipe_name_label.hide()
         self.pipe_name.hide()
 
+        # Separator for profile selection
+        profile_separator = QFrame()
+        profile_separator.setFrameShape(QFrame.Shape.HLine)
+        profile_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        form_layout.addRow(profile_separator)
+
+        # Profile section label
+        profile_label = QLabel("Malleable Profile Configuration:")
+        profile_label.setStyleSheet("font-weight: bold; color: #888;")
+        form_layout.addRow(profile_label)
+
+        # GET Profile dropdown
+        self.get_profile = QComboBox()
+        self.get_profile_label = QLabel("GET Profile:")
+        form_layout.addRow(self.get_profile_label, self.get_profile)
+
+        # POST Profile dropdown
+        self.post_profile = QComboBox()
+        self.post_profile_label = QLabel("POST Profile:")
+        form_layout.addRow(self.post_profile_label, self.post_profile)
+
+        # Server Response Profile dropdown
+        self.response_profile = QComboBox()
+        self.response_profile_label = QLabel("Response Profile:")
+        form_layout.addRow(self.response_profile_label, self.response_profile)
+
         layout.addLayout(form_layout)
         layout.addStretch()
         self.network_tab.setLayout(layout)
@@ -979,6 +1019,33 @@ class CreateListenerDialog(QDialog):
         # Show pipe name only for SMB
         self.pipe_name_label.setVisible(is_smb)
         self.pipe_name.setVisible(is_smb)
+
+    def populate_profiles(self):
+        """Populate profile dropdowns from database"""
+        profiles = {"get": ["default-get"], "post": ["default-post"], "server_response": ["default-response"]}
+
+        # Try to get profiles from database
+        if self.db:
+            try:
+                profiles = self.db.get_available_profiles()
+                print(f"CreateListenerDialog: Loaded profiles from database: {profiles}")
+            except Exception as e:
+                print(f"CreateListenerDialog: Failed to load profiles from database: {e}")
+
+        # Populate GET profile dropdown
+        self.get_profile.clear()
+        for name in profiles.get("get", ["default-get"]):
+            self.get_profile.addItem(name)
+
+        # Populate POST profile dropdown
+        self.post_profile.clear()
+        for name in profiles.get("post", ["default-post"]):
+            self.post_profile.addItem(name)
+
+        # Populate Response profile dropdown
+        self.response_profile.clear()
+        for name in profiles.get("server_response", ["default-response"]):
+            self.response_profile.addItem(name)
     
     #def setup_smb_tab(self):
     #    """Setup SMB listener configuration - SIMPLIFIED"""
@@ -1043,7 +1110,10 @@ class CreateListenerDialog(QDialog):
                 "data": {
                     "name": self.listener_name,
                     "protocol": "SMB",
-                    "pipe_name": pipe_name
+                    "pipe_name": pipe_name,
+                    "get_profile": self.get_profile.currentText(),
+                    "post_profile": self.post_profile.currentText(),
+                    "server_response_profile": self.response_profile.currentText()
                 }
             }
             print(f"CreateListenerDialog: Creating SMB listener with pipe: {pipe_name}")
@@ -1055,7 +1125,10 @@ class CreateListenerDialog(QDialog):
                     "name": self.listener_name,
                     "protocol": protocol,
                     "port": self.port.value(),
-                    "host": self.host.text()
+                    "host": self.host.text(),
+                    "get_profile": self.get_profile.currentText(),
+                    "post_profile": self.post_profile.currentText(),
+                    "server_response_profile": self.response_profile.currentText()
                 }
             }
 
