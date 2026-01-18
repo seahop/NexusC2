@@ -1645,8 +1645,42 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 	case "status_update":
 		log.Printf("[ProcessMessage] Received status update: %s", msg.Content)
 
+	case "sync_profiles":
+		log.Printf("[ProcessMessage] Received profile sync from websocket service")
+		s.handleProfileSync(msg)
+
 	default:
 		log.Printf("[ProcessMessage] Unknown message type: %s", msg.Type)
+	}
+}
+
+// handleProfileSync processes profile updates from the websocket service
+// This allows dynamically uploaded profiles to be available for routing agent requests
+func (s *GRPCServer) handleProfileSync(msg *pb.StreamMessage) {
+	var profileData struct {
+		GetProfiles            []config.GetProfile            `json:"get_profiles"`
+		PostProfiles           []config.PostProfile           `json:"post_profiles"`
+		ServerResponseProfiles []config.ServerResponseProfile `json:"server_response_profiles"`
+	}
+
+	if err := json.Unmarshal([]byte(msg.Content), &profileData); err != nil {
+		log.Printf("[ProfileSync] Failed to unmarshal profile data: %v", err)
+		return
+	}
+
+	// Update the listener manager's profiles
+	if s.manager != nil {
+		s.manager.UpdateProfiles(
+			profileData.GetProfiles,
+			profileData.PostProfiles,
+			profileData.ServerResponseProfiles,
+		)
+		log.Printf("[ProfileSync] Updated profiles: %d GET, %d POST, %d Response",
+			len(profileData.GetProfiles),
+			len(profileData.PostProfiles),
+			len(profileData.ServerResponseProfiles))
+	} else {
+		log.Printf("[ProfileSync] Warning: Manager is nil, cannot update profiles")
 	}
 }
 

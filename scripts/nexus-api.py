@@ -90,7 +90,7 @@ class NexusAPIClient:
         return headers
 
     def _request(self, method: str, endpoint: str, data: Dict = None,
-                 stream: bool = False) -> requests.Response:
+                 stream: bool = False, timeout: int = 120) -> requests.Response:
         """Make an API request."""
         url = f"{self.base_url}/api/v1{endpoint}"
         try:
@@ -100,7 +100,7 @@ class NexusAPIClient:
                 headers=self._headers(),
                 json=data if data else None,
                 stream=stream,
-                timeout=120  # Long timeout for payload builds
+                timeout=timeout
             )
             return response
         except requests.exceptions.ConnectionError:
@@ -367,7 +367,7 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
         if post_profile:
             data["post_profile"] = post_profile
         if server_response_profile:
-            data["server_response"] = server_response_profile  # API expects "server_response"
+            data["server_response_profile"] = server_response_profile
 
         response = self._request("POST", "/listeners", data)
         return self._handle_response(response)
@@ -416,6 +416,60 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
         response = self._request("GET", f"/profiles/server-response/{name}")
         return self._handle_response(response)
 
+    def get_profile_names(self) -> Dict:
+        """Get just the profile names (useful for dropdowns)."""
+        response = self._request("GET", "/profiles/names")
+        return self._handle_response(response)
+
+    def download_template(self, output_file: str = "listener_template.toml") -> None:
+        """Download the profile template file."""
+        response = self._request("GET", "/profiles/template")
+
+        if response.status_code != 200:
+            self._handle_response(response)
+            return
+
+        with open(output_file, "w") as f:
+            f.write(response.text)
+
+        print(color(f"Template downloaded to: {output_file}", Colors.GREEN))
+
+    def upload_profiles(self, file_path: str = None, content: str = None) -> Dict:
+        """Upload new malleable profiles from a TOML file or raw content."""
+        if file_path:
+            with open(file_path, "r") as f:
+                content = f.read()
+        elif not content:
+            raise ValueError("Either file_path or content must be provided")
+
+        # Send as raw TOML
+        url = f"{self.base_url}/api/v1/profiles/upload"
+        headers = self._headers()
+        headers["Content-Type"] = "application/toml"
+
+        response = self.session.post(
+            url,
+            headers=headers,
+            data=content,
+            timeout=30
+        )
+        return self._handle_response(response)
+
+    def delete_get_profile(self, name: str) -> Dict:
+        """Delete a GET profile by name."""
+        response = self._request("DELETE", f"/profiles/get/{name}")
+        return self._handle_response(response)
+
+    def delete_post_profile(self, name: str) -> Dict:
+        """Delete a POST profile by name."""
+        response = self._request("DELETE", f"/profiles/post/{name}")
+        return self._handle_response(response)
+
+    def delete_server_response_profile(self, name: str) -> Dict:
+        """Delete a server response profile by name."""
+        response = self._request("DELETE", f"/profiles/server-response/{name}")
+        return self._handle_response(response)
+
     # -------------------------------------------------------------------------
     # Payloads
     # -------------------------------------------------------------------------
@@ -443,7 +497,8 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
         print(f"Building payload for {os_type}/{arch}...")
         print(f"Listener: {listener}")
 
-        response = self._request("POST", "/payloads/build", data, stream=True)
+        # Use 10 minute timeout for payload builds (they can take a while on slow machines)
+        response = self._request("POST", "/payloads/build", data, stream=True, timeout=600)
 
         if response.status_code != 200:
             self._handle_response(response)
@@ -735,6 +790,19 @@ Environment Variables:
     profiles_get = profiles_sub.add_parser("get", help="Get profile details")
     profiles_get.add_argument("type", choices=["get", "post", "response"], help="Profile type")
     profiles_get.add_argument("name", help="Profile name")
+
+    profiles_sub.add_parser("names", help="List profile names only")
+
+    profiles_template = profiles_sub.add_parser("template", help="Download profile template")
+    profiles_template.add_argument("-o", "--output", default="listener_template.toml",
+                                    help="Output filename (default: listener_template.toml)")
+
+    profiles_upload = profiles_sub.add_parser("upload", help="Upload new profiles from TOML file")
+    profiles_upload.add_argument("file", help="Path to TOML profile file")
+
+    profiles_delete = profiles_sub.add_parser("delete", help="Delete a profile")
+    profiles_delete.add_argument("type", choices=["get", "post", "response"], help="Profile type")
+    profiles_delete.add_argument("name", help="Profile name to delete")
 
     # Payload
     payload_parser = subparsers.add_parser("payload", help="Payload operations")
@@ -1031,6 +1099,67 @@ Environment Variables:
             elif args.type == "response":
                 data = client.get_server_response_profile(args.name)
             print_json(data)
+
+        elif args.action == "names":
+            data = client.get_profile_names()
+            if output_json:
+                print_json(data)
+            else:
+                print(color("\nGET Profiles:", Colors.CYAN))
+                for name in data.get("get_profiles", []):
+                    print(f"  - {name}")
+                print(color("\nPOST Profiles:", Colors.CYAN))
+                for name in data.get("post_profiles", []):
+                    print(f"  - {name}")
+                print(color("\nServer Response Profiles:", Colors.CYAN))
+                for name in data.get("server_response_profiles", []):
+                    print(f"  - {name}")
+                print()
+
+        elif args.action == "template":
+            client.download_template(args.output)
+
+        elif args.action == "upload":
+            data = client.upload_profiles(file_path=args.file)
+            if output_json:
+                print_json(data)
+            else:
+                status = data.get("status", "unknown")
+                status_color = Colors.GREEN if status == "success" else Colors.YELLOW
+                print(f"Status: {color(status, status_color)}")
+                print(f"Message: {data.get('message', '')}")
+
+                get_added = data.get("get_profiles_added", [])
+                post_added = data.get("post_profiles_added", [])
+                response_added = data.get("server_response_added", [])
+
+                if get_added:
+                    print(color(f"\nGET profiles added:", Colors.CYAN))
+                    for name in get_added:
+                        print(f"  + {name}")
+                if post_added:
+                    print(color(f"\nPOST profiles added:", Colors.CYAN))
+                    for name in post_added:
+                        print(f"  + {name}")
+                if response_added:
+                    print(color(f"\nServer Response profiles added:", Colors.CYAN))
+                    for name in response_added:
+                        print(f"  + {name}")
+
+                errors = data.get("errors", [])
+                if errors:
+                    print(color(f"\nErrors:", Colors.RED))
+                    for err in errors:
+                        print(f"  ! {err}")
+
+        elif args.action == "delete":
+            if args.type == "get":
+                data = client.delete_get_profile(args.name)
+            elif args.type == "post":
+                data = client.delete_post_profile(args.name)
+            elif args.type == "response":
+                data = client.delete_server_response_profile(args.name)
+            print(color(data.get("message", "Profile deleted"), Colors.GREEN))
 
     elif args.command == "payload":
         if args.action == "build":

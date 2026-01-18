@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (QDialog, QSpinBox, QFormLayout,
                             QLineEdit, QPushButton, QComboBox, QHBoxLayout,
                             QVBoxLayout, QMessageBox, QFileDialog, QProgressDialog, QTabWidget, QWidget,
-                            QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit)
+                            QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit, QTextEdit)
 from PyQt6.QtCore import QThread, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
 from PyQt6.QtGui import QPixmap, QIcon
 from version import get_version_info, APP_NAME, APP_DESCRIPTION
@@ -41,7 +41,8 @@ class WebSocketThread(QThread):
     downloads_update = pyqtSignal(list)
     download_chunk = pyqtSignal(dict)
     upload_response = pyqtSignal(dict)
-    link_update = pyqtSignal(dict) 
+    link_update = pyqtSignal(dict)
+    profiles_updated = pyqtSignal(dict)  # Signal for profile uploads/updates 
 
     def __init__(self, username, host, port, parent=None):
         super().__init__(parent)
@@ -551,6 +552,29 @@ class WebSocketThread(QThread):
                 event = message_data['data']['event']
                 listener_data = message_data['data'].get('listener', message_data['data'])
                 self.listener_update.emit(event, listener_data)
+
+            elif message_type == 'profiles_updated':
+                # Broadcast when profiles are added/removed - update local database
+                print("WebSocketThread: Handling profiles_updated broadcast")
+                profile_data = message_data.get('data', {})
+                # Update local database with new profile lists
+                if self.db:
+                    self.db.update_profiles(profile_data)
+                self.profiles_updated.emit(profile_data)
+
+            elif message_type == 'profile_upload_response':
+                # Direct response to the client that uploaded profiles
+                print("WebSocketThread: Handling profile_upload_response")
+                response_data = message_data.get('data', {})
+                self.profiles_updated.emit(response_data)
+
+            elif message_type == 'profiles_list':
+                # Response to get_profiles request
+                print("WebSocketThread: Handling profiles_list response")
+                profile_data = message_data.get('data', {})
+                if self.db:
+                    self.db.update_profiles(profile_data)
+                self.profiles_updated.emit(profile_data)
 
             elif message_type == 'connection_update':
                 if message_data['data']['event'] == 'connected':
@@ -1167,6 +1191,220 @@ class CreateListenerDialog(QDialog):
         if event == "created" and listener_data.get("name") == self.listener_name:
             print(f"CreateListenerDialog: Matching listener '{self.listener_name}' found. Closing dialog.")
             self.handle_success()
+
+
+class ProfileUploadDialog(QDialog):
+    """Dialog for uploading custom malleable HTTP profiles"""
+    success_signal = pyqtSignal()
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, parent=None, ws_thread=None):
+        super().__init__(parent)
+        self.setWindowTitle("Upload Malleable Profiles")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+        self.ws_thread = ws_thread
+        self.file_path = None
+        self.waiting_for_response = False  # Track if we're waiting for upload response
+
+        # Connect signals
+        self.success_signal.connect(self.handle_success)
+        self.error_signal.connect(self.show_error)
+
+        if self.ws_thread:
+            self.ws_thread.profiles_updated.connect(self.handle_profile_response)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout()
+
+        # Instructions
+        instructions = QLabel(
+            "Upload a TOML file containing malleable HTTP profile definitions.\n"
+            "Profiles will be validated and added to the server configuration.\n\n"
+            "The file should define profiles under [http_profiles.get], [http_profiles.post],\n"
+            "and/or [http_profiles.server_response] sections."
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("color: #888; margin-bottom: 10px;")
+        layout.addWidget(instructions)
+
+        # File selection row
+        file_layout = QHBoxLayout()
+        self.file_path_edit = QLineEdit()
+        self.file_path_edit.setPlaceholderText("Select a TOML profile file...")
+        self.file_path_edit.setReadOnly(True)
+        file_layout.addWidget(self.file_path_edit)
+
+        self.browse_button = QPushButton("Browse...")
+        self.browse_button.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.browse_button)
+        layout.addLayout(file_layout)
+
+        # Preview area
+        preview_label = QLabel("File Preview:")
+        preview_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(preview_label)
+
+        self.preview_text = QTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlaceholderText("Select a file to preview its contents...")
+        self.preview_text.setStyleSheet("font-family: monospace;")
+        layout.addWidget(self.preview_text)
+
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #888;")
+        layout.addWidget(self.status_label)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.upload_button = QPushButton("Upload Profiles")
+        self.upload_button.setEnabled(False)
+        self.upload_button.clicked.connect(self.handle_upload)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(self.upload_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def browse_file(self):
+        """Open file dialog to select a TOML profile file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Profile TOML File",
+            "",
+            "TOML Files (*.toml);;All Files (*)"
+        )
+
+        if file_path:
+            self.file_path = file_path
+            self.file_path_edit.setText(file_path)
+            self.load_preview()
+
+    def load_preview(self):
+        """Load and preview the selected file"""
+        if not self.file_path:
+            return
+
+        try:
+            with open(self.file_path, 'r') as f:
+                content = f.read()
+            self.preview_text.setPlainText(content)
+            self.upload_button.setEnabled(True)
+            self.status_label.setText(f"File loaded: {len(content)} bytes")
+            self.status_label.setStyleSheet("color: #4CAF50;")
+        except Exception as e:
+            self.preview_text.setPlainText(f"Error reading file: {e}")
+            self.upload_button.setEnabled(False)
+            self.status_label.setText("Error loading file")
+            self.status_label.setStyleSheet("color: #F44336;")
+
+    def handle_upload(self):
+        """Send the profile content to the server"""
+        if not self.ws_thread or not self.ws_thread.is_connected():
+            QMessageBox.warning(self, "Warning", "Not connected to server")
+            return
+
+        content = self.preview_text.toPlainText()
+        if not content.strip():
+            QMessageBox.warning(self, "Warning", "No content to upload")
+            return
+
+        # Disable upload button while processing
+        self.upload_button.setEnabled(False)
+        self.upload_button.setText("Uploading...")
+        self.status_label.setText("Uploading profiles to server...")
+        self.status_label.setStyleSheet("color: #2196F3;")
+        self.waiting_for_response = True
+
+        # Send upload message via WebSocket
+        message = {
+            "type": "upload_profiles",
+            "data": {
+                "content": content
+            }
+        }
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.ws_thread.ws_client.send_message(json.dumps(message)),
+                self.ws_thread.loop
+            )
+        except Exception as e:
+            self.waiting_for_response = False
+            self.show_error(f"Failed to send upload request: {e}")
+
+    @pyqtSlot(dict)
+    def handle_profile_response(self, response_data):
+        """Handle profile upload response from server"""
+        # Only process if we're actually waiting for a response
+        if not self.waiting_for_response:
+            return
+
+        # Ignore profiles_updated broadcasts (they don't have 'success' or 'message' keys)
+        # We only want to handle direct profile_upload_response messages
+        if 'success' not in response_data and 'message' not in response_data:
+            # This is a broadcast update, not a response to our upload - ignore it
+            return
+
+        # Clear the waiting flag - we got our response
+        self.waiting_for_response = False
+
+        success = response_data.get('success', False)
+        message = response_data.get('message', '')
+        errors = response_data.get('errors', [])
+
+        # Re-enable upload button
+        self.upload_button.setEnabled(True)
+        self.upload_button.setText("Upload Profiles")
+
+        if success:
+            # Show success summary
+            get_added = response_data.get('get_profiles', [])
+            post_added = response_data.get('post_profiles', [])
+            response_added = response_data.get('server_response_profiles', [])
+
+            summary = f"Successfully added profiles:\n"
+            if get_added:
+                summary += f"  GET: {', '.join(get_added)}\n"
+            if post_added:
+                summary += f"  POST: {', '.join(post_added)}\n"
+            if response_added:
+                summary += f"  Response: {', '.join(response_added)}\n"
+
+            if errors:
+                summary += f"\nWarnings:\n  " + "\n  ".join(errors)
+
+            self.status_label.setText("Upload successful!")
+            self.status_label.setStyleSheet("color: #4CAF50;")
+            QMessageBox.information(self, "Upload Successful", summary)
+            self.accept()
+        else:
+            error_msg = message
+            if errors:
+                error_msg += "\n\n" + "\n".join(errors)
+            self.show_error(error_msg)
+
+    @pyqtSlot(str)
+    def show_error(self, message):
+        """Display error message"""
+        self.upload_button.setEnabled(True)
+        self.upload_button.setText("Upload Profiles")
+        self.status_label.setText("Upload failed")
+        self.status_label.setStyleSheet("color: #F44336;")
+        QMessageBox.warning(self, "Upload Error", message)
+
+    @pyqtSlot()
+    def handle_success(self):
+        """Handle successful upload"""
+        self.accept()
+
 
 class CreatePayloadDialog(QDialog):
     def __init__(self, parent=None, ws_thread=None, agent_tree=None):

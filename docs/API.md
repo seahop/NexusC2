@@ -712,7 +712,22 @@ Delete a listener.
 
 ### Malleable Profiles
 
-Malleable profiles define HTTP request/response patterns for agent communication. Profiles are defined in `config.toml` and can be bound to listeners at creation time.
+Malleable profiles define HTTP request/response patterns for agent communication, allowing traffic to blend in with legitimate services (AWS S3, Microsoft Graph, etc.).
+
+**Profile Sources:**
+- **Static profiles** are defined in `server/config.toml` and loaded at server startup
+- **Dynamic profiles** can be uploaded at runtime via the API or client UI without restarting the server
+
+**Creating Custom Profiles:**
+1. Download the template: `GET /api/v1/profiles/template` or use the client (Tools > Upload Profiles)
+2. Edit the template file (`server/docker/templates/listener_template.toml`) to define your custom profiles
+3. Upload via API (`POST /api/v1/profiles/upload`) or the client UI
+4. Create a listener using your new profiles
+
+Each profile type serves a specific purpose:
+- **GET profiles**: Define how agents poll for commands (path, method, headers, client ID parameter)
+- **POST profiles**: Define how agents send results back (path, method, content type, client ID parameter)
+- **Server Response profiles**: Define how the server responds to agents (content type, JSON field names, headers)
 
 #### GET /api/v1/profiles
 
@@ -957,6 +972,169 @@ Get a specific server response profile by name.
 
 **Errors:**
 - `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/names
+
+Get just the profile names (useful for dropdowns/selection lists).
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "get_profiles": ["default-get", "microsoft-graph-get", "aws-s3-get"],
+  "post_profiles": ["default-post", "microsoft-graph-post", "aws-s3-post"],
+  "server_response_profiles": ["default-response", "microsoft-graph-response", "aws-s3-response"]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/template
+
+Download the profile template file for creating custom profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+- Content-Type: `application/toml`
+- Content-Disposition: `attachment; filename=listener_template.toml`
+- Body: TOML template content
+
+---
+
+#### POST /api/v1/profiles/upload
+
+Upload and validate new malleable profiles at runtime. Profiles are added to the running configuration immediately (hot-loaded).
+
+**Authentication:** Required
+
+**Content Types Supported:**
+- `application/toml` or `text/plain`: Raw TOML content in request body
+- `multipart/form-data`: File upload with form field `profile`
+
+**Request (Raw TOML):**
+```toml
+[[http_profiles.get]]
+name = "custom-get"
+path = "/api/custom/check"
+method = "GET"
+[[http_profiles.get.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.post]]
+name = "custom-post"
+path = "/api/custom/data"
+method = "POST"
+content_type = "application/json"
+[[http_profiles.post.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.server_response]]
+name = "custom-response"
+content_type = "application/json"
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Profiles uploaded successfully",
+  "get_profiles_added": ["custom-get"],
+  "post_profiles_added": ["custom-post"],
+  "server_response_added": ["custom-response"],
+  "errors": []
+}
+```
+
+**Response (200 OK) - Partial Success:**
+```json
+{
+  "status": "partial",
+  "message": "Profiles uploaded successfully",
+  "get_profiles_added": ["custom-get"],
+  "post_profiles_added": [],
+  "server_response_added": [],
+  "errors": ["POST profile 'default-post': profile with name 'default-post' already exists"]
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Invalid TOML syntax or no profiles added
+
+---
+
+#### DELETE /api/v1/profiles/get/:name
+
+Delete a GET profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "GET profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: GET profile not found
+
+---
+
+#### DELETE /api/v1/profiles/post/:name
+
+Delete a POST profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "POST profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: POST profile not found
+
+---
+
+#### DELETE /api/v1/profiles/server-response/:name
+
+Delete a server response profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Server response profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Server response profile not found
 
 ---
 

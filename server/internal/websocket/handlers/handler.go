@@ -299,10 +299,13 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 
 	case "create_listener":
 		logMessage(LOG_VERBOSE, "Processing create_listener message")
-		// Peek at the protocol to determine if gRPC check is needed
+		// Peek at the protocol and profile names for validation
 		var listenerPeek struct {
 			Data struct {
-				Protocol string `json:"protocol"`
+				Protocol              string `json:"protocol"`
+				GetProfile            string `json:"get_profile"`
+				PostProfile           string `json:"post_profile"`
+				ServerResponseProfile string `json:"server_response_profile"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(message, &listenerPeek); err == nil {
@@ -311,6 +314,24 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 			if protocol != "SMB" {
 				if _, err := h.GetAgentClient(); err != nil {
 					return h.handleOfflineMessage(client, msgType, err)
+				}
+			}
+
+			// Validate profile names if specified (non-empty means user explicitly set them)
+			if h.agentConfig != nil {
+				var validationErrors []string
+				if listenerPeek.Data.GetProfile != "" && h.agentConfig.GetGetProfile(listenerPeek.Data.GetProfile) == nil {
+					validationErrors = append(validationErrors, fmt.Sprintf("GET profile '%s' does not exist", listenerPeek.Data.GetProfile))
+				}
+				if listenerPeek.Data.PostProfile != "" && h.agentConfig.GetPostProfile(listenerPeek.Data.PostProfile) == nil {
+					validationErrors = append(validationErrors, fmt.Sprintf("POST profile '%s' does not exist", listenerPeek.Data.PostProfile))
+				}
+				if listenerPeek.Data.ServerResponseProfile != "" && h.agentConfig.GetServerResponseProfile(listenerPeek.Data.ServerResponseProfile) == nil {
+					validationErrors = append(validationErrors, fmt.Sprintf("Server response profile '%s' does not exist", listenerPeek.Data.ServerResponseProfile))
+				}
+				if len(validationErrors) > 0 {
+					logMessage(LOG_NORMAL, "Profile validation failed: %v", validationErrors)
+					return h.sendListenerError(client, strings.Join(validationErrors, "; "))
 				}
 			}
 		} else {
@@ -371,6 +392,14 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		logMessage(LOG_VERBOSE, "Processing refresh_state message")
 		return h.handleRefreshState(client)
 
+	case "upload_profiles":
+		logMessage(LOG_VERBOSE, "Processing upload_profiles message")
+		return h.handleUploadProfiles(client, message)
+
+	case "get_profiles":
+		logMessage(LOG_VERBOSE, "Processing get_profiles message")
+		return h.handleGetProfiles(client, message)
+
 	default:
 		logMessage(LOG_NORMAL, "Unknown message type: %s", msgType)
 		return nil
@@ -405,6 +434,23 @@ func (h *WSHandler) handleOfflineMessage(client *hub.Client, msgType string, err
 	client.Send <- responseJSON
 
 	return nil
+}
+
+// sendListenerError sends an error response for listener operations
+func (h *WSHandler) sendListenerError(client *hub.Client, message string) error {
+	response := struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}{
+		Status:  "error",
+		Message: message,
+	}
+
+	responseJSON, _ := json.Marshal(response)
+	client.Send <- responseJSON
+
+	logMessage(LOG_NORMAL, "Listener error: %s", message)
+	return fmt.Errorf(message)
 }
 
 // handleRefreshState re-exports and sends the current state to the client

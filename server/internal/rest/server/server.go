@@ -138,6 +138,15 @@ func (s *Server) setupRouter() {
 	// Health check (no auth required)
 	router.GET("/health", s.handleHealth)
 
+	// Internal routes (service-to-service, no auth required)
+	// These endpoints are only accessible within the docker network
+	internal := router.Group("/internal")
+	{
+		if s.profileHandler != nil {
+			internal.POST("/profiles/sync", s.profileHandler.SyncProfiles)
+		}
+	}
+
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
@@ -203,18 +212,28 @@ func (s *Server) setupRouter() {
 				protected.POST("/payloads/build", s.payloadHandler.BuildPayload)
 			}
 
-			// Profiles - malleable profile discovery endpoints
+			// Profiles - malleable profile discovery and management endpoints
 			if s.profileHandler != nil {
 				profiles := protected.Group("/profiles")
 				{
 					profiles.GET("", s.profileHandler.ListAllProfiles)
 					profiles.GET("/names", s.profileHandler.GetProfileNames)
+					profiles.GET("/template", s.profileHandler.GetTemplate)
+					// Profile upload must go through WebSocket proxy to sync across all services
+					if s.useWSProxy {
+						profiles.POST("/upload", s.wsProxyHandlers.UploadProfiles)
+					} else {
+						profiles.POST("/upload", s.profileHandler.UploadProfiles)
+					}
 					profiles.GET("/get", s.profileHandler.ListGetProfiles)
 					profiles.GET("/get/:name", s.profileHandler.GetGetProfile)
+					profiles.DELETE("/get/:name", s.profileHandler.DeleteGetProfile)
 					profiles.GET("/post", s.profileHandler.ListPostProfiles)
 					profiles.GET("/post/:name", s.profileHandler.GetPostProfile)
+					profiles.DELETE("/post/:name", s.profileHandler.DeletePostProfile)
 					profiles.GET("/server-response", s.profileHandler.ListServerResponseProfiles)
 					profiles.GET("/server-response/:name", s.profileHandler.GetServerResponseProfile)
+					profiles.DELETE("/server-response/:name", s.profileHandler.DeleteServerResponseProfile)
 				}
 			}
 

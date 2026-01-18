@@ -118,6 +118,26 @@ func NewManager(
 	)
 }
 
+// UpdateProfiles replaces all HTTP profiles with the provided profiles
+// This is called when the websocket service syncs uploaded profiles
+func (m *Manager) UpdateProfiles(getProfiles []config.GetProfile, postProfiles []config.PostProfile, serverResponseProfiles []config.ServerResponseProfile) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if m.routes == nil {
+		log.Printf("[Manager] Warning: Cannot update profiles - routes config is nil")
+		return
+	}
+
+	// Replace all profiles
+	m.routes.HTTPProfiles.Get = getProfiles
+	m.routes.HTTPProfiles.Post = postProfiles
+	m.routes.HTTPProfiles.ServerResponse = serverResponseProfiles
+
+	log.Printf("[Manager] Profiles updated: %d GET, %d POST, %d Response",
+		len(getProfiles), len(postProfiles), len(serverResponseProfiles))
+}
+
 func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 	// Look up bound profiles for this listener
 	var getProfile *config.GetProfile
@@ -210,63 +230,16 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 			}
 		}
 
-		// Fallback to global routes if no profile matched
-		// Check GET handlers (which may use custom methods)
-		for _, handler := range m.routes.Routes.Get {
-			// Check if the path matches AND the method matches (custom or default)
-			if handler.Path == r.URL.Path && handler.Method == r.Method && handler.Enabled {
-				log.Printf("[%s] Found matching GET-type handler for path %s (global route)", r.Method, r.URL.Path)
-
-				clientID, err := m.extractClientID(r, handler)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-
-				// Use original GET request handler for global routes
-				m.handleGetRequest(w, clientID, m.commandBuffer)
-				return
-			}
-		}
-
-		// Check POST handlers (which may use custom methods)
-		for _, handler := range m.routes.Routes.Post {
-			// Check if the path matches AND the method matches (custom or default)
-			if handler.Path == r.URL.Path && handler.Method == r.Method && handler.Enabled {
-				log.Printf("[%s] Found matching POST-type handler for path %s (global route)", r.Method, r.URL.Path)
-
-				// Use POST request handler (since this is a POST-type operation)
-				m.handlePostRequest(w, r)
-				return
-			}
-		}
-
-		// No matching handler found
+		// No matching profile found
 		log.Printf("[%s] No matching handler found for path %s", r.Method, r.URL.Path)
 
-		// Check if this method is even allowed
+		// Check if this method is allowed based on bound profiles
 		allowed := false
 		if getProfile != nil && getProfile.Method == r.Method {
 			allowed = true
 		}
 		if postProfile != nil && postProfile.Method == r.Method {
 			allowed = true
-		}
-		if !allowed {
-			for _, handler := range m.routes.Routes.Get {
-				if handler.Enabled && handler.Method == r.Method {
-					allowed = true
-					break
-				}
-			}
-		}
-		if !allowed {
-			for _, handler := range m.routes.Routes.Post {
-				if handler.Enabled && handler.Method == r.Method {
-					allowed = true
-					break
-				}
-			}
 		}
 
 		if !allowed && !methodAllowed(cfg.AllowedMethods, r.Method) {
@@ -381,53 +354,6 @@ func (m *Manager) createSharedPortHandler(sps *SharedPortServer) http.Handler {
 			_ = cfg // Silence unused variable warning
 		}
 
-		// No direct profile match - try global routes for all registered listeners
-		// This handles cases where listeners use global routes instead of bound profiles
-		for _, listenerName := range sps.GetListenerNames() {
-			cfg, exists := sps.GetListenerConfig(listenerName)
-			if !exists {
-				continue
-			}
-
-			handler := sps.listenerHandlers[listenerName]
-
-			// Apply headers
-			for k, v := range handler.Headers {
-				w.Header().Set(k, v)
-			}
-
-			// Check global GET routes
-			for _, route := range m.routes.Routes.Get {
-				if route.Path == r.URL.Path && route.Method == r.Method && route.Enabled {
-					log.Printf("[SharedPort:%d] Matched global GET route for listener '%s'",
-						sps.Port, listenerName)
-
-					clientID, err := m.extractClientID(r, route)
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-
-					// Use original handler for global routes
-					m.handleGetRequest(w, clientID, m.commandBuffer)
-					return
-				}
-			}
-
-			// Check global POST routes
-			for _, route := range m.routes.Routes.Post {
-				if route.Path == r.URL.Path && route.Method == r.Method && route.Enabled {
-					log.Printf("[SharedPort:%d] Matched global POST route for listener '%s'",
-						sps.Port, listenerName)
-
-					m.handlePostRequest(w, r)
-					return
-				}
-			}
-
-			_ = cfg // Silence unused variable
-		}
-
 		// No handler found
 		log.Printf("[SharedPort:%d] No handler found for %s %s", sps.Port, r.Method, r.URL.Path)
 		http.Error(w, "Not found", http.StatusNotFound)
@@ -497,9 +423,27 @@ func (m *Manager) StartListener(cfg config.ListenerConfig) error {
 		return fmt.Errorf("listener with name %s already exists on shared port", cfg.Name)
 	}
 
-	// Set allowed methods if not already set
+	// Set allowed methods based on bound profiles
 	if len(cfg.AllowedMethods) == 0 {
-		cfg.AllowedMethods = m.routes.GetAllowedMethods(cfg.Protocol)
+		methods := make(map[string]bool)
+		// Add methods from bound profiles
+		if cfg.GetProfile != "" {
+			if getProfile := m.routes.GetGetProfile(cfg.GetProfile); getProfile != nil {
+				methods[getProfile.Method] = true
+			}
+		}
+		if cfg.PostProfile != "" {
+			if postProfile := m.routes.GetPostProfile(cfg.PostProfile); postProfile != nil {
+				methods[postProfile.Method] = true
+			}
+		}
+		// Always allow OPTIONS and HEAD for HTTP compatibility
+		methods["OPTIONS"] = true
+		methods["HEAD"] = true
+		// Convert map to slice
+		for method := range methods {
+			cfg.AllowedMethods = append(cfg.AllowedMethods, method)
+		}
 	}
 
 	// Set default headers if not already set

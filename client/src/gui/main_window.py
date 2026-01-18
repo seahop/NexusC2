@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QDialog,
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QMetaObject, Q_ARG, pyqtSlot, QTimer
 from PyQt6.QtGui import QPalette, QColor, QIcon
 
-from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog
+from .dialogs import ServerConnectDialog, CreateListenerDialog, CreatePayloadDialog, SettingsDialog, VersionDialog, ProfileUploadDialog
 from .widgets import AgentTreeWidget, TerminalWidget, AgentDisplayWidget
 from utils.database import StateDatabase
 from .widgets.downloads import DownloadsWidget
@@ -256,7 +256,12 @@ class C2ClientGUI(QMainWindow):
         createPayloadAction = toolsMenu.addAction('Create Payload')
         createPayloadAction.setShortcut(QKeySequence('Ctrl+P'))
         createPayloadAction.triggered.connect(self.showCreatePayload)
-        
+
+        toolsMenu.addSeparator()
+        uploadProfilesAction = toolsMenu.addAction('Upload Profiles...')
+        uploadProfilesAction.setShortcut(QKeySequence('Ctrl+Shift+P'))
+        uploadProfilesAction.triggered.connect(self.showUploadProfiles)
+
         # Add CNA script loading option
         toolsMenu.addSeparator()
         loadCNAAction = toolsMenu.addAction('Load CNA Script...')
@@ -1132,6 +1137,14 @@ class C2ClientGUI(QMainWindow):
             if not hasattr(self, '_payload_handler_connected'):
                 self.ws_thread.message_received.connect(self.handle_payload_message)
                 self._payload_handler_connected = True
+
+    def showUploadProfiles(self):
+        if not self.ws_thread or not self.ws_thread.is_connected():
+            QMessageBox.warning(self, "Warning", "Please connect to server first")
+            return
+
+        dialog = ProfileUploadDialog(self, self.ws_thread)
+        dialog.exec()
 
     def loadInitialState(self):
         print("\nMainWindow: Loading initial state")

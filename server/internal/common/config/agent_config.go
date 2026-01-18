@@ -2,6 +2,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/BurntSushi/toml"
 )
 
@@ -240,4 +242,184 @@ func (cfg *AgentConfig) GetServerResponseProfileNames() []string {
 		names[i] = profile.Name
 	}
 	return names
+}
+
+// ProfileUploadResult contains the results of a profile upload operation
+type ProfileUploadResult struct {
+	GetProfiles            []string `json:"get_profiles"`
+	PostProfiles           []string `json:"post_profiles"`
+	ServerResponseProfiles []string `json:"server_response_profiles"`
+	Errors                 []string `json:"errors,omitempty"`
+}
+
+// ValidateAndAddProfiles parses TOML content and adds valid profiles to the config
+// Returns the names of successfully added profiles and any validation errors
+func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUploadResult, error) {
+	result := &ProfileUploadResult{
+		GetProfiles:            []string{},
+		PostProfiles:           []string{},
+		ServerResponseProfiles: []string{},
+		Errors:                 []string{},
+	}
+
+	// Parse the uploaded TOML
+	var uploaded struct {
+		HTTPProfiles HTTPProfiles `toml:"http_profiles"`
+	}
+
+	if _, err := toml.Decode(tomlContent, &uploaded); err != nil {
+		return nil, fmt.Errorf("failed to parse TOML: %v", err)
+	}
+
+	// Validate and add GET profiles
+	for _, profile := range uploaded.HTTPProfiles.Get {
+		if err := cfg.validateGetProfile(&profile); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("GET profile '%s': %v", profile.Name, err))
+			continue
+		}
+		// Set defaults
+		if profile.Method == "" {
+			profile.Method = "GET"
+		}
+		cfg.HTTPProfiles.Get = append(cfg.HTTPProfiles.Get, profile)
+		result.GetProfiles = append(result.GetProfiles, profile.Name)
+	}
+
+	// Validate and add POST profiles
+	for _, profile := range uploaded.HTTPProfiles.Post {
+		if err := cfg.validatePostProfile(&profile); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("POST profile '%s': %v", profile.Name, err))
+			continue
+		}
+		// Set defaults
+		if profile.Method == "" {
+			profile.Method = "POST"
+		}
+		if profile.ContentType == "" {
+			profile.ContentType = "application/json"
+		}
+		cfg.HTTPProfiles.Post = append(cfg.HTTPProfiles.Post, profile)
+		result.PostProfiles = append(result.PostProfiles, profile.Name)
+	}
+
+	// Validate and add Server Response profiles
+	for _, profile := range uploaded.HTTPProfiles.ServerResponse {
+		if err := cfg.validateServerResponseProfile(&profile); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Server Response profile '%s': %v", profile.Name, err))
+			continue
+		}
+		// Set defaults
+		if profile.ContentType == "" {
+			profile.ContentType = "application/json"
+		}
+		if profile.StatusField == "" {
+			profile.StatusField = "status"
+		}
+		if profile.DataField == "" {
+			profile.DataField = "data"
+		}
+		if profile.CommandIDField == "" {
+			profile.CommandIDField = "id"
+		}
+		if profile.RekeyValue == "" {
+			profile.RekeyValue = "rekey"
+		}
+		cfg.HTTPProfiles.ServerResponse = append(cfg.HTTPProfiles.ServerResponse, profile)
+		result.ServerResponseProfiles = append(result.ServerResponseProfiles, profile.Name)
+	}
+
+	return result, nil
+}
+
+// validateGetProfile validates a GET profile
+func (cfg *AgentConfig) validateGetProfile(profile *GetProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if profile.Path == "" {
+		return fmt.Errorf("path is required")
+	}
+	// Check for duplicate name
+	if cfg.GetGetProfile(profile.Name) != nil {
+		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
+	}
+	// Validate params have required fields
+	for i, param := range profile.Params {
+		if param.Name == "" {
+			return fmt.Errorf("param[%d]: name is required", i)
+		}
+		if param.Type == "" {
+			return fmt.Errorf("param[%d]: type is required", i)
+		}
+	}
+	return nil
+}
+
+// validatePostProfile validates a POST profile
+func (cfg *AgentConfig) validatePostProfile(profile *PostProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if profile.Path == "" {
+		return fmt.Errorf("path is required")
+	}
+	// Check for duplicate name
+	if cfg.GetPostProfile(profile.Name) != nil {
+		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
+	}
+	// Validate params have required fields
+	for i, param := range profile.Params {
+		if param.Name == "" {
+			return fmt.Errorf("param[%d]: name is required", i)
+		}
+		if param.Type == "" {
+			return fmt.Errorf("param[%d]: type is required", i)
+		}
+	}
+	return nil
+}
+
+// validateServerResponseProfile validates a Server Response profile
+func (cfg *AgentConfig) validateServerResponseProfile(profile *ServerResponseProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	// Check for duplicate name
+	if cfg.GetServerResponseProfile(profile.Name) != nil {
+		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
+	}
+	return nil
+}
+
+// RemoveGetProfile removes a GET profile by name
+func (cfg *AgentConfig) RemoveGetProfile(name string) bool {
+	for i, profile := range cfg.HTTPProfiles.Get {
+		if profile.Name == name {
+			cfg.HTTPProfiles.Get = append(cfg.HTTPProfiles.Get[:i], cfg.HTTPProfiles.Get[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// RemovePostProfile removes a POST profile by name
+func (cfg *AgentConfig) RemovePostProfile(name string) bool {
+	for i, profile := range cfg.HTTPProfiles.Post {
+		if profile.Name == name {
+			cfg.HTTPProfiles.Post = append(cfg.HTTPProfiles.Post[:i], cfg.HTTPProfiles.Post[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveServerResponseProfile removes a Server Response profile by name
+func (cfg *AgentConfig) RemoveServerResponseProfile(name string) bool {
+	for i, profile := range cfg.HTTPProfiles.ServerResponse {
+		if profile.Name == name {
+			cfg.HTTPProfiles.ServerResponse = append(cfg.HTTPProfiles.ServerResponse[:i], cfg.HTTPProfiles.ServerResponse[i+1:]...)
+			return true
+		}
+	}
+	return false
 }

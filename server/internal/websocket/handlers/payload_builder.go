@@ -29,8 +29,9 @@ func (h *WSHandler) handleCreatePayload(client *hub.Client, message []byte) erro
 		logMessage(LOG_NORMAL, "Failed to marshal in-progress response: %v", err)
 	}
 
-	// Pass the Hub and listener manager to the builder
-	b, err := builder.NewBuilder(h.hub.ListenerManager, h.hub, h.db, h.agentClient)
+	// Pass the Hub, listener manager, and shared agentConfig to the builder
+	// The shared agentConfig includes dynamically uploaded profiles
+	b, err := builder.NewBuilder(h.hub.ListenerManager, h.hub, h.db, h.agentClient, h.agentConfig)
 	if err != nil {
 		logMessage(LOG_NORMAL, "Failed to create builder: %v", err)
 		return err

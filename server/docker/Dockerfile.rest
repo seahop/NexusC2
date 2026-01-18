@@ -110,6 +110,9 @@ COPY --chown=nexus:nexus ./docker/docker-compose.yml /app/docker-compose.yml
 COPY --chown=nexus:nexus ./docker/Dockerfile.builder /app/Dockerfile.builder
 COPY --chown=nexus:nexus ./docker/payloads /app/payloads/
 
+# Copy templates for profile uploads
+COPY --chown=nexus:nexus ./docker/templates /app/templates/
+
 # Ensure binary is executable
 RUN chmod +x /app/rest-api-service
 

@@ -1,0 +1,121 @@
+# =============================================================================
+# HTTP PROFILE TEMPLATE
+# =============================================================================
+# Fill out this template to create custom HTTP profiles for your listeners.
+# Upload via API: POST /api/v1/profiles/upload
+# Or use the client UI to upload this file.
+#
+# You can include any combination of profiles in a single file:
+# - GET profiles (how agents poll for commands)
+# - POST profiles (how agents send results)
+# - Server Response profiles (how server responds to agents)
+#
+# All fields with default values are optional - remove them to use defaults.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# GET PROFILE - Define how agents poll for commands
+# -----------------------------------------------------------------------------
+# Required fields: name, path
+# Optional fields: method (default: GET), headers, params
+
+[[http_profiles.get]]
+name = "my-custom-get"                    # Unique profile name (required)
+path = "/api/v1/check"                    # URL path for polling (required)
+method = "GET"                            # HTTP method (default: GET)
+
+# Headers to include in agent requests (optional)
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+
+[[http_profiles.get.headers]]
+name = "X-Custom-Header"
+value = "custom-value"
+
+# Parameters for client ID extraction (required - at least one)
+# location: "query" | "header" | "cookie"
+# type: "clientID_param" for client identification
+# format: use %CLIENTID% as placeholder for the actual client ID
+[[http_profiles.get.params]]
+name = "client"                           # Parameter name
+location = "query"                        # Where to place/extract the param
+type = "clientID_param"                   # Parameter type
+format = "%CLIENTID%"                     # Format string
+
+# -----------------------------------------------------------------------------
+# POST PROFILE - Define how agents send results
+# -----------------------------------------------------------------------------
+# Required fields: name, path
+# Optional fields: method (default: POST), content_type, headers, params
+
+[[http_profiles.post]]
+name = "my-custom-post"                   # Unique profile name (required)
+path = "/api/v1/submit"                   # URL path for submissions (required)
+method = "POST"                           # HTTP method (default: POST)
+content_type = "application/json"         # Content-Type header (default: application/json)
+
+# Headers to include in agent requests (optional)
+[[http_profiles.post.headers]]
+name = "Content-Type"
+value = "application/json"
+
+# Parameters for client ID extraction (required - at least one)
+[[http_profiles.post.params]]
+name = "client"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+# -----------------------------------------------------------------------------
+# SERVER RESPONSE PROFILE - Define how server responds to agents
+# -----------------------------------------------------------------------------
+# Required fields: name
+# Optional fields: content_type, status_field, data_field, command_id_field,
+#                  rekey_value, headers
+
+[[http_profiles.server_response]]
+name = "my-custom-response"               # Unique profile name (required)
+content_type = "application/json"         # Response Content-Type (default: application/json)
+status_field = "status"                   # JSON field for status (default: status)
+data_field = "data"                       # JSON field for data (default: data)
+command_id_field = "id"                   # JSON field for command ID (default: id)
+rekey_value = "refresh"                   # Value indicating rekey needed (default: rekey)
+
+# Headers to include in server responses (optional)
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "no-store"
+
+# =============================================================================
+# EXAMPLES - Common profile patterns
+# =============================================================================
+#
+# AWS S3-style profile:
+# [[http_profiles.get]]
+# name = "s3-get"
+# path = "/bucket/objects"
+# method = "GET"
+# [[http_profiles.get.headers]]
+# name = "x-amz-content-sha256"
+# value = "UNSIGNED-PAYLOAD"
+# [[http_profiles.get.params]]
+# name = "continuation-token"
+# location = "query"
+# type = "clientID_param"
+# format = "%CLIENTID%"
+#
+# Microsoft Graph-style profile:
+# [[http_profiles.get]]
+# name = "graph-get"
+# path = "/v1.0/me/drive/root/children"
+# method = "GET"
+# [[http_profiles.get.headers]]
+# name = "Authorization"
+# value = "Bearer %CLIENTID%"
+# [[http_profiles.get.params]]
+# name = "Authorization"
+# location = "header"
+# type = "clientID_param"
+# format = "Bearer %CLIENTID%"
+# =============================================================================

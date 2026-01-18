@@ -144,16 +144,21 @@ type buildData struct {
 	pipeName       string       // For SMB payloads
 }
 
-func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client) (*Builder, error) {
+func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %v", err)
 	}
 
-	// Load agent config for profile lookups
-	agentCfg, err := config.LoadAgentConfig()
-	if err != nil {
-		log.Printf("[Builder] Warning: Failed to load agent config for profiles: %v", err)
+	// Use provided agentConfig for profile lookups (shared with WebSocket handler)
+	// This allows dynamically uploaded profiles to be available to the builder
+	if agentCfg == nil {
+		log.Printf("[Builder] Warning: No agent config provided, loading from file (uploaded profiles may not be available)")
+		var err error
+		agentCfg, err = config.LoadAgentConfig()
+		if err != nil {
+			log.Printf("[Builder] Warning: Failed to load agent config for profiles: %v", err)
+		}
 	}
 
 	return &Builder{

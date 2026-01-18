@@ -495,6 +495,53 @@ class StateDatabase:
 
                 return profiles
 
+    def update_profiles(self, profile_data):
+        """Update available profiles from server broadcast/response
+
+        Args:
+            profile_data: dict with keys 'get_profiles', 'post_profiles', 'server_response_profiles'
+        """
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    # Clear existing profiles
+                    conn.execute("DELETE FROM available_profiles")
+
+                    profile_rows = []
+
+                    # Handle different key formats from server
+                    get_profiles = profile_data.get("get_profiles", profile_data.get("get", []))
+                    post_profiles = profile_data.get("post_profiles", profile_data.get("post", []))
+                    response_profiles = profile_data.get("server_response_profiles",
+                                                         profile_data.get("server_response", []))
+
+                    # Store GET profiles
+                    for name in get_profiles:
+                        profile_rows.append(("get", name))
+
+                    # Store POST profiles
+                    for name in post_profiles:
+                        profile_rows.append(("post", name))
+
+                    # Store Server Response profiles
+                    for name in response_profiles:
+                        profile_rows.append(("server_response", name))
+
+                    if profile_rows:
+                        conn.executemany(
+                            """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
+                               VALUES (?,?)""",
+                            profile_rows
+                        )
+
+                    conn.commit()
+                    print(f"Updated profiles: {len(get_profiles)} GET, {len(post_profiles)} POST, {len(response_profiles)} Response")
+                    return True
+                except Exception as e:
+                    print(f"Error updating profiles: {e}")
+                    conn.rollback()
+                    return False
+
     def update_agent_tags(self, agent_guid, tags):
         """Update all tags for a specific agent (replaces existing)"""
         with self._db_lock:

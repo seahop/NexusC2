@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -30,11 +31,14 @@ func NewProxyHandlers(client *Client, db *sql.DB) *ProxyHandlers {
 
 // CreateListenerRequest matches the REST API's expected format
 type CreateListenerRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Protocol string `json:"protocol" binding:"required"`
-	Port     int    `json:"port"`
-	IP       string `json:"ip"`       // REST API uses "ip"
-	PipeName string `json:"pipe_name,omitempty"`
+	Name                  string `json:"name" binding:"required"`
+	Protocol              string `json:"protocol" binding:"required"`
+	Port                  int    `json:"port"`
+	IP                    string `json:"ip"` // REST API uses "ip"
+	PipeName              string `json:"pipe_name,omitempty"`
+	GetProfile            string `json:"get_profile,omitempty"`
+	PostProfile           string `json:"post_profile,omitempty"`
+	ServerResponseProfile string `json:"server_response_profile,omitempty"`
 }
 
 // CreateListener proxies listener creation to WebSocket service
@@ -55,11 +59,14 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 	wsMsg := map[string]interface{}{
 		"type": "create_listener",
 		"data": map[string]interface{}{
-			"name":      req.Name,
-			"protocol":  req.Protocol,
-			"port":      req.Port,
-			"host":      req.IP, // Map IP to host for WebSocket service
-			"pipe_name": req.PipeName,
+			"name":                    req.Name,
+			"protocol":                req.Protocol,
+			"port":                    req.Port,
+			"host":                    req.IP, // Map IP to host for WebSocket service
+			"pipe_name":               req.PipeName,
+			"get_profile":             req.GetProfile,
+			"post_profile":            req.PostProfile,
+			"server_response_profile": req.ServerResponseProfile,
 		},
 	}
 
@@ -89,12 +96,15 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 				var updateData struct {
 					Event    string `json:"event"`
 					Listener struct {
-						ID       string `json:"id"`
-						Name     string `json:"name"`
-						Protocol string `json:"protocol"`
-						Port     int    `json:"port"`
-						IP       string `json:"ip"`
-						PipeName string `json:"pipe_name,omitempty"`
+						ID                    string `json:"id"`
+						Name                  string `json:"name"`
+						Protocol              string `json:"protocol"`
+						Port                  int    `json:"port"`
+						IP                    string `json:"ip"`
+						PipeName              string `json:"pipe_name,omitempty"`
+						GetProfile            string `json:"get_profile,omitempty"`
+						PostProfile           string `json:"post_profile,omitempty"`
+						ServerResponseProfile string `json:"server_response_profile,omitempty"`
 					} `json:"listener"`
 				}
 				if err := json.Unmarshal(msg.Data, &updateData); err == nil {
@@ -103,12 +113,15 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 						c.JSON(http.StatusCreated, gin.H{
 							"message": "listener created successfully",
 							"listener": gin.H{
-								"id":        updateData.Listener.ID,
-								"name":      updateData.Listener.Name,
-								"protocol":  updateData.Listener.Protocol,
-								"port":      fmt.Sprintf("%d", updateData.Listener.Port),
-								"ip":        updateData.Listener.IP,
-								"pipe_name": updateData.Listener.PipeName,
+								"id":                      updateData.Listener.ID,
+								"name":                    updateData.Listener.Name,
+								"protocol":                updateData.Listener.Protocol,
+								"port":                    fmt.Sprintf("%d", updateData.Listener.Port),
+								"ip":                      updateData.Listener.IP,
+								"pipe_name":               updateData.Listener.PipeName,
+								"get_profile":             updateData.Listener.GetProfile,
+								"post_profile":            updateData.Listener.PostProfile,
+								"server_response_profile": updateData.Listener.ServerResponseProfile,
 							},
 						})
 						return
@@ -124,12 +137,15 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 				Status  string `json:"status"`
 				Message string `json:"message"`
 				Data    struct {
-					ID       string `json:"id"`
-					Name     string `json:"name"`
-					Protocol string `json:"protocol"`
-					Port     string `json:"port"`
-					IP       string `json:"ip"`
-					PipeName string `json:"pipe_name,omitempty"`
+					ID                    string `json:"id"`
+					Name                  string `json:"name"`
+					Protocol              string `json:"protocol"`
+					Port                  string `json:"port"`
+					IP                    string `json:"ip"`
+					PipeName              string `json:"pipe_name,omitempty"`
+					GetProfile            string `json:"get_profile,omitempty"`
+					PostProfile           string `json:"post_profile,omitempty"`
+					ServerResponseProfile string `json:"server_response_profile,omitempty"`
 				} `json:"data"`
 			}
 
@@ -143,12 +159,15 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 					c.JSON(http.StatusCreated, gin.H{
 						"message": listenerResp.Message,
 						"listener": gin.H{
-							"id":        listenerResp.Data.ID,
-							"name":      listenerResp.Data.Name,
-							"protocol":  listenerResp.Data.Protocol,
-							"port":      listenerResp.Data.Port,
-							"ip":        listenerResp.Data.IP,
-							"pipe_name": listenerResp.Data.PipeName,
+							"id":                      listenerResp.Data.ID,
+							"name":                    listenerResp.Data.Name,
+							"protocol":                listenerResp.Data.Protocol,
+							"port":                    listenerResp.Data.Port,
+							"ip":                      listenerResp.Data.IP,
+							"pipe_name":               listenerResp.Data.PipeName,
+							"get_profile":             listenerResp.Data.GetProfile,
+							"post_profile":            listenerResp.Data.PostProfile,
+							"server_response_profile": listenerResp.Data.ServerResponseProfile,
 						},
 					})
 					return
@@ -617,4 +636,123 @@ func (p *ProxyHandlers) RefreshState(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, state)
+}
+
+// UploadProfiles proxies profile uploads to WebSocket service
+// POST /api/v1/profiles/upload
+func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
+	var tomlContent string
+
+	// Check if it's a file upload or raw content
+	contentType := c.GetHeader("Content-Type")
+
+	if contentType == "application/toml" || contentType == "text/plain" {
+		// Raw TOML content in body
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			return
+		}
+		tomlContent = string(body)
+	} else {
+		// Try multipart form file upload
+		file, err := c.FormFile("profile")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "No profile file provided. Send TOML content with Content-Type: application/toml or upload a file with form field 'profile'",
+			})
+			return
+		}
+
+		// Open and read the file
+		f, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+			return
+		}
+		defer f.Close()
+
+		content, err := io.ReadAll(f)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+			return
+		}
+		tomlContent = string(content)
+	}
+
+	// Build WebSocket message
+	wsMsg := map[string]interface{}{
+		"type": "upload_profiles",
+		"data": map[string]interface{}{
+			"content": tomlContent,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	// Subscribe to messages before sending
+	msgCh := p.client.Subscribe()
+
+	// Send the upload_profiles message
+	if err := p.client.Send(ctx, wsMsg); err != nil {
+		log.Printf("[WSProxy] UploadProfiles send error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send request: " + err.Error()})
+		return
+	}
+
+	// Wait for response
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case msg := <-msgCh:
+			log.Printf("[WSProxy] UploadProfiles received message type=%q", msg.Type)
+
+			// Check for profile_upload_response
+			if msg.Type == "profile_upload_response" {
+				var respData struct {
+					Success                bool     `json:"success"`
+					Message                string   `json:"message"`
+					GetProfiles            []string `json:"get_profiles,omitempty"`
+					PostProfiles           []string `json:"post_profiles,omitempty"`
+					ServerResponseProfiles []string `json:"server_response_profiles,omitempty"`
+					Errors                 []string `json:"errors,omitempty"`
+				}
+				if err := json.Unmarshal(msg.Data, &respData); err == nil {
+					if !respData.Success && len(respData.Errors) > 0 {
+						c.JSON(http.StatusBadRequest, gin.H{
+							"status":  "error",
+							"message": respData.Message,
+							"errors":  respData.Errors,
+						})
+						return
+					}
+
+					status := "success"
+					if len(respData.Errors) > 0 {
+						status = "partial"
+					}
+
+					c.JSON(http.StatusOK, gin.H{
+						"status":                 status,
+						"message":                respData.Message,
+						"get_profiles_added":     respData.GetProfiles,
+						"post_profiles_added":    respData.PostProfiles,
+						"server_response_added":  respData.ServerResponseProfiles,
+						"errors":                 respData.Errors,
+					})
+					return
+				}
+			}
+
+		case <-timeout:
+			log.Printf("[WSProxy] UploadProfiles timeout waiting for response")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "timeout waiting for response"})
+			return
+
+		case <-ctx.Done():
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "request cancelled"})
+			return
+		}
+	}
 }

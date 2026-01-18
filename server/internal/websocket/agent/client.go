@@ -743,6 +743,13 @@ func (c *Client) handleLinkUpdate(msg *pb.StreamMessage) error {
 	return nil
 }
 
+// SyncProfiles sends profile updates to the agent-handler service
+// This is called when profiles are uploaded via websocket to ensure the agent-handler
+// can route requests using the new profile paths
+func (c *Client) SyncProfiles(profiles map[string]interface{}) error {
+	return c.SendToStream("sync_profiles", profiles)
+}
+
 // handleCommandAck handles command_ack messages from the agent handler and broadcasts to websocket clients
 // This is sent AFTER the command is stored in the database, so it includes the db_id
 func (c *Client) handleCommandAck(msg *pb.StreamMessage) error {
