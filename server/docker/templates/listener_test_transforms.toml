@@ -1,0 +1,222 @@
+# =============================================================================
+# TEST TRANSFORMS PROFILES
+# =============================================================================
+# Upload this file to test dynamic listener creation with malleable transforms.
+#
+
+# -----------------------------------------------------------------------------
+# PROFILE SET 1: Header-based ClientID with Base64
+# -----------------------------------------------------------------------------
+# ClientID is base64url encoded and placed in X-Request-Token header
+
+[[http_profiles.get]]
+name = "xform-header-get"
+path = "/api/status"
+method = "GET"
+
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+
+[http_profiles.get.client_id]
+output = "header:X-Request-Token"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+
+[[http_profiles.post]]
+name = "xform-header-post"
+path = "/api/data"
+method = "POST"
+content_type = "application/json"
+
+[http_profiles.post.client_id]
+output = "header:X-Request-Token"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+
+[[http_profiles.server_response]]
+name = "xform-base64-response"
+content_type = "application/json"
+
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+
+# -----------------------------------------------------------------------------
+# PROFILE SET 2: Cookie-based ClientID with Random Padding
+# -----------------------------------------------------------------------------
+# ClientID is base64 encoded with random hex padding, placed in a cookie
+
+[[http_profiles.get]]
+name = "xform-cookie-get"
+path = "/web/check"
+method = "GET"
+
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "text/html"
+
+[http_profiles.get.client_id]
+output = "cookie:SESSIONID"
+[[http_profiles.get.client_id.transforms]]
+type = "base64"
+[[http_profiles.get.client_id.transforms]]
+type = "random_prepend"
+length = 8
+charset = "hex"
+[[http_profiles.get.client_id.transforms]]
+type = "random_append"
+length = 8
+charset = "hex"
+
+
+[[http_profiles.post]]
+name = "xform-cookie-post"
+path = "/web/submit"
+method = "POST"
+content_type = "application/x-www-form-urlencoded"
+
+[http_profiles.post.client_id]
+output = "cookie:SESSIONID"
+[[http_profiles.post.client_id.transforms]]
+type = "base64"
+[[http_profiles.post.client_id.transforms]]
+type = "random_prepend"
+length = 8
+charset = "hex"
+[[http_profiles.post.client_id.transforms]]
+type = "random_append"
+length = 8
+charset = "hex"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+[[http_profiles.post.data.transforms]]
+type = "random_prepend"
+length = 16
+charset = "alphanumeric"
+[[http_profiles.post.data.transforms]]
+type = "random_append"
+length = 16
+charset = "alphanumeric"
+
+
+[[http_profiles.server_response]]
+name = "xform-padded-response"
+content_type = "text/html"
+
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+[[http_profiles.server_response.data.transforms]]
+type = "random_prepend"
+length = 8
+charset = "numeric"
+[[http_profiles.server_response.data.transforms]]
+type = "random_append"
+length = 8
+charset = "numeric"
+
+
+# -----------------------------------------------------------------------------
+# PROFILE SET 3: Query Parameter with Hex Encoding
+# -----------------------------------------------------------------------------
+# ClientID is hex encoded and placed in a query parameter
+
+[[http_profiles.get]]
+name = "xform-query-get"
+path = "/files/list"
+method = "GET"
+
+[http_profiles.get.client_id]
+output = "query:token"
+[[http_profiles.get.client_id.transforms]]
+type = "hex"
+
+
+[[http_profiles.post]]
+name = "xform-query-post"
+path = "/files/upload"
+method = "POST"
+content_type = "application/octet-stream"
+
+[http_profiles.post.client_id]
+output = "query:token"
+[[http_profiles.post.client_id.transforms]]
+type = "hex"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "hex"
+
+
+[[http_profiles.server_response]]
+name = "xform-hex-response"
+content_type = "application/octet-stream"
+
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "hex"
+
+
+# -----------------------------------------------------------------------------
+# PROFILE SET 4: URI Append with Base64URL
+# -----------------------------------------------------------------------------
+# ClientID is appended to the URI path
+
+[[http_profiles.get]]
+name = "xform-uri-get"
+path = "/cdn/assets/"
+method = "GET"
+
+[http_profiles.get.client_id]
+output = "uri_append"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+[[http_profiles.get.client_id.transforms]]
+type = "append"
+value = ".js"
+
+
+[[http_profiles.post]]
+name = "xform-uri-post"
+path = "/cdn/upload/"
+method = "POST"
+content_type = "application/javascript"
+
+[http_profiles.post.client_id]
+output = "uri_append"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+[[http_profiles.post.client_id.transforms]]
+type = "append"
+value = ".js"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+
+[[http_profiles.server_response]]
+name = "xform-uri-response"
+content_type = "application/javascript"
+
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"

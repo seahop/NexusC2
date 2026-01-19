@@ -1178,6 +1178,36 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 	log.Printf("Building payload with profiles: GET=%s, POST=%s, Response=%s",
 		b.listener.GetProfile, b.listener.PostProfile, b.listener.ServerResponseProfile)
 
+	// Serialize transform DataBlocks from profiles
+	var getClientIDTransforms, postClientIDTransforms, postDataTransforms, responseDataTransforms string
+
+	if b.listener.GetProfile != "" && b.agentConfig != nil {
+		if getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile); getProfile != nil {
+			if getProfile.ClientID != nil {
+				getClientIDTransforms = serializeDataBlockCompact(getProfile.ClientID)
+			}
+		}
+	}
+
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
+			if postProfile.ClientID != nil {
+				postClientIDTransforms = serializeDataBlockCompact(postProfile.ClientID)
+			}
+			if postProfile.Data != nil {
+				postDataTransforms = serializeDataBlockCompact(postProfile.Data)
+			}
+		}
+	}
+
+	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
+		if respProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile); respProfile != nil {
+			if respProfile.Data != nil {
+				responseDataTransforms = serializeDataBlockCompact(respProfile.Data)
+			}
+		}
+	}
+
 	// Values that should be encrypted
 	encryptedValues := map[string]string{
 		"PUBLIC_KEY":            data.keyPair.PublicKeyPEM,
@@ -1198,6 +1228,11 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		"POST_CLIENT_ID_FORMAT": postClientIDParam.Format,
 		"POST_SECRET_NAME":      secretParam.Name,
 		"POST_SECRET_FORMAT":    secretParam.Format,
+		// Malleable transform configs (JSON-encoded DataBlocks)
+		"GET_CLIENTID_TRANSFORMS":  getClientIDTransforms,
+		"POST_CLIENTID_TRANSFORMS": postClientIDTransforms,
+		"POST_DATA_TRANSFORMS":     postDataTransforms,
+		"RESPONSE_DATA_TRANSFORMS": responseDataTransforms,
 	}
 
 	// Encrypt all values
@@ -1408,6 +1443,83 @@ func xorEncrypt(input, key string) string {
 		result = append(result, input[i]^key[i%len(key)])
 	}
 	return base64.StdEncoding.EncodeToString(result)
+}
+
+// Transform type codes (maps readable names to single char codes)
+var transformTypeMap = map[string]string{
+	"base64":         "a",
+	"base64url":      "b",
+	"hex":            "c",
+	"gzip":           "d",
+	"netbios":        "e",
+	"xor":            "f",
+	"prepend":        "g",
+	"append":         "h",
+	"random_prepend": "i",
+	"random_append":  "j",
+}
+
+// Charset codes
+var charsetMap = map[string]string{
+	"numeric":      "1",
+	"alpha":        "2",
+	"alphanumeric": "3",
+	"hex":          "4",
+}
+
+// serializeDataBlockCompact serializes a DataBlock to compact JSON format
+// Uses short keys to minimize binary size: "o" for output, "t" for transforms,
+// "T" for type, "V" for value, "L" for length, "C" for charset
+// Transform types and charsets are converted to single-char codes
+func serializeDataBlockCompact(db *config.DataBlock) string {
+	if db == nil {
+		return ""
+	}
+
+	// Create compact structure with short keys
+	type compactTransform struct {
+		Type    string `json:"T"`
+		Value   string `json:"V,omitempty"`
+		Length  int    `json:"L,omitempty"`
+		Charset string `json:"C,omitempty"`
+	}
+
+	type compactDataBlock struct {
+		Output     string             `json:"o"`
+		Transforms []compactTransform `json:"t,omitempty"`
+	}
+
+	compact := compactDataBlock{
+		Output: db.Output,
+	}
+
+	for _, t := range db.Transforms {
+		// Convert type to short code
+		typeCode := transformTypeMap[t.Type]
+		if typeCode == "" {
+			typeCode = t.Type // fallback to original
+		}
+
+		// Convert charset to short code
+		charsetCode := charsetMap[t.Charset]
+		if charsetCode == "" && t.Charset != "" {
+			charsetCode = t.Charset // fallback to original
+		}
+
+		compact.Transforms = append(compact.Transforms, compactTransform{
+			Type:    typeCode,
+			Value:   t.Value,
+			Length:  t.Length,
+			Charset: charsetCode,
+		})
+	}
+
+	data, err := json.Marshal(compact)
+	if err != nil {
+		log.Printf("[Builder] Warning: Failed to serialize DataBlock: %v", err)
+		return ""
+	}
+	return string(data)
 }
 
 func GenerateRSAKeyPair() (*KeyPair, error) {

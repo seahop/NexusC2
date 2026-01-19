@@ -252,6 +252,10 @@ build_binary() {
             -X 'main.MALLEABLE_REKEY_STATUS_FIELD=${MALLEABLE_REKEY_STATUS_FIELD}' \
             -X 'main.MALLEABLE_REKEY_DATA_FIELD=${MALLEABLE_REKEY_DATA_FIELD}' \
             -X 'main.MALLEABLE_REKEY_ID_FIELD=${MALLEABLE_REKEY_ID_FIELD}' \
+            -X 'main.getClientIDTransforms=${GET_CLIENTID_TRANSFORMS}' \
+            -X 'main.postClientIDTransforms=${POST_CLIENTID_TRANSFORMS}' \
+            -X 'main.postDataTransforms=${POST_DATA_TRANSFORMS}' \
+            -X 'main.responseDataTransforms=${RESPONSE_DATA_TRANSFORMS}' \
             ${TOGGLE_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"

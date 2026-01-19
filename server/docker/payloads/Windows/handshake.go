@@ -16,14 +16,37 @@ type HandshakeManager struct {
 	getURL          string
 	postURL         string
 	secureComms     *SecureComms
+
+	// Parsed transform DataBlocks
+	getClientIDDataBlock  *DataBlock
+	postClientIDDataBlock *DataBlock
+	postDataDataBlock     *DataBlock
+	responseDataDataBlock *DataBlock
 }
 
 func NewHandshakeManager() (*HandshakeManager, error) {
 	decrypted := decryptAllValues()
-	return &HandshakeManager{
+
+	hm := &HandshakeManager{
 		decryptedValues: decrypted,
-		initialClientID: clientID, // Store the initial client ID
-	}, nil
+		initialClientID: clientID,
+	}
+
+	// Parse transform DataBlocks if configured
+	if jsonStr := decrypted[geKeyGetClientIDTransforms]; jsonStr != "" {
+		hm.getClientIDDataBlock = parseDataBlock(jsonStr)
+	}
+	if jsonStr := decrypted[geKeyPostClientIDTransforms]; jsonStr != "" {
+		hm.postClientIDDataBlock = parseDataBlock(jsonStr)
+	}
+	if jsonStr := decrypted[geKeyPostDataTransforms]; jsonStr != "" {
+		hm.postDataDataBlock = parseDataBlock(jsonStr)
+	}
+	if jsonStr := decrypted[geKeyResponseDataTransforms]; jsonStr != "" {
+		hm.responseDataDataBlock = parseDataBlock(jsonStr)
+	}
+
+	return hm, nil
 }
 
 func (hm *HandshakeManager) PerformHandshake() error {
@@ -77,19 +100,36 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	hm.currentClientID = newClientID
 	clientID = newClientID // Update global clientID
 
-	// Step 8: Build new URLs with new client ID for subsequent communications
-	hm.getURL = buildGetURL(
-		baseURL,
-		hm.decryptedValues[geKeyGetRoute],
-		hm.decryptedValues[geKeyGetClientIDName],
-		newClientID,
-	)
-	hm.postURL = buildPostURL(
-		baseURL,
-		hm.decryptedValues[geKeyPostRoute],
-		hm.decryptedValues[geKeyPostClientIDName],
-		newClientID,
-	)
+	// Build new URLs with new client ID for subsequent communications
+	if hm.getClientIDDataBlock != nil {
+		getRoute := hm.decryptedValues[geKeyGetRoute]
+		if len(getRoute) > 0 && getRoute[0] != '/' {
+			getRoute = "/" + getRoute
+		}
+		hm.getURL = baseURL + getRoute
+	} else {
+		hm.getURL = buildGetURL(
+			baseURL,
+			hm.decryptedValues[geKeyGetRoute],
+			hm.decryptedValues[geKeyGetClientIDName],
+			newClientID,
+		)
+	}
+
+	if hm.postClientIDDataBlock != nil {
+		postRoute := hm.decryptedValues[geKeyPostRoute]
+		if len(postRoute) > 0 && postRoute[0] != '/' {
+			postRoute = "/" + postRoute
+		}
+		hm.postURL = baseURL + postRoute
+	} else {
+		hm.postURL = buildPostURL(
+			baseURL,
+			hm.decryptedValues[geKeyPostRoute],
+			hm.decryptedValues[geKeyPostClientIDName],
+			newClientID,
+		)
+	}
 
 	//log.Printf("Updated URLs with new client ID:")
 	//log.Printf("Initial Client ID: %s", hm.initialClientID)
@@ -142,4 +182,9 @@ func (hm *HandshakeManager) SetClientID(clientID string) {
 
 func (hm *HandshakeManager) GetSecureComms() *SecureComms {
 	return hm.secureComms
+}
+
+// GetTransformDataBlocks returns all parsed DataBlock configurations
+func (hm *HandshakeManager) GetTransformDataBlocks() (getClientID, postClientID, postData, responseData *DataBlock) {
+	return hm.getClientIDDataBlock, hm.postClientIDDataBlock, hm.postDataDataBlock, hm.responseDataDataBlock
 }

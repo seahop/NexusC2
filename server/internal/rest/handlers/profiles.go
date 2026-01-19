@@ -3,7 +3,9 @@ package handlers
 
 import (
 	"c2/internal/common/config"
+	"c2/internal/websocket/agent"
 	"io"
+	"log"
 	"net/http"
 	"os"
 
@@ -11,11 +13,17 @@ import (
 )
 
 type ProfileHandler struct {
-	config *config.AgentConfig
+	config      *config.AgentConfig
+	agentClient *agent.Client
 }
 
 func NewProfileHandler(cfg *config.AgentConfig) *ProfileHandler {
 	return &ProfileHandler{config: cfg}
+}
+
+// SetAgentClient sets the gRPC client for syncing profiles to agent-handler
+func (h *ProfileHandler) SetAgentClient(client *agent.Client) {
+	h.agentClient = client
 }
 
 // ListAllProfiles returns all available profiles (GET, POST, and server response)
@@ -155,6 +163,24 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 	status := "success"
 	if len(result.Errors) > 0 {
 		status = "partial"
+	}
+
+	// Sync profiles to agent-handler if client available
+	if h.agentClient != nil && totalAdded > 0 {
+		profileData := map[string]interface{}{
+			"get_profiles":             h.config.HTTPProfiles.Get,
+			"post_profiles":            h.config.HTTPProfiles.Post,
+			"server_response_profiles": h.config.HTTPProfiles.ServerResponse,
+		}
+		if err := h.agentClient.SyncProfiles(profileData); err != nil {
+			log.Printf("[REST] Warning: Failed to sync profiles to agent-handler: %v", err)
+			// Don't fail the request - profiles are saved, just not synced yet
+		} else {
+			log.Printf("[REST] Successfully synced profiles to agent-handler (%d GET, %d POST, %d Response)",
+				len(h.config.HTTPProfiles.Get),
+				len(h.config.HTTPProfiles.Post),
+				len(h.config.HTTPProfiles.ServerResponse))
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

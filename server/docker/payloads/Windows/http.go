@@ -27,7 +27,82 @@ var (
 	httpMetaId            = string([]byte{0x69, 0x64})                                                                                     // id
 	httpMetaEncryption    = string([]byte{0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e})                                     // encryption
 	httpEncRsaAes         = string([]byte{0x72, 0x73, 0x61, 0x2b, 0x61, 0x65, 0x73})                                                       // rsa+aes
+
+	// Padding length headers
+	httpHeaderPadPre = string([]byte{0x58, 0x2d, 0x50, 0x61, 0x64, 0x2d, 0x50, 0x72, 0x65}) // X-Pad-Pre
+	httpHeaderPadApp = string([]byte{0x58, 0x2d, 0x50, 0x61, 0x64, 0x2d, 0x41, 0x70, 0x70}) // X-Pad-App
 )
+
+// placeInLocation places data in the specified HTTP location
+// output format: "body", "header:<name>", "cookie:<name>", "query:<name>", "uri_append"
+// prependLen and appendLen are NOT set here - X-Pad headers are only for POST body data
+// For non-body locations (header/cookie/query), the server uses transform.Length directly
+func placeInLocation(req *http.Request, output string, data []byte, prependLen, appendLen int) {
+	locType, name := parseOutput(output)
+
+	// NOTE: We don't set X-Pad headers here. Those are only for POST body data.
+	// For clientID and other non-body data, the server uses the transform's Length
+	// field directly for reversal (which is already in the config).
+
+	switch locType {
+	case "body":
+		// Body is handled separately by the caller
+		return
+	case "header":
+		req.Header.Set(name, string(data))
+	case "cookie":
+		req.AddCookie(&http.Cookie{Name: name, Value: string(data)})
+	case "query":
+		q := req.URL.Query()
+		q.Set(name, string(data))
+		req.URL.RawQuery = q.Encode()
+	case "uri_append":
+		req.URL.Path = req.URL.Path + string(data)
+	}
+}
+
+// buildRequestWithTransforms creates an HTTP request with transformed clientID placed correctly
+// Returns the request and body data (if output is "body")
+func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted map[string]string) (*http.Request, []byte, error) {
+	req, err := http.NewRequest(method, baseURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf(ErrCtx(E12, err.Error()))
+	}
+
+	var bodyData []byte
+
+	if clientIDDataBlock != nil && len(clientIDDataBlock.Transforms) > 0 {
+		// Apply transforms to clientID
+		transformed, err := applyTransforms([]byte(clientIDVal), clientIDDataBlock.Transforms)
+		if err != nil {
+			return nil, nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+
+		locType, _ := parseOutput(clientIDDataBlock.Output)
+		if locType == "body" {
+			bodyData = transformed.Data
+			// Still set padding headers
+			if transformed.PrependLength > 0 {
+				req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", transformed.PrependLength))
+			}
+			if transformed.AppendLength > 0 {
+				req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", transformed.AppendLength))
+			}
+		} else {
+			placeInLocation(req, clientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
+		}
+	} else {
+		// Legacy: use query param with clientID name/format from decrypted values
+		clientIDName := decrypted[geKeyGetClientIDName]
+		if clientIDName != "" {
+			q := req.URL.Query()
+			q.Set(clientIDName, clientIDVal)
+			req.URL.RawQuery = q.Encode()
+		}
+	}
+
+	return req, bodyData, nil
+}
 
 // PostData represents the structure of our post request body
 type PostData struct {

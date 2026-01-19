@@ -4,11 +4,13 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"c2/internal/common/config"
 	"c2/internal/rest/sse"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/listeners"
@@ -22,14 +24,16 @@ type ListenerHandler struct {
 	listenerManager *listeners.Manager
 	agentClient     *agent.Client
 	sseHub          *sse.Hub
+	agentConfig     *config.AgentConfig
 }
 
-func NewListenerHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client, sseHub *sse.Hub) *ListenerHandler {
+func NewListenerHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client, sseHub *sse.Hub, agentConfig *config.AgentConfig) *ListenerHandler {
 	return &ListenerHandler{
 		db:              db,
 		listenerManager: listenerManager,
 		agentClient:     agentClient,
 		sseHub:          sseHub,
+		agentConfig:     agentConfig,
 	}
 }
 
@@ -175,6 +179,12 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		req.ServerResponseProfile = "default-response"
 	}
 
+	// Validate that the specified profiles exist in config
+	if err := h.validateListenerProfiles(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Create via listener manager with profiles
 	listener, err := h.listenerManager.CreateWithProfiles(req.Name, protocol, req.Port, req.IP, req.PipeName,
 		req.GetProfile, req.PostProfile, req.ServerResponseProfile)
@@ -285,4 +295,36 @@ func parseListenerType(protocol string) pb.ListenerType {
 	default:
 		return pb.ListenerType_UNKNOWN
 	}
+}
+
+// validateListenerProfiles checks that all profile names exist in config
+// Returns nil if all profiles are valid or if agentConfig is not available
+func (h *ListenerHandler) validateListenerProfiles(req *CreateListenerRequest) error {
+	// Skip validation if config not available
+	if h.agentConfig == nil {
+		return nil
+	}
+
+	// Validate GET profile if specified and not default
+	if req.GetProfile != "" && req.GetProfile != "default-get" {
+		if h.agentConfig.GetGetProfile(req.GetProfile) == nil {
+			return fmt.Errorf("GET profile '%s' not found in config", req.GetProfile)
+		}
+	}
+
+	// Validate POST profile if specified and not default
+	if req.PostProfile != "" && req.PostProfile != "default-post" {
+		if h.agentConfig.GetPostProfile(req.PostProfile) == nil {
+			return fmt.Errorf("POST profile '%s' not found in config", req.PostProfile)
+		}
+	}
+
+	// Validate ServerResponse profile if specified and not default
+	if req.ServerResponseProfile != "" && req.ServerResponseProfile != "default-response" {
+		if h.agentConfig.GetServerResponseProfile(req.ServerResponseProfile) == nil {
+			return fmt.Errorf("ServerResponse profile '%s' not found in config", req.ServerResponseProfile)
+		}
+	}
+
+	return nil
 }

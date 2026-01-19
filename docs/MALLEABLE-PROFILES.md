@@ -1,8 +1,6 @@
----
-title: "Malleable Profiles"
-description: "Customize traffic patterns, HTTP signatures, and payload behavior using config.toml profiles."
-weight: 3
----
+# Malleable Profiles
+
+Customize traffic patterns, HTTP signatures, and payload behavior using config.toml profiles.
 
 ## Overview
 
@@ -17,8 +15,6 @@ NexusC2 uses a malleable profile system defined in `server/config.toml` that all
 
 Changes to `config.toml` take effect when the server restarts and are baked into generated payloads at build time.
 
----
-
 ## Configuration File Location
 
 ```
@@ -26,56 +22,6 @@ server/config.toml
 ```
 
 The file uses [TOML format](https://toml.io/) for human-readable configuration.
-
----
-
-## Server Configuration
-
-### WebSocket Service
-
-```toml
-[websocket]
-port = "3131"
-cert_file = "/app/certs/ws_server.crt"
-key_file = "/app/certs/ws_server.key"
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `port` | WebSocket service port for GUI clients | 3131 |
-| `cert_file` | TLS certificate path | /app/certs/ws_server.crt |
-| `key_file` | TLS private key path | /app/certs/ws_server.key |
-
-### REST API Service
-
-```toml
-[rest_api]
-port = "8443"
-cert_file = "/app/certs/api_server.crt"
-key_file = "/app/certs/api_server.key"
-
-[rest_api.jwt]
-access_expiry = "1h"
-refresh_expiry = "24h"
-
-[rest_api.rate_limit]
-requests_per_minute = 100
-
-[rest_api.cors]
-allowed_origins = ["*"]
-```
-
-### Listener Certificates
-
-```toml
-[web_server]
-cert_file = "/app/certs/web_server.crt"
-key_file = "/app/certs/web_server.key"
-
-[rpc_server]
-cert_file = "/app/certs/rpc_server.crt"
-key_file = "/app/certs/rpc_server.key"
-```
 
 ---
 
@@ -534,19 +480,6 @@ Both modes are fully supported. A profile without DataBlocks uses legacy mode au
 
 ---
 
-## Redirect Site
-
-Configure where unauthorized requests are redirected:
-
-```toml
-[redirect_site]
-url = "https://google.com"
-```
-
-Requests that fail authentication or hit undefined routes are redirected here, making the server appear as a legitimate redirector.
-
----
-
 ## Server Headers
 
 Customize HTTP response headers to masquerade as legitimate servers:
@@ -642,18 +575,6 @@ max_message_size = 1048576     # 1MB
 heartbeat_interval = 60        # Seconds
 ```
 
-### Named Pipe Presets
-
-```toml
-[[smb_link.pipe_presets]]
-name = "spoolss"
-description = "Print Spooler Service"
-
-[[smb_link.pipe_presets]]
-name = "srvsvc"
-description = "Server Service"
-```
-
 ### Malleable SMB Fields
 
 ```toml
@@ -686,6 +607,6 @@ After modifying `config.toml`:
 
 ## Related Documentation
 
-- [Infrastructure]({{< ref "infrastructure.md" >}}) - Server architecture overview
-- [Payload Generation]({{< ref "payload-generation.md" >}}) - Building agents with profile settings
-- [API Documentation]({{< ref "api.md" >}}) - REST API reference
+- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) - Server architecture overview
+- [PAYLOAD-GENERATION.md](PAYLOAD-GENERATION.md) - Building agents with profile settings
+- [API.md](API.md) - REST API reference

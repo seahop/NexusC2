@@ -203,22 +203,50 @@ func (sps *SharedPortServer) GetRoutes() []PathRoute {
 }
 
 // LookupListener finds the listener name for a given method and path
+// Supports both exact matching and prefix matching for uri_append profiles
 func (sps *SharedPortServer) LookupListener(method, path string) (string, *ListenerHandler, bool) {
 	sps.mu.RLock()
 	defer sps.mu.RUnlock()
 
+	// First try exact match
 	key := method + ":" + path
 	listenerName, found := sps.pathRoutes[key]
-	if !found {
-		return "", nil, false
+	if found {
+		handler, handlerExists := sps.listenerHandlers[listenerName]
+		if handlerExists {
+			return listenerName, handler, true
+		}
 	}
 
-	handler, handlerExists := sps.listenerHandlers[listenerName]
-	if !handlerExists {
-		return "", nil, false
+	// If no exact match, try prefix matching for profiles that use uri_append
+	// The request path might be "/files/download/abc123.bin" while the profile path is "/files/download/"
+	for name, handler := range sps.listenerHandlers {
+		// Check GET profile
+		if handler.GetProfile != nil && handler.GetProfile.Method == method {
+			if handler.GetProfile.ClientID != nil && handler.GetProfile.ClientID.Output == "uri_append" {
+				// Profile uses uri_append - check if request path starts with profile path
+				if len(path) > len(handler.GetProfile.Path) && path[:len(handler.GetProfile.Path)] == handler.GetProfile.Path {
+					log.Printf("[SharedPort:%d] Matched uri_append GET profile for path %s (base: %s)",
+						sps.Port, path, handler.GetProfile.Path)
+					return name, handler, true
+				}
+			}
+		}
+
+		// Check POST profile
+		if handler.PostProfile != nil && handler.PostProfile.Method == method {
+			if handler.PostProfile.ClientID != nil && handler.PostProfile.ClientID.Output == "uri_append" {
+				// Profile uses uri_append - check if request path starts with profile path
+				if len(path) > len(handler.PostProfile.Path) && path[:len(handler.PostProfile.Path)] == handler.PostProfile.Path {
+					log.Printf("[SharedPort:%d] Matched uri_append POST profile for path %s (base: %s)",
+						sps.Port, path, handler.PostProfile.Path)
+					return name, handler, true
+				}
+			}
+		}
 	}
 
-	return listenerName, handler, true
+	return "", nil, false
 }
 
 // GetListenerConfig returns the config for a specific listener

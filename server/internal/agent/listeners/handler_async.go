@@ -268,24 +268,42 @@ func (ah *AsyncHandler) GetEnhancedMetrics() map[string]interface{} {
 }
 
 // handleActiveConnectionAsync processes results asynchronously
-func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *http.Request, conn *ActiveConnection) {
+// postProfile is optional - if nil, uses legacy JSON body parsing
+func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *http.Request, conn *ActiveConnection, postProfile *config.PostProfile) {
 	startTime := time.Now()
 	log.Printf("[Async] Processing request for agent %s", conn.ClientID)
 
-	// Read and decrypt the request body
-	var postData struct {
-		Data    string `json:"data"`
-		AgentID string `json:"agent_id"`
-	}
+	// Extract POST body data - supports malleable transforms via DataBlock
+	var encryptedDataB64 string
 
-	if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
-		log.Printf("[Async] Failed to decode request: %v", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
+	if postProfile != nil && postProfile.Data != nil {
+		// Use DataBlock extraction with transform reversal
+		basePath := postProfile.Path
+		bodyData, err := ah.Manager.extractDataFromDataBlock(r, postProfile.Data, basePath)
+		if err != nil {
+			log.Printf("[Async] Failed to extract body via DataBlock: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		encryptedDataB64 = string(bodyData)
+		log.Printf("[Async] Extracted data via DataBlock from %s", postProfile.Data.Output)
+	} else {
+		// Legacy: Read and parse JSON body
+		var postData struct {
+			Data    string `json:"data"`
+			AgentID string `json:"agent_id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
+			log.Printf("[Async] Failed to decode request: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		encryptedDataB64 = postData.Data
 	}
 
 	// Decrypt the data
-	plaintext, err := ah.decryptAgentData(postData.Data, conn.Secret1)
+	plaintext, err := ah.decryptAgentData(encryptedDataB64, conn.Secret1)
 	if err != nil {
 		log.Printf("[Async] Decryption failed: %v", err)
 		http.Error(w, "Decryption failed", http.StatusBadRequest)

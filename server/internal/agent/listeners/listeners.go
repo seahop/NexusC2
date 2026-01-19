@@ -196,21 +196,59 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 
 		// If listener has a bound GET profile, use it
 		if getProfile != nil {
-			if getProfile.Path == r.URL.Path && getProfile.Method == r.Method {
+			// Check for match - exact match OR prefix match if profile uses uri_append
+			pathMatches := getProfile.Path == r.URL.Path
+			if !pathMatches && getProfile.ClientID != nil && getProfile.ClientID.Output == "uri_append" {
+				// uri_append: request path should start with profile path
+				pathMatches = len(r.URL.Path) > len(getProfile.Path) &&
+					r.URL.Path[:len(getProfile.Path)] == getProfile.Path
+			}
+
+			if pathMatches && getProfile.Method == r.Method {
 				log.Printf("[%s] Matched GET profile %s for path %s", r.Method, getProfile.Name, r.URL.Path)
 
-				// Convert profile params to handler format for extractClientID
-				handler := config.Handler{
-					Path:    getProfile.Path,
-					Method:  getProfile.Method,
-					Enabled: true,
-					Params:  getProfile.Params,
-				}
+				var clientID string
+				var err error
 
-				clientID, err := m.extractClientID(r, handler)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
+				// Check if profile uses DataBlock for clientID (malleable transforms)
+				if getProfile.ClientID != nil {
+					clientID, err = m.extractClientIDFromDataBlock(r, getProfile.ClientID, config.Handler{}, getProfile.Path)
+					if err != nil {
+						// DataBlock extraction failed - fall back to legacy extraction
+						log.Printf("[%s] GET DataBlock extraction from %s failed (%v), trying legacy params",
+							r.Method, getProfile.ClientID.Output, err)
+
+						handler := config.Handler{
+							Path:    getProfile.Path,
+							Method:  getProfile.Method,
+							Enabled: true,
+							Params:  getProfile.Params,
+						}
+						log.Printf("[%s] GET legacy handler has %d params", r.Method, len(handler.Params))
+
+						clientID, err = m.extractClientID(r, handler)
+						if err != nil {
+							log.Printf("[%s] GET legacy extraction also failed: %v (URL: %s)", r.Method, err, r.URL.String())
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						log.Printf("[%s] Extracted client ID via GET legacy fallback: %s", r.Method, clientID)
+					} else {
+						log.Printf("[%s] Extracted client ID via GET DataBlock from %s: %s", r.Method, getProfile.ClientID.Output, clientID)
+					}
+				} else {
+					// Legacy: Extract clientID using profile's params
+					handler := config.Handler{
+						Path:    getProfile.Path,
+						Method:  getProfile.Method,
+						Enabled: true,
+						Params:  getProfile.Params,
+					}
+					clientID, err = m.extractClientID(r, handler)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
 				}
 
 				// Use profile-aware GET request handler
@@ -221,7 +259,15 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 
 		// If listener has a bound POST profile, use it
 		if postProfile != nil {
-			if postProfile.Path == r.URL.Path && postProfile.Method == r.Method {
+			// Check for match - exact match OR prefix match if profile uses uri_append
+			pathMatches := postProfile.Path == r.URL.Path
+			if !pathMatches && postProfile.ClientID != nil && postProfile.ClientID.Output == "uri_append" {
+				// uri_append: request path should start with profile path
+				pathMatches = len(r.URL.Path) > len(postProfile.Path) &&
+					r.URL.Path[:len(postProfile.Path)] == postProfile.Path
+			}
+
+			if pathMatches && postProfile.Method == r.Method {
 				log.Printf("[%s] Matched POST profile %s for path %s", r.Method, postProfile.Name, r.URL.Path)
 
 				// Use POST request handler with the bound profile
@@ -319,31 +365,74 @@ func (m *Manager) createSharedPortHandler(sps *SharedPortServer) http.Handler {
 			}
 
 			// Route based on which profile matched
-			if handler.GetProfile != nil &&
-				handler.GetProfile.Path == r.URL.Path &&
-				handler.GetProfile.Method == r.Method {
-				// This is a GET-type request - retrieve commands
-				profileHandler := config.Handler{
-					Path:    handler.GetProfile.Path,
-					Method:  handler.GetProfile.Method,
-					Enabled: true,
-					Params:  handler.GetProfile.Params,
+			// Check for match - exact match OR prefix match if profile uses uri_append
+			getPathMatches := false
+			if handler.GetProfile != nil && handler.GetProfile.Method == r.Method {
+				getPathMatches = handler.GetProfile.Path == r.URL.Path
+				if !getPathMatches && handler.GetProfile.ClientID != nil && handler.GetProfile.ClientID.Output == "uri_append" {
+					getPathMatches = len(r.URL.Path) > len(handler.GetProfile.Path) &&
+						r.URL.Path[:len(handler.GetProfile.Path)] == handler.GetProfile.Path
 				}
+			}
 
-				clientID, err := m.extractClientID(r, profileHandler)
-				if err != nil {
-					log.Printf("[SharedPort:%d] Failed to extract client ID: %v", sps.Port, err)
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
+			if getPathMatches {
+				// This is a GET-type request - retrieve commands
+				var clientID string
+				var err error
+
+				// Check if profile uses DataBlock for clientID (malleable transforms)
+				if handler.GetProfile.ClientID != nil {
+					clientID, err = m.extractClientIDFromDataBlock(r, handler.GetProfile.ClientID, config.Handler{}, handler.GetProfile.Path)
+					if err != nil {
+						// DataBlock extraction failed - fall back to legacy extraction
+						log.Printf("[SharedPort:%d] GET DataBlock extraction failed (%v), trying legacy", sps.Port, err)
+						profileHandler := config.Handler{
+							Path:    handler.GetProfile.Path,
+							Method:  handler.GetProfile.Method,
+							Enabled: true,
+							Params:  handler.GetProfile.Params,
+						}
+						clientID, err = m.extractClientID(r, profileHandler)
+						if err != nil {
+							log.Printf("[SharedPort:%d] GET legacy extraction also failed: %v", sps.Port, err)
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						log.Printf("[SharedPort:%d] Extracted client ID via GET legacy fallback", sps.Port)
+					} else {
+						log.Printf("[SharedPort:%d] Extracted client ID via GET DataBlock from %s", sps.Port, handler.GetProfile.ClientID.Output)
+					}
+				} else {
+					// Legacy: Extract clientID using profile's params
+					profileHandler := config.Handler{
+						Path:    handler.GetProfile.Path,
+						Method:  handler.GetProfile.Method,
+						Enabled: true,
+						Params:  handler.GetProfile.Params,
+					}
+					clientID, err = m.extractClientID(r, profileHandler)
+					if err != nil {
+						log.Printf("[SharedPort:%d] Failed to extract client ID: %v", sps.Port, err)
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
 				}
 
 				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, handler.ServerResponseProfile)
 				return
 			}
 
-			if handler.PostProfile != nil &&
-				handler.PostProfile.Path == r.URL.Path &&
-				handler.PostProfile.Method == r.Method {
+			// Check for POST profile match - exact match OR prefix match if profile uses uri_append
+			postPathMatches := false
+			if handler.PostProfile != nil && handler.PostProfile.Method == r.Method {
+				postPathMatches = handler.PostProfile.Path == r.URL.Path
+				if !postPathMatches && handler.PostProfile.ClientID != nil && handler.PostProfile.ClientID.Output == "uri_append" {
+					postPathMatches = len(r.URL.Path) > len(handler.PostProfile.Path) &&
+						r.URL.Path[:len(handler.PostProfile.Path)] == handler.PostProfile.Path
+				}
+			}
+
+			if postPathMatches {
 				// This is a POST-type request - agent sending data
 				m.handlePostRequestWithProfile(w, r, handler.PostProfile)
 				return

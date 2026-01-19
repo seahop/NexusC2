@@ -104,6 +104,36 @@ location = "query"
 type = "clientID_param"
 format = "%CLIENTID%"
 
+# CDN/jQuery style profile with malleable transforms
+# Mimics requests to a CDN for static assets with session tracking
+[[http_profiles.get]]
+name = "cdn-jquery-get"
+path = "/libs/jquery/3.6.0/jquery.min.js"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/javascript, */*;q=0.8"
+[[http_profiles.get.headers]]
+name = "Accept-Encoding"
+value = "gzip, deflate, br"
+[[http_profiles.get.headers]]
+name = "Referer"
+value = "https://www.example.com/"
+# Legacy params fallback (used during initial handshake before transforms apply)
+[[http_profiles.get.params]]
+name = "v"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+# ClientID goes in a cookie that looks like a session token (for polling after handshake)
+[http_profiles.get.client_id]
+output = "cookie:_ga_session"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+[[http_profiles.get.client_id.transforms]]
+type = "prepend"
+value = "GA1.2."
+
 # -----------------------------------------------------------------------------
 # POST PROFILES - Define how agents send results
 # -----------------------------------------------------------------------------
@@ -153,6 +183,49 @@ location = "header"
 type = "clientID_param"
 format = "%CLIENTID%"
 
+# CDN/Analytics style POST - mimics telemetry/metrics submission
+# Looks like Google Analytics or similar tracking beacon
+[[http_profiles.post]]
+name = "cdn-analytics-post"
+path = "/collect"
+method = "POST"
+content_type = "application/x-www-form-urlencoded"
+[[http_profiles.post.headers]]
+name = "Accept"
+value = "*/*"
+[[http_profiles.post.headers]]
+name = "Origin"
+value = "https://www.example.com"
+# Legacy params fallback (used during initial handshake before transforms apply)
+[[http_profiles.post.params]]
+name = "v"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+# ClientID in cookie (same as GET for session continuity) for polling after handshake
+[http_profiles.post.client_id]
+output = "cookie:_ga_session"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+[[http_profiles.post.client_id.transforms]]
+type = "prepend"
+value = "GA1.2."
+# POST body transforms - compress and encode like analytics payload
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+[[http_profiles.post.data.transforms]]
+type = "random_prepend"
+length = 8
+charset = "alphanumeric"
+[[http_profiles.post.data.transforms]]
+type = "random_append"
+length = 8
+charset = "alphanumeric"
+
 # -----------------------------------------------------------------------------
 # SERVER RESPONSE PROFILES - Define how server responds to agents
 # -----------------------------------------------------------------------------
@@ -189,6 +262,737 @@ rekey_value = "ExpiredToken"
 [[http_profiles.server_response.headers]]
 name = "x-amz-request-id"
 value = "%UUID%"
+
+# CDN style response - looks like minified JS or analytics response
+[[http_profiles.server_response]]
+name = "cdn-analytics-response"
+content_type = "application/javascript; charset=utf-8"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "session_refresh"
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "public, max-age=31536000"
+[[http_profiles.server_response.headers]]
+name = "X-Content-Type-Options"
+value = "nosniff"
+[[http_profiles.server_response.headers]]
+name = "Access-Control-Allow-Origin"
+value = "*"
+# Response transforms - base64 encode with JS-looking wrapper
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+[[http_profiles.server_response.data.transforms]]
+type = "prepend"
+value = "/*! jQuery v3.6.0 | (c) OpenJS Foundation */"
+
+# =============================================================================
+# TEST PROFILES - Various transform configurations for testing
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TEST 1: Header-Only Profile
+# ClientID in header, data in header - minimal body footprint
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-header-only-get"
+path = "/api/v2/health"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+# Legacy params for initial handshake
+[[http_profiles.get.params]]
+name = "cid"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+# After handshake, clientID in X-Correlation-ID header
+[http_profiles.get.client_id]
+output = "header:X-Correlation-ID"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+[[http_profiles.post]]
+name = "test-header-only-post"
+path = "/api/v2/telemetry"
+method = "POST"
+content_type = "application/json"
+[[http_profiles.post.headers]]
+name = "Content-Type"
+value = "application/json"
+[[http_profiles.post.params]]
+name = "cid"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "header:X-Correlation-ID"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+# POST body in X-Telemetry-Data header
+[http_profiles.post.data]
+output = "header:X-Telemetry-Data"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+[[http_profiles.server_response]]
+name = "test-header-only-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "no-store"
+# Response data in X-Response-Data header
+[http_profiles.server_response.data]
+output = "header:X-Response-Data"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 2: Gzip + Hex Profile
+# Heavy compression with hex encoding for binary-safe transport
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-gzip-hex-get"
+path = "/metrics/collect"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "text/plain"
+[[http_profiles.get.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "query:sid"
+[[http_profiles.get.client_id.transforms]]
+type = "hex"
+
+[[http_profiles.post]]
+name = "test-gzip-hex-post"
+path = "/metrics/submit"
+method = "POST"
+content_type = "text/plain"
+[[http_profiles.post.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "query:sid"
+[[http_profiles.post.client_id.transforms]]
+type = "hex"
+# Gzip then hex encode the POST body
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "hex"
+[[http_profiles.post.data.transforms]]
+type = "prepend"
+value = "data="
+
+[[http_profiles.server_response]]
+name = "test-gzip-hex-response"
+content_type = "text/plain"
+status_field = "s"
+data_field = "d"
+command_id_field = "i"
+rekey_value = "r"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "gzip"
+[[http_profiles.server_response.data.transforms]]
+type = "hex"
+
+# -----------------------------------------------------------------------------
+# TEST 3: NetBIOS Encoding Profile
+# Uses NetBIOS nibble encoding - each byte becomes 2 characters (a-p)
+# Mimics DNS-style encoding
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-netbios-get"
+path = "/dns/resolve"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/dns-message"
+[[http_profiles.get.params]]
+name = "q"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "query:name"
+[[http_profiles.get.client_id.transforms]]
+type = "netbios"
+[[http_profiles.get.client_id.transforms]]
+type = "append"
+value = ".example.com"
+
+[[http_profiles.post]]
+name = "test-netbios-post"
+path = "/dns/update"
+method = "POST"
+content_type = "application/dns-message"
+[[http_profiles.post.params]]
+name = "q"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "query:name"
+[[http_profiles.post.client_id.transforms]]
+type = "netbios"
+[[http_profiles.post.client_id.transforms]]
+type = "append"
+value = ".example.com"
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "netbios"
+
+[[http_profiles.server_response]]
+name = "test-netbios-response"
+content_type = "application/dns-message"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "netbios"
+
+# -----------------------------------------------------------------------------
+# TEST 4: XOR Masking Profile
+# XOR obfuscation layer with base64 encoding
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-xor-get"
+path = "/api/sync"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "*/*"
+[[http_profiles.get.params]]
+name = "token"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "cookie:sync_token"
+[[http_profiles.get.client_id.transforms]]
+type = "xor"
+value = "obfuscate123"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+[[http_profiles.post]]
+name = "test-xor-post"
+path = "/api/sync"
+method = "POST"
+content_type = "application/octet-stream"
+[[http_profiles.post.params]]
+name = "token"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "cookie:sync_token"
+[[http_profiles.post.client_id.transforms]]
+type = "xor"
+value = "obfuscate123"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "xor"
+value = "payload_key_456"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+[[http_profiles.server_response]]
+name = "test-xor-response"
+content_type = "application/octet-stream"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "resync"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "xor"
+value = "response_key_789"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 5: Minimal/Legacy Profile (No Transforms)
+# Tests backward compatibility - uses query params only, no DataBlocks
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-legacy-get"
+path = "/api/legacy/check"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+[[http_profiles.get.params]]
+name = "session"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+# No client_id DataBlock - uses legacy param extraction
+
+[[http_profiles.post]]
+name = "test-legacy-post"
+path = "/api/legacy/submit"
+method = "POST"
+content_type = "application/json"
+[[http_profiles.post.headers]]
+name = "Content-Type"
+value = "application/json"
+[[http_profiles.post.params]]
+name = "session"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+# No client_id or data DataBlock - uses legacy JSON body
+
+[[http_profiles.server_response]]
+name = "test-legacy-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "no-store"
+# No data DataBlock - uses legacy JSON-wrapped response
+
+# -----------------------------------------------------------------------------
+# TEST 6: Multi-Random Padding Profile
+# Tests random prepend/append with different charsets
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-random-padding-get"
+path = "/cdn/asset.js"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/javascript"
+[[http_profiles.get.params]]
+name = "v"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "cookie:_tracking"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+[[http_profiles.get.client_id.transforms]]
+type = "random_prepend"
+length = 4
+charset = "alpha"
+[[http_profiles.get.client_id.transforms]]
+type = "random_append"
+length = 4
+charset = "numeric"
+
+[[http_profiles.post]]
+name = "test-random-padding-post"
+path = "/cdn/beacon"
+method = "POST"
+content_type = "text/plain"
+[[http_profiles.post.params]]
+name = "v"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "cookie:_tracking"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+[[http_profiles.post.client_id.transforms]]
+type = "random_prepend"
+length = 4
+charset = "alpha"
+[[http_profiles.post.client_id.transforms]]
+type = "random_append"
+length = 4
+charset = "numeric"
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+[[http_profiles.post.data.transforms]]
+type = "random_prepend"
+length = 16
+charset = "hex"
+[[http_profiles.post.data.transforms]]
+type = "random_append"
+length = 16
+charset = "hex"
+
+[[http_profiles.server_response]]
+name = "test-random-padding-response"
+content_type = "application/javascript"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[[http_profiles.server_response.headers]]
+name = "Cache-Control"
+value = "public, max-age=86400"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+[[http_profiles.server_response.data.transforms]]
+type = "random_prepend"
+length = 12
+charset = "alphanumeric"
+[[http_profiles.server_response.data.transforms]]
+type = "random_append"
+length = 12
+charset = "alphanumeric"
+[[http_profiles.server_response.data.transforms]]
+type = "prepend"
+value = "//v3.6.0\n"
+[[http_profiles.server_response.data.transforms]]
+type = "append"
+value = "\n//EOF"
+
+# -----------------------------------------------------------------------------
+# TEST 7: URI Append Profile
+# ClientID appended directly to the URL path - tests uri_append output
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-uri-append-get"
+path = "/files/download/"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "*/*"
+[[http_profiles.get.params]]
+name = "f"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "uri_append"
+[[http_profiles.get.client_id.transforms]]
+type = "hex"
+[[http_profiles.get.client_id.transforms]]
+type = "append"
+value = ".bin"
+
+[[http_profiles.post]]
+name = "test-uri-append-post"
+path = "/files/upload/"
+method = "POST"
+content_type = "application/octet-stream"
+[[http_profiles.post.params]]
+name = "f"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "uri_append"
+[[http_profiles.post.client_id.transforms]]
+type = "hex"
+[[http_profiles.post.client_id.transforms]]
+type = "append"
+value = ".bin"
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+[[http_profiles.server_response]]
+name = "test-uri-append-response"
+content_type = "application/octet-stream"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 8: Cookie-Based Data Profile
+# POST data in a cookie - minimal body with data in Set-Cookie style transfer
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-cookie-data-get"
+path = "/tracking/pixel.gif"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "image/gif"
+[[http_profiles.get.params]]
+name = "uid"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "cookie:_utma"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+[[http_profiles.post]]
+name = "test-cookie-data-post"
+path = "/tracking/event"
+method = "POST"
+content_type = "application/x-www-form-urlencoded"
+[[http_profiles.post.params]]
+name = "uid"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "cookie:_utma"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+# POST data goes in a cookie instead of body
+[http_profiles.post.data]
+output = "cookie:_utmz"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64url"
+
+[[http_profiles.server_response]]
+name = "test-cookie-data-response"
+content_type = "image/gif"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 9: Double Base64 Profile
+# Tests multiple layers of the same encoding (base64 of base64)
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-double-b64-get"
+path = "/api/auth/verify"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "text/plain"
+[[http_profiles.get.params]]
+name = "t"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "header:Authorization"
+[[http_profiles.get.client_id.transforms]]
+type = "base64"
+[[http_profiles.get.client_id.transforms]]
+type = "base64"
+[[http_profiles.get.client_id.transforms]]
+type = "prepend"
+value = "Basic "
+
+[[http_profiles.post]]
+name = "test-double-b64-post"
+path = "/api/auth/data"
+method = "POST"
+content_type = "text/plain"
+[[http_profiles.post.params]]
+name = "t"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "header:Authorization"
+[[http_profiles.post.client_id.transforms]]
+type = "base64"
+[[http_profiles.post.client_id.transforms]]
+type = "base64"
+[[http_profiles.post.client_id.transforms]]
+type = "prepend"
+value = "Basic "
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+[[http_profiles.server_response]]
+name = "test-double-b64-response"
+content_type = "text/plain"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 10: Long Transform Chain Profile
+# Tests a complex chain: gzip -> xor -> base64 -> prepend -> random padding
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-chain-get"
+path = "/api/v3/stream"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/octet-stream"
+[[http_profiles.get.params]]
+name = "stream"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "header:X-Stream-ID"
+[[http_profiles.get.client_id.transforms]]
+type = "xor"
+value = "streamkey"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+[[http_profiles.get.client_id.transforms]]
+type = "prepend"
+value = "STREAM-"
+
+[[http_profiles.post]]
+name = "test-chain-post"
+path = "/api/v3/stream"
+method = "POST"
+content_type = "application/octet-stream"
+[[http_profiles.post.params]]
+name = "stream"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "header:X-Stream-ID"
+[[http_profiles.post.client_id.transforms]]
+type = "xor"
+value = "streamkey"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+[[http_profiles.post.client_id.transforms]]
+type = "prepend"
+value = "STREAM-"
+# Long chain: gzip -> xor -> base64 -> prepend -> random padding
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "xor"
+value = "payload_obf_key"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+[[http_profiles.post.data.transforms]]
+type = "prepend"
+value = "DATA:"
+[[http_profiles.post.data.transforms]]
+type = "random_append"
+length = 8
+charset = "hex"
+
+[[http_profiles.server_response]]
+name = "test-chain-response"
+content_type = "application/octet-stream"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "gzip"
+[[http_profiles.server_response.data.transforms]]
+type = "xor"
+value = "response_obf_key"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# -----------------------------------------------------------------------------
+# TEST 11: Query Parameter Data Profile
+# POST data in a query parameter instead of body
+# -----------------------------------------------------------------------------
+[[http_profiles.get]]
+name = "test-query-data-get"
+path = "/search"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+[[http_profiles.get.params]]
+name = "q"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.get.client_id]
+output = "query:session"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+[[http_profiles.post]]
+name = "test-query-data-post"
+path = "/search"
+method = "POST"
+content_type = "application/x-www-form-urlencoded"
+[[http_profiles.post.params]]
+name = "q"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "query:session"
+[[http_profiles.post.client_id.transforms]]
+type = "base64url"
+# POST data goes in a query parameter
+[http_profiles.post.data]
+output = "query:data"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64url"
+
+[[http_profiles.server_response]]
+name = "test-query-data-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "refresh"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
 
 # =============================================================================
 # PAYLOAD CONFIGURATION

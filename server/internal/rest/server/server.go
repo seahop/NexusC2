@@ -104,7 +104,7 @@ func NewServer(cfg *config.RESTConfig, agentCfg *config.AgentConfig, db *sql.DB)
 	s.authHandler = handlers.NewAuthHandler(jwtManager, cfg.APIPassword)
 	s.agentHandler = handlers.NewAgentHandler(db)
 	s.commandHandler = handlers.NewCommandHandler(db, nil) // agentClient set later
-	s.listenerHandler = handlers.NewListenerHandler(db, listenerManager, nil, sseHub)
+	s.listenerHandler = handlers.NewListenerHandler(db, listenerManager, nil, sseHub, agentCfg)
 
 	// Create profile handler for malleable profile discovery
 	if agentCfg != nil {
@@ -273,6 +273,9 @@ func (s *Server) SetAgentClient(client *agent.Client) {
 	s.commandHandler.SetAgentClient(client)
 	s.listenerHandler.SetAgentClient(client)
 	s.payloadHandler.SetAgentClient(client)
+	if s.profileHandler != nil {
+		s.profileHandler.SetAgentClient(client)
+	}
 }
 
 // GetSSEHub returns the SSE hub for event broadcasting

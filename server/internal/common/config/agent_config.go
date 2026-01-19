@@ -71,6 +71,47 @@ type Header struct {
 	Value string `toml:"value" json:"value"`
 }
 
+// =============================================================================
+// MALLEABLE TRANSFORMS - Data encoding and placement configuration
+// =============================================================================
+
+// Transform represents a single transformation step in a transform chain
+// Transforms are applied in order (first to last) when sending data
+// and reversed (last to first) when receiving data
+type Transform struct {
+	// Type of transform: base64, base64url, hex, gzip, xor, netbios, prepend, append, random_prepend, random_append
+	Type string `toml:"type" json:"type"`
+
+	// Value used by certain transforms:
+	// - prepend/append: the static string to add
+	// - xor: the XOR key (hex string or raw)
+	Value string `toml:"value,omitempty" json:"value,omitempty"`
+
+	// Length for random_prepend/random_append: number of random bytes to add
+	Length int `toml:"length,omitempty" json:"length,omitempty"`
+
+	// Charset for random_prepend/random_append:
+	// - "numeric": 0-9
+	// - "alpha": a-zA-Z
+	// - "alphanumeric": a-zA-Z0-9 (default)
+	// - "hex": 0-9a-f
+	Charset string `toml:"charset,omitempty" json:"charset,omitempty"`
+}
+
+// DataBlock defines how a piece of data (clientID, body, etc.) is transformed and placed
+type DataBlock struct {
+	// Output location for the transformed data:
+	// - "body": HTTP body
+	// - "header:<name>": in a specific header (e.g., "header:X-Request-ID")
+	// - "cookie:<name>": in a cookie (e.g., "cookie:session")
+	// - "query:<name>": as a query parameter (e.g., "query:id")
+	// - "uri_append": appended to the URI path
+	Output string `toml:"output" json:"output"`
+
+	// Ordered list of transforms to apply
+	Transforms []Transform `toml:"transforms,omitempty" json:"transforms,omitempty"`
+}
+
 // GetProfile defines a named GET request profile
 type GetProfile struct {
 	Name    string   `toml:"name" json:"name"`
@@ -78,6 +119,10 @@ type GetProfile struct {
 	Method  string   `toml:"method" json:"method"`
 	Headers []Header `toml:"headers" json:"headers"`
 	Params  []Param  `toml:"params" json:"params"`
+
+	// ClientID defines how the client ID is transformed and placed in GET requests
+	// If not specified, falls back to legacy Params-based clientID placement
+	ClientID *DataBlock `toml:"client_id,omitempty" json:"client_id,omitempty"`
 }
 
 // PostProfile defines a named POST request profile
@@ -88,6 +133,14 @@ type PostProfile struct {
 	ContentType string   `toml:"content_type" json:"content_type"`
 	Headers     []Header `toml:"headers" json:"headers"`
 	Params      []Param  `toml:"params" json:"params"`
+
+	// ClientID defines how the client ID is transformed and placed in POST requests
+	// If not specified, falls back to legacy Params-based clientID placement
+	ClientID *DataBlock `toml:"client_id,omitempty" json:"client_id,omitempty"`
+
+	// Data defines how the POST body data is transformed
+	// If not specified, data is sent as-is in the body
+	Data *DataBlock `toml:"data,omitempty" json:"data,omitempty"`
 }
 
 // ServerResponseProfile defines how the server responds to agents
@@ -99,6 +152,10 @@ type ServerResponseProfile struct {
 	CommandIDField string   `toml:"command_id_field" json:"command_id_field"`
 	RekeyValue     string   `toml:"rekey_value" json:"rekey_value"`
 	Headers        []Header `toml:"headers" json:"headers"`
+
+	// Data defines how response data is transformed before sending to agent
+	// If not specified, data is sent as-is
+	Data *DataBlock `toml:"data,omitempty" json:"data,omitempty"`
 }
 
 // HTTPProfiles holds all named profiles for GET, POST, and server responses

@@ -26,8 +26,8 @@ var (
 	customHeaders      string
 	getRoute           string
 	postRoute          string
-	getMethod          string // NEW: Custom HTTP method for GET operations
-	postMethod         string // NEW: Custom HTTP method for POST operations
+	getMethod          string // Custom HTTP method for GET operations
+	postMethod         string // Custom HTTP method for POST operations
 	getClientIDName    string
 	getClientIDFormat  string
 	postClientIDName   string
@@ -39,6 +39,12 @@ var (
 	protocol           string
 	ip                 string
 	port               string
+
+	// Malleable transform config (JSON-encoded DataBlocks)
+	getClientIDTransforms  string // DataBlock for GET clientID placement/transforms
+	postClientIDTransforms string // DataBlock for POST clientID placement/transforms
+	postDataTransforms     string // DataBlock for POST body data transforms
+	responseDataTransforms string // DataBlock for parsing server response transforms
 )
 
 // Global HandshakeManager instance

