@@ -504,14 +504,16 @@ func ParseListenerType(listenerTypeStr string) (pb.ListenerType, error) {
 
 func (c *Client) RegisterInit(ctx context.Context, initData map[string]string) error {
 	req := &pb.InitRequest{
-		Id:       initData["id"],
-		ClientId: initData["clientID"],
-		Type:     initData["type"],
-		Secret:   initData["secret"],
-		Os:       initData["os"],
-		Arch:     initData["arch"],
-		RsaKey:   initData["rsaKey"],
-		Protocol: initData["protocol"],
+		Id:         initData["id"],
+		ClientId:   initData["clientID"],
+		Type:       initData["type"],
+		Secret:     initData["secret"],
+		Os:         initData["os"],
+		Arch:       initData["arch"],
+		RsaKey:     initData["rsaKey"],
+		Protocol:   initData["protocol"],
+		SmbProfile: initData["smbProfile"],
+		SmbXorKey:  initData["smbXorKey"],
 	}
 
 	resp, err := c.client.RegisterInit(ctx, req)

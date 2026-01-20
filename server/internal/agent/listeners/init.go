@@ -8,14 +8,16 @@ import (
 
 // InitData represents the initialization data for a new agent
 type InitData struct {
-	ID       string
-	ClientID string
-	Type     string
-	Secret   string
-	OS       string
-	Arch     string
-	RSAKey   string
-	Protocol string
+	ID         string
+	ClientID   string
+	Type       string
+	Secret     string
+	OS         string
+	Arch       string
+	RSAKey     string
+	Protocol   string
+	SMBProfile string // SMB profile name for transform configuration
+	SMBXorKey  string // Per-build unique XOR key for SMB transforms
 }
 
 // StoreInitData stores the initialization data in memory
@@ -45,6 +47,12 @@ func (m *Manager) StoreInitData(data *InitData) error {
 		log.Printf("  Architecture: %s", initData.Arch)
 		log.Printf("  Secret Length: %d chars", len(initData.Secret))
 		log.Printf("  RSA Key Length: %d chars", len(initData.RSAKey))
+		if initData.SMBProfile != "" {
+			log.Printf("  SMB Profile: %s", initData.SMBProfile)
+		}
+		if initData.SMBXorKey != "" {
+			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
+		}
 	}
 	log.Printf("----------------------------------------------")
 
@@ -74,7 +82,8 @@ func (m *Manager) RemoveInitData(clientID string) {
 
 func (m *Manager) loadInitDataFromDB() error {
 	query := `
-        SELECT id, clientID, type, secret, os, arch, RSAkey
+        SELECT id, clientID, type, secret, os, arch, RSAkey,
+               COALESCE(smb_profile, ''), COALESCE(smb_xor_key, '')
         FROM inits
         WHERE id IS NOT NULL`
 
@@ -98,6 +107,8 @@ func (m *Manager) loadInitDataFromDB() error {
 			&data.OS,
 			&data.Arch,
 			&data.RSAKey,
+			&data.SMBProfile,
+			&data.SMBXorKey,
 		)
 		if err != nil {
 			log.Printf("Error scanning init row: %v", err)
@@ -123,6 +134,12 @@ func (m *Manager) loadInitDataFromDB() error {
 		log.Printf("  Architecture: %s", initData.Arch)
 		log.Printf("  Secret Length: %d chars", len(initData.Secret))
 		log.Printf("  RSA Key Length: %d chars", len(initData.RSAKey))
+		if initData.SMBProfile != "" {
+			log.Printf("  SMB Profile: %s", initData.SMBProfile)
+		}
+		if initData.SMBXorKey != "" {
+			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
+		}
 	}
 	if count > 0 {
 		log.Printf("----------------------------------------------")

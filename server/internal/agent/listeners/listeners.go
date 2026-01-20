@@ -885,9 +885,10 @@ func (m *Manager) LoadActiveConnections() error {
 func (m *Manager) LoadInitData() error {
 	log.Println("Loading InitData from database...")
 
-	// Note: The inits table does NOT have a protocol column based on the schema
+	// Query includes smb_profile and smb_xor_key for transform support
 	query := `
-		SELECT id, clientID, type, secret, os, arch, RSAkey
+		SELECT id, clientID, type, secret, os, arch, RSAkey,
+		       COALESCE(smb_profile, ''), COALESCE(smb_xor_key, '')
 		FROM inits
 		WHERE id IS NOT NULL
 	`
@@ -910,6 +911,8 @@ func (m *Manager) LoadInitData() error {
 			&initData.OS,
 			&initData.Arch,
 			&initData.RSAKey,
+			&initData.SMBProfile,
+			&initData.SMBXorKey,
 		)
 		if err != nil {
 			log.Printf("Failed to scan init data row: %v", err)

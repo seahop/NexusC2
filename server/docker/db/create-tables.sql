@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS listeners (
     pipe_name VARCHAR DEFAULT '',
     get_profile VARCHAR(100) DEFAULT 'default-get',
     post_profile VARCHAR(100) DEFAULT 'default-post',
-    server_response_profile VARCHAR(100) DEFAULT 'default-response'
+    server_response_profile VARCHAR(100) DEFAULT 'default-response',
+    smb_profile VARCHAR(100) DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS inits (
@@ -128,6 +129,39 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name = 'connections' AND column_name = 'hop_count') THEN
         ALTER TABLE connections ADD COLUMN hop_count INTEGER DEFAULT 0;
+    END IF;
+END $$;
+
+-- Add smb_profile column to inits, link_routing, and listeners tables for transform support
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'smb_profile') THEN
+        ALTER TABLE inits ADD COLUMN smb_profile VARCHAR(100) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'link_routing' AND column_name = 'smb_profile') THEN
+        ALTER TABLE link_routing ADD COLUMN smb_profile VARCHAR(100) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'listeners' AND column_name = 'smb_profile') THEN
+        ALTER TABLE listeners ADD COLUMN smb_profile VARCHAR(100) DEFAULT '';
+    END IF;
+END $$;
+
+-- Add smb_xor_key column to inits and link_routing tables for per-agent unique transform keys
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'smb_xor_key') THEN
+        ALTER TABLE inits ADD COLUMN smb_xor_key VARCHAR(32) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'link_routing' AND column_name = 'smb_xor_key') THEN
+        ALTER TABLE link_routing ADD COLUMN smb_xor_key VARCHAR(32) NULL;
     END IF;
 END $$;
 

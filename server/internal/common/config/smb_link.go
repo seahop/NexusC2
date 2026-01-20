@@ -15,6 +15,7 @@ type SMBLinkConfig struct {
 	HeartbeatInterval int              `toml:"heartbeat_interval"`
 	PipePresets       []PipePreset     `toml:"pipe_presets"`
 	Malleable         SMBLinkMalleable `toml:"malleable"`
+	Profiles          []SMBProfile     `toml:"profiles"`
 	mu                sync.RWMutex
 }
 
@@ -32,6 +33,12 @@ type SMBLinkMalleable struct {
 	LinkHandshakeResponseField string `toml:"link_handshake_response_field"`
 	RoutingIDField             string `toml:"routing_id_field"`
 	PayloadField               string `toml:"payload_field"`
+}
+
+// SMBProfile defines malleable transforms for named pipe traffic
+type SMBProfile struct {
+	Name string     `toml:"name" json:"name"`
+	Data *DataBlock `toml:"data,omitempty" json:"data,omitempty"`
 }
 
 type smbLinkTomlConfig struct {
@@ -107,4 +114,123 @@ func (c *SMBLinkConfig) GetMalleable() SMBLinkMalleable {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Malleable
+}
+
+// GetSMBProfile returns a specific SMB profile by name
+func (c *SMBLinkConfig) GetSMBProfile(name string) *SMBProfile {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for i := range c.Profiles {
+		if c.Profiles[i].Name == name {
+			return &c.Profiles[i]
+		}
+	}
+	return nil
+}
+
+// GetSMBProfileNames returns a list of all SMB profile names
+func (c *SMBLinkConfig) GetSMBProfileNames() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	names := make([]string, len(c.Profiles))
+	for i, p := range c.Profiles {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// GetSMBProfiles returns all SMB profiles
+func (c *SMBLinkConfig) GetSMBProfiles() []SMBProfile {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Profiles
+}
+
+// AddSMBProfile adds a new SMB profile, returning error if name already exists
+func (c *SMBLinkConfig) AddSMBProfile(profile SMBProfile) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check for duplicate name
+	for _, p := range c.Profiles {
+		if p.Name == profile.Name {
+			return fmt.Errorf("SMB profile '%s' already exists", profile.Name)
+		}
+	}
+
+	c.Profiles = append(c.Profiles, profile)
+	return nil
+}
+
+// RemoveSMBProfile removes an SMB profile by name, returning true if found
+func (c *SMBLinkConfig) RemoveSMBProfile(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i, p := range c.Profiles {
+		if p.Name == name {
+			c.Profiles = append(c.Profiles[:i], c.Profiles[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// SMBProfileUploadResult contains the results of an SMB profile upload
+type SMBProfileUploadResult struct {
+	ProfilesAdded []string
+	Errors        []string
+}
+
+// ValidateAndAddSMBProfiles validates and adds SMB profiles from TOML content
+func (c *SMBLinkConfig) ValidateAndAddSMBProfiles(profiles []SMBProfile) *SMBProfileUploadResult {
+	result := &SMBProfileUploadResult{
+		ProfilesAdded: []string{},
+		Errors:        []string{},
+	}
+
+	for _, profile := range profiles {
+		// Validate required fields
+		if profile.Name == "" {
+			result.Errors = append(result.Errors, "SMB profile missing required 'name' field")
+			continue
+		}
+
+		// Validate transforms if Data block exists
+		if profile.Data != nil {
+			for _, t := range profile.Data.Transforms {
+				if !isValidTransformType(t.Type) {
+					result.Errors = append(result.Errors,
+						fmt.Sprintf("SMB profile '%s': invalid transform type '%s'", profile.Name, t.Type))
+					continue
+				}
+			}
+		}
+
+		// Try to add the profile
+		if err := c.AddSMBProfile(profile); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		} else {
+			result.ProfilesAdded = append(result.ProfilesAdded, profile.Name)
+		}
+	}
+
+	return result
+}
+
+// isValidTransformType checks if a transform type is valid
+func isValidTransformType(t string) bool {
+	validTypes := map[string]bool{
+		"base64":         true,
+		"base64url":      true,
+		"hex":            true,
+		"gzip":           true,
+		"netbios":        true,
+		"xor":            true,
+		"prepend":        true,
+		"append":         true,
+		"random_prepend": true,
+		"random_append":  true,
+	}
+	return validTypes[t]
 }

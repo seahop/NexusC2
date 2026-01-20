@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"bytes"
+	"c2/internal/common/config"
 	"c2/internal/websocket/hub"
 	"context"
 	"crypto/tls"
@@ -29,6 +30,7 @@ type ProfileUploadResponse struct {
 		GetProfiles            []string `json:"get_profiles,omitempty"`
 		PostProfiles           []string `json:"post_profiles,omitempty"`
 		ServerResponseProfiles []string `json:"server_response_profiles,omitempty"`
+		SMBProfiles            []string `json:"smb_profiles,omitempty"`
 		Errors                 []string `json:"errors,omitempty"`
 	} `json:"data"`
 }
@@ -56,7 +58,7 @@ func (h *WSHandler) handleUploadProfiles(client *hub.Client, message []byte) err
 	}
 
 	// Count successful additions
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles)
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles)
 
 	// Build response
 	response := ProfileUploadResponse{
@@ -66,12 +68,13 @@ func (h *WSHandler) handleUploadProfiles(client *hub.Client, message []byte) err
 	response.Data.GetProfiles = result.GetProfiles
 	response.Data.PostProfiles = result.PostProfiles
 	response.Data.ServerResponseProfiles = result.ServerResponseProfiles
+	response.Data.SMBProfiles = result.SMBProfiles
 	response.Data.Errors = result.Errors
 
 	if totalAdded > 0 {
 		response.Data.Message = fmt.Sprintf("Successfully added %d profile(s)", totalAdded)
-		logMessage(LOG_MINIMAL, "Profile upload: added %d GET, %d POST, %d Response profiles",
-			len(result.GetProfiles), len(result.PostProfiles), len(result.ServerResponseProfiles))
+		logMessage(LOG_MINIMAL, "Profile upload: added %d GET, %d POST, %d Response, %d SMB profiles",
+			len(result.GetProfiles), len(result.PostProfiles), len(result.ServerResponseProfiles), len(result.SMBProfiles))
 	} else if len(result.Errors) > 0 {
 		response.Data.Message = "No profiles were added due to validation errors"
 	} else {
@@ -122,6 +125,7 @@ func (h *WSHandler) broadcastProfileUpdate() {
 			GetProfiles            []string `json:"get_profiles"`
 			PostProfiles           []string `json:"post_profiles"`
 			ServerResponseProfiles []string `json:"server_response_profiles"`
+			SMBProfiles            []string `json:"smb_profiles"`
 		} `json:"data"`
 	}{
 		Type: "profiles_updated",
@@ -130,6 +134,11 @@ func (h *WSHandler) broadcastProfileUpdate() {
 	update.Data.GetProfiles = h.agentConfig.GetGetProfileNames()
 	update.Data.PostProfiles = h.agentConfig.GetPostProfileNames()
 	update.Data.ServerResponseProfiles = h.agentConfig.GetServerResponseProfileNames()
+
+	// Get SMB profile names from SMB config
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		update.Data.SMBProfiles = smbConfig.GetSMBProfileNames()
+	}
 
 	if updateJSON, err := json.Marshal(update); err == nil {
 		h.hub.BroadcastToAll(context.Background(), updateJSON)
@@ -236,6 +245,7 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 			GetProfiles            []string `json:"get_profiles"`
 			PostProfiles           []string `json:"post_profiles"`
 			ServerResponseProfiles []string `json:"server_response_profiles"`
+			SMBProfiles            []string `json:"smb_profiles"`
 		} `json:"data"`
 	}{
 		Type: "profiles_list",
@@ -244,6 +254,11 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 	response.Data.GetProfiles = h.agentConfig.GetGetProfileNames()
 	response.Data.PostProfiles = h.agentConfig.GetPostProfileNames()
 	response.Data.ServerResponseProfiles = h.agentConfig.GetServerResponseProfileNames()
+
+	// Get SMB profile names from SMB config
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		response.Data.SMBProfiles = smbConfig.GetSMBProfileNames()
+	}
 
 	responseJSON, err := json.Marshal(response)
 	if err != nil {

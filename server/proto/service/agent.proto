@@ -62,6 +62,8 @@ message InitRequest {
   string arch = 6;
   string rsa_key = 7;
   string protocol = 8;
+  string smb_profile = 9;
+  string smb_xor_key = 10;
 }
 
 message InitResponse {

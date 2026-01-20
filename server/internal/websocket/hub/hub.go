@@ -26,6 +26,7 @@ type ListenerMessage struct {
 		GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
 		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
 		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
+		SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
 	} `json:"data"`
 }
 

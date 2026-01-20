@@ -105,6 +105,7 @@ type PayloadRequest struct {
 		// SMB-specific options
 		PayloadType string `json:"payload_type,omitempty"` // "http" or "smb"
 		PipeName    string `json:"pipe_name,omitempty"`    // For SMB payloads
+		SMBProfile  string `json:"smb_profile,omitempty"`  // SMB profile name for transforms
 	} `json:"data"`
 }
 
@@ -142,6 +143,8 @@ type buildData struct {
 	safetyChecks   SafetyChecks // Added safety checks to build data
 	payloadType    string       // "http" or "smb"
 	pipeName       string       // For SMB payloads
+	smbProfile     string       // SMB profile name for transforms
+	smbXorKey      string       // Per-build unique XOR key for SMB transforms
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
@@ -192,7 +195,8 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 		return fmt.Errorf("listener %s not found", req.Data.Listener)
 	}
 
-	log.Printf("Building payload for listener: %s", listener.Name)
+	log.Printf("Building payload for listener: %s (Protocol=%s, SMBProfile=%s)",
+		listener.Name, listener.Protocol, listener.SMBProfile)
 	b.clientUsername = clientUsername
 	b.listener = listener
 
@@ -900,6 +904,13 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		return nil, fmt.Errorf("failed to generate XOR key: %v", err)
 	}
 
+	// Generate SMB-specific XOR key for transform encryption (per-build unique)
+	// This replaces the static XOR key from config.toml for better security
+	smbXorKey, err := GenerateRandomString(12)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate SMB XOR key: %v", err)
+	}
+
 	// Determine payload type from listener protocol if not explicitly set
 	// This allows the UI to just select a listener and the server determines the payload type
 	listenerProtocol := strings.ToUpper(b.listener.Protocol)
@@ -950,6 +961,20 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		safetyChecks:   req.Data.SafetyChecks, // Store safety checks
 		payloadType:    payloadType,
 		pipeName:       pipeName,
+		smbProfile:     req.Data.SMBProfile, // SMB profile for transforms
+		smbXorKey:      smbXorKey,           // Per-build unique XOR key for SMB transforms
+	}
+
+	// Fall back to listener's SMB profile if not specified in the request
+	log.Printf("[Builder] SMB profile from request: '%s', listener SMBProfile: '%s'",
+		req.Data.SMBProfile, b.listener.SMBProfile)
+	if data.smbProfile == "" && b.listener != nil {
+		data.smbProfile = b.listener.SMBProfile
+		if data.smbProfile != "" {
+			log.Printf("[Builder] Using listener's SMB profile: %s", data.smbProfile)
+		} else {
+			log.Printf("[Builder] WARNING: Listener has no SMB profile set, transforms will not be embedded")
+		}
 	}
 
 	// Store in database
@@ -978,8 +1003,8 @@ func (b *Builder) generateBinaryName(req PayloadRequest) string {
 
 func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 	_, err := b.db.ExecContext(ctx, `
-        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `,
 		data.initID,
 		data.clientID,
@@ -988,20 +1013,24 @@ func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 		data.os,
 		data.arch,
 		data.keyPair.PrivateKeyPEM,
+		data.smbProfile,
+		data.smbXorKey,
 	)
 	return err
 }
 
 func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData) error {
 	initData := map[string]string{
-		"id":       data.initID.String(),
-		"clientID": data.clientID.String(),
-		"type":     data.connectionType,
-		"secret":   data.secret,
-		"os":       data.os,
-		"arch":     data.arch,
-		"rsaKey":   data.keyPair.PrivateKeyPEM,
-		"protocol": b.listener.Protocol,
+		"id":         data.initID.String(),
+		"clientID":   data.clientID.String(),
+		"type":       data.connectionType,
+		"secret":     data.secret,
+		"os":         data.os,
+		"arch":       data.arch,
+		"rsaKey":     data.keyPair.PrivateKeyPEM,
+		"protocol":   b.listener.Protocol,
+		"smbProfile": data.smbProfile,
+		"smbXorKey":  data.smbXorKey,
 	}
 
 	grpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -1288,6 +1317,31 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 
 		envVars = append(envVars, fmt.Sprintf("ENCRYPTED_CONFIG=%s", encryptedConfig))
 		log.Printf("[Builder] Created encrypted SMB config for pipe: %s", data.pipeName)
+
+		// Serialize SMB profile transforms if configured
+		if data.smbProfile != "" {
+			smbLinkConfig, err := config.GetSMBLinkConfig()
+			if err == nil && smbLinkConfig != nil {
+				if smbProfile := smbLinkConfig.GetSMBProfile(data.smbProfile); smbProfile != nil && smbProfile.Data != nil {
+					// Modify XOR transform values to use per-build unique key
+					modifiedData := modifyXorTransformValue(smbProfile.Data, data.smbXorKey)
+					smbDataTransforms := serializeDataBlockCompact(modifiedData)
+					if smbDataTransforms != "" {
+						// XOR encrypt with xorKey (same as other encrypted values)
+						xorKeyBytes := []byte(data.xorKey)
+						transformBytes := []byte(smbDataTransforms)
+						encryptedTransforms := make([]byte, len(transformBytes))
+						for i, b := range transformBytes {
+							encryptedTransforms[i] = b ^ xorKeyBytes[i%len(xorKeyBytes)]
+						}
+						encryptedValues["SMB_DATA_TRANSFORMS"] = base64.StdEncoding.EncodeToString(encryptedTransforms)
+						log.Printf("[Builder] Added SMB data transforms with unique XOR key from profile: %s", data.smbProfile)
+					}
+				} else {
+					log.Printf("[Builder] SMB profile '%s' not found or has no transforms", data.smbProfile)
+				}
+			}
+		}
 	}
 
 	// Add encrypted values to environment variables
@@ -1465,6 +1519,30 @@ var charsetMap = map[string]string{
 	"alpha":        "2",
 	"alphanumeric": "3",
 	"hex":          "4",
+}
+
+// modifyXorTransformValue creates a copy of DataBlock with XOR transform values replaced
+// This is used to embed per-build unique XOR keys instead of the static key from config.toml
+func modifyXorTransformValue(db *config.DataBlock, newXorKey string) *config.DataBlock {
+	if db == nil || newXorKey == "" {
+		return db
+	}
+
+	// Deep copy the DataBlock
+	modifiedDB := &config.DataBlock{
+		Output:     db.Output,
+		Transforms: make([]config.Transform, len(db.Transforms)),
+	}
+
+	for i, t := range db.Transforms {
+		modifiedDB.Transforms[i] = t
+		// Replace XOR transform value with unique key
+		if t.Type == "xor" {
+			modifiedDB.Transforms[i].Value = newXorKey
+		}
+	}
+
+	return modifiedDB
 }
 
 // serializeDataBlockCompact serializes a DataBlock to compact JSON format

@@ -341,9 +341,9 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		log.Printf("Failed to unmarshal listener message: %v", err)
 		return err
 	}
-	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s",
+	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s SMB=%s",
 		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName,
-		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile)
+		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile, msg.Data.SMBProfile)
 
 	// Check if this is an SMB listener - handle specially
 	isSMB := msg.Data.Protocol == "SMB" || msg.Data.Protocol == "smb"
@@ -371,6 +371,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		msg.Data.GetProfile,
 		msg.Data.PostProfile,
 		msg.Data.ServerResponseProfile,
+		msg.Data.SMBProfile,
 	)
 	if err != nil {
 		log.Printf("Listener creation failed: %v", err)

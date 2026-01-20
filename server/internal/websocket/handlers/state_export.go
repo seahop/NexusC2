@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"c2/internal/common/config"
 	"context"
 	"database/sql"
 	"fmt"
@@ -87,7 +88,8 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
             id, name, protocol, port, ip, COALESCE(pipe_name, ''),
             COALESCE(get_profile, 'default-get'),
             COALESCE(post_profile, 'default-post'),
-            COALESCE(server_response_profile, 'default-response')
+            COALESCE(server_response_profile, 'default-response'),
+            COALESCE(smb_profile, '')
         FROM listeners
         ORDER BY name ASC
     `)
@@ -102,16 +104,16 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	for rows.Next() {
 		var listener Listener
 		if err := rows.Scan(&listener.ID, &listener.Name, &listener.Protocol, &listener.Port, &listener.IP, &listener.PipeName,
-			&listener.GetProfile, &listener.PostProfile, &listener.ServerResponseProfile); err != nil {
+			&listener.GetProfile, &listener.PostProfile, &listener.ServerResponseProfile, &listener.SMBProfile); err != nil {
 			return nil, &DBOperationError{
 				Operation: "scan listener",
 				Err:       err,
 			}
 		}
 		export.Listeners = append(export.Listeners, listener)
-		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s, PipeName=%s, Profiles: GET=%s POST=%s Response=%s",
+		logMessage(LOG_VERBOSE, "Exported listener: Name=%s, Protocol=%s, Port=%s, PipeName=%s, Profiles: GET=%s POST=%s Response=%s SMB=%s",
 			listener.Name, listener.Protocol, listener.Port, listener.PipeName,
-			listener.GetProfile, listener.PostProfile, listener.ServerResponseProfile)
+			listener.GetProfile, listener.PostProfile, listener.ServerResponseProfile, listener.SMBProfile)
 	}
 
 	// 3. Query recent commands
@@ -218,6 +220,7 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			Get:            make([]string, 0),
 			Post:           make([]string, 0),
 			ServerResponse: make([]string, 0),
+			SMB:            make([]string, 0),
 		}
 
 		// Extract GET profile names
@@ -235,9 +238,14 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			profiles.ServerResponse = append(profiles.ServerResponse, p.Name)
 		}
 
+		// Extract SMB profile names from SMB config
+		if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+			profiles.SMB = smbConfig.GetSMBProfileNames()
+		}
+
 		export.AvailableProfiles = profiles
-		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d",
-			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse))
+		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d, SMB=%d",
+			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse), len(profiles.SMB))
 	}
 
 	// Log summary of exported data
@@ -248,8 +256,8 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	logMessage(LOG_NORMAL, "- Command Outputs: %d", len(export.CommandOutputs))
 	logMessage(LOG_NORMAL, "- Agent Tags: %d agents with tags", len(export.AgentTags))
 	if export.AvailableProfiles != nil {
-		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d",
-			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse))
+		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d, SMB=%d",
+			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse), len(export.AvailableProfiles.SMB))
 	}
 
 	// Commit the transaction

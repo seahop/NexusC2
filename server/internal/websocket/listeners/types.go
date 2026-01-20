@@ -17,6 +17,7 @@ type Listener struct {
 	GetProfile            string // Bound GET profile name
 	PostProfile           string // Bound POST profile name
 	ServerResponseProfile string // Bound server response profile name
+	SMBProfile            string // Bound SMB profile name for transforms
 	Active                bool
 	Created               time.Time
 }

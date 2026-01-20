@@ -52,6 +52,7 @@ type Listener struct {
 	GetProfile            string `json:"get_profile"`
 	PostProfile           string `json:"post_profile"`
 	ServerResponseProfile string `json:"server_response_profile"`
+	SMBProfile            string `json:"smb_profile,omitempty"`
 }
 
 type CreateListenerRequest struct {
@@ -63,6 +64,7 @@ type CreateListenerRequest struct {
 	GetProfile            string `json:"get_profile,omitempty"`
 	PostProfile           string `json:"post_profile,omitempty"`
 	ServerResponseProfile string `json:"server_response,omitempty"`
+	SMBProfile            string `json:"smb_profile,omitempty"`
 }
 
 // ListListeners returns all configured listeners
@@ -75,7 +77,8 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
 		       COALESCE(get_profile, 'default-get'),
 		       COALESCE(post_profile, 'default-post'),
-		       COALESCE(server_response_profile, 'default-response')
+		       COALESCE(server_response_profile, 'default-response'),
+		       COALESCE(smb_profile, '')
 		FROM listeners
 		ORDER BY name
 	`)
@@ -89,7 +92,7 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 	for rows.Next() {
 		var l Listener
 		if err := rows.Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile); err == nil {
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile); err == nil {
 			listeners = append(listeners, l)
 		}
 	}
@@ -109,10 +112,11 @@ func (h *ListenerHandler) GetListener(c *gin.Context) {
 		SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
 		       COALESCE(get_profile, 'default-get'),
 		       COALESCE(post_profile, 'default-post'),
-		       COALESCE(server_response_profile, 'default-response')
+		       COALESCE(server_response_profile, 'default-response'),
+		       COALESCE(smb_profile, '')
 		FROM listeners WHERE name = $1
 	`, name).Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-		&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile)
+		&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile)
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
@@ -187,7 +191,7 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 
 	// Create via listener manager with profiles
 	listener, err := h.listenerManager.CreateWithProfiles(req.Name, protocol, req.Port, req.IP, req.PipeName,
-		req.GetProfile, req.PostProfile, req.ServerResponseProfile)
+		req.GetProfile, req.PostProfile, req.ServerResponseProfile, req.SMBProfile)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

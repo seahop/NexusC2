@@ -64,6 +64,7 @@ type AvailableProfiles struct {
 	Get            []string `json:"get"`
 	Post           []string `json:"post"`
 	ServerResponse []string `json:"server_response"`
+	SMB            []string `json:"smb"`
 }
 
 // StateExport represents the complete state export
@@ -124,10 +125,11 @@ type Listener struct {
 	Protocol              string `json:"protocol"`
 	Port                  string `json:"port"`
 	IP                    string `json:"ip"`
-	PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
-	GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
-	PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
+	PipeName              string `json:"pipe_name,omitempty"`               // For SMB listeners
+	GetProfile            string `json:"get_profile,omitempty"`             // Bound GET profile name
+	PostProfile           string `json:"post_profile,omitempty"`            // Bound POST profile name
 	ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
+	SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
 }
 
 // messageJob represents a message processing job

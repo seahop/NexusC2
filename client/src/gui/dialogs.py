@@ -1026,6 +1026,14 @@ class CreateListenerDialog(QDialog):
         self.response_profile_label = QLabel("Response Profile:")
         form_layout.addRow(self.response_profile_label, self.response_profile)
 
+        # SMB Profile dropdown (only shown for SMB protocol)
+        self.smb_profile = QComboBox()
+        self.smb_profile_label = QLabel("SMB Profile:")
+        form_layout.addRow(self.smb_profile_label, self.smb_profile)
+        # Initially hidden (shown when SMB protocol is selected)
+        self.smb_profile_label.setVisible(False)
+        self.smb_profile.setVisible(False)
+
         layout.addLayout(form_layout)
         layout.addStretch()
         self.network_tab.setLayout(layout)
@@ -1043,6 +1051,16 @@ class CreateListenerDialog(QDialog):
         # Show pipe name only for SMB
         self.pipe_name_label.setVisible(is_smb)
         self.pipe_name.setVisible(is_smb)
+
+        # Show SMB profile only for SMB, hide HTTP profiles
+        self.smb_profile_label.setVisible(is_smb)
+        self.smb_profile.setVisible(is_smb)
+        self.get_profile_label.setVisible(not is_smb)
+        self.get_profile.setVisible(not is_smb)
+        self.post_profile_label.setVisible(not is_smb)
+        self.post_profile.setVisible(not is_smb)
+        self.response_profile_label.setVisible(not is_smb)
+        self.response_profile.setVisible(not is_smb)
 
     def populate_profiles(self):
         """Populate profile dropdowns from database"""
@@ -1070,7 +1088,12 @@ class CreateListenerDialog(QDialog):
         self.response_profile.clear()
         for name in profiles.get("server_response", ["default-response"]):
             self.response_profile.addItem(name)
-    
+
+        # Populate SMB profile dropdown
+        self.smb_profile.clear()
+        for name in profiles.get("smb", ["default-smb"]):
+            self.smb_profile.addItem(name)
+
     #def setup_smb_tab(self):
     #    """Setup SMB listener configuration - SIMPLIFIED"""
     #    layout = QVBoxLayout()
@@ -1135,9 +1158,7 @@ class CreateListenerDialog(QDialog):
                     "name": self.listener_name,
                     "protocol": "SMB",
                     "pipe_name": pipe_name,
-                    "get_profile": self.get_profile.currentText(),
-                    "post_profile": self.post_profile.currentText(),
-                    "server_response_profile": self.response_profile.currentText()
+                    "smb_profile": self.smb_profile.currentText()
                 }
             }
             print(f"CreateListenerDialog: Creating SMB listener with pipe: {pipe_name}")

@@ -239,7 +239,8 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 		listenerProtocol, payloadType, connectionType)
 
 	// Store in database - use connectionType (edge/link) as type, and PRIVATE key for RSA
-	err = h.storeInit(ctx, initID, clientID, connectionType, secret, osLower, req.Arch, keyPair.PrivateKeyPEM)
+	// SMB profile is empty for REST API builds (SMB payloads are built via WebSocket)
+	err = h.storeInit(ctx, initID, clientID, connectionType, secret, osLower, req.Arch, keyPair.PrivateKeyPEM, "")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to store init: %v", err)
 	}
@@ -277,11 +278,11 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	return binaryPath, binaryName, nil
 }
 
-func (h *PayloadHandler) storeInit(ctx context.Context, initID, clientID uuid.UUID, payloadType, secret, os, arch, rsaKey string) error {
+func (h *PayloadHandler) storeInit(ctx context.Context, initID, clientID uuid.UUID, payloadType, secret, os, arch, rsaKey, smbProfile string) error {
 	_, err := h.db.ExecContext(ctx, `
-		INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, initID, clientID, payloadType, secret, os, arch, rsaKey)
+		INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, initID, clientID, payloadType, secret, os, arch, rsaKey, smbProfile)
 	return err
 }
 

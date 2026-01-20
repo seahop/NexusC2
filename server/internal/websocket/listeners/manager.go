@@ -63,19 +63,19 @@ func NewManager(db *sql.DB) *Manager {
 }
 
 func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener, error) {
-	return m.CreateWithProfiles(name, protocol, port, ip, "", "default-get", "default-post", "default-response")
+	return m.CreateWithProfiles(name, protocol, port, ip, "", "default-get", "default-post", "default-response", "")
 }
 
 // CreateWithPipe creates a listener with optional pipe name (uses default profiles)
 func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pipeName string) (*Listener, error) {
-	return m.CreateWithProfiles(name, protocol, port, ip, pipeName, "default-get", "default-post", "default-response")
+	return m.CreateWithProfiles(name, protocol, port, ip, pipeName, "default-get", "default-post", "default-response", "")
 }
 
 // CreateWithProfiles creates a listener with optional pipe name and bound profiles
 func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string, pipeName string,
-	getProfile, postProfile, serverResponseProfile string) (*Listener, error) {
-	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s, Profiles: GET=%s POST=%s Response=%s",
-		name, protocol, port, ip, pipeName, getProfile, postProfile, serverResponseProfile)
+	getProfile, postProfile, serverResponseProfile, smbProfile string) (*Listener, error) {
+	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s, Profiles: GET=%s POST=%s Response=%s SMB=%s",
+		name, protocol, port, ip, pipeName, getProfile, postProfile, serverResponseProfile, smbProfile)
 
 	// Normalize protocol to uppercase
 	protocol = strings.ToUpper(protocol)
@@ -131,6 +131,7 @@ func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string,
 		GetProfile:            getProfile,
 		PostProfile:           postProfile,
 		ServerResponseProfile: serverResponseProfile,
+		SMBProfile:            smbProfile,
 		Created:               time.Now(),
 	}
 
@@ -335,7 +336,8 @@ func (m *Manager) loadExistingListeners() error {
 	rows, err := m.db.Query(`SELECT id, name, protocol, port, ip, COALESCE(pipe_name, ''),
 		COALESCE(get_profile, 'default-get'),
 		COALESCE(post_profile, 'default-post'),
-		COALESCE(server_response_profile, 'default-response')
+		COALESCE(server_response_profile, 'default-response'),
+		COALESCE(smb_profile, '')
 		FROM listeners`)
 	if err != nil {
 		log.Printf("Error querying listeners: %v", err)
@@ -348,7 +350,7 @@ func (m *Manager) loadExistingListeners() error {
 		var l Listener
 		var idStr string
 		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile); err != nil {
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile); err != nil {
 			log.Printf("Error scanning listener row: %v", err)
 			return err
 		}
@@ -562,9 +564,9 @@ func (m *Manager) saveToDB(l *Listener) error {
 		defer tx.Rollback()
 
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile); err != nil {
+            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile, l.SMBProfile); err != nil {
 			return fmt.Errorf("failed to insert listener: %v", err)
 		}
 

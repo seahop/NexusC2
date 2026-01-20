@@ -631,14 +631,16 @@ func (s *GRPCServer) RegisterInit(ctx context.Context, req *pb.InitRequest) (*pb
 
 	// Store the init data in memory
 	initData := &listeners.InitData{
-		ID:       req.Id,
-		ClientID: req.ClientId,
-		Type:     req.Type,
-		Secret:   req.Secret,
-		OS:       req.Os,
-		Arch:     req.Arch,
-		RSAKey:   req.RsaKey,
-		Protocol: req.Protocol,
+		ID:         req.Id,
+		ClientID:   req.ClientId,
+		Type:       req.Type,
+		Secret:     req.Secret,
+		OS:         req.Os,
+		Arch:       req.Arch,
+		RSAKey:     req.RsaKey,
+		Protocol:   req.Protocol,
+		SMBProfile: req.SmbProfile,
+		SMBXorKey:  req.SmbXorKey,
 	}
 
 	// Add to the manager's in-memory storage

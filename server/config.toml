@@ -1057,3 +1057,44 @@ link_handshake_field = "lh"               # Initial handshake from SMB agent
 link_handshake_response_field = "lr"      # Handshake response for SMB agent
 routing_id_field = "r"                    # Short routing identifier
 payload_field = "p"                       # Encrypted payload blob
+
+# =============================================================================
+# SMB PIPE PROFILES - Transform configurations for named pipe traffic
+# =============================================================================
+# These profiles define how SMB pipe messages are obfuscated between the
+# server and SMB agents. The parent HTTPS agent just relays opaque blobs -
+# it doesn't need to know the transform schema.
+#
+# Supported transforms: base64, base64url, hex, gzip, netbios, xor,
+#                       prepend, append, random_prepend, random_append
+
+# Default profile - no transforms (backward compatible, legacy JSON visible)
+[[smb_link.profiles]]
+name = "default-smb"
+
+# NetBIOS encoding - makes traffic look like NetBIOS name resolution
+[[smb_link.profiles]]
+name = "netbios-smb"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "netbios"
+
+# Binary obfuscation with compression and XOR masking
+[[smb_link.profiles]]
+name = "binary-smb"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "smb_transform_key"
+[[smb_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 8
+charset = "hex"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 8
+charset = "hex"

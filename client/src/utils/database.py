@@ -335,6 +335,10 @@ class StateDatabase:
                             for name in profiles.get("server_response", []):
                                 profile_rows.append(("server_response", name))
 
+                            # Store SMB profiles
+                            for name in profiles.get("smb", []):
+                                profile_rows.append(("smb", name))
+
                             if profile_rows:
                                 conn.executemany(
                                     """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
@@ -476,7 +480,8 @@ class StateDatabase:
                 profiles = {
                     "get": [],
                     "post": [],
-                    "server_response": []
+                    "server_response": [],
+                    "smb": []
                 }
 
                 for row in rows:
@@ -492,6 +497,8 @@ class StateDatabase:
                     profiles["post"] = ["default-post"]
                 if not profiles["server_response"]:
                     profiles["server_response"] = ["default-response"]
+                if not profiles["smb"]:
+                    profiles["smb"] = ["default-smb"]
 
                 return profiles
 
@@ -514,6 +521,7 @@ class StateDatabase:
                     post_profiles = profile_data.get("post_profiles", profile_data.get("post", []))
                     response_profiles = profile_data.get("server_response_profiles",
                                                          profile_data.get("server_response", []))
+                    smb_profiles = profile_data.get("smb_profiles", profile_data.get("smb", []))
 
                     # Store GET profiles
                     for name in get_profiles:
@@ -527,6 +535,10 @@ class StateDatabase:
                     for name in response_profiles:
                         profile_rows.append(("server_response", name))
 
+                    # Store SMB profiles
+                    for name in smb_profiles:
+                        profile_rows.append(("smb", name))
+
                     if profile_rows:
                         conn.executemany(
                             """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
@@ -535,7 +547,7 @@ class StateDatabase:
                         )
 
                     conn.commit()
-                    print(f"Updated profiles: {len(get_profiles)} GET, {len(post_profiles)} POST, {len(response_profiles)} Response")
+                    print(f"Updated profiles: {len(get_profiles)} GET, {len(post_profiles)} POST, {len(response_profiles)} Response, {len(smb_profiles)} SMB")
                     return True
                 except Exception as e:
                     print(f"Error updating profiles: {e}")

@@ -203,6 +203,11 @@ build_binary() {
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
         echo "[*] Building SMB payload with pipe: ${PIPE_NAME:-spoolss}"
         SMB_FLAGS="-X 'main.pipeName=${PIPE_NAME:-spoolss}'"
+        # Add SMB transform profile if configured
+        if [ ! -z "${SMB_DATA_TRANSFORMS}" ]; then
+            echo "[*] SMB data transforms configured"
+            SMB_FLAGS="${SMB_FLAGS} -X 'main.smbDataTransforms=${SMB_DATA_TRANSFORMS}'"
+        fi
     fi
 
     # Run garble build with all flags including safety checks
