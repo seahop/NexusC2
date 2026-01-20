@@ -1,7 +1,7 @@
 ---
 title: "File Transfers"
 description: "Upload and download files with chunked transfer and integrity verification."
-weight: 8
+weight: 10
 ---
 ## Overview
 

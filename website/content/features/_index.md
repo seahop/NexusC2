@@ -102,8 +102,12 @@ Server ← HTTP → Edge Agent ← SMB → Internal Agent ← SMB → Deep Agent
 Full-featured API for automation and integration. NexusC2 includes a Python CLI client (`scripts/nexus-api.py`) for easy API access:
 
 ```bash
-# Login (saves token for future requests)
-./nexus-api.py login -u operator1 -p mypassword
+# Login using server certificate (saves token for future requests)
+./nexus-api.py --cert ../server/certs/api_server.crt login -u operator1
+
+# Or set certificate path via environment variable
+export NEXUS_API_CERT="../server/certs/api_server.crt"
+./nexus-api.py login -u operator1
 
 # List all agents
 ./nexus-api.py agents list
@@ -135,7 +139,7 @@ API capabilities:
 - **Listener control** - create, modify, delete HTTP/HTTPS/SMB
 - **Payload generation** - build with safety checks (kill date, hostname, etc.)
 - **Event streaming** - SSE for real-time agent/command updates
-- **Authentication** - JWT tokens with refresh, environment variable support
+- **Certificate-based authentication** - JWT tokens with TLS client certificate verification
 
 ---
 

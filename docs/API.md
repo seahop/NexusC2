@@ -8,7 +8,7 @@ The NexusC2 REST API provides programmatic access to all C2 operations. The API 
 
 ## Authentication
 
-All endpoints (except `/auth/cert-login`, `/auth/login`, and `/auth/refresh`) require a valid JWT access token in the `Authorization` header:
+All endpoints (except `/auth/cert-login` and `/auth/refresh`) require a valid JWT access token in the `Authorization` header:
 
 ```
 Authorization: Bearer <access_token>
@@ -16,34 +16,21 @@ Authorization: Bearer <access_token>
 
 ### Token Lifecycle
 
-1. **Login** with username (cert-based) or username/password to receive an access token (1h) and refresh token (24h)
+1. **Login** with username using certificate-based authentication to receive an access token (1h) and refresh token (24h)
 2. **Use access token** for API requests
 3. **Refresh** the access token before expiry using the refresh token
 4. **Logout** to invalidate the refresh token
 
-### Authentication Methods
+### Certificate-Based Authentication
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| Shared API Password | `/auth/login` | **Recommended.** Use the API password from `.env` file with any username |
-| Certificate-based | `/auth/cert-login` | If you have the server certificate (can establish TLS), provide only username |
-
-### Shared API Password (Recommended)
-
-The simplest authentication method uses the shared API password generated during setup:
-
-1. During setup, `API_PASSWORD` is generated and stored in `server/docker/db/.secrets/.env`
-2. Use this password with any username to authenticate
-3. Users are auto-provisioned on first login
+NexusC2 uses TLS certificate-based authentication. If you have access to the server certificate, you can authenticate with just a username. Users are auto-provisioned on first login.
 
 ```bash
-# Get the API password
-cat server/docker/db/.secrets/.env | grep API_PASSWORD
+# Login using the server certificate
+./nexus-api.py --cert ../server/certs/api_server.crt login -u operator1
 
-# Set environment variable
-export NEXUS_API_PASSWORD="<password from above>"
-
-# Login with any username
+# Or set certificate path via environment variable
+export NEXUS_API_CERT="../server/certs/api_server.crt"
 ./nexus-api.py login -u operator1
 ```
 
@@ -55,7 +42,7 @@ export NEXUS_API_PASSWORD="<password from above>"
 
 #### POST /api/v1/auth/cert-login
 
-**Recommended authentication method.** Authenticate using TLS certificate trust. If you can establish a TLS connection (have the server certificate), you can authenticate with just a username. Users are auto-provisioned on first login.
+Authenticate using TLS certificate trust. If you can establish a TLS connection (have the server certificate), you can authenticate with just a username. Users are auto-provisioned on first login.
 
 **Request Body:**
 ```json
@@ -79,38 +66,6 @@ export NEXUS_API_PASSWORD="<password from above>"
 - `400 Bad Request`: Username is required
 - `403 Forbidden`: User account is inactive
 - `500 Internal Server Error`: Authentication failed
-
----
-
-#### POST /api/v1/auth/login
-
-Authenticate with username and password. Supports two authentication modes:
-
-1. **Shared API Password**: If the password matches the `API_PASSWORD` environment variable, the user is authenticated and auto-provisioned if they don't exist.
-2. **User-specific Password**: Falls back to checking the user's stored password hash in the database.
-
-**Request Body:**
-```json
-{
-  "username": "string",    // Required: Username/operator name
-  "password": "string"     // Required: API password (shared or user-specific)
-}
-```
-
-**Response (200 OK):**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "refresh_token": "a1b2c3d4e5f6...",
-  "expires_in": 3600,
-  "token_type": "Bearer",
-  "username": "admin"
-}
-```
-
-**Errors:**
-- `401 Unauthorized`: Invalid username or password
-- `403 Forbidden`: User account is inactive
 
 ---
 
@@ -1309,35 +1264,29 @@ The API implements rate limiting per IP address:
 
 ## User Management
 
-### Auto-Provisioning (Recommended)
+### Auto-Provisioning
 
-When using the shared API password (`API_PASSWORD`), users are automatically created on first login. This is the recommended approach:
+Users are automatically created on first login via certificate-based authentication. Anyone with access to the server certificate can authenticate:
 
 ```bash
-# Get API password from .env
-export NEXUS_API_PASSWORD=$(grep API_PASSWORD server/docker/db/.secrets/.env | cut -d= -f2)
-
-# First login creates the user
-./nexus-api.py login -u newoperator
+# First login creates the user automatically
+./nexus-api.py --cert ../server/certs/api_server.crt login -u newoperator
 
 # User "newoperator" now exists in the database
 ```
 
-### Manual User Creation
+### Viewing Users
 
-For user-specific passwords, connect to the PostgreSQL database:
+Connect to the PostgreSQL database to manage users:
 
-```sql
--- Generate a bcrypt hash for the password (cost=10)
--- You can use: htpasswd -bnBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
-
-INSERT INTO api_users (username, password_hash, is_active)
-VALUES ('admin', '$2a$10$...hashed_password...', true);
-```
-
-Or use Python to generate the hash:
 ```bash
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
+docker exec -it database psql -U postgres -d ops
+
+# List all API users
+SELECT username, created_at, last_login, is_active FROM api_users;
+
+# Deactivate a user
+UPDATE api_users SET is_active = false WHERE username = 'oldoperator';
 ```
 
 ### Environment Variables
@@ -1346,7 +1295,6 @@ The REST API uses the following environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `API_PASSWORD` | Shared password for authentication (generated during setup) |
 | `JWT_SECRET` | Secret key for signing JWT tokens (generated during setup) |
 
 These are automatically set in `server/docker/db/.secrets/.env` during setup.

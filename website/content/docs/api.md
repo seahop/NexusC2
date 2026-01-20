@@ -11,7 +11,7 @@ The NexusC2 REST API provides programmatic access to all C2 operations. The API 
 
 ## Authentication
 
-All endpoints (except `/auth/cert-login`, `/auth/login`, and `/auth/refresh`) require a valid JWT access token in the `Authorization` header:
+All endpoints (except `/auth/cert-login` and `/auth/refresh`) require a valid JWT access token in the `Authorization` header:
 
 ```
 Authorization: Bearer <access_token>
@@ -19,34 +19,21 @@ Authorization: Bearer <access_token>
 
 ### Token Lifecycle
 
-1. **Login** with username (cert-based) or username/password to receive an access token (1h) and refresh token (24h)
+1. **Login** with username using certificate-based authentication to receive an access token (1h) and refresh token (24h)
 2. **Use access token** for API requests
 3. **Refresh** the access token before expiry using the refresh token
 4. **Logout** to invalidate the refresh token
 
-### Authentication Methods
+### Certificate-Based Authentication
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| Shared API Password | `/auth/login` | **Recommended.** Use the API password from `.env` file with any username |
-| Certificate-based | `/auth/cert-login` | If you have the server certificate (can establish TLS), provide only username |
-
-### Shared API Password (Recommended)
-
-The simplest authentication method uses the shared API password generated during setup:
-
-1. During setup, `API_PASSWORD` is generated and stored in `server/docker/db/.secrets/.env`
-2. Use this password with any username to authenticate
-3. Users are auto-provisioned on first login
+NexusC2 uses TLS certificate-based authentication. If you have access to the server certificate, you can authenticate with just a username. Users are auto-provisioned on first login.
 
 ```bash
-# Get the API password
-cat server/docker/db/.secrets/.env | grep API_PASSWORD
+# Login using the server certificate
+./nexus-api.py --cert ../server/certs/api_server.crt login -u operator1
 
-# Set environment variable
-export NEXUS_API_PASSWORD="<password from above>"
-
-# Login with any username
+# Or set certificate path via environment variable
+export NEXUS_API_CERT="../server/certs/api_server.crt"
 ./nexus-api.py login -u operator1
 ```
 
@@ -58,7 +45,7 @@ export NEXUS_API_PASSWORD="<password from above>"
 
 #### POST /api/v1/auth/cert-login
 
-**Recommended authentication method.** Authenticate using TLS certificate trust. If you can establish a TLS connection (have the server certificate), you can authenticate with just a username. Users are auto-provisioned on first login.
+Authenticate using TLS certificate trust. If you can establish a TLS connection (have the server certificate), you can authenticate with just a username. Users are auto-provisioned on first login.
 
 **Request Body:**
 ```json
@@ -82,38 +69,6 @@ export NEXUS_API_PASSWORD="<password from above>"
 - `400 Bad Request`: Username is required
 - `403 Forbidden`: User account is inactive
 - `500 Internal Server Error`: Authentication failed
-
----
-
-#### POST /api/v1/auth/login
-
-Authenticate with username and password. Supports two authentication modes:
-
-1. **Shared API Password**: If the password matches the `API_PASSWORD` environment variable, the user is authenticated and auto-provisioned if they don't exist.
-2. **User-specific Password**: Falls back to checking the user's stored password hash in the database.
-
-**Request Body:**
-```json
-{
-  "username": "string",    // Required: Username/operator name
-  "password": "string"     // Required: API password (shared or user-specific)
-}
-```
-
-**Response (200 OK):**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "refresh_token": "a1b2c3d4e5f6...",
-  "expires_in": 3600,
-  "token_type": "Bearer",
-  "username": "admin"
-}
-```
-
-**Errors:**
-- `401 Unauthorized`: Invalid username or password
-- `403 Forbidden`: User account is inactive
 
 ---
 
@@ -566,7 +521,10 @@ List all configured listeners.
       "protocol": "HTTPS",
       "port": "443",
       "ip": "0.0.0.0",
-      "pipe_name": ""
+      "pipe_name": "",
+      "get_profile": "microsoft-graph-get",
+      "post_profile": "microsoft-graph-post",
+      "server_response_profile": "microsoft-graph-response"
     },
     {
       "id": "660e8400-e29b-41d4-a716-446655440001",
@@ -574,7 +532,10 @@ List all configured listeners.
       "protocol": "SMB",
       "port": "",
       "ip": "",
-      "pipe_name": "spoolss"
+      "pipe_name": "spoolss",
+      "get_profile": "default-get",
+      "post_profile": "default-post",
+      "server_response_profile": "default-response"
     }
   ]
 }
@@ -599,7 +560,10 @@ Get a specific listener by name.
   "protocol": "HTTPS",
   "port": "443",
   "ip": "0.0.0.0",
-  "pipe_name": ""
+  "pipe_name": "",
+  "get_profile": "microsoft-graph-get",
+  "post_profile": "microsoft-graph-post",
+  "server_response_profile": "microsoft-graph-response"
 }
 ```
 
@@ -610,28 +574,44 @@ Get a specific listener by name.
 
 #### POST /api/v1/listeners
 
-Create a new listener.
+Create a new listener with optional malleable profile bindings.
 
 **Authentication:** Required
 
 **Request Body:**
 ```json
 {
-  "name": "string",        // Required: Unique listener name
-  "protocol": "string",    // Required: "HTTP", "HTTPS", "SMB", or "RPC"
-  "port": 443,             // Required for HTTP/HTTPS: Port number (1-65535)
-  "ip": "string",          // Optional: Bind IP (default: "0.0.0.0")
-  "pipe_name": "string"    // Required for SMB: Named pipe name
+  "name": "string",                    // Required: Unique listener name
+  "protocol": "string",                // Required: "HTTP", "HTTPS", "SMB", or "RPC"
+  "port": 443,                         // Required for HTTP/HTTPS: Port number (1-65535)
+  "ip": "string",                      // Optional: Bind IP (default: "0.0.0.0")
+  "pipe_name": "string",               // Required for SMB: Named pipe name
+  "get_profile": "string",             // Optional: GET malleable profile name (default: "default-get")
+  "post_profile": "string",            // Optional: POST malleable profile name (default: "default-post")
+  "server_response_profile": "string"  // Optional: Server response profile name (default: "default-response")
 }
 ```
 
-**Example (HTTPS):**
+**Example (HTTPS with default profiles):**
 ```json
 {
   "name": "https-listener",
   "protocol": "HTTPS",
   "port": 443,
   "ip": "0.0.0.0"
+}
+```
+
+**Example (HTTPS with Microsoft Graph profiles):**
+```json
+{
+  "name": "ms-graph-listener",
+  "protocol": "HTTPS",
+  "port": 443,
+  "ip": "0.0.0.0",
+  "get_profile": "microsoft-graph-get",
+  "post_profile": "microsoft-graph-post",
+  "server_response_profile": "microsoft-graph-response"
 }
 ```
 
@@ -650,17 +630,20 @@ Create a new listener.
   "message": "listener created successfully",
   "listener": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "https-listener",
+    "name": "ms-graph-listener",
     "protocol": "HTTPS",
     "port": "443",
     "ip": "0.0.0.0",
-    "pipe_name": ""
+    "pipe_name": "",
+    "get_profile": "microsoft-graph-get",
+    "post_profile": "microsoft-graph-post",
+    "server_response_profile": "microsoft-graph-response"
   }
 }
 ```
 
 **Errors:**
-- `400 Bad Request`: Invalid protocol, port, or missing required fields
+- `400 Bad Request`: Invalid protocol, port, missing required fields, or unknown profile name
 
 ---
 
@@ -682,6 +665,434 @@ Delete a listener.
 
 **Errors:**
 - `404 Not Found`: Listener not found
+
+---
+
+### Malleable Profiles
+
+Malleable profiles define HTTP request/response patterns for agent communication, allowing traffic to blend in with legitimate services (AWS S3, Microsoft Graph, etc.).
+
+**Profile Sources:**
+- **Static profiles** are defined in `server/config.toml` and loaded at server startup
+- **Dynamic profiles** can be uploaded at runtime via the API or client UI without restarting the server
+
+**Creating Custom Profiles:**
+1. Download the template: `GET /api/v1/profiles/template` or use the client (Tools > Upload Profiles)
+2. Edit the template file (`server/docker/templates/listener_template.toml`) to define your custom profiles
+3. Upload via API (`POST /api/v1/profiles/upload`) or the client UI
+4. Create a listener using your new profiles
+
+Each profile type serves a specific purpose:
+- **GET profiles**: Define how agents poll for commands (path, method, headers, client ID parameter)
+- **POST profiles**: Define how agents send results back (path, method, content type, client ID parameter)
+- **Server Response profiles**: Define how the server responds to agents (content type, JSON field names, headers)
+
+#### GET /api/v1/profiles
+
+List all available malleable profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "get_profiles": [
+    {
+      "name": "default-get",
+      "path": "/api/v1/status",
+      "method": "GET"
+    },
+    {
+      "name": "microsoft-graph-get",
+      "path": "/v1.0/me/drive/root/children",
+      "method": "GET"
+    }
+  ],
+  "post_profiles": [
+    {
+      "name": "default-post",
+      "path": "/api/v1/data",
+      "method": "POST"
+    },
+    {
+      "name": "microsoft-graph-post",
+      "path": "/v1.0/me/drive/items",
+      "method": "PUT"
+    }
+  ],
+  "server_response_profiles": [
+    {
+      "name": "default-response",
+      "content_type": "application/json"
+    },
+    {
+      "name": "microsoft-graph-response",
+      "content_type": "application/json; odata.metadata=minimal"
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/get
+
+List all GET request profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-get",
+      "path": "/api/v1/status",
+      "method": "GET",
+      "headers": [
+        {"name": "Accept", "value": "application/json"}
+      ],
+      "params": [
+        {"name": "client", "location": "query", "type": "clientID_param", "format": "%CLIENTID%"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-get",
+      "path": "/v1.0/me/drive/root/children",
+      "method": "GET",
+      "headers": [
+        {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+      ],
+      "params": [
+        {"name": "Authorization", "location": "header", "type": "clientID_param", "format": "Bearer %CLIENTID%"}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/get/:name
+
+Get a specific GET profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-get",
+  "path": "/v1.0/me/drive/root/children",
+  "method": "GET",
+  "headers": [
+    {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+  ],
+  "params": [
+    {"name": "Authorization", "location": "header", "type": "clientID_param", "format": "Bearer %CLIENTID%"}
+  ]
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/post
+
+List all POST request profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-post",
+      "path": "/api/v1/data",
+      "method": "POST",
+      "content_type": "application/json",
+      "headers": [],
+      "params": [
+        {"name": "client", "location": "query", "type": "clientID_param", "format": "%CLIENTID%"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-post",
+      "path": "/v1.0/me/drive/items",
+      "method": "PUT",
+      "content_type": "application/json",
+      "headers": [
+        {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+      ],
+      "params": []
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/post/:name
+
+Get a specific POST profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-post",
+  "path": "/v1.0/me/drive/items",
+  "method": "PUT",
+  "content_type": "application/json",
+  "headers": [
+    {"name": "Authorization", "value": "Bearer %CLIENTID%"}
+  ],
+  "params": []
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/server-response
+
+List all server response profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "profiles": [
+    {
+      "name": "default-response",
+      "content_type": "application/json",
+      "status_field": "status",
+      "data_field": "data",
+      "command_id_field": "id",
+      "rekey_value": "refresh",
+      "headers": [
+        {"name": "Cache-Control", "value": "no-store"}
+      ]
+    },
+    {
+      "name": "microsoft-graph-response",
+      "content_type": "application/json; odata.metadata=minimal",
+      "status_field": "@odata.context",
+      "data_field": "value",
+      "command_id_field": "@odata.nextLink",
+      "rekey_value": "TokenExpired",
+      "headers": [
+        {"name": "x-ms-ags-diagnostic", "value": "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/server-response/:name
+
+Get a specific server response profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "name": "microsoft-graph-response",
+  "content_type": "application/json; odata.metadata=minimal",
+  "status_field": "@odata.context",
+  "data_field": "value",
+  "command_id_field": "@odata.nextLink",
+  "rekey_value": "TokenExpired",
+  "headers": [
+    {"name": "x-ms-ags-diagnostic", "value": "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"}
+  ]
+}
+```
+
+**Errors:**
+- `404 Not Found`: Profile not found
+
+---
+
+#### GET /api/v1/profiles/names
+
+Get just the profile names (useful for dropdowns/selection lists).
+
+**Authentication:** Required
+
+**Response (200 OK):**
+```json
+{
+  "get_profiles": ["default-get", "microsoft-graph-get", "aws-s3-get"],
+  "post_profiles": ["default-post", "microsoft-graph-post", "aws-s3-post"],
+  "server_response_profiles": ["default-response", "microsoft-graph-response", "aws-s3-response"]
+}
+```
+
+---
+
+#### GET /api/v1/profiles/template
+
+Download the profile template file for creating custom profiles.
+
+**Authentication:** Required
+
+**Response (200 OK):**
+- Content-Type: `application/toml`
+- Content-Disposition: `attachment; filename=listener_template.toml`
+- Body: TOML template content
+
+---
+
+#### POST /api/v1/profiles/upload
+
+Upload and validate new malleable profiles at runtime. Profiles are added to the running configuration immediately (hot-loaded).
+
+**Authentication:** Required
+
+**Content Types Supported:**
+- `application/toml` or `text/plain`: Raw TOML content in request body
+- `multipart/form-data`: File upload with form field `profile`
+
+**Request (Raw TOML):**
+```toml
+[[http_profiles.get]]
+name = "custom-get"
+path = "/api/custom/check"
+method = "GET"
+[[http_profiles.get.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.post]]
+name = "custom-post"
+path = "/api/custom/data"
+method = "POST"
+content_type = "application/json"
+[[http_profiles.post.params]]
+name = "id"
+location = "query"
+type = "clientID_param"
+format = "%CLIENTID%"
+
+[[http_profiles.server_response]]
+name = "custom-response"
+content_type = "application/json"
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Profiles uploaded successfully",
+  "get_profiles_added": ["custom-get"],
+  "post_profiles_added": ["custom-post"],
+  "server_response_added": ["custom-response"],
+  "errors": []
+}
+```
+
+**Response (200 OK) - Partial Success:**
+```json
+{
+  "status": "partial",
+  "message": "Profiles uploaded successfully",
+  "get_profiles_added": ["custom-get"],
+  "post_profiles_added": [],
+  "server_response_added": [],
+  "errors": ["POST profile 'default-post': profile with name 'default-post' already exists"]
+}
+```
+
+**Errors:**
+- `400 Bad Request`: Invalid TOML syntax or no profiles added
+
+---
+
+#### DELETE /api/v1/profiles/get/:name
+
+Delete a GET profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "GET profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: GET profile not found
+
+---
+
+#### DELETE /api/v1/profiles/post/:name
+
+Delete a POST profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "POST profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: POST profile not found
+
+---
+
+#### DELETE /api/v1/profiles/server-response/:name
+
+Delete a server response profile by name.
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `name` (required): Profile name
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Server response profile deleted"
+}
+```
+
+**Errors:**
+- `404 Not Found`: Server response profile not found
 
 ---
 
@@ -856,35 +1267,29 @@ The API implements rate limiting per IP address:
 
 ## User Management
 
-### Auto-Provisioning (Recommended)
+### Auto-Provisioning
 
-When using the shared API password (`API_PASSWORD`), users are automatically created on first login. This is the recommended approach:
+Users are automatically created on first login via certificate-based authentication. Anyone with access to the server certificate can authenticate:
 
 ```bash
-# Get API password from .env
-export NEXUS_API_PASSWORD=$(grep API_PASSWORD server/docker/db/.secrets/.env | cut -d= -f2)
-
-# First login creates the user
-./nexus-api.py login -u newoperator
+# First login creates the user automatically
+./nexus-api.py --cert ../server/certs/api_server.crt login -u newoperator
 
 # User "newoperator" now exists in the database
 ```
 
-### Manual User Creation
+### Viewing Users
 
-For user-specific passwords, connect to the PostgreSQL database:
+Connect to the PostgreSQL database to manage users:
 
-```sql
--- Generate a bcrypt hash for the password (cost=10)
--- You can use: htpasswd -bnBC 10 "" password | tr -d ':\n' | sed 's/$2y/$2a/'
-
-INSERT INTO api_users (username, password_hash, is_active)
-VALUES ('admin', '$2a$10$...hashed_password...', true);
-```
-
-Or use Python to generate the hash:
 ```bash
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
+docker exec -it database psql -U postgres -d ops
+
+# List all API users
+SELECT username, created_at, last_login, is_active FROM api_users;
+
+# Deactivate a user
+UPDATE api_users SET is_active = false WHERE username = 'oldoperator';
 ```
 
 ### Environment Variables
@@ -893,7 +1298,6 @@ The REST API uses the following environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `API_PASSWORD` | Shared password for authentication (generated during setup) |
 | `JWT_SECRET` | Secret key for signing JWT tokens (generated during setup) |
 
 These are automatically set in `server/docker/db/.secrets/.env` during setup.

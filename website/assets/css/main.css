@@ -145,6 +145,10 @@
     @apply text-nexus-green-500 bg-nexus-green-500/10;
   }
 
+  .sidebar-link-sub {
+    @apply pl-6 text-sm;
+  }
+
   /* Search modal */
   .search-backdrop {
     @apply fixed inset-0 bg-black/80 backdrop-blur-sm z-50;

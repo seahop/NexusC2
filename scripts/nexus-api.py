@@ -3,14 +3,10 @@
 NexusC2 REST API Client
 
 A command-line tool to interact with the NexusC2 REST API.
-Credentials can be provided via:
-  1. Environment variables (NEXUS_API_TOKEN, NEXUS_API_URL, NEXUS_API_PASSWORD)
-  2. Command-line flags
-  3. Interactive login
+Authentication uses TLS client certificate verification.
 
 Usage:
-    ./nexus-api.py login -u operator1                    # Uses API_PASSWORD from env
-    ./nexus-api.py login -u operator1 -p mypassword      # Explicit password
+    ./nexus-api.py --cert ../server/certs/api_server.crt login -u operator1
     ./nexus-api.py agents list
     ./nexus-api.py agents get <agent_id>
     ./nexus-api.py command <agent_id> "whoami"
@@ -18,8 +14,7 @@ Usage:
 Environment Variables:
     NEXUS_API_URL       - API base URL (default: https://localhost:8443)
     NEXUS_API_TOKEN     - JWT access token (for authenticated requests)
-    NEXUS_API_PASSWORD  - Shared API password (for login without -p flag)
-    NEXUS_API_CERT      - Path to CA certificate for TLS verification
+    NEXUS_API_CERT      - Path to server certificate for TLS verification
 """
 
 import argparse
@@ -113,7 +108,7 @@ class NexusAPIClient:
         """Handle API response and errors."""
         if response.status_code == 401:
             print(color("Error: Unauthorized. Please login first.", Colors.RED))
-            print(f"Run: {sys.argv[0]} login -u <username> -p <password>")
+            print(f"Run: {sys.argv[0]} --cert <path/to/api_server.crt> login -u <username>")
             sys.exit(1)
 
         if response.status_code == 429:
@@ -143,29 +138,15 @@ class NexusAPIClient:
     # Authentication
     # -------------------------------------------------------------------------
 
-    def login(self, username: str, password: Optional[str] = None) -> Dict:
-        """Login and get JWT tokens.
+    def login(self, username: str) -> Dict:
+        """Login and get JWT tokens using certificate-based authentication.
 
-        Password resolution order:
-        1. Explicit password argument
-        2. NEXUS_API_PASSWORD environment variable
-        3. Certificate-based login (if no password available)
+        Requires the server certificate to be provided via --cert flag or
+        NEXUS_API_CERT environment variable for TLS verification.
         """
-        # Try to get password from environment if not provided
-        if password is None:
-            password = os.environ.get("NEXUS_API_PASSWORD")
-
-        if password:
-            # Password-based login (shared API password or user-specific)
-            response = self._request("POST", "/auth/login", {
-                "username": username,
-                "password": password
-            })
-        else:
-            # Certificate-based login (no password needed if you have the cert)
-            response = self._request("POST", "/auth/cert-login", {
-                "username": username
-            })
+        response = self._request("POST", "/auth/cert-login", {
+            "username": username
+        })
         data = self._handle_response(response)
 
         if data:
@@ -643,12 +624,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  Login with shared API password (from environment):
-    export NEXUS_API_PASSWORD="your-api-password"
-    %(prog)s login -u operator1
+  Login with server certificate:
+    %(prog)s --cert ../server/certs/api_server.crt login -u operator1
 
-  Login with explicit password:
-    %(prog)s login -u admin -p password
+  Or set certificate via environment:
+    export NEXUS_API_CERT="../server/certs/api_server.crt"
+    %(prog)s login -u operator1
 
   List agents:
     %(prog)s agents list
@@ -667,7 +648,6 @@ Examples:
 Environment Variables:
   NEXUS_API_URL       API base URL (default: https://localhost:8443)
   NEXUS_API_TOKEN     JWT access token (saved after login)
-  NEXUS_API_PASSWORD  Shared API password (used for login if -p not specified)
   NEXUS_API_CERT      Path to server certificate for TLS verification
         """
     )
@@ -681,9 +661,8 @@ Environment Variables:
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # Login
-    login_parser = subparsers.add_parser("login", help="Login to API")
+    login_parser = subparsers.add_parser("login", help="Login to API using certificate authentication")
     login_parser.add_argument("-u", "--username", required=True, help="Username")
-    login_parser.add_argument("-p", "--password", help="Password (uses NEXUS_API_PASSWORD env var if not specified)")
 
     # Logout
     subparsers.add_parser("logout", help="Logout from API")
@@ -870,7 +849,7 @@ Environment Variables:
 
     # Handle commands
     if args.command == "login":
-        client.login(args.username, args.password)
+        client.login(args.username)
 
     elif args.command == "logout":
         client.logout()
