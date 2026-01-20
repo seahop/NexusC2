@@ -10,7 +10,7 @@ Profiles can be added to a running NexusC2 server without restarting. This enabl
 - Deploying new traffic patterns without downtime
 - Automation and scripting of profile management
 
-For profile structure and transform reference, see [Malleable Profiles](MALLEABLE-PROFILES.md).
+For profile structure and transform reference, see [Malleable Profiles](/docs/malleable-profiles/).
 
 ---
 
@@ -99,7 +99,7 @@ output = "body"
 type = "base64"
 ```
 
-For complete examples, see [Profile Examples](PROFILE-EXAMPLES.md).
+For complete examples, see [Profile Examples](/docs/profile-examples/).
 
 ---
 
@@ -262,6 +262,6 @@ For complete API documentation, see the script help:
 
 ## Related Documentation
 
-- [Malleable Profiles](MALLEABLE-PROFILES.md) - Profile structure and transforms
-- [Profile Examples](PROFILE-EXAMPLES.md) - Complete profile examples
-- [API Documentation](API.md) - REST API reference
+- [Malleable Profiles](/docs/malleable-profiles/) - Profile structure and transforms
+- [Profile Examples](/docs/profile-examples/) - Complete profile examples
+- [API Documentation](/docs/api/) - REST API reference

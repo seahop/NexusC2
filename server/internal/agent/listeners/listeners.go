@@ -212,7 +212,8 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 
 				// Check if profile uses DataBlock for clientID (malleable transforms)
 				if getProfile.ClientID != nil {
-					clientID, err = m.extractClientIDFromDataBlock(r, getProfile.ClientID, config.Handler{}, getProfile.Path)
+					// Note: ClientID extraction uses static profile key (empty xorKeyOverride)
+					clientID, err = m.extractClientIDFromDataBlock(r, getProfile.ClientID, config.Handler{}, getProfile.Path, "")
 					if err != nil {
 						// DataBlock extraction failed - fall back to legacy extraction
 						log.Printf("[%s] GET DataBlock extraction from %s failed (%v), trying legacy params",
@@ -382,7 +383,8 @@ func (m *Manager) createSharedPortHandler(sps *SharedPortServer) http.Handler {
 
 				// Check if profile uses DataBlock for clientID (malleable transforms)
 				if handler.GetProfile.ClientID != nil {
-					clientID, err = m.extractClientIDFromDataBlock(r, handler.GetProfile.ClientID, config.Handler{}, handler.GetProfile.Path)
+					// Note: ClientID extraction uses static profile key (empty xorKeyOverride)
+					clientID, err = m.extractClientIDFromDataBlock(r, handler.GetProfile.ClientID, config.Handler{}, handler.GetProfile.Path, "")
 					if err != nil {
 						// DataBlock extraction failed - fall back to legacy extraction
 						log.Printf("[SharedPort:%d] GET DataBlock extraction failed (%v), trying legacy", sps.Port, err)

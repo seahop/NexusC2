@@ -4,7 +4,7 @@
 
 This page provides complete, ready-to-use profile examples that demonstrate different traffic patterns. Each example includes coordinated GET, POST, and server response profiles.
 
-For transform reference and profile structure details, see [Malleable Profiles](MALLEABLE-PROFILES.md).
+For transform reference and profile structure details, see [Malleable Profiles](/docs/malleable-profiles/).
 
 ---
 
@@ -232,6 +232,6 @@ type = "hex"
 
 ## Related Documentation
 
-- [Malleable Profiles](MALLEABLE-PROFILES.md) - Transform reference and profile structure
-- [Profile Management](PROFILE-MANAGEMENT.md) - Upload and manage profiles via CLI
-- [SMB Transforms](SMB-TRANSFORMS.md) - Named pipe traffic obfuscation
+- [Malleable Profiles](/docs/malleable-profiles/) - Transform reference and profile structure
+- [Profile Management](/docs/profile-management/) - Upload and manage profiles via CLI
+- [SMB Transforms](/docs/smb-transforms/) - Named pipe traffic obfuscation

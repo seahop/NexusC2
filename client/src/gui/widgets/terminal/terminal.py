@@ -3,7 +3,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                             QTextEdit, QLineEdit, QPushButton, QTabWidget,
                             QTabBar, QApplication, QLabel)
-from PyQt6.QtCore import Qt, pyqtSlot, QEvent
+from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal, QEvent, QThread
 from PyQt6.QtGui import QTextCursor, QTextDocument
 import os
 
@@ -458,7 +458,10 @@ class AgentTerminal(QWidget):
             
 class TerminalWidget(QWidget):
     """Main widget that manages terminal tabs"""
-    
+
+    # Signal for thread-safe agent rename handling
+    _agent_renamed_signal = pyqtSignal(dict)
+
     def __init__(self, ws_thread=None):
         super().__init__()
         self.ws_thread = ws_thread
@@ -467,6 +470,9 @@ class TerminalWidget(QWidget):
         self.pending_outputs = {}  # Store outputs for agents without open tabs: {agent_id: [(output, timestamp), ...]}
         self.agent_tree = None
         self.agent_aliases = {}  # Track agent renames (agent_guid -> display_name)
+
+        # Connect internal signal for thread-safe operations
+        self._agent_renamed_signal.connect(self._do_handle_agent_renamed, Qt.ConnectionType.QueuedConnection)
 
         layout = QVBoxLayout()
 
@@ -660,7 +666,19 @@ class TerminalWidget(QWidget):
             self.tabs.setCurrentIndex(index)
 
     def handle_agent_renamed(self, data):
-        """Handle agent rename notification and update tab title"""
+        """Thread-safe handler for agent rename notification"""
+        # Check if we're on the main GUI thread
+        app = QApplication.instance()
+        if app and QThread.currentThread() != app.thread():
+            # We're on a different thread - emit signal for thread-safe update
+            self._agent_renamed_signal.emit(data)
+        else:
+            # We're on the GUI thread - can call directly
+            self._do_handle_agent_renamed(data)
+
+    @pyqtSlot(dict)
+    def _do_handle_agent_renamed(self, data):
+        """Actual implementation of agent rename handling - runs on GUI thread"""
         agent_id = data.get('agent_id')
         new_name = data.get('new_name')
 

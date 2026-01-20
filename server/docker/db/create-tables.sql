@@ -165,6 +165,15 @@ BEGIN
     END IF;
 END $$;
 
+-- Add http_xor_key column to inits table for per-agent unique HTTP transform keys
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'http_xor_key') THEN
+        ALTER TABLE inits ADD COLUMN http_xor_key VARCHAR(32) NULL;
+    END IF;
+END $$;
+
 -- =============================================================================
 -- REST API AUTHENTICATION TABLES
 -- =============================================================================

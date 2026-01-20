@@ -20,7 +20,8 @@ func (m *Manager) handlePostRequestWithProfile(w http.ResponseWriter, r *http.Re
 	// Check if profile uses DataBlock for clientID (malleable transforms)
 	if postProfile.ClientID != nil {
 		// Use DataBlock-aware extraction with transform reversal
-		clientID, err = m.extractClientIDFromDataBlock(r, postProfile.ClientID, config.Handler{}, postProfile.Path)
+		// Note: ClientID extraction uses static profile key (empty xorKeyOverride)
+		clientID, err = m.extractClientIDFromDataBlock(r, postProfile.ClientID, config.Handler{}, postProfile.Path, "")
 		if err != nil {
 			// DataBlock extraction failed - fall back to legacy extraction
 			// This is needed because initial handshake always uses legacy JSON format

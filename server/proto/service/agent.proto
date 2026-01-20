@@ -64,6 +64,7 @@ message InitRequest {
   string protocol = 8;
   string smb_profile = 9;
   string smb_xor_key = 10;
+  string http_xor_key = 11;
 }
 
 message InitResponse {

@@ -246,7 +246,7 @@ All services connect to PostgreSQL via bridge network:
 
 NexusC2 uses PostgreSQL with tables for agent tracking, command history, listener configuration, authentication, and link routing.
 
-For complete table definitions and column details, see [Database Schema Reference](DATABASE-SCHEMA.md).
+For complete table definitions and column details, see [Database Schema Reference](/docs/database-schema/).
 
 ---
 

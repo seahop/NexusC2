@@ -145,6 +145,7 @@ type buildData struct {
 	pipeName       string       // For SMB payloads
 	smbProfile     string       // SMB profile name for transforms
 	smbXorKey      string       // Per-build unique XOR key for SMB transforms
+	httpXorKey     string       // Per-build unique XOR key for HTTP transforms
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
@@ -911,6 +912,10 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		return nil, fmt.Errorf("failed to generate SMB XOR key: %v", err)
 	}
 
+	// HTTP profiles use static XOR keys from config.toml (no per-build keys)
+	// This simplifies the implementation - agent and server both use profile's static key
+	var httpXorKey string // Empty - not used for HTTP, kept for struct compatibility
+
 	// Determine payload type from listener protocol if not explicitly set
 	// This allows the UI to just select a listener and the server determines the payload type
 	listenerProtocol := strings.ToUpper(b.listener.Protocol)
@@ -963,6 +968,7 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		pipeName:       pipeName,
 		smbProfile:     req.Data.SMBProfile, // SMB profile for transforms
 		smbXorKey:      smbXorKey,           // Per-build unique XOR key for SMB transforms
+		httpXorKey:     httpXorKey,          // Per-build unique XOR key for HTTP transforms
 	}
 
 	// Fall back to listener's SMB profile if not specified in the request
@@ -1003,8 +1009,8 @@ func (b *Builder) generateBinaryName(req PayloadRequest) string {
 
 func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 	_, err := b.db.ExecContext(ctx, `
-        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key, http_xor_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `,
 		data.initID,
 		data.clientID,
@@ -1015,6 +1021,7 @@ func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 		data.keyPair.PrivateKeyPEM,
 		data.smbProfile,
 		data.smbXorKey,
+		data.httpXorKey,
 	)
 	return err
 }
@@ -1031,6 +1038,7 @@ func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData)
 		"protocol":   b.listener.Protocol,
 		"smbProfile": data.smbProfile,
 		"smbXorKey":  data.smbXorKey,
+		"httpXorKey": data.httpXorKey,
 	}
 
 	grpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -1208,11 +1216,15 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		b.listener.GetProfile, b.listener.PostProfile, b.listener.ServerResponseProfile)
 
 	// Serialize transform DataBlocks from profiles
+	// NOTE: Per-build unique XOR keys are only applied to DATA transforms, not clientID transforms.
+	// This is because the server needs to extract clientID first (using static profile key) to
+	// identify the agent, then look up the agent's unique key for data extraction.
 	var getClientIDTransforms, postClientIDTransforms, postDataTransforms, responseDataTransforms string
 
 	if b.listener.GetProfile != "" && b.agentConfig != nil {
 		if getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile); getProfile != nil {
 			if getProfile.ClientID != nil {
+				// ClientID uses static profile key (no per-build modification)
 				getClientIDTransforms = serializeDataBlockCompact(getProfile.ClientID)
 			}
 		}
@@ -1221,9 +1233,12 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 	if b.listener.PostProfile != "" && b.agentConfig != nil {
 		if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
 			if postProfile.ClientID != nil {
+				// ClientID uses static profile key (no per-build modification)
 				postClientIDTransforms = serializeDataBlockCompact(postProfile.ClientID)
 			}
 			if postProfile.Data != nil {
+				// Data uses static profile XOR key (no per-build modification)
+				// Server applies same transforms with same key from profile
 				postDataTransforms = serializeDataBlockCompact(postProfile.Data)
 			}
 		}
@@ -1232,6 +1247,8 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
 		if respProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile); respProfile != nil {
 			if respProfile.Data != nil {
+				// Response data uses static profile XOR key (no per-build modification)
+				// Server applies same transforms with same key from profile
 				responseDataTransforms = serializeDataBlockCompact(respProfile.Data)
 			}
 		}
@@ -1519,6 +1536,44 @@ var charsetMap = map[string]string{
 	"alpha":        "2",
 	"alphanumeric": "3",
 	"hex":          "4",
+}
+
+// profileUsesXorTransform checks if any HTTP profile DataBlock contains XOR transforms
+func (b *Builder) profileUsesXorTransform() bool {
+	if b.agentConfig == nil || b.listener == nil {
+		return false
+	}
+
+	checkDataBlock := func(db *config.DataBlock) bool {
+		if db == nil {
+			return false
+		}
+		for _, t := range db.Transforms {
+			if t.Type == "xor" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Only check Data blocks (not ClientID) - unique keys are only applied to Data transforms
+	// This is because clientID must use static profile key for server to identify the agent
+
+	// Check POST profile Data
+	if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
+		if checkDataBlock(postProfile.Data) {
+			return true
+		}
+	}
+
+	// Check Server Response profile Data
+	if respProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile); respProfile != nil {
+		if checkDataBlock(respProfile.Data) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // modifyXorTransformValue creates a copy of DataBlock with XOR transform values replaced

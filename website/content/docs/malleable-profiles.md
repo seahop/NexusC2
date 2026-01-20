@@ -64,11 +64,17 @@ Transforms allow you to modify how data is encoded, compressed, and placed in HT
 | `hex` | Hexadecimal encoding | None |
 | `gzip` | Gzip compression | None |
 | `netbios` | NetBIOS nibble encoding (each byte becomes 2 chars a-p) | None |
-| `xor` | XOR with key | `value` (the XOR key) |
+| `xor` | XOR with key (see note below) | `value` (the XOR key) |
 | `prepend` | Add static prefix | `value` (prefix string) |
 | `append` | Add static suffix | `value` (suffix string) |
 | `random_prepend` | Add random prefix | `length`, optional `charset` |
 | `random_append` | Add random suffix | `length`, optional `charset` |
+
+> **HTTP XOR Keys:** For HTTP/HTTPS profiles, `xor` transforms use the **static key from config.toml**. Both the agent and server use the same key defined in the profile. This keeps the implementation simple and reliable.
+>
+> **Note:** The transform XOR key is separate from the communication encryption. Agent traffic is encrypted with a rotating per-connection secret derived from the agent's unique ID and session keys. The transform XOR is an additional obfuscation layer applied on top of the encrypted data.
+>
+> **SMB is different:** SMB profiles use per-build unique XOR keys for enhanced isolation. See [SMB Transforms](/docs/smb-transforms/) for details.
 
 ### Charsets for Random Transforms
 
@@ -211,7 +217,7 @@ value = ";(function(){})();"
 
 ## Complete Profile Examples
 
-For complete, ready-to-use profile examples including CDN/Analytics style, Header-Only auth, NetBIOS encoding, and XOR masking, see [Profile Examples](PROFILE-EXAMPLES.md).
+For complete, ready-to-use profile examples including CDN/Analytics style, Header-Only auth, NetBIOS encoding, and XOR masking, see [Profile Examples](/docs/profile-examples/).
 
 ---
 
@@ -379,13 +385,13 @@ rekey_id_field = "id"
 
 ## SMB Link Configuration
 
-For SMB named pipe configuration including connection settings, pipe presets, malleable fields, and pipe traffic transforms (with per-build unique XOR keys), see [SMB Transforms](SMB-TRANSFORMS.md).
+For SMB named pipe configuration including connection settings, pipe presets, malleable fields, and pipe traffic transforms (with per-build unique XOR keys), see [SMB Transforms](/docs/smb-transforms/).
 
 ---
 
 ## Dynamic Profile Loading
 
-Profiles can be added to a running NexusC2 server without restarting. For complete documentation on profile management including the nexus-api.py CLI tool, uploading, validation, and best practices, see [Profile Management](PROFILE-MANAGEMENT.md).
+Profiles can be added to a running NexusC2 server without restarting. For complete documentation on profile management including the nexus-api.py CLI tool, uploading, validation, and best practices, see [Profile Management](/docs/profile-management/).
 
 ---
 
@@ -408,11 +414,11 @@ After modifying `config.toml`:
 ## Related Documentation
 
 **Profile Sub-Pages:**
-- [Profile Examples](PROFILE-EXAMPLES.md) - Complete, ready-to-use profile examples
-- [SMB Transforms](SMB-TRANSFORMS.md) - Named pipe traffic obfuscation
-- [Profile Management](PROFILE-MANAGEMENT.md) - Upload and manage profiles via CLI
+- [Profile Examples](/docs/profile-examples/) - Complete, ready-to-use profile examples
+- [SMB Transforms](/docs/smb-transforms/) - Named pipe traffic obfuscation
+- [Profile Management](/docs/profile-management/) - Upload and manage profiles via CLI
 
 **Other Documentation:**
-- [Infrastructure](INFRASTRUCTURE.md) - Server architecture overview
-- [Payload Generation](PAYLOAD-GENERATION.md) - Building agents with profile settings
-- [API Documentation](API.md) - REST API reference
+- [Infrastructure](/docs/infrastructure/) - Server architecture overview
+- [Payload Generation](/docs/payload-generation/) - Building agents with profile settings
+- [API Documentation](/docs/api/) - REST API reference

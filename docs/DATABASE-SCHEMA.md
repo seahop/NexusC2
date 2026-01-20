@@ -10,7 +10,7 @@ NexusC2 uses PostgreSQL for persistent storage. The database contains tables for
 - Port: 5432 (internal only)
 - Authentication: SCRAM-SHA-256
 
-For service architecture and how components connect to the database, see [Infrastructure](INFRASTRUCTURE.md).
+For service architecture and how components connect to the database, see [Infrastructure](/docs/infrastructure/).
 
 ---
 
@@ -239,6 +239,6 @@ SELECT * FROM listeners;         # List all listeners
 
 ## Related Documentation
 
-- [Infrastructure](INFRASTRUCTURE.md) - Service architecture and deployment
-- [Linked Agents](LINKED-AGENTS.md) - SMB link routing details
-- [Encryption](ENCRYPTION.md) - Secret key management
+- [Infrastructure](/docs/infrastructure/) - Service architecture and deployment
+- [Linked Agents](/docs/linked-agents/) - SMB link routing details
+- [Encryption](/docs/encryption/) - Secret key management

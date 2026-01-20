@@ -61,8 +61,9 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 
 	if postProfile != nil && postProfile.Data != nil {
 		// Use DataBlock extraction with transform reversal
+		// Uses static profile XOR key - agent has matching key embedded at build time
 		basePath := postProfile.Path
-		bodyData, err := m.extractDataFromDataBlock(r, postProfile.Data, basePath)
+		bodyData, err := m.extractDataFromDataBlock(r, postProfile.Data, basePath, "")
 		if err != nil {
 			log.Printf("[Active Connection] Failed to extract body via DataBlock: %v", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)

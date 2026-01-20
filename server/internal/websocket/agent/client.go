@@ -514,6 +514,7 @@ func (c *Client) RegisterInit(ctx context.Context, initData map[string]string) e
 		Protocol:   initData["protocol"],
 		SmbProfile: initData["smbProfile"],
 		SmbXorKey:  initData["smbXorKey"],
+		HttpXorKey: initData["httpXorKey"],
 	}
 
 	resp, err := c.client.RegisterInit(ctx, req)

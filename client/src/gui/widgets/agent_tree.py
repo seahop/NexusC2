@@ -1,7 +1,8 @@
 #agent_tree.py
 from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout,
                               QMessageBox, QMenu, QInputDialog, QLineEdit, QHBoxLayout, QLabel)
-from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot, pyqtSignal
+from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot, pyqtSignal, QThread
+from PyQt6.QtWidgets import QApplication
 import json
 import asyncio
 import sqlite3
@@ -12,11 +13,23 @@ class AgentTreeWidget(QWidget):
     # Signal emitted when agents are removed (for syncing other views)
     agents_removed = pyqtSignal(list)  # list of GUIDs that were removed
 
+    # Signals for thread-safe operations (called from websocket thread)
+    _agent_renamed_signal = pyqtSignal(dict)
+    _agent_tags_updated_signal = pyqtSignal(dict)
+    _new_connection_signal = pyqtSignal(dict)
+    _update_connection_signal = pyqtSignal(dict)
+
     def __init__(self, terminal_widget):
         super().__init__()
         self.terminal_widget = terminal_widget
         layout = QVBoxLayout()
         self.is_state_loaded = False
+
+        # Connect thread-safe signals to their implementations
+        self._agent_renamed_signal.connect(self._do_handle_agent_renamed, Qt.ConnectionType.QueuedConnection)
+        self._agent_tags_updated_signal.connect(self._do_handle_agent_tags_updated, Qt.ConnectionType.QueuedConnection)
+        self._new_connection_signal.connect(self._do_handle_new_connection, Qt.ConnectionType.QueuedConnection)
+        self._update_connection_signal.connect(self._do_update_existing_connection, Qt.ConnectionType.QueuedConnection)
 
         # Add search bar at the top
         search_layout = QHBoxLayout()
@@ -235,9 +248,17 @@ class AgentTreeWidget(QWidget):
             if child.text(0) != new_text:
                 child.setText(0, new_text)
 
-    @pyqtSlot(dict)
     def handle_new_connection(self, conn_data):
-        """Handle new connection or reactivation"""
+        """Thread-safe handler for new connection or reactivation"""
+        app = QApplication.instance()
+        if app and QThread.currentThread() != app.thread():
+            self._new_connection_signal.emit(conn_data)
+        else:
+            self._do_handle_new_connection(conn_data)
+
+    @pyqtSlot(dict)
+    def _do_handle_new_connection(self, conn_data):
+        """Actual implementation - runs on GUI thread"""
         # Check for existing agent
         if any(agent.get('guid') == conn_data['new_client_id'] for agent in self.agent_data):
             print(f"Found existing agent {conn_data['new_client_id']}")
@@ -1059,9 +1080,18 @@ class AgentTreeWidget(QWidget):
         print("\nAgentTreeWidget: loadStateFromDatabase completed")
 
     def update_existing_connection(self, connection_data):
-        """Update an existing agent in the tree."""
+        """Thread-safe method to update an existing agent in the tree."""
+        app = QApplication.instance()
+        if app and QThread.currentThread() != app.thread():
+            self._update_connection_signal.emit(connection_data)
+        else:
+            self._do_update_existing_connection(connection_data)
+
+    @pyqtSlot(dict)
+    def _do_update_existing_connection(self, connection_data):
+        """Actual implementation - runs on GUI thread"""
         agent_name = f"{connection_data['newclient_id'][:8]}"
-        
+
         # Find and update the agent
         for agent in self.agent_data:
             if agent['guid'] == connection_data['newclient_id']:
@@ -1080,7 +1110,7 @@ class AgentTreeWidget(QWidget):
                     "Last Seen: 0 seconds ago"
                 ]
                 agent['last_seen_timestamp'] = QDateTime.currentDateTime()
-                
+
                 # Update the tree view
                 tree_item = self.agent_items.get(agent_name)
                 if tree_item:
@@ -1311,7 +1341,16 @@ class AgentTreeWidget(QWidget):
             self.terminal_widget.log_message(f"Agent {agent['name']} reconnected")
 
     def handle_agent_renamed(self, data):
-        """Handle agent rename notification from server"""
+        """Thread-safe handler for agent rename notification from server"""
+        app = QApplication.instance()
+        if app and QThread.currentThread() != app.thread():
+            self._agent_renamed_signal.emit(data)
+        else:
+            self._do_handle_agent_renamed(data)
+
+    @pyqtSlot(dict)
+    def _do_handle_agent_renamed(self, data):
+        """Actual implementation - runs on GUI thread"""
         agent_id = data.get('agent_id')
         new_name = data.get('new_name')
 
@@ -1347,7 +1386,16 @@ class AgentTreeWidget(QWidget):
                 break
 
     def handle_agent_tags_updated(self, data):
-        """Handle agent tag update notification from server"""
+        """Thread-safe handler for agent tag update notification from server"""
+        app = QApplication.instance()
+        if app and QThread.currentThread() != app.thread():
+            self._agent_tags_updated_signal.emit(data)
+        else:
+            self._do_handle_agent_tags_updated(data)
+
+    @pyqtSlot(dict)
+    def _do_handle_agent_tags_updated(self, data):
+        """Actual implementation - runs on GUI thread"""
         agent_id = data.get('agent_id')
         tags = data.get('tags', [])
 

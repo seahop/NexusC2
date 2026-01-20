@@ -18,6 +18,7 @@ type InitData struct {
 	Protocol   string
 	SMBProfile string // SMB profile name for transform configuration
 	SMBXorKey  string // Per-build unique XOR key for SMB transforms
+	HTTPXorKey string // Per-build unique XOR key for HTTP transforms
 }
 
 // StoreInitData stores the initialization data in memory
@@ -53,6 +54,9 @@ func (m *Manager) StoreInitData(data *InitData) error {
 		if initData.SMBXorKey != "" {
 			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
 		}
+		if initData.HTTPXorKey != "" {
+			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
+		}
 	}
 	log.Printf("----------------------------------------------")
 
@@ -83,7 +87,7 @@ func (m *Manager) RemoveInitData(clientID string) {
 func (m *Manager) loadInitDataFromDB() error {
 	query := `
         SELECT id, clientID, type, secret, os, arch, RSAkey,
-               COALESCE(smb_profile, ''), COALESCE(smb_xor_key, '')
+               COALESCE(smb_profile, ''), COALESCE(smb_xor_key, ''), COALESCE(http_xor_key, '')
         FROM inits
         WHERE id IS NOT NULL`
 
@@ -109,6 +113,7 @@ func (m *Manager) loadInitDataFromDB() error {
 			&data.RSAKey,
 			&data.SMBProfile,
 			&data.SMBXorKey,
+			&data.HTTPXorKey,
 		)
 		if err != nil {
 			log.Printf("Error scanning init row: %v", err)
@@ -139,6 +144,9 @@ func (m *Manager) loadInitDataFromDB() error {
 		}
 		if initData.SMBXorKey != "" {
 			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
+		}
+		if initData.HTTPXorKey != "" {
+			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
 		}
 	}
 	if count > 0 {

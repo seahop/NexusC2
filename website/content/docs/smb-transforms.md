@@ -7,7 +7,7 @@ weight: 3.2
 
 SMB transforms define how data is obfuscated when traveling through named pipes between the server and SMB agents. The parent HTTPS agent simply relays the opaque, transformed blobs without needing to understand them.
 
-For general HTTP profile transforms, see [Malleable Profiles](MALLEABLE-PROFILES.md).
+For general HTTP profile transforms, see [Malleable Profiles](/docs/malleable-profiles/).
 
 ---
 
@@ -66,15 +66,19 @@ The HTTPS (edge) agent acts as a transparent relay - it never decrypts or modifi
 
 ---
 
-## Per-Build Unique XOR Keys
+## Per-Build Unique XOR Keys (SMB Only)
 
-When using the `xor` transform, NexusC2 generates a **unique 12-character key for each SMB agent build**. This provides:
+When using the `xor` transform in SMB profiles, NexusC2 generates a **unique 12-character key for each SMB agent build**.
+
+This provides:
 
 - **Agent isolation**: Even if one agent's key is compromised, others remain secure
 - **No shared secrets**: Each SMB agent has its own XOR key embedded at build time
 - **Automatic key management**: The server tracks each agent's unique key in the database
 
-The XOR key from the profile configuration (e.g., `"smb_transform_key"`) serves as a fallback for backward compatibility. New builds always generate unique keys.
+The XOR key from the profile configuration (e.g., `"smb_transform_key"`) serves as a fallback for backward compatibility. New SMB builds always generate unique keys.
+
+> **Note:** HTTP/HTTPS profiles use **static XOR keys** from config.toml for simpler operation. The key you define in the profile is used by both agent and server. See [Malleable Profiles](/docs/malleable-profiles/) for HTTP profile details.
 
 ---
 
@@ -236,6 +240,6 @@ Payloads built for that listener will use the specified SMB profile's transforms
 
 ## Related Documentation
 
-- [Linked Agents](LINKED-AGENTS.md) - SMB agent architecture and link management
-- [Malleable Profiles](MALLEABLE-PROFILES.md) - HTTP profile transforms
-- [Profile Management](PROFILE-MANAGEMENT.md) - Upload and manage profiles via CLI
+- [Linked Agents](/docs/linked-agents/) - SMB agent architecture and link management
+- [Malleable Profiles](/docs/malleable-profiles/) - HTTP profile transforms
+- [Profile Management](/docs/profile-management/) - Upload and manage profiles via CLI
