@@ -1478,17 +1478,10 @@ class CreatePayloadDialog(QDialog):
         self.populate_listeners()
         self.listener.currentTextChanged.connect(self.on_listener_changed)
         form_layout.addRow("Listener:", self.listener)
-        
-        # Connection Type - only visible for SMB listeners
-        self.connection_type_label = QLabel("Connection Type:")
-        self.connection_type = QComboBox()
-        self.connection_type.addItems(["Direct", "SMB"])
-        form_layout.addRow(self.connection_type_label, self.connection_type)
-        
-        # Initially hide connection type (will show only for SMB listeners)
-        self.connection_type_label.setVisible(False)
-        self.connection_type.setVisible(False)
-        
+
+        # Track if current listener is SMB (for payload generation)
+        self.is_smb_listener = False
+
         # Language dropdown
         self.language = QComboBox()
         self.language.addItem("Go")
@@ -1517,6 +1510,10 @@ class CreatePayloadDialog(QDialog):
         layout.addLayout(form_layout)
         layout.addStretch()
         self.basic_tab.setLayout(layout)
+
+        # Trigger listener change handler for initial selection
+        if self.listener.currentText():
+            self.on_listener_changed(self.listener.currentText())
 
     def setup_safety_tab(self):
         layout = QVBoxLayout()
@@ -1640,24 +1637,30 @@ class CreatePayloadDialog(QDialog):
         """Handle listener selection changes"""
         # Check if this is an SMB listener
         is_smb_listener = False
-        
+
         if self.agent_tree:
             # Get listener data to check protocol
             listeners = self.agent_tree.listener_data
             for listener in listeners:
                 if listener.get('name') == listener_name:
-                    is_smb_listener = (listener.get('protocol') == 'SMB')
+                    # Protocol is stored in details array as "Protocol: SMB" etc.
+                    for detail in listener.get('details', []):
+                        if detail.startswith('Protocol:'):
+                            protocol = detail.split(':', 1)[1].strip()
+                            is_smb_listener = (protocol == 'SMB')
+                            break
                     break
-        
-        # Show connection type only for SMB listeners
+
+        # Update SMB listener state and OS options
+        self.is_smb_listener = is_smb_listener
         if is_smb_listener:
-            self.connection_type_label.setVisible(True)
-            self.connection_type.setVisible(True)
-            self.connection_type.setCurrentText("SMB")  # Default to SMB
+            # SMB only supports Windows - restrict OS dropdown
+            self.os.clear()
+            self.os.addItem("Windows")
         else:
-            self.connection_type_label.setVisible(False)
-            self.connection_type.setVisible(False)
-            self.connection_type.setCurrentText("Direct")  # Reset to Direct
+            # Restore all OS options for non-SMB listeners
+            self.os.clear()
+            self.os.addItems(["Linux", "Darwin", "Windows"])
 
     def populate_listeners(self):
         if self.agent_tree:
@@ -1721,8 +1724,8 @@ class CreatePayloadDialog(QDialog):
             }
         }
         
-        # Only add connection_type if it's visible and set to SMB
-        if self.connection_type.isVisible() and self.connection_type.currentText() == "SMB":
+        # Add connection_type for SMB listeners
+        if self.is_smb_listener:
             payload_data["data"]["connection_type"] = "smb"
         
         message = json.dumps(payload_data)
