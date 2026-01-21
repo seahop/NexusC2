@@ -23,7 +23,7 @@ class ListenersWidget(QWidget):
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             'Name', 'Protocol', 'Host/Pipe', 'Port',
-            'GET Profile', 'POST Profile', 'Response Profile'
+            'GET/SMB Profile', 'POST Profile', 'Response Profile'
         ])
 
         # Set table properties
@@ -70,6 +70,7 @@ class ListenersWidget(QWidget):
         get_profile = ''
         post_profile = ''
         response_profile = ''
+        smb_profile = ''
 
         for detail in listener.get('details', []):
             if detail.startswith('Protocol:'):
@@ -86,6 +87,8 @@ class ListenersWidget(QWidget):
                 post_profile = detail.split(':', 1)[1].strip()
             elif detail.startswith('Response Profile:'):
                 response_profile = detail.split(':', 1)[1].strip()
+            elif detail.startswith('SMB Profile:'):
+                smb_profile = detail.split(':', 1)[1].strip()
 
         # For SMB listeners, show pipe name in Host/Pipe column
         host_or_pipe = pipe_name if protocol == 'SMB' else host
@@ -113,14 +116,18 @@ class ListenersWidget(QWidget):
         port_item = QTableWidgetItem(port if protocol != 'SMB' else '-')
         self.table.setItem(row_position, 3, port_item)
 
-        # Set Profile columns
-        get_profile_item = QTableWidgetItem(get_profile or 'default-get')
+        # Set Profile columns - for SMB, show SMB profile in GET column and '-' for others
+        if protocol == 'SMB':
+            get_profile_item = QTableWidgetItem(smb_profile or 'default-smb')
+            post_profile_item = QTableWidgetItem('-')
+            response_profile_item = QTableWidgetItem('-')
+        else:
+            get_profile_item = QTableWidgetItem(get_profile or 'default-get')
+            post_profile_item = QTableWidgetItem(post_profile or 'default-post')
+            response_profile_item = QTableWidgetItem(response_profile or 'default-response')
+
         self.table.setItem(row_position, 4, get_profile_item)
-
-        post_profile_item = QTableWidgetItem(post_profile or 'default-post')
         self.table.setItem(row_position, 5, post_profile_item)
-
-        response_profile_item = QTableWidgetItem(response_profile or 'default-response')
         self.table.setItem(row_position, 6, response_profile_item)
 
     def show_context_menu(self, position):
@@ -190,17 +197,29 @@ class ListenersWidget(QWidget):
         protocol = listener_data.get('protocol', '').upper()
         is_smb = protocol == 'SMB'
 
-        listener = {
-            'name': listener_data.get('name', ''),
-            'details': [
-                f"Protocol: {protocol}",
-                f"Host: {listener_data.get('ip', '')}" if not is_smb else f"Pipe: {listener_data.get('pipe_name', 'spoolss')}",
-                f"Port: {listener_data.get('port', '')}" if not is_smb else "",
-                f"GET Profile: {listener_data.get('get_profile', 'default-get')}",
-                f"POST Profile: {listener_data.get('post_profile', 'default-post')}",
-                f"Response Profile: {listener_data.get('server_response_profile', 'default-response')}"
-            ]
-        }
+        if is_smb:
+            # SMB listeners use pipe name and SMB profile
+            listener = {
+                'name': listener_data.get('name', ''),
+                'details': [
+                    f"Protocol: {protocol}",
+                    f"Pipe: {listener_data.get('pipe_name', 'spoolss')}",
+                    f"SMB Profile: {listener_data.get('smb_profile', 'default-smb')}"
+                ]
+            }
+        else:
+            # HTTP/HTTPS listeners use host, port, and HTTP profiles
+            listener = {
+                'name': listener_data.get('name', ''),
+                'details': [
+                    f"Protocol: {protocol}",
+                    f"Host: {listener_data.get('ip', '')}",
+                    f"Port: {listener_data.get('port', '')}",
+                    f"GET Profile: {listener_data.get('get_profile', 'default-get')}",
+                    f"POST Profile: {listener_data.get('post_profile', 'default-post')}",
+                    f"Response Profile: {listener_data.get('server_response_profile', 'default-response')}"
+                ]
+            }
         # Filter out empty details
         listener['details'] = [d for d in listener['details'] if d]
 

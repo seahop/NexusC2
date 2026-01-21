@@ -849,7 +849,8 @@ class C2ClientGUI(QMainWindow):
                     pipe_name=listener_details.get('pipe_name', ''),
                     get_profile=listener_details.get('get_profile', ''),
                     post_profile=listener_details.get('post_profile', ''),
-                    server_response_profile=listener_details.get('server_response_profile', '')
+                    server_response_profile=listener_details.get('server_response_profile', ''),
+                    smb_profile=listener_details.get('smb_profile', '')
                 )
                 self.terminal.log_message(f"New listener added: {listener_details['name']}")
                 # Mark this listener as processed

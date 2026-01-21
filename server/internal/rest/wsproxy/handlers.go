@@ -39,6 +39,7 @@ type CreateListenerRequest struct {
 	GetProfile            string `json:"get_profile,omitempty"`
 	PostProfile           string `json:"post_profile,omitempty"`
 	ServerResponseProfile string `json:"server_response_profile,omitempty"`
+	SMBProfile            string `json:"smb_profile,omitempty"`
 }
 
 // CreateListener proxies listener creation to WebSocket service
@@ -67,6 +68,7 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 			"get_profile":             req.GetProfile,
 			"post_profile":            req.PostProfile,
 			"server_response_profile": req.ServerResponseProfile,
+			"smb_profile":             req.SMBProfile,
 		},
 	}
 
@@ -105,6 +107,7 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 						GetProfile            string `json:"get_profile,omitempty"`
 						PostProfile           string `json:"post_profile,omitempty"`
 						ServerResponseProfile string `json:"server_response_profile,omitempty"`
+						SMBProfile            string `json:"smb_profile,omitempty"`
 					} `json:"listener"`
 				}
 				if err := json.Unmarshal(msg.Data, &updateData); err == nil {
@@ -122,6 +125,7 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 								"get_profile":             updateData.Listener.GetProfile,
 								"post_profile":            updateData.Listener.PostProfile,
 								"server_response_profile": updateData.Listener.ServerResponseProfile,
+								"smb_profile":             updateData.Listener.SMBProfile,
 							},
 						})
 						return
@@ -146,6 +150,7 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 					GetProfile            string `json:"get_profile,omitempty"`
 					PostProfile           string `json:"post_profile,omitempty"`
 					ServerResponseProfile string `json:"server_response_profile,omitempty"`
+					SMBProfile            string `json:"smb_profile,omitempty"`
 				} `json:"data"`
 			}
 
@@ -168,6 +173,7 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 							"get_profile":             listenerResp.Data.GetProfile,
 							"post_profile":            listenerResp.Data.PostProfile,
 							"server_response_profile": listenerResp.Data.ServerResponseProfile,
+							"smb_profile":             listenerResp.Data.SMBProfile,
 						},
 					})
 					return
@@ -716,9 +722,11 @@ func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 					GetProfiles            []string `json:"get_profiles,omitempty"`
 					PostProfiles           []string `json:"post_profiles,omitempty"`
 					ServerResponseProfiles []string `json:"server_response_profiles,omitempty"`
+					SMBProfiles            []string `json:"smb_profiles,omitempty"`
 					Errors                 []string `json:"errors,omitempty"`
 				}
 				if err := json.Unmarshal(msg.Data, &respData); err == nil {
+					log.Printf("[WSProxy] Received raw message: %s", string(msg.Data))
 					if !respData.Success && len(respData.Errors) > 0 {
 						c.JSON(http.StatusBadRequest, gin.H{
 							"status":  "error",
@@ -739,6 +747,7 @@ func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 						"get_profiles_added":     respData.GetProfiles,
 						"post_profiles_added":    respData.PostProfiles,
 						"server_response_added":  respData.ServerResponseProfiles,
+						"smb_profiles_added":     respData.SMBProfiles,
 						"errors":                 respData.Errors,
 					})
 					return

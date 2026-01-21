@@ -185,11 +185,16 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 		return
 	}
 
-	// Serialize all profiles
+	// Serialize all profiles (HTTP and SMB)
 	profileData := map[string]interface{}{
 		"get_profiles":             h.agentConfig.HTTPProfiles.Get,
 		"post_profiles":            h.agentConfig.HTTPProfiles.Post,
 		"server_response_profiles": h.agentConfig.HTTPProfiles.ServerResponse,
+	}
+
+	// Include SMB profiles if available
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		profileData["smb_profiles"] = smbConfig.GetSMBProfiles()
 	}
 
 	jsonData, err := json.Marshal(profileData)
@@ -224,10 +229,15 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		logMessage(LOG_MINIMAL, "Successfully synced profiles to REST API (%d GET, %d POST, %d Response)",
+		smbCount := 0
+		if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+			smbCount = len(smbConfig.GetSMBProfiles())
+		}
+		logMessage(LOG_MINIMAL, "Successfully synced profiles to REST API (%d GET, %d POST, %d Response, %d SMB)",
 			len(h.agentConfig.HTTPProfiles.Get),
 			len(h.agentConfig.HTTPProfiles.Post),
-			len(h.agentConfig.HTTPProfiles.ServerResponse))
+			len(h.agentConfig.HTTPProfiles.ServerResponse),
+			smbCount)
 	} else {
 		logMessage(LOG_NORMAL, "REST API profile sync returned status: %d", resp.StatusCode)
 	}

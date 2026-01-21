@@ -50,6 +50,12 @@ class StateDatabase:
             conn.execute("ALTER TABLE listeners ADD COLUMN server_response_profile TEXT DEFAULT 'default-response'")
             print("StateDatabase: Migration complete - server_response_profile column added")
 
+        # Migration: Add smb_profile column to listeners if missing
+        if 'smb_profile' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding smb_profile column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN smb_profile TEXT DEFAULT ''")
+            print("StateDatabase: Migration complete - smb_profile column added")
+
         # Get existing columns for connections table
         cursor = conn.execute("PRAGMA table_info(connections)")
         conn_columns = {row[1] for row in cursor.fetchall()}
@@ -202,13 +208,14 @@ class StateDatabase:
                             print("Upserting listeners in database")
                             conn.executemany(
                                 """INSERT OR REPLACE INTO listeners
-                                   (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile)
-                                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                                   (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile)
+                                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                                 [(l["id"], l["name"], l["protocol"], l["port"], l["ip"],
                                   l.get("pipe_name", ""),
                                   l.get("get_profile", "default-get"),
                                   l.get("post_profile", "default-post"),
-                                  l.get("server_response_profile", "default-response"))
+                                  l.get("server_response_profile", "default-response"),
+                                  l.get("smb_profile", ""))
                                 for l in state_data["listeners"] if l is not None]
                             )
                             print(f"Upserted {len(state_data['listeners'])} listeners")

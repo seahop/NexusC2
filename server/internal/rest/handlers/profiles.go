@@ -4,6 +4,7 @@ package handlers
 import (
 	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -26,14 +27,21 @@ func (h *ProfileHandler) SetAgentClient(client *agent.Client) {
 	h.agentClient = client
 }
 
-// ListAllProfiles returns all available profiles (GET, POST, and server response)
+// ListAllProfiles returns all available profiles (GET, POST, server response, and SMB)
 // GET /api/v1/profiles
 func (h *ProfileHandler) ListAllProfiles(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"get_profiles":             h.config.HTTPProfiles.Get,
 		"post_profiles":            h.config.HTTPProfiles.Post,
 		"server_response_profiles": h.config.HTTPProfiles.ServerResponse,
-	})
+	}
+
+	// Include SMB profiles if available
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		response["smb_profiles"] = smbConfig.GetSMBProfiles()
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // ListGetProfiles returns all GET profiles
@@ -93,11 +101,18 @@ func (h *ProfileHandler) GetServerResponseProfile(c *gin.Context) {
 // GetProfileNames returns just the names of all profiles (useful for dropdowns)
 // GET /api/v1/profiles/names
 func (h *ProfileHandler) GetProfileNames(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"get_profiles":             h.config.GetGetProfileNames(),
 		"post_profiles":            h.config.GetPostProfileNames(),
 		"server_response_profiles": h.config.GetServerResponseProfileNames(),
-	})
+	}
+
+	// Include SMB profile names if available
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		response["smb_profiles"] = smbConfig.GetSMBProfileNames()
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // UploadProfiles accepts a TOML file or raw TOML content and adds profiles to the config
@@ -149,8 +164,8 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		return
 	}
 
-	// Determine response status
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles)
+	// Determine response status - include SMB profiles in count
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles)
 	if totalAdded == 0 && len(result.Errors) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -165,8 +180,9 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		status = "partial"
 	}
 
-	// Sync profiles to agent-handler if client available
-	if h.agentClient != nil && totalAdded > 0 {
+	// Sync HTTP profiles to agent-handler if client available
+	httpAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles)
+	if h.agentClient != nil && httpAdded > 0 {
 		profileData := map[string]interface{}{
 			"get_profiles":             h.config.HTTPProfiles.Get,
 			"post_profiles":            h.config.HTTPProfiles.Post,
@@ -183,12 +199,27 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		}
 	}
 
+	// Log SMB profile additions and current state
+	if len(result.SMBProfiles) > 0 {
+		log.Printf("[REST] Added %d SMB profiles: %v", len(result.SMBProfiles), result.SMBProfiles)
+	}
+	// Debug: log current SMB profile count
+	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+		log.Printf("[REST] Current SMB profiles in config: %v", smbConfig.GetSMBProfileNames())
+	}
+
+	message := fmt.Sprintf("Successfully added %d profile(s)", totalAdded)
+	if totalAdded == 0 {
+		message = "No new profiles added (may already exist)"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":                   status,
-		"message":                  "Profiles uploaded successfully",
+		"message":                  message,
 		"get_profiles_added":       result.GetProfiles,
 		"post_profiles_added":      result.PostProfiles,
 		"server_response_added":    result.ServerResponseProfiles,
+		"smb_profiles_added":       result.SMBProfiles,
 		"errors":                   result.Errors,
 	})
 }
@@ -249,6 +280,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 		GetProfiles            []config.GetProfile            `json:"get_profiles"`
 		PostProfiles           []config.PostProfile           `json:"post_profiles"`
 		ServerResponseProfiles []config.ServerResponseProfile `json:"server_response_profiles"`
+		SMBProfiles            []config.SMBProfile            `json:"smb_profiles"`
 	}
 
 	if err := c.ShouldBindJSON(&profileData); err != nil {
@@ -256,10 +288,21 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 		return
 	}
 
-	// Update the config with the new profiles
+	// Update the HTTP profiles in config
 	h.config.HTTPProfiles.Get = profileData.GetProfiles
 	h.config.HTTPProfiles.Post = profileData.PostProfiles
 	h.config.HTTPProfiles.ServerResponse = profileData.ServerResponseProfiles
+
+	// Update SMB profiles in SMBLinkConfig singleton
+	smbCount := 0
+	if len(profileData.SMBProfiles) > 0 {
+		if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
+			// Replace all SMB profiles with the synced ones
+			smbConfig.ReplaceSMBProfiles(profileData.SMBProfiles)
+			smbCount = len(profileData.SMBProfiles)
+			log.Printf("[REST] Synced %d SMB profiles from WebSocket service", smbCount)
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -268,6 +311,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 			"get":             len(profileData.GetProfiles),
 			"post":            len(profileData.PostProfiles),
 			"server_response": len(profileData.ServerResponseProfiles),
+			"smb":             smbCount,
 		},
 	})
 }

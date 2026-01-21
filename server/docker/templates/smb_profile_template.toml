@@ -1,0 +1,279 @@
+# =============================================================================
+# SMB PROFILE TEMPLATE
+# =============================================================================
+# Fill out this template to create custom SMB profiles for named pipe traffic.
+# Upload via API: POST /api/v1/profiles/upload
+# Or use the client UI to upload this file.
+#
+# SMB profiles define how data is obfuscated when traveling through named pipes
+# between the server and SMB agents. The parent HTTPS agent relays the opaque,
+# transformed blobs without needing to understand them.
+#
+# Supported transforms:
+#   base64, base64url, hex, gzip, netbios, xor,
+#   prepend, append, random_prepend, random_append
+#
+# XOR keys are auto-generated per-build for agent isolation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MINIMAL PROFILE - No transforms (legacy compatible)
+# -----------------------------------------------------------------------------
+# Use when you don't need obfuscation or for testing
+
+[[smb_link.profiles]]
+name = "minimal-smb"
+# No data block = no transforms applied
+
+# -----------------------------------------------------------------------------
+# BASIC OBFUSCATION - Compression + XOR
+# -----------------------------------------------------------------------------
+# Good baseline protection with minimal overhead
+
+[[smb_link.profiles]]
+name = "basic-obfuscated-smb"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "basic_smb_key"     # Auto-replaced with unique per-build key
+
+# -----------------------------------------------------------------------------
+# PRINT SPOOLER (spoolss) - Mimic print job traffic
+# -----------------------------------------------------------------------------
+# Best for: General use, high traffic environments
+# Traffic appears as: Binary print job data
+# Risk level: Low - print data rarely inspected
+
+[[smb_link.profiles]]
+name = "spoolss-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "spoolss_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0001"    # RPC version header
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000"    # Null terminator padding
+
+# -----------------------------------------------------------------------------
+# SERVER SERVICE (srvsvc) - Mimic share enumeration
+# -----------------------------------------------------------------------------
+# Best for: Domain environments with frequent share queries
+# Traffic appears as: DCE/RPC share enumeration requests
+# Risk level: Low - constant admin tool traffic
+
+[[smb_link.profiles]]
+name = "srvsvc-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "srvsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"    # DCE/RPC request header
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 4
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# LOCAL SECURITY AUTHORITY (lsarpc) - Mimic SID resolution
+# -----------------------------------------------------------------------------
+# Best for: Any domain environment
+# Traffic appears as: SID-to-name translation requests
+# Risk level: Medium - part of auth flow but very common
+
+[[smb_link.profiles]]
+name = "lsarpc-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "lsarpc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000\u0000\u0000"    # DCE/RPC bind header
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 8
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# NETLOGON SERVICE - Mimic domain authentication
+# -----------------------------------------------------------------------------
+# Best for: Near domain controllers
+# Traffic appears as: Domain authentication requests
+# Risk level: Medium - auth-related but expected high volume
+
+[[smb_link.profiles]]
+name = "netlogon-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "netlogon_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0000\u0004\u0000"    # Netlogon authenticator structure
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 12
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# SERVICE CONTROL MANAGER (svcctl) - Mimic service management
+# -----------------------------------------------------------------------------
+# Best for: Managed environments (SCCM, Intune)
+# Traffic appears as: Remote service management requests
+# Risk level: Low - common management tool traffic
+
+[[smb_link.profiles]]
+name = "svcctl-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "svcctl_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"    # DCE/RPC request
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"    # 8-byte padding
+
+# -----------------------------------------------------------------------------
+# TASK SCHEDULER (atsvc) - Mimic scheduled task management
+# -----------------------------------------------------------------------------
+# Best for: Environments with scheduled jobs/maintenance
+# Traffic appears as: Remote task scheduler requests
+# Risk level: Low - common for backups and updates
+
+[[smb_link.profiles]]
+name = "atsvc-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "atsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000"    # DCE/RPC header
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 6
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# BROWSER SERVICE - Mimic legacy network discovery
+# -----------------------------------------------------------------------------
+# Best for: Legacy networks with NetBIOS
+# Traffic appears as: Browser service announcements
+# Risk level: Very Low - deprecated service, rarely monitored
+
+[[smb_link.profiles]]
+name = "browser-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "netbios"    # Natural NetBIOS encoding
+
+# -----------------------------------------------------------------------------
+# SECURITY ACCOUNT MANAGER (samr) - Mimic user enumeration
+# -----------------------------------------------------------------------------
+# Best for: AD-heavy networks
+# Traffic appears as: User/group lookup requests
+# Risk level: Medium - security tools may monitor
+
+[[smb_link.profiles]]
+name = "samr-mimic"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "samr_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u000b\u0003"    # RPC bind
+[[smb_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 4
+charset = "binary"
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000"
+
+# -----------------------------------------------------------------------------
+# HEAVY OBFUSCATION - Multiple layers
+# -----------------------------------------------------------------------------
+# Maximum obfuscation with random padding on both ends
+# Use when traffic analysis is a concern
+
+[[smb_link.profiles]]
+name = "heavy-obfuscated-smb"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "heavy_obf_key"
+[[smb_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 16
+charset = "binary"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 16
+charset = "binary"
+[[smb_link.profiles.data.transforms]]
+type = "base64"
+
+# =============================================================================
+# PROFILE SELECTION GUIDE
+# =============================================================================
+#
+# Environment Type          | Recommended Profile    | Pipe Name
+# --------------------------|------------------------|------------------
+# General/Unknown           | spoolss-mimic          | spoolss
+# Domain with shares        | srvsvc-mimic           | srvsvc
+# Near domain controller    | netlogon-mimic         | netlogon
+# AD-heavy network          | lsarpc-mimic           | lsarpc
+# Managed (SCCM/Intune)     | svcctl-mimic           | svcctl
+# Scheduled job servers     | atsvc-mimic            | atsvc
+# Legacy NetBIOS network    | browser-mimic          | browser
+# Maximum obfuscation       | heavy-obfuscated-smb   | (any)
+#
+# =============================================================================
+# USAGE EXAMPLE
+# =============================================================================
+#
+# Create an SMB listener with a profile:
+#
+#   ./scripts/nexus-api.py listeners create \
+#     -n smb-lateral \
+#     -P SMB \
+#     --pipe-name spoolss \
+#     --smb-profile spoolss-mimic
+#
+# =============================================================================

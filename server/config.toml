@@ -1098,3 +1098,218 @@ charset = "hex"
 type = "random_append"
 length = 8
 charset = "hex"
+
+# =============================================================================
+# COMMON WINDOWS NAMED PIPE PRESETS
+# =============================================================================
+# These presets define commonly-used Windows named pipes that blend with
+# legitimate enterprise traffic. Use with corresponding profiles below.
+
+[[smb_link.pipe_presets]]
+name = "spoolss"
+description = "Print Spooler Service - Printer management and job submission"
+
+[[smb_link.pipe_presets]]
+name = "srvsvc"
+description = "Server Service - Share enumeration and session management"
+
+[[smb_link.pipe_presets]]
+name = "wkssvc"
+description = "Workstation Service - Domain membership and workstation info"
+
+[[smb_link.pipe_presets]]
+name = "samr"
+description = "Security Account Manager - User and group enumeration"
+
+[[smb_link.pipe_presets]]
+name = "lsarpc"
+description = "Local Security Authority - SID resolution and security policies"
+
+[[smb_link.pipe_presets]]
+name = "netlogon"
+description = "Netlogon Service - Domain authentication and secure channel"
+
+[[smb_link.pipe_presets]]
+name = "svcctl"
+description = "Service Control Manager - Remote service management"
+
+[[smb_link.pipe_presets]]
+name = "atsvc"
+description = "Task Scheduler Service - Remote scheduled task management"
+
+[[smb_link.pipe_presets]]
+name = "browser"
+description = "Computer Browser Service - Network discovery (legacy)"
+
+# =============================================================================
+# WINDOWS PIPE PROFILES - Mimic legitimate Windows SMB traffic patterns
+# =============================================================================
+# Each profile uses transforms that match real Windows RPC/DCE traffic structure.
+# Pair these with the corresponding pipe_preset for best blending.
+
+# -----------------------------------------------------------------------------
+# Print Spooler (spoolss) - High traffic, binary data expected
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "spoolss-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "spoolss_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0001"
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000"
+
+# -----------------------------------------------------------------------------
+# Server Service (srvsvc) - Share queries, very high traffic in domains
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "srvsvc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "srvsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 4
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# Workstation Service (wkssvc) - Domain tools and net commands
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "wkssvc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "wkssvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000\u0000\u0000"
+
+# -----------------------------------------------------------------------------
+# Security Account Manager (samr) - AD queries, user lookups
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "samr-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "samr_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u000b\u0003"
+[[smb_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 4
+charset = "binary"
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000"
+
+# -----------------------------------------------------------------------------
+# Local Security Authority (lsarpc) - SID translation, every domain auth
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "lsarpc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "lsarpc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000\u0000\u0000"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 8
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# Netlogon Service (netlogon) - Domain auth, high volume near DCs
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "netlogon-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "netlogon_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0000\u0004\u0000"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 12
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# Service Control Manager (svcctl) - SCCM, Intune, remote management
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "svcctl-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "svcctl_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+
+# -----------------------------------------------------------------------------
+# Task Scheduler (atsvc) - Scheduled tasks, maintenance traffic
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "atsvc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "atsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 6
+charset = "binary"
+
+# -----------------------------------------------------------------------------
+# Browser Service (browser) - Legacy NetBIOS, natural encoding
+# -----------------------------------------------------------------------------
+[[smb_link.profiles]]
+name = "browser-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "netbios"

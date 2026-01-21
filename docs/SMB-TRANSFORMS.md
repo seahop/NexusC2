@@ -235,6 +235,305 @@ Payloads built for that listener will use the specified SMB profile's transforms
 
 ---
 
+## Common Windows Named Pipe Profiles
+
+The following profiles mimic legitimate Windows SMB traffic patterns. Each uses a named pipe commonly found in enterprise environments.
+
+### Print Spooler (spoolss)
+
+The Print Spooler service is present on nearly every Windows system. Traffic patterns include job submissions, printer queries, and status updates.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "spoolss"
+description = "Print Spooler Service - Printer management and job submission"
+
+[[smb_link.profiles]]
+name = "spoolss-profile"
+[smb_link.profiles.data]
+output = "body"
+# Mimic print job data structure
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "spoolss_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0001"    # RPC version header
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000"    # Null terminator padding
+```
+
+**Why it blends:** Print spooler traffic is frequent, expected to carry binary data (print jobs), and rarely inspected deeply.
+
+---
+
+### Server Service (srvsvc)
+
+Used for share enumeration, session management, and server info queries. One of the most common pipes in any domain environment.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "srvsvc"
+description = "Server Service - Share and session management"
+
+[[smb_link.profiles]]
+name = "srvsvc-profile"
+[smb_link.profiles.data]
+output = "body"
+# Mimic DCE/RPC structure
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "srvsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"    # DCE/RPC request header
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 4
+charset = "binary"
+```
+
+**Why it blends:** Admin tools, Group Policy, and login scripts constantly query srvsvc for share information.
+
+---
+
+### Workstation Service (wkssvc)
+
+Provides workstation configuration and domain membership information. Common in domain-joined environments.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "wkssvc"
+description = "Workstation Service - Domain and workstation info"
+
+[[smb_link.profiles]]
+name = "wkssvc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "wkssvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000\u0000\u0000"    # DCE/RPC bind header
+```
+
+**Why it blends:** Used by `net` commands, domain tools, and management software.
+
+---
+
+### Security Account Manager (samr)
+
+Handles user and group enumeration. Heavily used by authentication and identity management systems.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "samr"
+description = "Security Account Manager - User and group enumeration"
+
+[[smb_link.profiles]]
+name = "samr-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "samr_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u000b\u0003"    # RPC bind
+[[smb_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 4
+charset = "binary"
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000"
+```
+
+**Why it blends:** Active Directory queries, user lookups, and authentication flows use samr constantly.
+
+---
+
+### Local Security Authority (lsarpc)
+
+Handles security policy queries, SID lookups, and trust relationships. Critical for domain operations.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "lsarpc"
+description = "Local Security Authority - Policy and SID resolution"
+
+[[smb_link.profiles]]
+name = "lsarpc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "lsarpc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000\u0000\u0000"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 8
+charset = "binary"
+```
+
+**Why it blends:** Every domain authentication involves lsarpc for SID-to-name translation.
+
+---
+
+### Netlogon Service (netlogon)
+
+Authenticates users and computers in a domain. High-volume traffic during login hours.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "netlogon"
+description = "Netlogon Service - Domain authentication"
+
+[[smb_link.profiles]]
+name = "netlogon-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "netlogon_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0000\u0000\u0000\u0000\u0004\u0000"    # Netlogon authenticator structure
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 12
+charset = "binary"
+```
+
+**Why it blends:** Domain controllers see constant netlogon traffic; workstations query during login, GPO updates, and periodic reauth.
+
+---
+
+### Service Control Manager (svcctl)
+
+Manages Windows services remotely. Used by SCCM, management tools, and admins.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "svcctl"
+description = "Service Control Manager - Remote service management"
+
+[[smb_link.profiles]]
+name = "svcctl-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "svcctl_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"    # DCE/RPC request
+[[smb_link.profiles.data.transforms]]
+type = "append"
+value = "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+```
+
+**Why it blends:** Management tools like SCCM, Intune connectors, and PowerShell remoting use svcctl heavily.
+
+---
+
+### Task Scheduler (atsvc)
+
+Schedules and manages tasks remotely. Used by enterprise job schedulers and management systems.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "atsvc"
+description = "Task Scheduler Service - Remote task management"
+
+[[smb_link.profiles]]
+name = "atsvc-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "atsvc_key"
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003\u0010\u0000"
+[[smb_link.profiles.data.transforms]]
+type = "random_append"
+length = 6
+charset = "binary"
+```
+
+**Why it blends:** Scheduled tasks are common for updates, backups, and maintenance scripts.
+
+---
+
+### Browser Service (browser)
+
+Legacy but still present for network browsing and master browser elections.
+
+```toml
+[[smb_link.pipe_presets]]
+name = "browser"
+description = "Computer Browser Service - Network discovery"
+
+[[smb_link.profiles]]
+name = "browser-profile"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "netbios"
+```
+
+**Why it blends:** Browser announcements use NetBIOS encoding naturally; this is native traffic mimicry.
+
+---
+
+## Choosing the Right Pipe
+
+| Pipe | Best For | Traffic Volume | Inspection Risk |
+|------|----------|----------------|-----------------|
+| `spoolss` | General use | High | Low - binary print data expected |
+| `srvsvc` | Domain environments | Very High | Low - constant share queries |
+| `samr` | AD-heavy networks | High | Medium - security tools may monitor |
+| `lsarpc` | Any domain | Very High | Medium - part of auth flow |
+| `netlogon` | DC proximity | Very High | Medium - auth-related |
+| `svcctl` | Managed environments | Medium | Low - admin tool traffic |
+| `atsvc` | Scheduled job environments | Medium | Low - maintenance traffic |
+| `browser` | Legacy networks | Low | Very Low - deprecated service |
+
+---
+
+## Profile Selection Strategy
+
+**High-security environments:** Use `spoolss` or `srvsvc` - they generate the most "noise" and are rarely inspected.
+
+**Domain controller adjacent:** Use `netlogon` or `lsarpc` - these are expected in high volume near DCs.
+
+**Management server proximity:** Use `svcctl` or `atsvc` - aligns with SCCM/Intune patterns.
+
+**Legacy networks:** Use `browser` with NetBIOS encoding for natural traffic mimicry.
+
+---
+
 ## Related Documentation
 
 - [Linked Agents](/docs/linked-agents/) - SMB agent architecture and link management

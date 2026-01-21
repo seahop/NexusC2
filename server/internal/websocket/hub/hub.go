@@ -39,10 +39,11 @@ type ListenerResponse struct {
 		Protocol              string `json:"protocol"`
 		Port                  string `json:"port"`
 		IP                    string `json:"ip"`
-		PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
-		GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
-		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
+		PipeName              string `json:"pipe_name,omitempty"`               // For SMB listeners
+		GetProfile            string `json:"get_profile,omitempty"`             // Bound GET profile name
+		PostProfile           string `json:"post_profile,omitempty"`            // Bound POST profile name
 		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
+		SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
 	} `json:"data,omitempty"`
 }
 

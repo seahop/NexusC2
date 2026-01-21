@@ -452,6 +452,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				GetProfile            string `json:"get_profile,omitempty"`
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
+				SMBProfile            string `json:"smb_profile,omitempty"`
 			} `json:"listener"`
 		} `json:"data"`
 	}{
@@ -468,6 +469,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				GetProfile            string `json:"get_profile,omitempty"`
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
+				SMBProfile            string `json:"smb_profile,omitempty"`
 			} `json:"listener"`
 		}{
 			Event: "created",
@@ -481,6 +483,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				GetProfile            string `json:"get_profile,omitempty"`
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
+				SMBProfile            string `json:"smb_profile,omitempty"`
 			}{
 				ID:                    l.ID.String(),
 				Name:                  l.Name,
@@ -491,6 +494,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				GetProfile:            l.GetProfile,
 				PostProfile:           l.PostProfile,
 				ServerResponseProfile: l.ServerResponseProfile,
+				SMBProfile:            l.SMBProfile,
 			},
 		},
 	}
@@ -503,7 +507,22 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 	}
 
 	// Send success response to original client
-	response := ListenerResponse{
+	response := struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
+			ID                    string `json:"id"`
+			Name                  string `json:"name"`
+			Protocol              string `json:"protocol"`
+			Port                  string `json:"port"`
+			IP                    string `json:"ip"`
+			PipeName              string `json:"pipe_name,omitempty"`
+			GetProfile            string `json:"get_profile,omitempty"`
+			PostProfile           string `json:"post_profile,omitempty"`
+			ServerResponseProfile string `json:"server_response_profile,omitempty"`
+			SMBProfile            string `json:"smb_profile,omitempty"`
+		} `json:"data,omitempty"`
+	}{
 		Status:  "success",
 		Message: "Listener created successfully",
 		Data: struct {
@@ -516,6 +535,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			GetProfile            string `json:"get_profile,omitempty"`
 			PostProfile           string `json:"post_profile,omitempty"`
 			ServerResponseProfile string `json:"server_response_profile,omitempty"`
+			SMBProfile            string `json:"smb_profile,omitempty"`
 		}{
 			ID:                    l.ID.String(),
 			Name:                  l.Name,
@@ -526,6 +546,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			GetProfile:            l.GetProfile,
 			PostProfile:           l.PostProfile,
 			ServerResponseProfile: l.ServerResponseProfile,
+			SMBProfile:            l.SMBProfile,
 		},
 	}
 

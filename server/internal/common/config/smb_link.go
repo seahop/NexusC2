@@ -176,6 +176,14 @@ func (c *SMBLinkConfig) RemoveSMBProfile(name string) bool {
 	return false
 }
 
+// ReplaceSMBProfiles replaces all SMB profiles with the provided list
+// Used for syncing profiles from other services
+func (c *SMBLinkConfig) ReplaceSMBProfiles(profiles []SMBProfile) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Profiles = profiles
+}
+
 // SMBProfileUploadResult contains the results of an SMB profile upload
 type SMBProfileUploadResult struct {
 	ProfilesAdded []string

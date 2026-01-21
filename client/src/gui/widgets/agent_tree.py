@@ -569,8 +569,8 @@ class AgentTreeWidget(QWidget):
         return self.agent_by_guid.get(guid, None)
 
     def add_listener(self, name, protocol, host, port, pipe_name="",
-                     get_profile="", post_profile="", server_response_profile=""):
-        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}, Profiles: GET={get_profile} POST={post_profile} Response={server_response_profile}")
+                     get_profile="", post_profile="", server_response_profile="", smb_profile=""):
+        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}, Profiles: GET={get_profile} POST={post_profile} Response={server_response_profile} SMB={smb_profile}")
 
         # Check for existing listener to avoid duplicates
         for listener in self.listener_data:
@@ -578,7 +578,7 @@ class AgentTreeWidget(QWidget):
                 print(f"AgentTreeWidget: Listener {name} already exists")
                 return
 
-        # For SMB listeners, show pipe name instead of host/port
+        # For SMB listeners, show pipe name and SMB profile instead of HTTP profiles
         if protocol.upper() == "SMB":
             pipe = pipe_name if pipe_name else "spoolss"
             new_listener = {
@@ -586,9 +586,7 @@ class AgentTreeWidget(QWidget):
                 'details': [
                     f'Protocol: {protocol}',
                     f'Pipe: {pipe}',
-                    f'GET Profile: {get_profile or "default-get"}',
-                    f'POST Profile: {post_profile or "default-post"}',
-                    f'Response Profile: {server_response_profile or "default-response"}'
+                    f'SMB Profile: {smb_profile or "default-smb"}'
                 ]
             }
         else:
@@ -893,7 +891,7 @@ class AgentTreeWidget(QWidget):
                 print("\nAgentTreeWidget: Loading listeners from database")
                 cursor = conn.execute("""
                     SELECT id, name, protocol, port, ip, pipe_name,
-                           get_profile, post_profile, server_response_profile
+                           get_profile, post_profile, server_response_profile, smb_profile
                     FROM listeners
                     ORDER BY name ASC
                 """)
@@ -907,8 +905,9 @@ class AgentTreeWidget(QWidget):
                     get_profile = row[6] if len(row) > 6 and row[6] else "default-get"
                     post_profile = row[7] if len(row) > 7 and row[7] else "default-post"
                     response_profile = row[8] if len(row) > 8 and row[8] else "default-response"
+                    smb_profile = row[9] if len(row) > 9 and row[9] else "default-smb"
 
-                    # For SMB listeners, show pipe name instead of port/host
+                    # For SMB listeners, show pipe name and SMB profile instead of HTTP profiles
                     if protocol == "SMB":
                         pipe_name = row[5] if len(row) > 5 and row[5] else "spoolss"
                         listener = {
@@ -916,9 +915,7 @@ class AgentTreeWidget(QWidget):
                             'details': [
                                 f'Protocol: {protocol}',
                                 f'Pipe: {pipe_name}',
-                                f'GET Profile: {get_profile}',
-                                f'POST Profile: {post_profile}',
-                                f'Response Profile: {response_profile}'
+                                f'SMB Profile: {smb_profile}'
                             ]
                         }
                     else:

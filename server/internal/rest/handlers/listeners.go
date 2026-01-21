@@ -228,6 +228,7 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		GetProfile:            listener.GetProfile,
 		PostProfile:           listener.PostProfile,
 		ServerResponseProfile: listener.ServerResponseProfile,
+		SMBProfile:            listener.SMBProfile,
 	}
 
 	// Broadcast listener creation via SSE

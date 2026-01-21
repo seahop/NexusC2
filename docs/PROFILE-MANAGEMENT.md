@@ -36,7 +36,7 @@ export NEXUS_API_CERT="../server/certs/api_server.crt"
 
 ---
 
-## Getting the Template
+## Getting the Templates
 
 Download the profile template to start customizing:
 
@@ -44,15 +44,18 @@ Download the profile template to start customizing:
 ./nexus-api.py profiles template -o my-profiles.toml
 ```
 
-The template is also available at:
-- `server/docker/templates/listener_template.toml`
-- `server/docker/templates/listener_test_transforms.toml`
+Templates are available at:
+- **HTTP profiles:** `server/docker/templates/listener_template.toml`
+- **SMB profiles:** `server/docker/templates/smb_profile_template.toml`
+- **Test profiles:** `server/docker/templates/listener_test_transforms.toml`
 
 ---
 
 ## Creating Custom Profiles
 
-Profiles use TOML format with three coordinated profile types:
+### HTTP Profiles
+
+HTTP profiles use TOML format with three coordinated profile types:
 
 ```toml
 # GET Profile - How agents poll for commands
@@ -98,6 +101,28 @@ type = "base64"
 
 For complete examples, see [Profile Examples](/docs/profile-examples/).
 
+### SMB Profiles
+
+SMB profiles define named pipe traffic obfuscation for lateral movement:
+
+```toml
+# SMB Profile - Named pipe traffic transforms
+[[smb_link.profiles]]
+name = "custom-smb"
+[smb_link.profiles.data]
+output = "body"
+[[smb_link.profiles.data.transforms]]
+type = "gzip"
+[[smb_link.profiles.data.transforms]]
+type = "xor"
+value = "my_custom_key"    # Auto-replaced with per-build unique key
+[[smb_link.profiles.data.transforms]]
+type = "prepend"
+value = "\u0005\u0000\u0000\u0003"    # DCE/RPC header mimicry
+```
+
+For SMB profile examples mimicking Windows services, see [SMB Transforms](/docs/smb-transforms/).
+
 ---
 
 ## Uploading Profiles
@@ -105,13 +130,17 @@ For complete examples, see [Profile Examples](/docs/profile-examples/).
 ### Via nexus-api.py
 
 ```bash
+# Upload HTTP profiles
 ./nexus-api.py profiles upload my-profiles.toml
+
+# Upload SMB profiles
+./nexus-api.py profiles upload server/docker/templates/smb_profile_template.toml
 ```
 
 **Output (success):**
 ```
 Status: success
-Message: Successfully added 3 profile(s)
+Message: Successfully added 4 profile(s)
 
 GET profiles added:
   + custom-get
@@ -121,6 +150,9 @@ POST profiles added:
 
 Server Response profiles added:
   + custom-response
+
+SMB profiles added:
+  + custom-smb
 ```
 
 **Output (partial success with errors):**
@@ -130,6 +162,9 @@ Message: Some profiles added with errors
 
 GET profiles added:
   + custom-get
+
+SMB profiles added:
+  + custom-smb
 
 Errors:
   ! POST profile 'custom-post': path is required
@@ -153,11 +188,13 @@ Profiles are validated before being added:
 | GET | `name`, `path` |
 | POST | `name`, `path` |
 | Server Response | `name` |
+| SMB | `name` |
 
 Additional validations:
 - Duplicate names are rejected
 - Invalid transform types are rejected
-- Params must have `name`, `location`, and `type`
+- HTTP params must have `name`, `location`, and `type`
+- SMB transforms must use valid types: `base64`, `base64url`, `hex`, `gzip`, `netbios`, `xor`, `prepend`, `append`, `random_prepend`, `random_append`
 
 ---
 
@@ -181,21 +218,41 @@ New profiles are immediately available for:
 
 ### List Profiles
 
-**List all profiles:**
+**List all profiles (HTTP and SMB):**
 ```bash
 ./nexus-api.py profiles list
 ```
 
-**List specific profile types:**
+**List specific HTTP profile types:**
 ```bash
 ./nexus-api.py profiles list-get
 ./nexus-api.py profiles list-post
 ./nexus-api.py profiles list-response
 ```
 
-**List profile names only:**
+**List profile names only (includes SMB):**
 ```bash
 ./nexus-api.py profiles names
+```
+
+**Example output:**
+```
+GET Profiles:
+  - default-get
+  - microsoft-graph-get
+
+POST Profiles:
+  - default-post
+  - microsoft-graph-post
+
+Server Response Profiles:
+  - default-response
+  - microsoft-graph-response
+
+SMB Profiles:
+  - default-smb
+  - spoolss-profile
+  - srvsvc-profile
 ```
 
 ### Get Profile Details
@@ -220,14 +277,24 @@ New profiles are immediately available for:
 
 After uploading profiles, bind them to a listener:
 
+**HTTPS Listener with HTTP Profiles:**
 ```bash
 ./nexus-api.py listeners create \
-  -n my-listener \
+  -n my-https-listener \
   -P HTTPS \
   -p 443 \
   --get-profile custom-get \
   --post-profile custom-post \
   --response-profile custom-response
+```
+
+**SMB Listener with SMB Profile:**
+```bash
+./nexus-api.py listeners create \
+  -n my-smb-listener \
+  -P SMB \
+  --pipe-name spoolss \
+  --smb-profile spoolss-profile
 ```
 
 ---
@@ -259,6 +326,7 @@ For complete API documentation, see the script help:
 
 ## Related Documentation
 
-- [Malleable Profiles](/docs/malleable-profiles/) - Profile structure and transforms
-- [Profile Examples](/docs/profile-examples/) - Complete profile examples
+- [Malleable Profiles](/docs/malleable-profiles/) - HTTP profile structure and transforms
+- [SMB Transforms](/docs/smb-transforms/) - SMB profile structure and Windows pipe mimicry
+- [Profile Examples](/docs/profile-examples/) - Complete HTTP profile examples
 - [API Documentation](/docs/api/) - REST API reference

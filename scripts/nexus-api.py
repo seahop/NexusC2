@@ -331,7 +331,8 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
     def create_listener(self, name: str, protocol: str, port: int = None,
                         ip: str = None, pipe_name: str = None,
                         get_profile: str = None, post_profile: str = None,
-                        server_response_profile: str = None) -> Dict:
+                        server_response_profile: str = None,
+                        smb_profile: str = None) -> Dict:
         """Create a new listener with optional malleable profile bindings."""
         data = {
             "name": name,
@@ -349,6 +350,8 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
             data["post_profile"] = post_profile
         if server_response_profile:
             data["server_response_profile"] = server_response_profile
+        if smb_profile:
+            data["smb_profile"] = smb_profile
 
         response = self._request("POST", "/listeners", data)
         return self._handle_response(response)
@@ -596,24 +599,41 @@ def print_agents_table(agents: list) -> None:
 
 
 def print_listeners_table(listeners: list) -> None:
-    """Print listeners in a table format."""
+    """Print listeners in a table format, with separate sections for HTTP and SMB listeners."""
     if not listeners:
         print("No listeners found.")
         return
 
-    print(f"\n{'Name':<20} {'Protocol':<8} {'Port':<6} {'IP':<15} {'GET Profile':<20} {'POST Profile':<20} {'Response':<20}")
-    print("-" * 115)
+    # Separate HTTP/HTTPS and SMB listeners
+    http_listeners = [l for l in listeners if l.get("protocol", "").upper() in ("HTTP", "HTTPS")]
+    smb_listeners = [l for l in listeners if l.get("protocol", "").upper() in ("SMB", "RPC")]
 
-    for listener in listeners:
-        name = listener.get("name", "")[:18]
-        protocol = listener.get("protocol", "")[:6]
-        port = str(listener.get("port", ""))[:4]
-        ip = listener.get("ip", "")[:13]
-        get_profile = listener.get("get_profile", "default-get")[:18]
-        post_profile = listener.get("post_profile", "default-post")[:18]
-        response_profile = listener.get("server_response_profile", "default-response")[:18]
+    # Print HTTP/HTTPS listeners
+    if http_listeners:
+        print(f"\n{color('HTTP/HTTPS Listeners:', Colors.CYAN)}")
+        print(f"{'Name':<20} {'Protocol':<8} {'Port':<6} {'IP':<15} {'GET Profile':<20} {'POST Profile':<20} {'Response':<20}")
+        print("-" * 115)
+        for listener in http_listeners:
+            name = listener.get("name", "")[:18]
+            protocol = listener.get("protocol", "")[:6]
+            port = str(listener.get("port", ""))[:4]
+            ip = listener.get("ip", "")[:13]
+            get_profile = listener.get("get_profile", "default-get")[:18]
+            post_profile = listener.get("post_profile", "default-post")[:18]
+            response_profile = listener.get("server_response_profile", "default-response")[:18]
+            print(f"{name:<20} {protocol:<8} {port:<6} {ip:<15} {get_profile:<20} {post_profile:<20} {response_profile:<20}")
 
-        print(f"{name:<20} {protocol:<8} {port:<6} {ip:<15} {get_profile:<20} {post_profile:<20} {response_profile:<20}")
+    # Print SMB listeners
+    if smb_listeners:
+        print(f"\n{color('SMB/RPC Listeners:', Colors.CYAN)}")
+        print(f"{'Name':<20} {'Protocol':<8} {'Pipe Name':<20} {'SMB Profile':<30}")
+        print("-" * 80)
+        for listener in smb_listeners:
+            name = listener.get("name", "")[:18]
+            protocol = listener.get("protocol", "")[:6]
+            pipe_name = listener.get("pipe_name", "spoolss")[:18]
+            smb_profile = listener.get("smb_profile", "default-smb")[:28]
+            print(f"{name:<20} {protocol:<8} {pipe_name:<20} {smb_profile:<30}")
 
     print()
 
@@ -753,6 +773,7 @@ Environment Variables:
     listeners_create.add_argument("--get-profile", help="GET malleable profile name")
     listeners_create.add_argument("--post-profile", help="POST malleable profile name")
     listeners_create.add_argument("--response-profile", help="Server response profile name")
+    listeners_create.add_argument("--smb-profile", help="SMB malleable profile name")
 
     listeners_del = listeners_sub.add_parser("delete", help="Delete listener")
     listeners_del.add_argument("name", help="Listener name")
@@ -1008,7 +1029,8 @@ Environment Variables:
                 pipe_name=args.pipe,
                 get_profile=args.get_profile,
                 post_profile=args.post_profile,
-                server_response_profile=args.response_profile
+                server_response_profile=args.response_profile,
+                smb_profile=args.smb_profile
             )
             print(color(data.get("message", "Listener created"), Colors.GREEN))
             print_json(data.get("listener", {}))
@@ -1031,6 +1053,9 @@ Environment Variables:
                     print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
                 print(color("\nServer Response Profiles:", Colors.CYAN))
                 for p in data.get("server_response_profiles", []):
+                    print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
+                print(color("\nSMB Profiles:", Colors.CYAN))
+                for p in data.get("smb_profiles", []):
                     print(f"  - {p.get('name', p) if isinstance(p, dict) else p}")
                 print()
 
@@ -1093,6 +1118,9 @@ Environment Variables:
                 print(color("\nServer Response Profiles:", Colors.CYAN))
                 for name in data.get("server_response_profiles", []):
                     print(f"  - {name}")
+                print(color("\nSMB Profiles:", Colors.CYAN))
+                for name in data.get("smb_profiles", []):
+                    print(f"  - {name}")
                 print()
 
         elif args.action == "template":
@@ -1111,6 +1139,7 @@ Environment Variables:
                 get_added = data.get("get_profiles_added", [])
                 post_added = data.get("post_profiles_added", [])
                 response_added = data.get("server_response_added", [])
+                smb_added = data.get("smb_profiles_added", [])
 
                 if get_added:
                     print(color(f"\nGET profiles added:", Colors.CYAN))
@@ -1123,6 +1152,10 @@ Environment Variables:
                 if response_added:
                     print(color(f"\nServer Response profiles added:", Colors.CYAN))
                     for name in response_added:
+                        print(f"  + {name}")
+                if smb_added:
+                    print(color(f"\nSMB profiles added:", Colors.CYAN))
+                    for name in smb_added:
                         print(f"  + {name}")
 
                 errors = data.get("errors", [])
