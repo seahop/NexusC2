@@ -20,7 +20,7 @@ Build a payload binary. This is a synchronous operation - the response is the bi
   "os": "string",                 // Required: "windows", "linux", "darwin"
   "arch": "string",               // Required: "amd64", "arm64"
   "language": "string",           // Optional: "go" (default), "goproject" (export source)
-  "payload_type": "string",       // Optional: "http" (default), "smb"
+  "payload_type": "string",       // Optional: "http" (default), "smb", "tcp"
   "pipe_name": "string",          // Required if payload_type="smb": Pipe name
   "safety_checks": {              // Optional: All fields optional
     "hostname": "string",         // Must match target hostname

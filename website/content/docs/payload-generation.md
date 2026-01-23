@@ -14,7 +14,8 @@ NexusC2 generates agent payloads using a Docker-based build system. Payloads are
 
 **Payload Types:**
 - HTTP/HTTPS - Standard web-based communication
-- SMB - Named pipe communication for Windows linking
+- SMB - Named pipe communication for Windows lateral movement
+- TCP - Direct TCP socket communication for lateral movement
 
 ---
 
@@ -271,6 +272,17 @@ Named pipe-based payload for lateral movement.
 PIPE_NAME: "spoolss"  # Default mimics print spooler
 ```
 
+### TCP Payload
+
+TCP socket-based payload for lateral movement.
+
+**Communication:**
+- Creates TCP socket listener
+- Parent agent connects and relays commands
+- No direct internet communication
+
+**Use Case:** Internal pivoting as an alternative to SMB when named pipes are unavailable or blocked
+
 ---
 
 ## Build Process
@@ -378,3 +390,4 @@ This data is used during agent registration to validate legitimate payloads.
 | Windows Templates | `server/docker/payloads/Windows/` |
 | macOS Templates | `server/docker/payloads/Darwin/` |
 | SMB Templates | `server/docker/payloads/SMB_Windows/` |
+| TCP Templates | `server/docker/payloads/TCP_Windows/`, `TCP_Linux/`, `TCP_Darwin/` |

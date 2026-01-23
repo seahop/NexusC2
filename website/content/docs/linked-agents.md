@@ -8,13 +8,14 @@ weight: 9
 NexusC2 supports linking agents together via SMB named pipes, enabling command and control through internal networks where direct internet access is not available. An "edge" agent (HTTP/HTTPS) can connect to SMB agents on internal systems, creating a parent-child relationship where commands and results flow through the chain.
 
 **Key Features:**
-- Named pipe connections between agents
+- Named pipe connections between agents (SMB)
+- TCP socket connections for cross-platform lateral movement
 - Multi-hop chain support (HTTPS → SMB → SMB → ...)
 - Automatic routing and secret management
 - Transparent command distribution
 - Parent-child relationship tracking
 
-**Platform:** Windows (SMB agents), any platform (edge agents)
+**Platform:** Windows (SMB agents), Windows/Linux/macOS (TCP agents), any platform (edge agents)
 
 ---
 
