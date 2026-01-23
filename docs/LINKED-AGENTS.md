@@ -11,7 +11,7 @@ NexusC2 supports linking agents together via SMB named pipes, enabling command a
 - Transparent command distribution
 - Parent-child relationship tracking
 
-**Platform:** Windows (SMB agents), any platform (edge agents)
+**Platform:** Windows (SMB agents), any platform (edge agents connecting to SMB/TCP agents)
 
 ---
 
@@ -44,7 +44,7 @@ flowchart LR
 
 ### Overview
 
-Each Windows agent has a LinkManager singleton that tracks connections to child SMB agents:
+Each edge agent (Windows, Linux, or macOS) has a LinkManager singleton that tracks connections to child SMB/TCP agents:
 
 ```go
 type LinkManager struct {
@@ -492,9 +492,13 @@ Linked agents rotate secrets after each exchange, just like direct agents.
 
 | Command | Description |
 |---------|-------------|
-| `link smb <host> [pipe]` | Connect to SMB agent |
-| `unlink <routing_id>` | Disconnect from SMB agent |
+| `link smb <host> [pipe]` | Connect to SMB agent (Windows edge) |
+| `link smb <host> [pipe] <DOMAIN\user> <password>` | Connect to SMB agent (Linux/macOS edge - requires credentials) |
+| `link tcp <host> [port]` | Connect to TCP agent |
+| `unlink <routing_id>` | Disconnect from linked agent |
 | `links` | List active links |
+
+**Note:** Windows edge agents use native SMB and typically authenticate using the current user context. Linux and macOS edge agents use explicit NTLM credentials via the go-smb2 library.
 
 ### Link Output Format
 
@@ -511,7 +515,8 @@ S6|\\192.168.1.50\pipe\spoolss|1|Q
 
 | Limitation | Description |
 |------------|-------------|
-| Windows Only | SMB agents require Windows |
+| SMB Agents | SMB listener agents must run on Windows |
+| Linux/macOS SMB | Requires explicit NTLM credentials for SMB linking |
 | Latency | Multi-hop adds round-trip latency |
 | Single Path | No redundant routes |
 | Queue Size | 100 item outbound buffer |
@@ -523,9 +528,15 @@ S6|\\192.168.1.50\pipe\spoolss|1|Q
 
 | Component | File Path |
 |-----------|-----------|
-| Edge Link Commands | `server/docker/payloads/Windows/action_link.go` |
-| Link Manager | `server/docker/payloads/Windows/link_manager.go` |
-| Pipe Connection | `server/docker/payloads/Windows/link_pipe_windows.go` |
+| Windows Edge Link Commands | `server/docker/payloads/Windows/action_link.go` |
+| Windows Link Manager | `server/docker/payloads/Windows/link_manager.go` |
+| Windows Pipe Connection | `server/docker/payloads/Windows/link_pipe_windows.go` |
+| Linux Edge Link Commands | `server/docker/payloads/Linux/action_link.go` |
+| Linux Link Manager | `server/docker/payloads/Linux/link_manager.go` |
+| Linux Pipe Connection (go-smb2) | `server/docker/payloads/Linux/link_pipe_linux.go` |
+| macOS Edge Link Commands | `server/docker/payloads/Darwin/action_link.go` |
+| macOS Link Manager | `server/docker/payloads/Darwin/link_manager.go` |
+| macOS Pipe Connection (go-smb2) | `server/docker/payloads/Darwin/link_pipe_darwin.go` |
 | SMB Agent Link | `server/docker/payloads/SMB_Windows/action_link.go` |
 | Server Link Handler | `server/internal/agent/listeners/handler_link.go` |
 | Database Schema | `server/docker/db/create-tables.sql` |

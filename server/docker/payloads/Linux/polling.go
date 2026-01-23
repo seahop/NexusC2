@@ -692,14 +692,28 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		}
 
 		// Try to send regardless of IsActive - the TCP agent may be waiting with long timeout
+		// CRITICAL: Use goroutine with timeout because SetWriteDeadline doesn't work with go-smb2
+		// The SMB2 library's file.Write() doesn't respect TCP-level deadlines
 		link.mu.Lock()
 		if link.Conn != nil {
-			if err := writeMessage(link.Conn, data); err == nil {
-				link.LastSeen = time.Now()
-				// Re-activate link if it was marked inactive due to read timeout
-				if !link.IsActive {
-					link.IsActive = true
+			conn := link.Conn // Capture for goroutine
+			done := make(chan error, 1)
+			go func() {
+				done <- writeMessage(conn, data)
+			}()
+
+			select {
+			case err := <-done:
+				if err == nil {
+					link.LastSeen = time.Now()
+					// Re-activate link if it was marked inactive due to read timeout
+					if !link.IsActive {
+						link.IsActive = true
+					}
 				}
+			case <-time.After(10 * time.Second):
+				// Write timed out - SMB pipe is unresponsive
+				link.IsActive = false
 			}
 		}
 		link.mu.Unlock()

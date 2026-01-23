@@ -691,17 +691,21 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 // and wraps them properly for forwarding through the chain
 func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommandItem, error) {
 	if m.linkRouting == nil {
+		log.Printf("[LinkCommands] linkRouting is nil for edge %s", edgeClientID[:8])
 		return nil, nil
 	}
 
 	linkedAgents, err := m.linkRouting.GetLinkedAgents(edgeClientID)
 	if err != nil {
+		log.Printf("[LinkCommands] Error getting linked agents for edge %s: %v", edgeClientID[:8], err)
 		return nil, err
 	}
 
 	if len(linkedAgents) == 0 {
 		return nil, nil
 	}
+
+	log.Printf("[LinkCommands] Found %d linked agents for edge %s", len(linkedAgents), edgeClientID[:8])
 
 	var commands []LinkCommandItem
 	cfg := m.linkRouting.config.GetMalleable()
@@ -725,16 +729,21 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 			WHERE edge_clientID = $1 AND linked_clientID = $2 AND status = 'active'`,
 			edgeClientID, linkedClientID).Scan(&routingID)
 		if err != nil {
+			log.Printf("[LinkCommands] No routing ID found for linked agent %s: %v", linkedClientID[:8], err)
 			continue
 		}
 
+		log.Printf("[LinkCommands] Processing linked agent %s with routing ID %s", linkedClientID[:8], routingID)
+
 		// Skip if this routing ID has a pending handshake response
 		if pendingRoutingIDs[routingID] {
+			log.Printf("[LinkCommands] Skipping %s - pending handshake response", linkedClientID[:8])
 			continue
 		}
 
 		// Get pending commands for this linked agent
 		pendingCmds, hasCommands := m.commandBuffer.GetCommand(linkedClientID)
+		log.Printf("[LinkCommands] Agent %s: hasCommands=%v, cmdCount=%d", linkedClientID[:8], hasCommands, len(pendingCmds))
 
 		// MULTI-HOP: Also get commands and handshake responses for this agent's children
 		// These need to be nested in the payload so the linked agent can forward them
@@ -742,6 +751,7 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 
 		// If no commands and no nested data, skip
 		if (!hasCommands || len(pendingCmds) == 0) && len(nestedHandshakes) == 0 && len(nestedCommands) == 0 {
+			log.Printf("[LinkCommands] Skipping %s - no commands or nested data", linkedClientID[:8])
 			continue
 		}
 

@@ -39,6 +39,7 @@ RUN mkdir -p /preload && cd /preload && \
     echo '    _ "github.com/jcmturner/rpc/v2/mstypes"' >> dummy.go && \
     echo '    _ "github.com/jcmturner/aescts/v2"' >> dummy.go && \
     echo '    _ "github.com/shoenig/test"' >> dummy.go && \
+    echo '    _ "github.com/hirochachacha/go-smb2"' >> dummy.go && \
     echo '    _ "google.golang.org/grpc")' >> dummy.go && \
     echo ')' >> dummy.go && \
     echo 'func main() {}' >> dummy.go && \
@@ -67,7 +68,8 @@ RUN mkdir -p /preload && cd /preload && \
         -require=github.com/hashicorp/go-uuid@v1.0.3 \
         -require=github.com/jcmturner/rpc/v2@v2.0.3 \
         -require=github.com/jcmturner/aescts/v2@v2.0.0 \
-        -require=github.com/shoenig/test@v1.7.0 && \
+        -require=github.com/shoenig/test@v1.7.0 \
+        -require=github.com/hirochachacha/go-smb2@v1.1.0 && \
     go mod tidy
 
 # Ensure the dynamically created go.mod and go.sum are used during runtime

