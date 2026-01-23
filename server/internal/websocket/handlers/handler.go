@@ -310,8 +310,9 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		}
 		if err := json.Unmarshal(message, &listenerPeek); err == nil {
 			protocol := strings.ToUpper(listenerPeek.Data.Protocol)
-			// SMB listeners don't need gRPC - they don't bind to network ports
-			if protocol != "SMB" {
+			// Link-based listeners (SMB/TCP) don't need gRPC - they don't bind to network ports on server
+			isLinkProtocol := protocol == "SMB" || protocol == "TCP"
+			if !isLinkProtocol {
 				if _, err := h.GetAgentClient(); err != nil {
 					return h.handleOfflineMessage(client, msgType, err)
 				}
@@ -335,7 +336,7 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 				}
 			}
 		} else {
-			// If we can't parse, check gRPC anyway (will fail in CreateListener if SMB)
+			// If we can't parse, check gRPC anyway (will fail in CreateListener if link protocol)
 			if _, err := h.GetAgentClient(); err != nil {
 				return h.handleOfflineMessage(client, msgType, err)
 			}

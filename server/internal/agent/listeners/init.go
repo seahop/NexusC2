@@ -19,6 +19,9 @@ type InitData struct {
 	SMBProfile string // SMB profile name for transform configuration
 	SMBXorKey  string // Per-build unique XOR key for SMB transforms
 	HTTPXorKey string // Per-build unique XOR key for HTTP transforms
+	TCPProfile string // TCP profile name for transform configuration
+	TCPXorKey  string // Per-build unique XOR key for TCP transforms
+	TCPPort    string // TCP port for TCP payloads
 }
 
 // StoreInitData stores the initialization data in memory
@@ -43,7 +46,7 @@ func (m *Manager) StoreInitData(data *InitData) error {
 		log.Printf("ClientID: %s", clientID)
 		log.Printf("  ID: %s", initData.ID)
 		log.Printf("  Type: %s", initData.Type)
-		log.Printf("  Protocol: %s", initData.Protocol)
+		log.Printf("  Protocol: %s (determines SMB vs TCP)", initData.Protocol)
 		log.Printf("  OS: %s", initData.OS)
 		log.Printf("  Architecture: %s", initData.Arch)
 		log.Printf("  Secret Length: %d chars", len(initData.Secret))
@@ -56,6 +59,15 @@ func (m *Manager) StoreInitData(data *InitData) error {
 		}
 		if initData.HTTPXorKey != "" {
 			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
+		}
+		if initData.TCPProfile != "" {
+			log.Printf("  TCP Profile: %s", initData.TCPProfile)
+		}
+		if initData.TCPXorKey != "" {
+			log.Printf("  TCP XOR Key: %s... (%d chars)", initData.TCPXorKey[:min(4, len(initData.TCPXorKey))], len(initData.TCPXorKey))
+		}
+		if initData.TCPPort != "" {
+			log.Printf("  TCP Port: %s", initData.TCPPort)
 		}
 	}
 	log.Printf("----------------------------------------------")
@@ -87,7 +99,8 @@ func (m *Manager) RemoveInitData(clientID string) {
 func (m *Manager) loadInitDataFromDB() error {
 	query := `
         SELECT id, clientID, type, secret, os, arch, RSAkey,
-               COALESCE(smb_profile, ''), COALESCE(smb_xor_key, ''), COALESCE(http_xor_key, '')
+               COALESCE(smb_profile, ''), COALESCE(smb_xor_key, ''), COALESCE(http_xor_key, ''),
+               COALESCE(tcp_profile, ''), COALESCE(tcp_xor_key, ''), COALESCE(protocol, '')
         FROM inits
         WHERE id IS NOT NULL`
 
@@ -114,6 +127,9 @@ func (m *Manager) loadInitDataFromDB() error {
 			&data.SMBProfile,
 			&data.SMBXorKey,
 			&data.HTTPXorKey,
+			&data.TCPProfile,
+			&data.TCPXorKey,
+			&data.Protocol,
 		)
 		if err != nil {
 			log.Printf("Error scanning init row: %v", err)
@@ -135,6 +151,7 @@ func (m *Manager) loadInitDataFromDB() error {
 		log.Printf("ClientID: %s", clientID)
 		log.Printf("  ID: %s", initData.ID)
 		log.Printf("  Type: %s", initData.Type)
+		log.Printf("  Protocol: %s", initData.Protocol)
 		log.Printf("  OS: %s", initData.OS)
 		log.Printf("  Architecture: %s", initData.Arch)
 		log.Printf("  Secret Length: %d chars", len(initData.Secret))
@@ -147,6 +164,12 @@ func (m *Manager) loadInitDataFromDB() error {
 		}
 		if initData.HTTPXorKey != "" {
 			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
+		}
+		if initData.TCPProfile != "" {
+			log.Printf("  TCP Profile: %s", initData.TCPProfile)
+		}
+		if initData.TCPXorKey != "" {
+			log.Printf("  TCP XOR Key: %s... (%d chars)", initData.TCPXorKey[:min(4, len(initData.TCPXorKey))], len(initData.TCPXorKey))
 		}
 	}
 	if count > 0 {

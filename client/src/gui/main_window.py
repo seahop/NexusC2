@@ -850,7 +850,8 @@ class C2ClientGUI(QMainWindow):
                     get_profile=listener_details.get('get_profile', ''),
                     post_profile=listener_details.get('post_profile', ''),
                     server_response_profile=listener_details.get('server_response_profile', ''),
-                    smb_profile=listener_details.get('smb_profile', '')
+                    smb_profile=listener_details.get('smb_profile', ''),
+                    tcp_profile=listener_details.get('tcp_profile', '')
                 )
                 self.terminal.log_message(f"New listener added: {listener_details['name']}")
                 # Mark this listener as processed

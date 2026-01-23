@@ -61,6 +61,9 @@ const (
 	E29 = "E29" // Invalid jitter value
 	E30 = "E30" // Session not active
 	E31 = "E31" // Authentication failed
+	E32 = "E32" // Unsupported link protocol (SMB not available on Linux/Darwin)
+	E33 = "E33" // Link failed to connect
+	E34 = "E34" // Unlink failed
 	E37 = "E37" // Network token exec failed
 )
 

@@ -83,6 +83,10 @@ ERROR_CODES = {
     "E29": "Invalid jitter value",
     "E30": "Session not active",
     "E31": "Authentication failed",
+    "E32": "Unsupported link protocol - SMB is only available on Windows. Use 'link tcp' instead",
+    "E33": "Failed to connect to linked agent",
+    "E34": "Failed to unlink agent",
+    "E37": "Network token exec failed",
 
     # Windows-specific errors (E40-E59)
     "E40": "Logon failed - invalid credentials",

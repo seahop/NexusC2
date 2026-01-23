@@ -65,6 +65,7 @@ type AvailableProfiles struct {
 	Post           []string `json:"post"`
 	ServerResponse []string `json:"server_response"`
 	SMB            []string `json:"smb"`
+	TCP            []string `json:"tcp"`
 }
 
 // StateExport represents the complete state export

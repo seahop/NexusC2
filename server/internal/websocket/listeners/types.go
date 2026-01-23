@@ -18,6 +18,7 @@ type Listener struct {
 	PostProfile           string // Bound POST profile name
 	ServerResponseProfile string // Bound server response profile name
 	SMBProfile            string // Bound SMB profile name for transforms
+	TCPProfile            string // Bound TCP profile name for transforms
 	Active                bool
 	Created               time.Time
 }

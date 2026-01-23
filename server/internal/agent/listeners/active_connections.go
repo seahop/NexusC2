@@ -195,6 +195,26 @@ func (acm *ActiveConnectionManager) RemoveConnection(clientID string) error {
 	return nil
 }
 
+// UpdateConnection updates the secrets for an existing connection in memory
+// This is used when a linked agent reconnects after being unlinked - the database
+// is already updated by the caller, but the in-memory cache needs to be refreshed
+func (acm *ActiveConnectionManager) UpdateConnection(conn *ActiveConnection) error {
+	if conn == nil {
+		return fmt.Errorf("connection cannot be nil")
+	}
+	if conn.ClientID == "" {
+		return fmt.Errorf("client ID cannot be empty")
+	}
+
+	acm.mutex.Lock()
+	defer acm.mutex.Unlock()
+
+	// Update or add to memory - we don't care if it exists or not
+	acm.connections[conn.ClientID] = conn
+	log.Printf("Updated connection secrets for client: %s", conn.ClientID)
+	return nil
+}
+
 func (acm *ActiveConnectionManager) GetConnection(clientID string) (*ActiveConnection, error) {
 	if clientID == "" {
 		return nil, fmt.Errorf("client ID cannot be empty")

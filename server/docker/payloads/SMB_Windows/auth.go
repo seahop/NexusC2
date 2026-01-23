@@ -97,16 +97,38 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 	responseChan := make(chan []byte, 1)
 	errChan := make(chan error, 1)
 
+	// Read messages in a loop, skipping ping/pong and waiting for handshake_response
 	go func() {
-		resp, err := conn.ReadMessage()
-		if err != nil {
-			errChan <- err
+		for {
+			resp, err := conn.ReadMessage()
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Check if this is a ping message - if so, respond with pong and continue waiting
+			var msgCheck struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(resp, &msgCheck); err == nil {
+				if msgCheck.Type == "ping" {
+					pongMsg := map[string]string{"type": "pong"}
+					pongJSON, _ := json.Marshal(pongMsg)
+					conn.WriteMessage(pongJSON)
+					continue // Keep waiting for handshake_response
+				}
+			}
+
+			// Not a ping, send to response channel
+			responseChan <- resp
 			return
 		}
-		responseChan <- resp
 	}()
 
 	// Wait for response with timeout
+	// 5-minute timeout to accommodate slow polling from parent HTTPS agent
+	// The response must travel: SMB -> HTTPS -> Server -> HTTPS -> SMB
+	// This can take 2-3 poll cycles of the HTTPS agent
 	select {
 	case response := <-responseChan:
 		// Parse the response
@@ -148,16 +170,12 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 		secret1, secret2 := generateInitialSecrets(initSecret, sysInfo.AgentInfo.Seed)
 		secureComms = NewSecureComms(secret1, secret2)
 
-		// logDebug("Handshake successful: clientID=%s", clientID)
 		return nil
 
 	case err := <-errChan:
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
 
 	case <-time.After(300 * time.Second):
-		// 5-minute timeout to accommodate slow polling from parent HTTPS agent
-		// The response must travel: SMB -> HTTPS -> Server -> HTTPS -> SMB
-		// This can take 2-3 poll cycles of the HTTPS agent
 		return fmt.Errorf(Err(E6))
 	}
 }

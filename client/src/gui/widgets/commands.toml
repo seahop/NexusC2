@@ -1839,17 +1839,19 @@ Mixed Operations:
 [commands.link]
 name = "link"
 fileName = "link"
-os_compatibility = ["windows"]
+os_compatibility = "all"
 description = "Link to a remote agent for lateral movement"
 syntax = """
 link <protocol> <target_host> [options]
-link smb <target_host> [pipe_name]    # Connect via SMB named pipe
+link smb <target_host> [pipe_name]    # Connect via SMB named pipe (Windows only)
+link tcp <target_host> [port]         # Connect via TCP socket (all platforms)
 """
 examples = [
+    "link tcp 192.168.1.100 4444",
+    "link tcp 10.0.0.5 9999",
+    "link tcp linux-server.internal",
     "link smb 192.168.1.50 spoolss",
-    "link smb dc01.corp.local netlogon",
-    "link smb localhost customPipe",
-    "link smb 10.0.0.5"
+    "link smb dc01.corp.local netlogon"
 ]
 help = """
 Connects to a link agent running on a remote host for lateral movement.
@@ -1859,16 +1861,21 @@ This command enables lateral movement by linking an HTTPS "edge" agent to a
 back to the server through the edge agent, creating a chain.
 
 PROTOCOLS:
-  smb    Connect via SMB named pipe (port 445)
-         Future: Additional protocols will be added (tcp, etc.)
+  tcp    Connect via TCP socket - All platforms (Linux, Darwin, Windows)
+  smb    Connect via SMB named pipe (port 445) - Windows only
 
 REQUIREMENTS:
 - The calling agent must be an HTTPS (edge) agent
 - Network access to the target host on the protocol's port
-- Valid credentials for authentication (use token impersonation if needed)
 - A link agent must be running on the target and listening
 
-SMB PIPE NAME:
+TCP PORT:
+- If not specified, defaults to 4444
+- Specify the port that the TCP link agent is listening on
+- TCP works across all platforms (Linux, macOS, Windows)
+- Uses HMAC-based authentication with pre-shared key (embedded at build time)
+
+SMB PIPE NAME (Windows only):
 - If not specified, defaults to 'spoolss'
 - View configured pipe names in the Listeners panel (View > Show Listeners)
 - Common pipes: spoolss, netlogon, lsarpc, samr, browser
@@ -1882,17 +1889,14 @@ ARCHITECTURE:
   encrypted - the edge agent cannot read the link agent's traffic.
 
 AUTHENTICATION:
-  Connections use the current security context. To connect with
+  TCP: Uses HMAC-based mutual authentication with a pre-shared key
+  embedded at build time. No additional credential setup needed.
+
+  SMB (Windows): Uses current security context. To connect with
   different credentials, first impersonate the appropriate token:
 
   token steal 1234 domain-admin        # Steal domain admin token
   link smb dc01.corp.local spoolss     # Connect as domain admin
-
-  Or use make-token/token create for explicit credentials:
-
-  token create CORP\\admin P@ssw0rd admin-tok
-  token use admin-tok
-  link smb fileserver.corp.local spoolss
 
 MULTI-HOP CHAINS:
   Link agents can themselves link to other link agents, creating
@@ -1901,31 +1905,32 @@ MULTI-HOP CHAINS:
   Server <-> EdgeAgent <-> LinkAgent1 <-> LinkAgent2 <-> LinkAgent3
 
 EXAMPLES:
-  # Basic link to an SMB agent
-  link smb 192.168.1.50 spoolss
+  # Link to a TCP agent (works from any platform)
+  link tcp 192.168.1.100 4444
+  link tcp linux-server.internal 9999
+  link tcp 10.0.0.5                     # Uses default port 4444
 
-  # Link using FQDN
+  # Link to an SMB agent (Windows edge agent only)
+  link smb 192.168.1.50 spoolss
   link smb dc01.corp.local netlogon
 
-  # Link with token impersonation for authentication
-  token steal 1752 domain-admin
-  link smb 10.0.0.100 spoolss
-
-  # Link using default pipe name (spoolss)
-  link smb workstation01
-
 TROUBLESHOOTING:
+  TCP:
+  - "Connection refused": TCP agent not running or wrong port
+  - "Connection timeout": Firewall blocking traffic
+  - "Auth failed": PSK mismatch between agents (rebuild with matching PSK)
+
+  SMB:
   - "Access denied": Check credentials/token context
   - "Pipe not found": Verify link agent is running and pipe name matches
   - "Network path not found": Check target host is reachable
-  - "Connection timeout": Firewall may be blocking traffic
 """
 
 [commands.unlink]
 name = "unlink"
 fileName = "unlink"
-os_compatibility = ["windows"]
-description = "Disconnect from a linked SMB agent"
+os_compatibility = "all"
+description = "Disconnect from a linked agent"
 syntax = """
 unlink <agent_id>
 unlink all
@@ -1935,34 +1940,33 @@ examples = [
     "unlink all"
 ]
 help = """
-Disconnects from a linked SMB agent.
+Disconnects from a linked agent (TCP or SMB).
 
 USAGE:
   unlink <agent_id>    Disconnect from a specific linked agent
   unlink all           Disconnect from all linked agents
 
 When an agent is unlinked:
-- The SMB pipe connection is closed
+- The connection (TCP socket or SMB pipe) is closed
 - The link agent stops receiving commands through this edge agent
-- The link agent may attempt to reconnect or remain dormant
+- The link agent may continue running and can be re-linked later
 
-NOTE: This does not kill the remote SMB agent - it only severs
-the connection. The SMB agent will continue running and can be
-re-linked later.
+NOTE: This does not kill the remote agent - it only severs
+the connection.
 
 EXAMPLES:
   # Unlink a specific agent (use agent ID from tree view)
   unlink abc123def456
 
-  # Unlink all connected SMB agents
+  # Unlink all connected agents
   unlink all
 """
 
 [commands.links]
 name = "links"
 fileName = "links"
-os_compatibility = ["windows"]
-description = "List all active SMB link connections from this agent"
+os_compatibility = "all"
+description = "List all active link connections from this agent"
 syntax = """
 links
 """
@@ -1970,22 +1974,24 @@ examples = [
     "links"
 ]
 help = """
-Lists all active SMB pipe connections from this edge agent.
+Lists all active link connections (TCP and SMB) from this edge agent.
 
 OUTPUT COLUMNS:
   ID        Routing ID for the linked agent (use with 'unlink')
-  Target    Pipe path of the connected SMB agent
+  Type      Link type (tcp or smb)
+  Target    Connection target (host:port for TCP, pipe path for SMB)
   Status    Connection status (connected, disconnected)
   Linked    Timestamp when the link was established
 
 USAGE:
-  Use this command to see which SMB agents are currently connected
+  Use this command to see which agents are currently connected
   through this edge agent. The routing ID shown can be used with
   'unlink' to disconnect specific agents.
 
 EXAMPLE OUTPUT:
-  ID    Target                        Status      Linked
-  ---   --------------------------    ----------  -------------------
-  1     \\\\192.168.1.50\\pipe\\spoolss   connected   2024-01-15 10:30:00
-  2     \\\\dc01\\pipe\\netlogon          connected   2024-01-15 10:32:15
+  ID    Type  Target                        Status      Linked
+  ---   ----  --------------------------    ----------  -------------------
+  1     tcp   192.168.1.100:4444            connected   2024-01-15 10:30:00
+  2     tcp   10.0.0.5:9999                 connected   2024-01-15 10:32:15
+  3     smb   \\\\dc01\\pipe\\spoolss         connected   2024-01-15 10:35:00
 """

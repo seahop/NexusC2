@@ -332,7 +332,7 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
                         ip: str = None, pipe_name: str = None,
                         get_profile: str = None, post_profile: str = None,
                         server_response_profile: str = None,
-                        smb_profile: str = None) -> Dict:
+                        smb_profile: str = None, tcp_profile: str = None) -> Dict:
         """Create a new listener with optional malleable profile bindings."""
         data = {
             "name": name,
@@ -352,6 +352,8 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
             data["server_response_profile"] = server_response_profile
         if smb_profile:
             data["smb_profile"] = smb_profile
+        if tcp_profile:
+            data["tcp_profile"] = tcp_profile
 
         response = self._request("POST", "/listeners", data)
         return self._handle_response(response)
@@ -461,7 +463,7 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
     def build_payload(self, listener: str, os_type: str, arch: str,
                       output_file: str = None, language: str = None,
                       payload_type: str = None, pipe_name: str = None,
-                      safety_checks: Dict = None) -> None:
+                      tcp_port: str = None, safety_checks: Dict = None) -> None:
         """Build a payload and save to file."""
         data = {
             "listener": listener,
@@ -475,6 +477,8 @@ export NEXUS_API_REFRESH_TOKEN="{self.refresh_token or ''}"
             data["payload_type"] = payload_type
         if pipe_name:
             data["pipe_name"] = pipe_name
+        if tcp_port:
+            data["tcp_port"] = tcp_port
         if safety_checks:
             data["safety_checks"] = safety_checks
 
@@ -599,14 +603,15 @@ def print_agents_table(agents: list) -> None:
 
 
 def print_listeners_table(listeners: list) -> None:
-    """Print listeners in a table format, with separate sections for HTTP and SMB listeners."""
+    """Print listeners in a table format, with separate sections for HTTP, SMB, and TCP listeners."""
     if not listeners:
         print("No listeners found.")
         return
 
-    # Separate HTTP/HTTPS and SMB listeners
+    # Separate HTTP/HTTPS, SMB, and TCP listeners
     http_listeners = [l for l in listeners if l.get("protocol", "").upper() in ("HTTP", "HTTPS")]
     smb_listeners = [l for l in listeners if l.get("protocol", "").upper() in ("SMB", "RPC")]
+    tcp_listeners = [l for l in listeners if l.get("protocol", "").upper() == "TCP"]
 
     # Print HTTP/HTTPS listeners
     if http_listeners:
@@ -634,6 +639,18 @@ def print_listeners_table(listeners: list) -> None:
             pipe_name = listener.get("pipe_name", "spoolss")[:18]
             smb_profile = listener.get("smb_profile", "default-smb")[:28]
             print(f"{name:<20} {protocol:<8} {pipe_name:<20} {smb_profile:<30}")
+
+    # Print TCP listeners
+    if tcp_listeners:
+        print(f"\n{color('TCP Listeners:', Colors.CYAN)}")
+        print(f"{'Name':<20} {'Protocol':<8} {'Port':<8} {'TCP Profile':<30}")
+        print("-" * 70)
+        for listener in tcp_listeners:
+            name = listener.get("name", "")[:18]
+            protocol = listener.get("protocol", "")[:6]
+            port = str(listener.get("port", "4444"))[:6]
+            tcp_profile = listener.get("tcp_profile", "default-tcp")[:28]
+            print(f"{name:<20} {protocol:<8} {port:<8} {tcp_profile:<30}")
 
     print()
 
@@ -766,7 +783,7 @@ Environment Variables:
     listeners_create = listeners_sub.add_parser("create", help="Create listener")
     listeners_create.add_argument("-n", "--name", required=True, help="Listener name")
     listeners_create.add_argument("-P", "--protocol", required=True,
-                                   choices=["HTTP", "HTTPS", "SMB", "RPC"])
+                                   choices=["HTTP", "HTTPS", "SMB", "RPC", "TCP"])
     listeners_create.add_argument("-p", "--port", type=int, help="Port number")
     listeners_create.add_argument("-i", "--ip", help="Bind IP")
     listeners_create.add_argument("--pipe", help="Pipe name (for SMB)")
@@ -774,6 +791,7 @@ Environment Variables:
     listeners_create.add_argument("--post-profile", help="POST malleable profile name")
     listeners_create.add_argument("--response-profile", help="Server response profile name")
     listeners_create.add_argument("--smb-profile", help="SMB malleable profile name")
+    listeners_create.add_argument("--tcp-profile", help="TCP malleable profile name")
 
     listeners_del = listeners_sub.add_parser("delete", help="Delete listener")
     listeners_del.add_argument("name", help="Listener name")
@@ -818,8 +836,9 @@ Environment Variables:
     payload_build.add_argument("-O", "--output", help="Output filename")
     payload_build.add_argument("--language", choices=["go", "goproject"])
     payload_build.add_argument("--type", dest="payload_type",
-                                choices=["http", "smb"])
+                                choices=["http", "smb", "tcp"])
     payload_build.add_argument("--pipe", help="Pipe name (for SMB payloads)")
+    payload_build.add_argument("--tcp-port", help="TCP port (for TCP payloads)")
     payload_build.add_argument("--hostname", help="Safety check: hostname")
     payload_build.add_argument("--username", help="Safety check: username")
     payload_build.add_argument("--domain", help="Safety check: domain")
@@ -1030,7 +1049,8 @@ Environment Variables:
                 get_profile=args.get_profile,
                 post_profile=args.post_profile,
                 server_response_profile=args.response_profile,
-                smb_profile=args.smb_profile
+                smb_profile=args.smb_profile,
+                tcp_profile=args.tcp_profile
             )
             print(color(data.get("message", "Listener created"), Colors.GREEN))
             print_json(data.get("listener", {}))
@@ -1205,6 +1225,7 @@ Environment Variables:
                 language=args.language,
                 payload_type=args.payload_type,
                 pipe_name=args.pipe,
+                tcp_port=args.tcp_port,
                 safety_checks=safety_checks if safety_checks else None
             )
 

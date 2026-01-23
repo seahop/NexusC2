@@ -37,5 +37,12 @@ const (
 	CmdPersistCron = 102
 )
 
+// Link commands (230-232) - for multi-hop TCP agent chains
+const (
+	CmdLink   = 230
+	CmdUnlink = 231
+	CmdLinks  = 232
+)
+
 // CmdUnknown indicates an unrecognized command (treat as shell)
 const CmdUnknown = -1

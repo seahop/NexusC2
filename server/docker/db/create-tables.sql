@@ -151,6 +151,39 @@ BEGIN
     END IF;
 END $$;
 
+-- Add tcp_profile column to inits, link_routing, and listeners tables for TCP transform support
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'tcp_profile') THEN
+        ALTER TABLE inits ADD COLUMN tcp_profile VARCHAR(100) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'link_routing' AND column_name = 'tcp_profile') THEN
+        ALTER TABLE link_routing ADD COLUMN tcp_profile VARCHAR(100) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'listeners' AND column_name = 'tcp_profile') THEN
+        ALTER TABLE listeners ADD COLUMN tcp_profile VARCHAR(100) DEFAULT '';
+    END IF;
+END $$;
+
+-- Add tcp_xor_key column to inits and link_routing tables for per-agent unique TCP transform keys
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'tcp_xor_key') THEN
+        ALTER TABLE inits ADD COLUMN tcp_xor_key VARCHAR(32) NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'link_routing' AND column_name = 'tcp_xor_key') THEN
+        ALTER TABLE link_routing ADD COLUMN tcp_xor_key VARCHAR(32) NULL;
+    END IF;
+END $$;
+
 -- Add smb_xor_key column to inits and link_routing tables for per-agent unique transform keys
 DO $$
 BEGIN
@@ -171,6 +204,28 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name = 'inits' AND column_name = 'http_xor_key') THEN
         ALTER TABLE inits ADD COLUMN http_xor_key VARCHAR(32) NULL;
+    END IF;
+END $$;
+
+-- Add protocol column to inits table to distinguish SMB vs TCP link payloads
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inits' AND column_name = 'protocol') THEN
+        ALTER TABLE inits ADD COLUMN protocol VARCHAR(10) NULL;
+    END IF;
+END $$;
+
+-- Allow NULL for ip column in listeners table (SMB and TCP listeners don't need IP)
+DO $$
+BEGIN
+    -- Check if the column exists and is NOT NULL, then alter it
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'listeners' AND column_name = 'ip' AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE listeners ALTER COLUMN ip DROP NOT NULL;
+        ALTER TABLE listeners ALTER COLUMN ip SET DEFAULT '';
     END IF;
 END $$;
 

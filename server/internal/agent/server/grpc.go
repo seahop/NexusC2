@@ -642,6 +642,9 @@ func (s *GRPCServer) RegisterInit(ctx context.Context, req *pb.InitRequest) (*pb
 		SMBProfile: req.SmbProfile,
 		SMBXorKey:  req.SmbXorKey,
 		HTTPXorKey: req.HttpXorKey,
+		TCPProfile: req.TcpProfile,
+		TCPXorKey:  req.TcpXorKey,
+		TCPPort:    req.TcpPort,
 	}
 
 	// Add to the manager's in-memory storage

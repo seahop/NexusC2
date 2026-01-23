@@ -45,6 +45,7 @@ var ValidProtocols = map[string]bool{
 	"HTTPS": true,
 	"RPC":   true,
 	"SMB":   true,
+	"TCP":   true,
 }
 
 func NewManager(db *sql.DB) *Manager {
@@ -63,27 +64,32 @@ func NewManager(db *sql.DB) *Manager {
 }
 
 func (m *Manager) Create(name, protocol string, port int, ip string) (*Listener, error) {
-	return m.CreateWithProfiles(name, protocol, port, ip, "", "default-get", "default-post", "default-response", "")
+	return m.CreateWithProfiles(name, protocol, port, ip, "", "default-get", "default-post", "default-response", "", "")
 }
 
 // CreateWithPipe creates a listener with optional pipe name (uses default profiles)
 func (m *Manager) CreateWithPipe(name, protocol string, port int, ip string, pipeName string) (*Listener, error) {
-	return m.CreateWithProfiles(name, protocol, port, ip, pipeName, "default-get", "default-post", "default-response", "")
+	return m.CreateWithProfiles(name, protocol, port, ip, pipeName, "default-get", "default-post", "default-response", "", "")
 }
 
 // CreateWithProfiles creates a listener with optional pipe name and bound profiles
 func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string, pipeName string,
-	getProfile, postProfile, serverResponseProfile, smbProfile string) (*Listener, error) {
-	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s, Profiles: GET=%s POST=%s Response=%s SMB=%s",
-		name, protocol, port, ip, pipeName, getProfile, postProfile, serverResponseProfile, smbProfile)
+	getProfile, postProfile, serverResponseProfile, smbProfile, tcpProfile string) (*Listener, error) {
+	log.Printf("Validating listener creation request - Name: %s, Protocol: %s, Port: %d, IP: %s, PipeName: %s, Profiles: GET=%s POST=%s Response=%s SMB=%s TCP=%s",
+		name, protocol, port, ip, pipeName, getProfile, postProfile, serverResponseProfile, smbProfile, tcpProfile)
 
 	// Normalize protocol to uppercase
 	protocol = strings.ToUpper(protocol)
 
-	// Input validation - use SMB-specific validation if SMB protocol
+	// Input validation - use protocol-specific validation for link protocols
 	if protocol == "SMB" {
 		if err := m.validateSMBInput(name, pipeName); err != nil {
 			log.Printf("SMB Validation failed: %v", err)
+			return nil, err
+		}
+	} else if protocol == "TCP" {
+		if err := m.validateTCPInput(name, port); err != nil {
+			log.Printf("TCP Validation failed: %v", err)
 			return nil, err
 		}
 	} else {
@@ -93,8 +99,14 @@ func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string,
 		}
 	}
 
-	// Resource availability check - skip port check for SMB
+	// Resource availability check - skip port check for SMB, use name-only check for TCP
 	if protocol == "SMB" {
+		if err := m.checkNameAvailability(name); err != nil {
+			log.Printf("Resource check failed: %v", err)
+			return nil, err
+		}
+	} else if protocol == "TCP" {
+		// TCP listeners only need unique name (port is on the agent side)
 		if err := m.checkNameAvailability(name); err != nil {
 			log.Printf("Resource check failed: %v", err)
 			return nil, err
@@ -132,10 +144,12 @@ func (m *Manager) CreateWithProfiles(name, protocol string, port int, ip string,
 		PostProfile:           postProfile,
 		ServerResponseProfile: serverResponseProfile,
 		SMBProfile:            smbProfile,
+		TCPProfile:            tcpProfile,
 		Created:               time.Now(),
 	}
 
-	// For SMB, use port 0 to indicate no port binding
+	// For SMB/TCP, use port 0 to indicate no port binding (for SMB)
+	// TCP stores the port for display purposes but doesn't bind it on server side
 	if protocol == "SMB" {
 		l.Port = 0
 		l.IP = "" // No IP needed for SMB listeners
@@ -299,6 +313,40 @@ func (m *Manager) validateSMBInput(name, pipeName string) error {
 	return nil
 }
 
+// validateTCPInput validates input specifically for TCP listeners
+func (m *Manager) validateTCPInput(name string, port int) error {
+	// Name validation
+	name = strings.TrimSpace(name)
+	if len(name) < MinNameLen {
+		return &ValidationError{
+			Field:   "name",
+			Message: "name is too short",
+		}
+	}
+	if len(name) > MaxNameLen {
+		return &ValidationError{
+			Field:   "name",
+			Message: fmt.Sprintf("name exceeds maximum length of %d characters", MaxNameLen),
+		}
+	}
+	if !isValidName(name) {
+		return &ValidationError{
+			Field:   "name",
+			Message: "name contains invalid characters (use alphanumeric, hyphen, underscore only)",
+		}
+	}
+
+	// Port validation - TCP port for agent to listen on
+	if port < MinPort || port > MaxPort {
+		return &ValidationError{
+			Field:   "port",
+			Message: fmt.Sprintf("port must be between %d and %d", MinPort, MaxPort),
+		}
+	}
+
+	return nil
+}
+
 // isValidPipeName validates SMB pipe names
 func isValidPipeName(pipeName string) bool {
 	// Allow alphanumeric characters, hyphens, and underscores
@@ -337,7 +385,8 @@ func (m *Manager) loadExistingListeners() error {
 		COALESCE(get_profile, 'default-get'),
 		COALESCE(post_profile, 'default-post'),
 		COALESCE(server_response_profile, 'default-response'),
-		COALESCE(smb_profile, '')
+		COALESCE(smb_profile, ''),
+		COALESCE(tcp_profile, '')
 		FROM listeners`)
 	if err != nil {
 		log.Printf("Error querying listeners: %v", err)
@@ -350,7 +399,7 @@ func (m *Manager) loadExistingListeners() error {
 		var l Listener
 		var idStr string
 		if err := rows.Scan(&idStr, &l.Name, &l.Protocol, &l.Port, &l.IP, &l.PipeName,
-			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile); err != nil {
+			&l.GetProfile, &l.PostProfile, &l.ServerResponseProfile, &l.SMBProfile, &l.TCPProfile); err != nil {
 			log.Printf("Error scanning listener row: %v", err)
 			return err
 		}
@@ -564,9 +613,9 @@ func (m *Manager) saveToDB(l *Listener) error {
 		defer tx.Rollback()
 
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile, l.SMBProfile); err != nil {
+            INSERT INTO listeners (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile, tcp_profile)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `, l.ID, l.Name, l.Protocol, l.Port, l.IP, l.PipeName, l.GetProfile, l.PostProfile, l.ServerResponseProfile, l.SMBProfile, l.TCPProfile); err != nil {
 			return fmt.Errorf("failed to insert listener: %v", err)
 		}
 

@@ -696,9 +696,11 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		}
 
 		// Send handshake response to SMB agent
-		message := map[string]string{
+		// Include the lr array for forwarding to grandchildren (SMB chains)
+		message := map[string]interface{}{
 			pollMsgType:    pollTypeHandshakeResp,
 			pollMsgPayload: payload,
+			"lr":           []interface{}{respMap}, // Include for forwarding to grandchildren
 		}
 
 		data, err := json.Marshal(message)
@@ -789,17 +791,20 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				nextInterval = backoffInterval
 			}
 
-			// Collect link data from connected SMB agents (if any)
+			// Collect link data from connected SMB/TCP agents (if any)
 			linkData := GetLinkManager().GetOutboundData()
+			// Collect link handshake data (for new linked agents, sent via "lh" field)
+			linkHandshake := GetLinkManager().GetHandshakeData()
 			// Collect unlink notifications (routing IDs that have been disconnected)
 			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
 
 			// Handle pending results before sleep
 			hasResults := resultManager.HasResults()
 			hasLinkData := len(linkData) > 0
+			hasLinkHandshake := linkHandshake != nil
 			hasUnlinkNotifications := len(unlinkNotifications) > 0
 
-			if hasResults || hasLinkData || hasUnlinkNotifications {
+			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
 				payload := make(map[string]interface{})
 				payload[pollKeyAgentID] = clientID
@@ -809,6 +814,10 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				}
 				if hasLinkData {
 					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+				}
+				if hasLinkHandshake {
+					// Send handshake as single object via "lh" field
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake
 				}
 				if hasUnlinkNotifications {
 					payload[pollKeyLinkUnlink] = unlinkNotifications

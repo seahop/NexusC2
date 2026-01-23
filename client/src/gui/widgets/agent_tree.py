@@ -569,8 +569,8 @@ class AgentTreeWidget(QWidget):
         return self.agent_by_guid.get(guid, None)
 
     def add_listener(self, name, protocol, host, port, pipe_name="",
-                     get_profile="", post_profile="", server_response_profile="", smb_profile=""):
-        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}, Profiles: GET={get_profile} POST={post_profile} Response={server_response_profile} SMB={smb_profile}")
+                     get_profile="", post_profile="", server_response_profile="", smb_profile="", tcp_profile=""):
+        print(f"AgentTreeWidget: Adding listener - Name: {name}, Protocol: {protocol}, Host: {host}, Port: {port}, PipeName: {pipe_name}, Profiles: GET={get_profile} POST={post_profile} Response={server_response_profile} SMB={smb_profile} TCP={tcp_profile}")
 
         # Check for existing listener to avoid duplicates
         for listener in self.listener_data:
@@ -578,20 +578,41 @@ class AgentTreeWidget(QWidget):
                 print(f"AgentTreeWidget: Listener {name} already exists")
                 return
 
-        # For SMB listeners, show pipe name and SMB profile instead of HTTP profiles
-        if protocol.upper() == "SMB":
+        # Handle listeners based on protocol
+        protocol_upper = protocol.upper()
+        if protocol_upper == "SMB":
+            # SMB listeners - show pipe name and SMB profile
             pipe = pipe_name if pipe_name else "spoolss"
             new_listener = {
                 'name': name,
+                'protocol': protocol_upper,
                 'details': [
                     f'Protocol: {protocol}',
                     f'Pipe: {pipe}',
                     f'SMB Profile: {smb_profile or "default-smb"}'
                 ]
             }
-        else:
+        elif protocol_upper == "TCP":
+            # TCP listeners - show port and TCP profile
             new_listener = {
                 'name': name,
+                'protocol': protocol_upper,
+                'port': port,
+                'ip': host,
+                'tcp_profile': tcp_profile or "default-tcp",
+                'details': [
+                    f'Protocol: {protocol}',
+                    f'Port: {port}',
+                    f'TCP Profile: {tcp_profile or "default-tcp"}'
+                ]
+            }
+        else:
+            # HTTP/HTTPS listeners - show host, port, and HTTP profiles
+            new_listener = {
+                'name': name,
+                'protocol': protocol_upper,
+                'host': host,
+                'port': port,
                 'details': [
                     f'Protocol: {protocol}',
                     f'Host: {host}',
@@ -891,7 +912,7 @@ class AgentTreeWidget(QWidget):
                 print("\nAgentTreeWidget: Loading listeners from database")
                 cursor = conn.execute("""
                     SELECT id, name, protocol, port, ip, pipe_name,
-                           get_profile, post_profile, server_response_profile, smb_profile
+                           get_profile, post_profile, server_response_profile, smb_profile, tcp_profile
                     FROM listeners
                     ORDER BY name ASC
                 """)
@@ -906,21 +927,42 @@ class AgentTreeWidget(QWidget):
                     post_profile = row[7] if len(row) > 7 and row[7] else "default-post"
                     response_profile = row[8] if len(row) > 8 and row[8] else "default-response"
                     smb_profile = row[9] if len(row) > 9 and row[9] else "default-smb"
+                    tcp_profile = row[10] if len(row) > 10 and row[10] else "default-tcp"
 
-                    # For SMB listeners, show pipe name and SMB profile instead of HTTP profiles
+                    # Handle listeners based on protocol
                     if protocol == "SMB":
+                        # SMB listeners - show pipe name and SMB profile
                         pipe_name = row[5] if len(row) > 5 and row[5] else "spoolss"
                         listener = {
                             'name': row[1],
+                            'protocol': protocol,
                             'details': [
                                 f'Protocol: {protocol}',
                                 f'Pipe: {pipe_name}',
                                 f'SMB Profile: {smb_profile}'
                             ]
                         }
-                    else:
+                    elif protocol == "TCP":
+                        # TCP listeners - show port and TCP profile
                         listener = {
                             'name': row[1],
+                            'protocol': protocol,
+                            'port': row[3],
+                            'ip': row[4],
+                            'tcp_profile': tcp_profile,
+                            'details': [
+                                f'Protocol: {protocol}',
+                                f'Port: {row[3]}',
+                                f'TCP Profile: {tcp_profile}'
+                            ]
+                        }
+                    else:
+                        # HTTP/HTTPS listeners - show host, port, and HTTP profiles
+                        listener = {
+                            'name': row[1],
+                            'protocol': protocol,
+                            'host': row[4],
+                            'port': row[3],
                             'details': [
                                 f'Protocol: {protocol}',
                                 f'Host: {row[4]}',

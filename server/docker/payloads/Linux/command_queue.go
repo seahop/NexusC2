@@ -91,6 +91,11 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdPersist, wrapCommand(&PersistenceCommand{}))
 	queue.RegisterHandler(CmdPersistCron, wrapCommand(&CronPersistenceCommand{}))
 
+	// Link commands (230-232) - for TCP child agent connections
+	queue.RegisterHandler(CmdLink, wrapCommand(&LinkCommand{}))
+	queue.RegisterHandler(CmdUnlink, wrapCommand(&UnlinkCommand{}))
+	queue.RegisterHandler(CmdLinks, wrapCommand(&LinksCommand{}))
+
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()
 

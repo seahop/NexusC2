@@ -221,6 +221,7 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			Post:           make([]string, 0),
 			ServerResponse: make([]string, 0),
 			SMB:            make([]string, 0),
+			TCP:            make([]string, 0),
 		}
 
 		// Extract GET profile names
@@ -243,9 +244,14 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			profiles.SMB = smbConfig.GetSMBProfileNames()
 		}
 
+		// Extract TCP profile names from TCP config
+		if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+			profiles.TCP = tcpConfig.GetTCPProfileNames()
+		}
+
 		export.AvailableProfiles = profiles
-		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d, SMB=%d",
-			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse), len(profiles.SMB))
+		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d, SMB=%d, TCP=%d",
+			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse), len(profiles.SMB), len(profiles.TCP))
 	}
 
 	// Log summary of exported data
@@ -256,8 +262,8 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	logMessage(LOG_NORMAL, "- Command Outputs: %d", len(export.CommandOutputs))
 	logMessage(LOG_NORMAL, "- Agent Tags: %d agents with tags", len(export.AgentTags))
 	if export.AvailableProfiles != nil {
-		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d, SMB=%d",
-			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse), len(export.AvailableProfiles.SMB))
+		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d, SMB=%d, TCP=%d",
+			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse), len(export.AvailableProfiles.SMB), len(export.AvailableProfiles.TCP))
 	}
 
 	// Commit the transaction

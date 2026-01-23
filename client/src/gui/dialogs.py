@@ -971,9 +971,9 @@ class CreateListenerDialog(QDialog):
         self.name = QLineEdit()
         form_layout.addRow("Name:", self.name)
 
-        # Protocol dropdown - includes SMB
+        # Protocol dropdown - includes SMB and TCP
         self.protocol = QComboBox()
-        self.protocol.addItems(["HTTPS", "HTTP", "SMB"])
+        self.protocol.addItems(["HTTPS", "HTTP", "SMB", "TCP"])
         self.protocol.currentTextChanged.connect(self.on_protocol_changed)
         form_layout.addRow("Protocol:", self.protocol)
 
@@ -1034,6 +1034,14 @@ class CreateListenerDialog(QDialog):
         self.smb_profile_label.setVisible(False)
         self.smb_profile.setVisible(False)
 
+        # TCP Profile dropdown (only shown for TCP protocol)
+        self.tcp_profile = QComboBox()
+        self.tcp_profile_label = QLabel("TCP Profile:")
+        form_layout.addRow(self.tcp_profile_label, self.tcp_profile)
+        # Initially hidden (shown when TCP protocol is selected)
+        self.tcp_profile_label.setVisible(False)
+        self.tcp_profile.setVisible(False)
+
         layout.addLayout(form_layout)
         layout.addStretch()
         self.network_tab.setLayout(layout)
@@ -1041,26 +1049,42 @@ class CreateListenerDialog(QDialog):
     def on_protocol_changed(self, protocol):
         """Show/hide fields based on selected protocol"""
         is_smb = protocol == "SMB"
+        is_tcp = protocol == "TCP"
+        is_http = protocol in ["HTTP", "HTTPS"]
 
-        # Hide port and host for SMB
+        # Show port and host for HTTP/HTTPS and TCP, hide for SMB
         self.port_label.setVisible(not is_smb)
         self.port.setVisible(not is_smb)
         self.host_label.setVisible(not is_smb)
         self.host.setVisible(not is_smb)
 
+        # Set default port based on protocol
+        if is_tcp:
+            self.port.setValue(4444)
+        elif protocol == "HTTPS":
+            self.port.setValue(443)
+        elif protocol == "HTTP":
+            self.port.setValue(80)
+
         # Show pipe name only for SMB
         self.pipe_name_label.setVisible(is_smb)
         self.pipe_name.setVisible(is_smb)
 
-        # Show SMB profile only for SMB, hide HTTP profiles
+        # Show SMB profile only for SMB
         self.smb_profile_label.setVisible(is_smb)
         self.smb_profile.setVisible(is_smb)
-        self.get_profile_label.setVisible(not is_smb)
-        self.get_profile.setVisible(not is_smb)
-        self.post_profile_label.setVisible(not is_smb)
-        self.post_profile.setVisible(not is_smb)
-        self.response_profile_label.setVisible(not is_smb)
-        self.response_profile.setVisible(not is_smb)
+
+        # Show TCP profile only for TCP
+        self.tcp_profile_label.setVisible(is_tcp)
+        self.tcp_profile.setVisible(is_tcp)
+
+        # Show HTTP profiles only for HTTP/HTTPS
+        self.get_profile_label.setVisible(is_http)
+        self.get_profile.setVisible(is_http)
+        self.post_profile_label.setVisible(is_http)
+        self.post_profile.setVisible(is_http)
+        self.response_profile_label.setVisible(is_http)
+        self.response_profile.setVisible(is_http)
 
     def populate_profiles(self):
         """Populate profile dropdowns from database"""
@@ -1093,6 +1117,11 @@ class CreateListenerDialog(QDialog):
         self.smb_profile.clear()
         for name in profiles.get("smb", ["default-smb"]):
             self.smb_profile.addItem(name)
+
+        # Populate TCP profile dropdown
+        self.tcp_profile.clear()
+        for name in profiles.get("tcp", ["default-tcp"]):
+            self.tcp_profile.addItem(name)
 
     #def setup_smb_tab(self):
     #    """Setup SMB listener configuration - SIMPLIFIED"""
@@ -1162,6 +1191,19 @@ class CreateListenerDialog(QDialog):
                 }
             }
             print(f"CreateListenerDialog: Creating SMB listener with pipe: {pipe_name}")
+        elif protocol == "TCP":
+            # TCP listener - uses port like HTTP/HTTPS but with TCP profile
+            listener_data = {
+                "type": "create_listener",
+                "data": {
+                    "name": self.listener_name,
+                    "protocol": "TCP",
+                    "port": self.port.value(),
+                    "host": self.host.text(),
+                    "tcp_profile": self.tcp_profile.currentText()
+                }
+            }
+            print(f"CreateListenerDialog: Creating TCP listener on port: {self.port.value()}")
         else:
             # Network listener (HTTP/HTTPS)
             listener_data = {
@@ -1472,32 +1514,35 @@ class CreatePayloadDialog(QDialog):
     def setup_basic_tab(self):
         layout = QVBoxLayout()
         form_layout = QFormLayout()
-        
+
         # Listener dropdown
         self.listener = QComboBox()
         self.populate_listeners()
         self.listener.currentTextChanged.connect(self.on_listener_changed)
         form_layout.addRow("Listener:", self.listener)
 
-        # Track if current listener is SMB (for payload generation)
-        self.is_smb_listener = False
+        # Track current listener protocol (determined from listener selection)
+        # HTTP/HTTPS = direct HTTPS agent, SMB = SMB agent, TCP = TCP agent
+        self.listener_protocol = "HTTPS"
+        self.listener_port = ""
+        self.listener_ip = ""
 
         # Language dropdown
         self.language = QComboBox()
         self.language.addItem("Go")
         self.language.addItem("GoProject")
         form_layout.addRow("Language:", self.language)
-        
+
         # OS dropdown
         self.os = QComboBox()
         self.os.addItems(["Linux", "Darwin", "Windows"])
         form_layout.addRow("Operating System:", self.os)
-        
+
         # Architecture dropdown
         self.arch = QComboBox()
         self.arch.addItems(["amd64", "arm64"])
         form_layout.addRow("Architecture:", self.arch)
-        
+
         # Output path
         path_layout = QHBoxLayout()
         self.output_path = QLineEdit()
@@ -1506,7 +1551,7 @@ class CreatePayloadDialog(QDialog):
         path_layout.addWidget(self.output_path)
         path_layout.addWidget(self.browse_button)
         form_layout.addRow("Output Path:", path_layout)
-        
+
         layout.addLayout(form_layout)
         layout.addStretch()
         self.basic_tab.setLayout(layout)
@@ -1634,32 +1679,43 @@ class CreatePayloadDialog(QDialog):
         self.safety_tab.setLayout(layout)
 
     def on_listener_changed(self, listener_name):
-        """Handle listener selection changes"""
-        # Check if this is an SMB listener
-        is_smb_listener = False
+        """Handle listener selection changes.
+
+        The listener protocol determines the payload type:
+        - HTTP/HTTPS listeners -> Direct HTTPS agent
+        - SMB listeners -> SMB agent (Windows only, connects via parent)
+        - TCP listeners -> TCP agent (all platforms, connects via parent)
+        """
+        self.listener_protocol = "HTTPS"  # Default
+        self.listener_port = ""
+        self.listener_ip = ""
 
         if self.agent_tree:
-            # Get listener data to check protocol
+            # Get listener data to check protocol and extract connection info
             listeners = self.agent_tree.listener_data
             for listener in listeners:
                 if listener.get('name') == listener_name:
-                    # Protocol is stored in details array as "Protocol: SMB" etc.
-                    for detail in listener.get('details', []):
-                        if detail.startswith('Protocol:'):
-                            protocol = detail.split(':', 1)[1].strip()
-                            is_smb_listener = (protocol == 'SMB')
-                            break
+                    # Get protocol from listener data
+                    protocol = listener.get('protocol', '')
+                    if not protocol:
+                        # Fallback: parse from details array
+                        for detail in listener.get('details', []):
+                            if detail.startswith('Protocol:'):
+                                protocol = detail.split(':', 1)[1].strip()
+                                break
+
+                    self.listener_protocol = protocol.upper() if protocol else "HTTPS"
+                    self.listener_port = str(listener.get('port', ''))
+                    self.listener_ip = listener.get('ip', listener.get('host', ''))
                     break
 
-        # Update SMB listener state and OS options
-        self.is_smb_listener = is_smb_listener
-        if is_smb_listener:
-            # SMB only supports Windows - restrict OS dropdown
-            self.os.clear()
+        # Update OS options based on listener protocol
+        self.os.clear()
+        if self.listener_protocol == "SMB":
+            # SMB only supports Windows
             self.os.addItem("Windows")
         else:
-            # Restore all OS options for non-SMB listeners
-            self.os.clear()
+            # HTTP/HTTPS and TCP support all platforms
             self.os.addItems(["Linux", "Darwin", "Windows"])
 
     def populate_listeners(self):
@@ -1723,15 +1779,24 @@ class CreatePayloadDialog(QDialog):
                 "safety_checks": safety_checks
             }
         }
-        
-        # Add connection_type for SMB listeners
-        if self.is_smb_listener:
+
+        # Set connection_type based on listener protocol
+        # HTTP/HTTPS listeners -> direct HTTPS agents
+        # SMB listeners -> SMB agents (lateral movement)
+        # TCP listeners -> TCP agents (lateral movement)
+        if self.listener_protocol == "SMB":
             payload_data["data"]["connection_type"] = "smb"
-        
+        elif self.listener_protocol == "TCP":
+            payload_data["data"]["connection_type"] = "tcp"
+            # TCP port comes from listener data
+            if self.listener_port:
+                payload_data["data"]["tcp_port"] = self.listener_port
+        # HTTP/HTTPS listeners don't need connection_type (direct agent)
+
         message = json.dumps(payload_data)
         print(f"CreatePayloadDialog: Sending payload creation message")
-        if payload_data["data"].get("connection_type") == "smb":
-            print(f"CreatePayloadDialog: Creating SMB beacon for listener: {self.listener.currentText()}")
+        if payload_data["data"].get("connection_type") in ("smb", "tcp"):
+            print(f"CreatePayloadDialog: Creating {payload_data['data']['connection_type'].upper()} beacon for listener: {self.listener.currentText()}")
         
         # Send the message
         asyncio.run_coroutine_threadsafe(

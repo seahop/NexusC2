@@ -27,6 +27,7 @@ type ListenerMessage struct {
 		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
 		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
 		SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
+		TCPProfile            string `json:"tcp_profile,omitempty"`             // Bound TCP profile name for transforms
 	} `json:"data"`
 }
 
@@ -44,6 +45,7 @@ type ListenerResponse struct {
 		PostProfile           string `json:"post_profile,omitempty"`            // Bound POST profile name
 		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
 		SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
+		TCPProfile            string `json:"tcp_profile,omitempty"`             // Bound TCP profile name for transforms
 	} `json:"data,omitempty"`
 }
 

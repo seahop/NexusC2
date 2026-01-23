@@ -31,6 +31,7 @@ type ProfileUploadResponse struct {
 		PostProfiles           []string `json:"post_profiles,omitempty"`
 		ServerResponseProfiles []string `json:"server_response_profiles,omitempty"`
 		SMBProfiles            []string `json:"smb_profiles,omitempty"`
+		TCPProfiles            []string `json:"tcp_profiles,omitempty"`
 		Errors                 []string `json:"errors,omitempty"`
 	} `json:"data"`
 }
@@ -58,7 +59,7 @@ func (h *WSHandler) handleUploadProfiles(client *hub.Client, message []byte) err
 	}
 
 	// Count successful additions
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles)
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles)
 
 	// Build response
 	response := ProfileUploadResponse{
@@ -69,12 +70,13 @@ func (h *WSHandler) handleUploadProfiles(client *hub.Client, message []byte) err
 	response.Data.PostProfiles = result.PostProfiles
 	response.Data.ServerResponseProfiles = result.ServerResponseProfiles
 	response.Data.SMBProfiles = result.SMBProfiles
+	response.Data.TCPProfiles = result.TCPProfiles
 	response.Data.Errors = result.Errors
 
 	if totalAdded > 0 {
 		response.Data.Message = fmt.Sprintf("Successfully added %d profile(s)", totalAdded)
-		logMessage(LOG_MINIMAL, "Profile upload: added %d GET, %d POST, %d Response, %d SMB profiles",
-			len(result.GetProfiles), len(result.PostProfiles), len(result.ServerResponseProfiles), len(result.SMBProfiles))
+		logMessage(LOG_MINIMAL, "Profile upload: added %d GET, %d POST, %d Response, %d SMB, %d TCP profiles",
+			len(result.GetProfiles), len(result.PostProfiles), len(result.ServerResponseProfiles), len(result.SMBProfiles), len(result.TCPProfiles))
 	} else if len(result.Errors) > 0 {
 		response.Data.Message = "No profiles were added due to validation errors"
 	} else {
@@ -126,6 +128,7 @@ func (h *WSHandler) broadcastProfileUpdate() {
 			PostProfiles           []string `json:"post_profiles"`
 			ServerResponseProfiles []string `json:"server_response_profiles"`
 			SMBProfiles            []string `json:"smb_profiles"`
+			TCPProfiles            []string `json:"tcp_profiles"`
 		} `json:"data"`
 	}{
 		Type: "profiles_updated",
@@ -138,6 +141,11 @@ func (h *WSHandler) broadcastProfileUpdate() {
 	// Get SMB profile names from SMB config
 	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
 		update.Data.SMBProfiles = smbConfig.GetSMBProfileNames()
+	}
+
+	// Get TCP profile names from TCP config
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		update.Data.TCPProfiles = tcpConfig.GetTCPProfileNames()
 	}
 
 	if updateJSON, err := json.Marshal(update); err == nil {
@@ -185,7 +193,7 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 		return
 	}
 
-	// Serialize all profiles (HTTP and SMB)
+	// Serialize all profiles (HTTP, SMB, and TCP)
 	profileData := map[string]interface{}{
 		"get_profiles":             h.agentConfig.HTTPProfiles.Get,
 		"post_profiles":            h.agentConfig.HTTPProfiles.Post,
@@ -195,6 +203,11 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 	// Include SMB profiles if available
 	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
 		profileData["smb_profiles"] = smbConfig.GetSMBProfiles()
+	}
+
+	// Include TCP profiles if available
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		profileData["tcp_profiles"] = tcpConfig.GetTCPProfiles()
 	}
 
 	jsonData, err := json.Marshal(profileData)
@@ -230,14 +243,19 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 
 	if resp.StatusCode == http.StatusOK {
 		smbCount := 0
+		tcpCount := 0
 		if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
 			smbCount = len(smbConfig.GetSMBProfiles())
 		}
-		logMessage(LOG_MINIMAL, "Successfully synced profiles to REST API (%d GET, %d POST, %d Response, %d SMB)",
+		if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+			tcpCount = len(tcpConfig.GetTCPProfiles())
+		}
+		logMessage(LOG_MINIMAL, "Successfully synced profiles to REST API (%d GET, %d POST, %d Response, %d SMB, %d TCP)",
 			len(h.agentConfig.HTTPProfiles.Get),
 			len(h.agentConfig.HTTPProfiles.Post),
 			len(h.agentConfig.HTTPProfiles.ServerResponse),
-			smbCount)
+			smbCount,
+			tcpCount)
 	} else {
 		logMessage(LOG_NORMAL, "REST API profile sync returned status: %d", resp.StatusCode)
 	}
@@ -256,6 +274,7 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 			PostProfiles           []string `json:"post_profiles"`
 			ServerResponseProfiles []string `json:"server_response_profiles"`
 			SMBProfiles            []string `json:"smb_profiles"`
+			TCPProfiles            []string `json:"tcp_profiles"`
 		} `json:"data"`
 	}{
 		Type: "profiles_list",
@@ -268,6 +287,11 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 	// Get SMB profile names from SMB config
 	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
 		response.Data.SMBProfiles = smbConfig.GetSMBProfileNames()
+	}
+
+	// Get TCP profile names from TCP config
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		response.Data.TCPProfiles = tcpConfig.GetTCPProfileNames()
 	}
 
 	responseJSON, err := json.Marshal(response)

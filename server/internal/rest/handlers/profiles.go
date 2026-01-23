@@ -41,6 +41,11 @@ func (h *ProfileHandler) ListAllProfiles(c *gin.Context) {
 		response["smb_profiles"] = smbConfig.GetSMBProfiles()
 	}
 
+	// Include TCP profiles if available
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		response["tcp_profiles"] = tcpConfig.GetTCPProfiles()
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -112,6 +117,11 @@ func (h *ProfileHandler) GetProfileNames(c *gin.Context) {
 		response["smb_profiles"] = smbConfig.GetSMBProfileNames()
 	}
 
+	// Include TCP profile names if available
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		response["tcp_profiles"] = tcpConfig.GetTCPProfileNames()
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -164,8 +174,8 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		return
 	}
 
-	// Determine response status - include SMB profiles in count
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles)
+	// Determine response status - include SMB and TCP profiles in count
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles)
 	if totalAdded == 0 && len(result.Errors) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -208,6 +218,15 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		log.Printf("[REST] Current SMB profiles in config: %v", smbConfig.GetSMBProfileNames())
 	}
 
+	// Log TCP profile additions and current state
+	if len(result.TCPProfiles) > 0 {
+		log.Printf("[REST] Added %d TCP profiles: %v", len(result.TCPProfiles), result.TCPProfiles)
+	}
+	// Debug: log current TCP profile count
+	if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+		log.Printf("[REST] Current TCP profiles in config: %v", tcpConfig.GetTCPProfileNames())
+	}
+
 	message := fmt.Sprintf("Successfully added %d profile(s)", totalAdded)
 	if totalAdded == 0 {
 		message = "No new profiles added (may already exist)"
@@ -220,6 +239,7 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		"post_profiles_added":      result.PostProfiles,
 		"server_response_added":    result.ServerResponseProfiles,
 		"smb_profiles_added":       result.SMBProfiles,
+		"tcp_profiles_added":       result.TCPProfiles,
 		"errors":                   result.Errors,
 	})
 }
@@ -281,6 +301,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 		PostProfiles           []config.PostProfile           `json:"post_profiles"`
 		ServerResponseProfiles []config.ServerResponseProfile `json:"server_response_profiles"`
 		SMBProfiles            []config.SMBProfile            `json:"smb_profiles"`
+		TCPProfiles            []config.TCPProfile            `json:"tcp_profiles"`
 	}
 
 	if err := c.ShouldBindJSON(&profileData); err != nil {
@@ -304,6 +325,17 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 		}
 	}
 
+	// Update TCP profiles in TCPLinkConfig singleton
+	tcpCount := 0
+	if len(profileData.TCPProfiles) > 0 {
+		if tcpConfig, err := config.GetTCPLinkConfig(); err == nil && tcpConfig != nil {
+			// Replace all TCP profiles with the synced ones
+			tcpConfig.ReplaceTCPProfiles(profileData.TCPProfiles)
+			tcpCount = len(profileData.TCPProfiles)
+			log.Printf("[REST] Synced %d TCP profiles from WebSocket service", tcpCount)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Profiles synced successfully",
@@ -312,6 +344,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 			"post":            len(profileData.PostProfiles),
 			"server_response": len(profileData.ServerResponseProfiles),
 			"smb":             smbCount,
+			"tcp":             tcpCount,
 		},
 	})
 }

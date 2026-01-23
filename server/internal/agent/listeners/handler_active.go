@@ -165,6 +165,12 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 
 	// Check for link handshake (new SMB agent connecting)
 	// Field name is configurable via smb_link.malleable.link_handshake_field (default: "lh")
+	// Debug: log all fields present in decryptedData
+	var fields []string
+	for k := range decryptedData {
+		fields = append(fields, k)
+	}
+	log.Printf("[Active Connection] Received POST with fields: %v from edge %s", fields, conn.ClientID)
 	if linkHandshake, ok := decryptedData["lh"].(map[string]interface{}); ok {
 		log.Printf("[Active Connection] Processing link handshake from edge %s", conn.ClientID)
 		response, err := m.processLinkHandshake(ctx, conn.ClientID, linkHandshake)

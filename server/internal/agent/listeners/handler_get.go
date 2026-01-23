@@ -263,6 +263,21 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 	// XOR encrypt the entire JSON
 	encryptedData := xorEncryptBytes(jsonData, xorKey)
 
+	// Debug: Log profile state
+	if responseProfile == nil {
+		log.Printf("[GetRequest] DEBUG: responseProfile is nil")
+	} else {
+		log.Printf("[GetRequest] DEBUG: responseProfile=%s, Data=%v, TransformCount=%d",
+			responseProfile.Name,
+			responseProfile.Data != nil,
+			func() int {
+				if responseProfile.Data != nil {
+					return len(responseProfile.Data.Transforms)
+				}
+				return 0
+			}())
+	}
+
 	// Check if we should apply response transforms
 	if responseProfile != nil && responseProfile.Data != nil && len(responseProfile.Data.Transforms) > 0 {
 		// Apply transforms to the encrypted data

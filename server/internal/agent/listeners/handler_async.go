@@ -316,6 +316,7 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 		AgentID             string                   `json:"agent_id"`
 		Results             []map[string]interface{} `json:"results"`
 		LinkData            []interface{}            `json:"ld"` // Link data from connected SMB agents
+		LinkHandshake       map[string]interface{}   `json:"lh"` // Link handshake from new SMB/TCP agent
 		UnlinkNotifications []interface{}            `json:"lu"` // Unlink notifications (routing IDs)
 	}
 
@@ -342,6 +343,19 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 			} else {
 				tx.Commit()
 			}
+		}
+	}
+
+	// Process link handshake if present (new SMB/TCP agent connecting)
+	if decryptedData.LinkHandshake != nil && len(decryptedData.LinkHandshake) > 0 {
+		log.Printf("[Async] Processing link handshake from edge agent %s", conn.ClientID)
+		ctx := context.Background()
+		response, err := ah.Manager.processLinkHandshake(ctx, conn.ClientID, decryptedData.LinkHandshake)
+		if err != nil {
+			log.Printf("[Async] Link handshake failed: %v", err)
+		} else if response != nil {
+			ah.Manager.storeLinkHandshakeResponse(conn.ClientID, response)
+			log.Printf("[Async] Link handshake processed, response queued for edge agent %s", conn.ClientID)
 		}
 	}
 

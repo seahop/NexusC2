@@ -56,6 +56,12 @@ class StateDatabase:
             conn.execute("ALTER TABLE listeners ADD COLUMN smb_profile TEXT DEFAULT ''")
             print("StateDatabase: Migration complete - smb_profile column added")
 
+        # Migration: Add tcp_profile column to listeners if missing
+        if 'tcp_profile' not in existing_columns:
+            print("StateDatabase: Migrating listeners table - adding tcp_profile column")
+            conn.execute("ALTER TABLE listeners ADD COLUMN tcp_profile TEXT DEFAULT ''")
+            print("StateDatabase: Migration complete - tcp_profile column added")
+
         # Get existing columns for connections table
         cursor = conn.execute("PRAGMA table_info(connections)")
         conn_columns = {row[1] for row in cursor.fetchall()}
@@ -119,7 +125,9 @@ class StateDatabase:
                         pipe_name TEXT DEFAULT '',
                         get_profile TEXT DEFAULT 'default-get',
                         post_profile TEXT DEFAULT 'default-post',
-                        server_response_profile TEXT DEFAULT 'default-response'
+                        server_response_profile TEXT DEFAULT 'default-response',
+                        smb_profile TEXT DEFAULT '',
+                        tcp_profile TEXT DEFAULT ''
                     );
                     CREATE TABLE IF NOT EXISTS agent_tags (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,14 +216,15 @@ class StateDatabase:
                             print("Upserting listeners in database")
                             conn.executemany(
                                 """INSERT OR REPLACE INTO listeners
-                                   (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile)
-                                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                                   (id, name, protocol, port, ip, pipe_name, get_profile, post_profile, server_response_profile, smb_profile, tcp_profile)
+                                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                                 [(l["id"], l["name"], l["protocol"], l["port"], l["ip"],
                                   l.get("pipe_name", ""),
                                   l.get("get_profile", "default-get"),
                                   l.get("post_profile", "default-post"),
                                   l.get("server_response_profile", "default-response"),
-                                  l.get("smb_profile", ""))
+                                  l.get("smb_profile", ""),
+                                  l.get("tcp_profile", ""))
                                 for l in state_data["listeners"] if l is not None]
                             )
                             print(f"Upserted {len(state_data['listeners'])} listeners")
@@ -345,6 +354,10 @@ class StateDatabase:
                             # Store SMB profiles
                             for name in profiles.get("smb", []):
                                 profile_rows.append(("smb", name))
+
+                            # Store TCP profiles
+                            for name in profiles.get("tcp", []):
+                                profile_rows.append(("tcp", name))
 
                             if profile_rows:
                                 conn.executemany(
@@ -488,7 +501,8 @@ class StateDatabase:
                     "get": [],
                     "post": [],
                     "server_response": [],
-                    "smb": []
+                    "smb": [],
+                    "tcp": []
                 }
 
                 for row in rows:
@@ -506,6 +520,8 @@ class StateDatabase:
                     profiles["server_response"] = ["default-response"]
                 if not profiles["smb"]:
                     profiles["smb"] = ["default-smb"]
+                if not profiles["tcp"]:
+                    profiles["tcp"] = ["default-tcp"]
 
                 return profiles
 
@@ -529,6 +545,7 @@ class StateDatabase:
                     response_profiles = profile_data.get("server_response_profiles",
                                                          profile_data.get("server_response", []))
                     smb_profiles = profile_data.get("smb_profiles", profile_data.get("smb", []))
+                    tcp_profiles = profile_data.get("tcp_profiles", profile_data.get("tcp", []))
 
                     # Store GET profiles
                     for name in get_profiles:
@@ -546,6 +563,10 @@ class StateDatabase:
                     for name in smb_profiles:
                         profile_rows.append(("smb", name))
 
+                    # Store TCP profiles
+                    for name in tcp_profiles:
+                        profile_rows.append(("tcp", name))
+
                     if profile_rows:
                         conn.executemany(
                             """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
@@ -554,7 +575,7 @@ class StateDatabase:
                         )
 
                     conn.commit()
-                    print(f"Updated profiles: {len(get_profiles)} GET, {len(post_profiles)} POST, {len(response_profiles)} Response, {len(smb_profiles)} SMB")
+                    print(f"Updated profiles: {len(get_profiles)} GET, {len(post_profiles)} POST, {len(response_profiles)} Response, {len(smb_profiles)} SMB, {len(tcp_profiles)} TCP")
                     return True
                 except Exception as e:
                     print(f"Error updating profiles: {e}")
