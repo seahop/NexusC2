@@ -602,12 +602,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Collect unlink notifications (routing IDs that have been disconnected)
 			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
 
-			log.Printf("[LINK] Collected from children: linkData=%d, linkHandshake=%v, unlinkNotifications=%d",
-				len(linkData), linkHandshake != nil, len(unlinkNotifications))
-			for i, ld := range linkData {
-				log.Printf("[LINK] LinkData[%d]: routingID=%s, payloadLen=%d", i, ld.RoutingID, len(ld.Payload))
-			}
-
 			// Handle pending results before sleep
 			hasResults := resultManager.HasResults()
 			hasLinkData := len(linkData) > 0
@@ -616,8 +610,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
-				log.Printf("[LINK] Building response: results=%d, linkData=%d, hasHandshake=%v, unlinkNotifications=%d",
-					len(results), len(linkData), hasLinkHandshake, len(unlinkNotifications))
 				payload := make(map[string]interface{})
 				payload["agent_id"] = clientID
 
