@@ -15,7 +15,6 @@ var (
 	lnkCmdLinks     = string([]byte{0x6c, 0x69, 0x6e, 0x6b, 0x73})                                           // links
 	lnkProtoSmb     = string([]byte{0x73, 0x6d, 0x62})                                                       // smb
 	lnkProtoTcp     = string([]byte{0x74, 0x63, 0x70})                                                       // tcp
-	lnkDefPipe      = string([]byte{0x73, 0x70, 0x6f, 0x6f, 0x6c, 0x73, 0x73})                               // spoolss
 	lnkDefPort      = string([]byte{0x34, 0x34, 0x34, 0x34})                                                 // 4444
 	lnkLocalhost    = string([]byte{0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74})                   // localhost
 	lnkLoopback     = string([]byte{0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31})                   // 127.0.0.1
@@ -46,10 +45,14 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 
 	switch protocol {
 	case lnkProtoSmb:
-		pipeName := lnkDefPipe
-		if len(args) >= 3 {
-			pipeName = args[2]
+		if len(args) < 3 {
+			return CommandResult{
+				Output:      Err(E1),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}
 		}
+		pipeName := args[2]
 
 		// Build the full UNC pipe path
 		// Handle localhost specially - use "." for local machine

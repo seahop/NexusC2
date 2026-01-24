@@ -354,7 +354,10 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 	}
 }
 
-// sendPipeResponse sends a response through the pipe, applying transforms if configured
+// sendPipeResponse sends a response through the pipe
+// NOTE: Transforms are NOT applied for parent-agent responses because the parent
+// agent doesn't have this agent's transforms and can't reverse them.
+// Transforms are only meant for HTTP server communication, not inter-agent links.
 func sendPipeResponse(conn *PipeConnection, encryptedPayload string) error {
 	// Create JSON envelope
 	response := map[string]string{
@@ -366,21 +369,7 @@ func sendPipeResponse(conn *PipeConnection, encryptedPayload string) error {
 		return err
 	}
 
-	// Apply transforms if configured
-	if parsedSMBTransforms != nil && len(parsedSMBTransforms.Transforms) > 0 {
-		result, err := applySMBTransforms(respJSON, parsedSMBTransforms.Transforms)
-		if err != nil {
-			// Fall back to legacy mode on error
-			return conn.WriteMessage(respJSON)
-		}
-		// Store padding lengths for next receive cycle
-		currentPrependLen = result.PrependLength
-		currentAppendLen = result.AppendLength
-		// Write transformed data directly
-		return conn.WriteMessage(result.Data)
-	}
-
-	// Legacy mode - write JSON directly
+	// Write JSON directly - no transforms for parent-agent communication
 	return conn.WriteMessage(respJSON)
 }
 

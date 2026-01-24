@@ -229,8 +229,12 @@ build_binary() {
     # Build SMB-specific flags if this is an SMB payload
     SMB_FLAGS=""
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
-        echo "[*] Building SMB payload with pipe: ${PIPE_NAME:-spoolss}"
-        SMB_FLAGS="-X 'main.pipeName=${PIPE_NAME:-spoolss}'"
+        if [ -z "${PIPE_NAME}" ]; then
+            echo "[ERROR] PIPE_NAME environment variable required for SMB payloads"
+            exit 1
+        fi
+        echo "[*] Building SMB payload with pipe: ${PIPE_NAME}"
+        SMB_FLAGS="-X 'main.pipeName=${PIPE_NAME}'"
         # Add SMB transform profile if configured
         if [ ! -z "${SMB_DATA_TRANSFORMS}" ]; then
             echo "[*] SMB data transforms configured"
