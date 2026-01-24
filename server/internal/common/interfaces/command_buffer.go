@@ -10,4 +10,7 @@ type CommandBuffer interface {
 	BroadcastLinkUpdate(agentID string, parentClientID string, linkType string) error
 	QueueDownloadCommand(clientID string, downloadCmd map[string]interface{}) error
 	QueueUploadNextChunk(agentID string, chunkDir string) error
+	// Active transfer tracking for reliable job status (especially for linked agents)
+	UpdateActiveTransfer(agentID, transferType, filename string, currentChunk, totalChunks int)
+	CompleteTransfer(agentID, filename string)
 }

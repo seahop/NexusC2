@@ -461,6 +461,9 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 			return fmt.Errorf("failed to handle upload chunk: %v", err)
 		}
 
+		// Update active transfer tracking for reliable job status
+		m.commandBuffer.UpdateActiveTransfer(agentID, "upload", filename, int(currentChunk), int(totalChunks))
+
 		// Store progress in database if we have a command_db_id
 		if commandDBID > 0 {
 			if _, err := tx.ExecContext(ctx, `
@@ -482,6 +485,9 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 				log.Printf("[File Operation] Queued next chunk for upload of %s (%d/%d)",
 					filename, int(currentChunk)+1, int(totalChunks))
 			}
+		} else {
+			// Upload complete - remove from active tracking
+			m.commandBuffer.CompleteTransfer(agentID, filename)
 		}
 
 	case "download":
@@ -496,6 +502,9 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 		if err := m.downloadTracker.handleDownloadChunk(chunk); err != nil {
 			return fmt.Errorf("failed to handle download chunk: %v", err)
 		}
+
+		// Update active transfer tracking for reliable job status
+		m.commandBuffer.UpdateActiveTransfer(agentID, "download", filename, int(currentChunk), int(totalChunks))
 
 		// Store progress in database if we have a command_db_id
 		if commandDBID > 0 {
@@ -525,6 +534,9 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 			if err := m.commandBuffer.QueueDownloadCommand(agentID, nextChunkCmd); err != nil {
 				log.Printf("[ERROR] Failed to queue next download chunk: %v", err)
 			}
+		} else {
+			// Download complete - remove from active tracking
+			m.commandBuffer.CompleteTransfer(agentID, filename)
 		}
 
 	default:

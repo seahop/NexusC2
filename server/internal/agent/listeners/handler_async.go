@@ -593,6 +593,11 @@ func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[strin
 			log.Printf("[Async] Processing upload result for chunk %d/%d of file %s",
 				int(currentChunk), int(totalChunks), filename)
 
+			// Update active transfer tracking for reliable job status
+			if ah.Manager != nil && ah.Manager.commandBuffer != nil {
+				ah.Manager.commandBuffer.UpdateActiveTransfer(agentID, "upload", filename, int(currentChunk), int(totalChunks))
+			}
+
 			// Queue next upload chunk if not the last one
 			if int(currentChunk) < int(totalChunks)-1 {
 				chunkDir := filepath.Join("/app/temp", filename)
@@ -616,6 +621,11 @@ func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[strin
 				// THIS IS THE ADDITION: Clean up temp directory when upload is complete
 				log.Printf("[Async] Upload complete - received confirmation for final chunk %d/%d of %s",
 					int(currentChunk)+1, int(totalChunks), filename)
+
+				// Upload complete - remove from active tracking
+				if ah.Manager != nil && ah.Manager.commandBuffer != nil {
+					ah.Manager.commandBuffer.CompleteTransfer(agentID, filename)
+				}
 
 				// Clean up the temp directory
 				chunkDir := filepath.Join("/app/temp", filename)
@@ -647,6 +657,11 @@ func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[strin
 					log.Printf("[Async] Successfully processed download chunk %d/%d",
 						int(currentChunk), int(totalChunks))
 
+					// Update active transfer tracking for reliable job status
+					if ah.Manager.commandBuffer != nil {
+						ah.Manager.commandBuffer.UpdateActiveTransfer(agentID, "download", filename, int(currentChunk), int(totalChunks))
+					}
+
 					// Queue next chunk if not the last one
 					if int(currentChunk) < int(totalChunks) {
 						nextCmd := map[string]interface{}{
@@ -671,6 +686,10 @@ func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[strin
 						}
 					} else {
 						log.Printf("[Async] Download complete for file %s", filename)
+						// Download complete - remove from active tracking
+						if ah.Manager.commandBuffer != nil {
+							ah.Manager.commandBuffer.CompleteTransfer(agentID, filename)
+						}
 					}
 				}
 			} else {

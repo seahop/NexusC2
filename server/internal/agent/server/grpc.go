@@ -76,6 +76,19 @@ type GRPCServer struct {
 	streamMutex       sync.RWMutex
 	pingTicker        *time.Ticker
 	commandLogger     *logging.SimpleLogger // ADD THIS FIELD
+	// Active file transfers tracked separately from CommandBuffer for reliable job tracking
+	activeTransfers   map[string]map[string]*ActiveTransfer // agentID -> filename -> transfer
+	transferMutex     sync.RWMutex
+}
+
+// ActiveTransfer tracks an ongoing file transfer for the jobs command
+type ActiveTransfer struct {
+	Type         string    // "upload" or "download"
+	Filename     string
+	CurrentChunk int
+	TotalChunks  int
+	StartTime    time.Time
+	LastUpdate   time.Time
 }
 
 func NewGRPCServer(manager *listeners.Manager, cmdBuffer map[string][]Command, db *sql.DB, mux *http.ServeMux) *GRPCServer {
@@ -93,6 +106,7 @@ func NewGRPCServer(manager *listeners.Manager, cmdBuffer map[string][]Command, d
 		socksMutex:        sync.RWMutex{},
 		httpMux:           mux,
 		streamConnections: make(map[string]*StreamConnection), // ADD: Initialize stream connections
+		activeTransfers:   make(map[string]map[string]*ActiveTransfer),
 	}
 
 	// ADD: Initialize simple command logger
@@ -127,6 +141,58 @@ func (s *GRPCServer) RegisterLogEndpoint(mux *http.ServeMux) {
 
 func (s *GRPCServer) SetManager(m *listeners.Manager) {
 	s.manager = m
+}
+
+// UpdateActiveTransfer tracks or updates an active file transfer
+func (s *GRPCServer) UpdateActiveTransfer(agentID, transferType, filename string, currentChunk, totalChunks int) {
+	s.transferMutex.Lock()
+	defer s.transferMutex.Unlock()
+
+	if s.activeTransfers[agentID] == nil {
+		s.activeTransfers[agentID] = make(map[string]*ActiveTransfer)
+	}
+
+	if transfer, exists := s.activeTransfers[agentID][filename]; exists {
+		transfer.CurrentChunk = currentChunk
+		transfer.LastUpdate = time.Now()
+	} else {
+		s.activeTransfers[agentID][filename] = &ActiveTransfer{
+			Type:         transferType,
+			Filename:     filename,
+			CurrentChunk: currentChunk,
+			TotalChunks:  totalChunks,
+			StartTime:    time.Now(),
+			LastUpdate:   time.Now(),
+		}
+	}
+}
+
+// CompleteTransfer removes a completed file transfer from tracking
+func (s *GRPCServer) CompleteTransfer(agentID, filename string) {
+	s.transferMutex.Lock()
+	defer s.transferMutex.Unlock()
+
+	if transfers, exists := s.activeTransfers[agentID]; exists {
+		delete(transfers, filename)
+		if len(transfers) == 0 {
+			delete(s.activeTransfers, agentID)
+		}
+	}
+}
+
+// GetActiveTransfers returns all active transfers for an agent
+func (s *GRPCServer) GetActiveTransfers(agentID string) []*ActiveTransfer {
+	s.transferMutex.RLock()
+	defer s.transferMutex.RUnlock()
+
+	if transfers, exists := s.activeTransfers[agentID]; exists {
+		result := make([]*ActiveTransfer, 0, len(transfers))
+		for _, t := range transfers {
+			result = append(result, t)
+		}
+		return result
+	}
+	return nil
 }
 
 type Command struct {
@@ -1524,13 +1590,37 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 		// Handle jobs command
 		if commandData.Command == "jobs" {
 			const ChunkSize = 512 * 1024 // 512KB chunks
-			s.Mutex.Lock()
 			activeJobs := []FileTransferJob{}
 			jobID := 1
+			seenFiles := make(map[string]bool) // Avoid duplicates
 
+			// First, check the activeTransfers map (reliable for linked agents)
+			transfers := s.GetActiveTransfers(commandData.AgentID)
+			for _, t := range transfers {
+				if t.TotalChunks > 0 {
+					job := FileTransferJob{
+						JobID:       jobID,
+						Type:        t.Type,
+						Filename:    t.Filename,
+						Progress:    int((float64(t.CurrentChunk) / float64(t.TotalChunks)) * 100),
+						TotalSize:   int64(t.TotalChunks * ChunkSize),
+						CurrentSize: int64(t.CurrentChunk * ChunkSize),
+					}
+					activeJobs = append(activeJobs, job)
+					seenFiles[t.Filename] = true
+					jobID++
+				}
+			}
+
+			// Also check CommandBuffer for any pending commands not yet tracked
+			s.Mutex.Lock()
 			if commands, exists := s.CommandBuffer[commandData.AgentID]; exists {
 				for _, cmd := range commands {
 					if strings.HasPrefix(cmd.Command, "upload") || strings.HasPrefix(cmd.Command, "download") {
+						// Skip if already seen in activeTransfers
+						if seenFiles[cmd.Filename] {
+							continue
+						}
 						job := FileTransferJob{
 							JobID:    jobID,
 							Type:     strings.Split(cmd.Command, " ")[0],
