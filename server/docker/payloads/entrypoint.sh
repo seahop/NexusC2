@@ -268,6 +268,13 @@ build_binary() {
             -X 'main.jitter=${JITTER}' \
             -X 'main.secret=${SECRET}' \
             -X 'main.encryptedConfig=${ENCRYPTED_CONFIG}' \
+            -X 'main.MALLEABLE_LINK_DATA_FIELD=${MALLEABLE_LINK_DATA_FIELD}' \
+            -X 'main.MALLEABLE_LINK_COMMANDS_FIELD=${MALLEABLE_LINK_COMMANDS_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_FIELD=${MALLEABLE_LINK_HANDSHAKE_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_RESP_FIELD=${MALLEABLE_LINK_HANDSHAKE_RESP_FIELD}' \
+            -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
+            -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
+            -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
             ${SMB_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
@@ -280,6 +287,13 @@ build_binary() {
             -X 'main.sleep=${SLEEP}' \
             -X 'main.jitter=${JITTER}' \
             -X 'main.secret=${SECRET}' \
+            -X 'main.MALLEABLE_LINK_DATA_FIELD=${MALLEABLE_LINK_DATA_FIELD}' \
+            -X 'main.MALLEABLE_LINK_COMMANDS_FIELD=${MALLEABLE_LINK_COMMANDS_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_FIELD=${MALLEABLE_LINK_HANDSHAKE_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_RESP_FIELD=${MALLEABLE_LINK_HANDSHAKE_RESP_FIELD}' \
+            -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
+            -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
+            -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
             ${TCP_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
@@ -313,6 +327,13 @@ build_binary() {
             -X 'main.MALLEABLE_REKEY_STATUS_FIELD=${MALLEABLE_REKEY_STATUS_FIELD}' \
             -X 'main.MALLEABLE_REKEY_DATA_FIELD=${MALLEABLE_REKEY_DATA_FIELD}' \
             -X 'main.MALLEABLE_REKEY_ID_FIELD=${MALLEABLE_REKEY_ID_FIELD}' \
+            -X 'main.MALLEABLE_LINK_DATA_FIELD=${MALLEABLE_LINK_DATA_FIELD}' \
+            -X 'main.MALLEABLE_LINK_COMMANDS_FIELD=${MALLEABLE_LINK_COMMANDS_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_FIELD=${MALLEABLE_LINK_HANDSHAKE_FIELD}' \
+            -X 'main.MALLEABLE_LINK_HANDSHAKE_RESP_FIELD=${MALLEABLE_LINK_HANDSHAKE_RESP_FIELD}' \
+            -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
+            -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
+            -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
             -X 'main.getClientIDTransforms=${GET_CLIENTID_TRANSFORMS}' \
             -X 'main.postClientIDTransforms=${POST_CLIENTID_TRANSFORMS}' \
             -X 'main.postDataTransforms=${POST_DATA_TRANSFORMS}' \

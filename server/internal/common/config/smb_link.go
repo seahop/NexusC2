@@ -31,6 +31,7 @@ type SMBLinkMalleable struct {
 	LinkCommandsField          string `toml:"link_commands_field"`
 	LinkHandshakeField         string `toml:"link_handshake_field"`
 	LinkHandshakeResponseField string `toml:"link_handshake_response_field"`
+	LinkUnlinkField            string `toml:"link_unlink_field"`
 	RoutingIDField             string `toml:"routing_id_field"`
 	PayloadField               string `toml:"payload_field"`
 }
@@ -82,6 +83,9 @@ func LoadSMBLinkConfig() (*SMBLinkConfig, error) {
 	}
 	if config.Malleable.LinkHandshakeResponseField == "" {
 		config.Malleable.LinkHandshakeResponseField = "lr"
+	}
+	if config.Malleable.LinkUnlinkField == "" {
+		config.Malleable.LinkUnlinkField = "lu"
 	}
 	if config.Malleable.RoutingIDField == "" {
 		config.Malleable.RoutingIDField = "r"

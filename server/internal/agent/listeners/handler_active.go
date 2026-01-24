@@ -163,15 +163,21 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	// Load unified link malleable configuration (shared between SMB and TCP)
+	linkMalleable, cfgErr := config.GetLinkMalleable()
+	if cfgErr != nil {
+		log.Printf("[Active Connection] Warning: Failed to load link config, using defaults: %v", cfgErr)
+	}
+
 	// Check for link handshake (new SMB agent connecting)
-	// Field name is configurable via smb_link.malleable.link_handshake_field (default: "lh")
+	// Field name is configurable via smb_link.malleable.link_handshake_field
 	// Debug: log all fields present in decryptedData
 	var fields []string
 	for k := range decryptedData {
 		fields = append(fields, k)
 	}
 	log.Printf("[Active Connection] Received POST with fields: %v from edge %s", fields, conn.ClientID)
-	if linkHandshake, ok := decryptedData["lh"].(map[string]interface{}); ok {
+	if linkHandshake, ok := decryptedData[linkMalleable.LinkHandshakeField].(map[string]interface{}); ok {
 		log.Printf("[Active Connection] Processing link handshake from edge %s", conn.ClientID)
 		response, err := m.processLinkHandshake(ctx, conn.ClientID, linkHandshake)
 		if err != nil {
@@ -185,8 +191,8 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Check for link data (data from linked SMB agents)
-	// Field name is configurable via smb_link.malleable.link_data_field (default: "ld")
-	if linkData, ok := decryptedData["ld"].([]interface{}); ok && len(linkData) > 0 {
+	// Field name is configurable via smb_link.malleable.link_data_field
+	if linkData, ok := decryptedData[linkMalleable.LinkDataField].([]interface{}); ok && len(linkData) > 0 {
 		log.Printf("[Active Connection] Processing %d link data items from edge %s", len(linkData), conn.ClientID)
 		if err := m.processLinkData(ctx, tx, conn.ClientID, linkData); err != nil {
 			log.Printf("[Active Connection] Failed to process link data: %v", err)
@@ -195,14 +201,14 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Check for link unlink notifications (when edge agent disconnects from SMB agent)
-	// Field: "lu" (link_unlink) contains routing IDs that have been unlinked
-	if luRaw, exists := decryptedData["lu"]; exists {
-		log.Printf("[Active Connection] DEBUG: Found 'lu' field in payload, type=%T, value=%v", luRaw, luRaw)
+	// Field name is configurable via smb_link.malleable.link_unlink_field
+	if luRaw, exists := decryptedData[linkMalleable.LinkUnlinkField]; exists {
+		log.Printf("[Active Connection] DEBUG: Found '%s' field in payload, type=%T, value=%v", linkMalleable.LinkUnlinkField, luRaw, luRaw)
 		if unlinkData, ok := luRaw.([]interface{}); ok && len(unlinkData) > 0 {
 			log.Printf("[Active Connection] Processing %d unlink notifications from edge %s", len(unlinkData), conn.ClientID)
 			m.processUnlinkNotifications(ctx, conn.ClientID, unlinkData)
 		} else {
-			log.Printf("[Active Connection] DEBUG: 'lu' field type assertion to []interface{} failed")
+			log.Printf("[Active Connection] DEBUG: '%s' field type assertion to []interface{} failed", linkMalleable.LinkUnlinkField)
 		}
 	}
 

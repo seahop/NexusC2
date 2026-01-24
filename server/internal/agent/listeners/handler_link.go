@@ -29,7 +29,7 @@ import (
 type LinkRouting struct {
 	mu                        sync.RWMutex
 	db                        *sql.DB
-	config                    *config.SMBLinkConfig
+	malleable                 config.LinkMalleable
 	pendingHandshakeResponses map[string][]*LinkCommandItem // edgeClientID -> pending responses
 }
 
@@ -56,27 +56,16 @@ type LinkCommandItem struct {
 
 // NewLinkRouting creates a new link routing manager
 func NewLinkRouting(db *sql.DB) (*LinkRouting, error) {
-	cfg, err := config.GetSMBLinkConfig()
+	// Load unified link malleable config (shared between SMB and TCP)
+	malleable, err := config.GetLinkMalleable()
 	if err != nil {
-		// Use defaults if config not available
-		cfg = &config.SMBLinkConfig{
-			ConnectionTimeout: 30,
-			MaxMessageSize:    1048576,
-			HeartbeatInterval: 60,
-			Malleable: config.SMBLinkMalleable{
-				LinkDataField:              "ld",
-				LinkCommandsField:          "lc",
-				LinkHandshakeField:         "lh",
-				LinkHandshakeResponseField: "lr",
-				RoutingIDField:             "r",
-				PayloadField:               "p",
-			},
-		}
+		// GetLinkMalleable returns defaults on error, so just log
+		log.Printf("[LinkRouting] Warning: Failed to load link config, using defaults: %v", err)
 	}
 
 	return &LinkRouting{
 		db:                        db,
-		config:                    cfg,
+		malleable:                 malleable,
 		pendingHandshakeResponses: make(map[string][]*LinkCommandItem),
 	}, nil
 }
@@ -241,7 +230,7 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		}
 	}
 
-	cfg := m.linkRouting.config.GetMalleable()
+	cfg := m.linkRouting.malleable
 
 	for _, item := range linkData {
 		itemMap, ok := item.(map[string]interface{})
@@ -287,39 +276,62 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		// Extract padding lengths if present (for transform reversal)
 		prependLen := 0
 		appendLen := 0
+		transformed := false
 		if pre, ok := itemMap["pre"].(float64); ok {
 			prependLen = int(pre)
 		}
 		if app, ok := itemMap["app"].(float64); ok {
 			appendLen = int(app)
 		}
-
-		// Decode base64 payload
-		rawPayload, err := base64.StdEncoding.DecodeString(payload)
-		if err != nil {
-			log.Printf("[LinkData] Failed to decode base64 payload: %v", err)
-			continue
+		// Check for transform flag (t:true indicates data was transformed)
+		if t, ok := itemMap["t"].(bool); ok && t {
+			transformed = true
 		}
 
-		// Reverse transforms if profile has transforms
+		// Determine if transforms were actually applied to this data
+		// Transforms are applied if: t:true flag is set, OR pre/app lengths are non-zero
+		transformsApplied := transformed || prependLen > 0 || appendLen > 0
+
 		var encryptedPayload string
-		if linkProfile != nil && linkProfile.Data != nil && len(linkProfile.Data.Transforms) > 0 {
+		if transformsApplied && linkProfile != nil && linkProfile.Data != nil && len(linkProfile.Data.Transforms) > 0 {
+			// Transforms were applied - decode base64 and reverse transforms
+			rawPayload, err := base64.StdEncoding.DecodeString(payload)
+			if err != nil {
+				log.Printf("[LinkData] Failed to decode base64 payload: %v", err)
+				continue
+			}
 			encryptedPayload, err = reversePipeTransforms(rawPayload, linkProfile, prependLen, appendLen, linkXorKey)
 			if err != nil {
 				log.Printf("[LinkData] Failed to reverse transforms for %s: %v", linkedClientID, err)
 				continue
 			}
 		} else {
-			// Legacy mode - no transforms, parse JSON envelope directly
-			var envelope struct {
-				Type    string `json:"type"`
-				Payload string `json:"payload"`
-			}
-			if err := json.Unmarshal(rawPayload, &envelope); err != nil {
-				encryptedPayload = payload
+			// Legacy mode - no transforms applied, payload is already the encrypted string
+			// Try to base64 decode in case it's wrapped, otherwise use directly
+			if rawPayload, err := base64.StdEncoding.DecodeString(payload); err == nil {
+				// It was base64 encoded - check if it's a JSON envelope
+				var envelope struct {
+					Type    string `json:"type"`
+					Payload string `json:"payload"`
+				}
+				if err := json.Unmarshal(rawPayload, &envelope); err == nil && envelope.Payload != "" {
+					encryptedPayload = envelope.Payload
+				} else {
+					// Not a JSON envelope - payload is already base64-encoded AES-GCM ciphertext
+					// Use the original payload string (not the decoded binary)
+					// decryptLinkedPayload expects a base64 string
+					encryptedPayload = payload
+				}
 			} else {
-				encryptedPayload = envelope.Payload
+				// Not base64 encoded - use payload directly (it's the encrypted string)
+				encryptedPayload = payload
 			}
+		}
+
+		// Skip if we couldn't extract a payload
+		if encryptedPayload == "" {
+			log.Printf("[LinkData] Empty encrypted payload for %s", linkedClientID)
+			continue
 		}
 
 		// Decrypt the payload with the linked agent's secret
@@ -329,35 +341,42 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			continue
 		}
 
-		// Parse the decrypted payload - now includes potential nested link data
-		var linkedData struct {
-			AgentID             string                   `json:"agent_id"`
-			Results             []map[string]interface{} `json:"results"`
-			NestedLinkData      []interface{}            `json:"ld"` // Link data from grandchild agents
-			NestedLinkHandshake map[string]interface{}   `json:"lh"` // Handshake from newly linked grandchild agent
-			UnlinkNotifications []interface{}            `json:"lu"` // Unlink notifications from children
-		}
-		if err := json.Unmarshal(decryptedPayload, &linkedData); err != nil {
+		// Parse the decrypted payload into a map for dynamic field access
+		// This allows configurable field names for nested link data
+		var linkedDataMap map[string]interface{}
+		if err := json.Unmarshal(decryptedPayload, &linkedDataMap); err != nil {
 			log.Printf("[LinkData] Failed to parse linked payload: %v", err)
 			continue
 		}
 
+		// Extract fixed fields (agent_id, results)
+		var results []map[string]interface{}
+		if resultsRaw, ok := linkedDataMap["results"].([]interface{}); ok {
+			for _, r := range resultsRaw {
+				if rm, ok := r.(map[string]interface{}); ok {
+					results = append(results, rm)
+				}
+			}
+		}
+
 		// Process the linked agent's results
-		if err := m.processResults(ctx, tx, linkedClientID, linkedData.Results); err != nil {
+		if err := m.processResults(ctx, tx, linkedClientID, results); err != nil {
 			log.Printf("[LinkData] Failed to process linked results for %s: %v", linkedClientID, err)
 			continue
 		}
 
 		// RECURSIVE: Process nested link data from grandchild agents
-		if len(linkedData.NestedLinkData) > 0 {
-			if err := m.processLinkData(ctx, tx, linkedClientID, linkedData.NestedLinkData); err != nil {
+		// Use configurable field name from config
+		if nestedLinkData, ok := linkedDataMap[cfg.LinkDataField].([]interface{}); ok && len(nestedLinkData) > 0 {
+			if err := m.processLinkData(ctx, tx, linkedClientID, nestedLinkData); err != nil {
 				log.Printf("[LinkData] Failed to process nested link data: %v", err)
 			}
 		}
 
 		// Process nested link handshake from grandchild agent
-		if linkedData.NestedLinkHandshake != nil && len(linkedData.NestedLinkHandshake) > 0 {
-			response, err := m.processLinkHandshake(ctx, linkedClientID, linkedData.NestedLinkHandshake)
+		// Use configurable field name from config
+		if nestedHandshake, ok := linkedDataMap[cfg.LinkHandshakeField].(map[string]interface{}); ok && len(nestedHandshake) > 0 {
+			response, err := m.processLinkHandshake(ctx, linkedClientID, nestedHandshake)
 			if err != nil {
 				log.Printf("[LinkData] Nested link handshake failed: %v", err)
 			} else if response != nil {
@@ -366,8 +385,9 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		}
 
 		// Process unlink notifications from child agents
-		if len(linkedData.UnlinkNotifications) > 0 {
-			m.processUnlinkNotifications(ctx, linkedClientID, linkedData.UnlinkNotifications)
+		// Use configurable field name from config
+		if unlinkNotifications, ok := linkedDataMap[cfg.LinkUnlinkField].([]interface{}); ok && len(unlinkNotifications) > 0 {
+			m.processUnlinkNotifications(ctx, linkedClientID, unlinkNotifications)
 		}
 
 		// Rotate the linked agent's secrets
@@ -428,7 +448,7 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		}
 	}
 
-	cfg := m.linkRouting.config.GetMalleable()
+	cfg := m.linkRouting.malleable
 
 	routingID, _ := handshake[cfg.RoutingIDField].(string)
 	payload, _ := handshake[cfg.PayloadField].(string)
@@ -708,8 +728,7 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 	log.Printf("[LinkCommands] Found %d linked agents for edge %s", len(linkedAgents), edgeClientID[:8])
 
 	var commands []LinkCommandItem
-	cfg := m.linkRouting.config.GetMalleable()
-	_ = cfg // Will use for field names if needed
+	cfg := m.linkRouting.malleable
 
 	// Check if there are any pending handshake responses for this edge agent
 	// If so, we should NOT send commands yet - the SMB agent hasn't completed handshake
@@ -778,7 +797,7 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 			if payload == nil {
 				payload = make(map[string]interface{})
 			}
-			payload["lr"] = nestedHandshakes
+			payload[cfg.LinkHandshakeResponseField] = nestedHandshakes
 		}
 
 		// Add nested commands (for grandchildren)
@@ -786,7 +805,7 @@ func (m *Manager) getCommandsForLinkedAgents(edgeClientID string) ([]LinkCommand
 			if payload == nil {
 				payload = make(map[string]interface{})
 			}
-			payload["lc"] = nestedCommands
+			payload[cfg.LinkCommandsField] = nestedCommands
 		}
 
 		// Skip if nothing to send
@@ -972,22 +991,43 @@ func (m *Manager) storeLinkHandshakeResponse(edgeClientID string, response *Link
 // getPendingLinkResponses retrieves all pending link responses for an edge agent
 // This includes handshake responses and commands for linked agents
 // DEPRECATED: Use getPendingLinkResponsesSeparate instead for proper separation
-func (m *Manager) getPendingLinkResponses(edgeClientID string) ([]LinkCommandItem, error) {
+// Returns maps with configurable field names
+func (m *Manager) getPendingLinkResponses(edgeClientID string) ([]map[string]interface{}, error) {
 	handshakes, commands, err := m.getPendingLinkResponsesSeparate(edgeClientID)
 	if err != nil {
 		return nil, err
 	}
 	// Combine for backwards compatibility
-	var all []LinkCommandItem
+	var all []map[string]interface{}
 	all = append(all, handshakes...)
 	all = append(all, commands...)
 	return all, nil
 }
 
+// linkCommandToMap converts a LinkCommandItem to a map using configurable field names
+func (m *Manager) linkCommandToMap(item LinkCommandItem) map[string]interface{} {
+	cfg := m.linkRouting.malleable
+	result := map[string]interface{}{
+		cfg.RoutingIDField: item.RoutingID,
+		cfg.PayloadField:   item.Payload,
+	}
+	if item.PrependLength > 0 {
+		result["pre"] = item.PrependLength
+	}
+	if item.AppendLength > 0 {
+		result["app"] = item.AppendLength
+	}
+	if item.Transformed {
+		result["t"] = item.Transformed
+	}
+	return result
+}
+
 // getPendingLinkResponsesSeparate retrieves pending handshake responses and commands separately
 // This allows the server to send them in different fields (lr for handshakes, lc for commands)
 // so the HTTPS agent can forward them with the correct message type
-func (m *Manager) getPendingLinkResponsesSeparate(edgeClientID string) (handshakes []LinkCommandItem, commands []LinkCommandItem, err error) {
+// Returns maps with configurable field names instead of structs with hardcoded JSON tags
+func (m *Manager) getPendingLinkResponsesSeparate(edgeClientID string) (handshakes []map[string]interface{}, commands []map[string]interface{}, err error) {
 	if m.linkRouting == nil {
 		return nil, nil, nil
 	}
@@ -996,12 +1036,15 @@ func (m *Manager) getPendingLinkResponsesSeparate(edgeClientID string) (handshak
 	handshakeResponses := m.linkRouting.GetPendingHandshakeResponses(edgeClientID)
 	for _, r := range handshakeResponses {
 		if r != nil {
-			handshakes = append(handshakes, *r)
+			handshakes = append(handshakes, m.linkCommandToMap(*r))
 		}
 	}
 
 	// Get commands for linked agents
-	commands, _ = m.getCommandsForLinkedAgents(edgeClientID)
+	cmdItems, _ := m.getCommandsForLinkedAgents(edgeClientID)
+	for _, item := range cmdItems {
+		commands = append(commands, m.linkCommandToMap(item))
+	}
 
 	return handshakes, commands, nil
 }
@@ -1085,8 +1128,9 @@ func (m *Manager) getXorKeyForAgent(linkedClientID string) string {
 }
 
 // getTCPProfileForAgent returns the TCP profile to use for a linked agent
+// Returns as SMBProfile since the Data block structure is the same
 func (m *Manager) getTCPProfileForAgent(linkedClientID string) *config.SMBProfile {
-	if m.linkRouting == nil || m.linkRouting.config == nil {
+	if m.linkRouting == nil {
 		return nil
 	}
 
@@ -1102,8 +1146,22 @@ func (m *Manager) getTCPProfileForAgent(linkedClientID string) *config.SMBProfil
 		return nil
 	}
 
-	profile := m.linkRouting.config.GetSMBProfile(profileName.String)
-	return profile
+	// Load TCP config for profile access
+	tcpCfg, err := config.GetTCPLinkConfig()
+	if err != nil || tcpCfg == nil {
+		return nil
+	}
+
+	tcpProfile := tcpCfg.GetTCPProfile(profileName.String)
+	if tcpProfile == nil {
+		return nil
+	}
+
+	// Convert TCP profile to SMB profile format (same structure)
+	return &config.SMBProfile{
+		Name: tcpProfile.Name,
+		Data: tcpProfile.Data,
+	}
 }
 
 // getTCPXorKeyForAgent returns the per-build XOR key for a TCP linked agent
@@ -1136,7 +1194,7 @@ func (m *Manager) getTCPXorKeyForAgent(linkedClientID string) string {
 
 // getSMBProfileForAgent returns the SMB profile to use for a linked agent
 func (m *Manager) getSMBProfileForAgent(linkedClientID string) *config.SMBProfile {
-	if m.linkRouting == nil || m.linkRouting.config == nil {
+	if m.linkRouting == nil {
 		return nil
 	}
 
@@ -1152,8 +1210,13 @@ func (m *Manager) getSMBProfileForAgent(linkedClientID string) *config.SMBProfil
 		return nil
 	}
 
-	profile := m.linkRouting.config.GetSMBProfile(profileName.String)
-	return profile
+	// Load SMB config for profile access
+	smbCfg, err := config.GetSMBLinkConfig()
+	if err != nil || smbCfg == nil {
+		return nil
+	}
+
+	return smbCfg.GetSMBProfile(profileName.String)
 }
 
 // getSMBXorKeyForAgent returns the per-build XOR key for a linked agent

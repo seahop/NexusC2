@@ -1348,6 +1348,21 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		fmt.Sprintf("PAYLOAD_TYPE=%s", data.payloadType),
 	}
 
+	// Load unified link malleable config for payload injection (shared between SMB and TCP)
+	linkMalleable, linkErr := config.GetLinkMalleable()
+	if linkErr != nil {
+		log.Printf("[WS Builder] Warning: Failed to load link config, using defaults: %v", linkErr)
+	}
+	envVars = append(envVars,
+		fmt.Sprintf("MALLEABLE_LINK_DATA_FIELD=%s", linkMalleable.LinkDataField),
+		fmt.Sprintf("MALLEABLE_LINK_COMMANDS_FIELD=%s", linkMalleable.LinkCommandsField),
+		fmt.Sprintf("MALLEABLE_LINK_HANDSHAKE_FIELD=%s", linkMalleable.LinkHandshakeField),
+		fmt.Sprintf("MALLEABLE_LINK_HANDSHAKE_RESP_FIELD=%s", linkMalleable.LinkHandshakeResponseField),
+		fmt.Sprintf("MALLEABLE_LINK_UNLINK_FIELD=%s", linkMalleable.LinkUnlinkField),
+		fmt.Sprintf("MALLEABLE_ROUTING_ID_FIELD=%s", linkMalleable.RoutingIDField),
+		fmt.Sprintf("MALLEABLE_PAYLOAD_FIELD=%s", linkMalleable.PayloadField),
+	)
+
 	// Add SMB-specific environment variables
 	if data.payloadType == "smb" {
 		envVars = append(envVars, fmt.Sprintf("PIPE_NAME=%s", data.pipeName))

@@ -86,6 +86,34 @@ type LinkDataIn struct {
 	AppendLength  int    `json:"app,omitempty"` // Length of random append (for transform reversal)
 }
 
+// ToMalleableMap converts LinkDataOut to a map using configurable field names
+// This avoids hardcoded JSON struct tags when marshaling
+func (ld *LinkDataOut) ToMalleableMap() map[string]interface{} {
+	m := map[string]interface{}{
+		MALLEABLE_ROUTING_ID_FIELD: ld.RoutingID,
+		MALLEABLE_PAYLOAD_FIELD:    ld.Payload,
+	}
+	if ld.PrependLength > 0 {
+		m["pre"] = ld.PrependLength
+	}
+	if ld.AppendLength > 0 {
+		m["app"] = ld.AppendLength
+	}
+	return m
+}
+
+// ConvertLinkDataToMaps converts a slice of LinkDataOut to maps with malleable field names
+func ConvertLinkDataToMaps(data []*LinkDataOut) []map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+	result := make([]map[string]interface{}, len(data))
+	for i, ld := range data {
+		result[i] = ld.ToMalleableMap()
+	}
+	return result
+}
+
 var (
 	linkManager     *LinkManager
 	linkManagerOnce sync.Once

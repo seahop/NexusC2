@@ -311,33 +311,48 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Parse the decrypted data
-	var decryptedData struct {
-		AgentID             string                   `json:"agent_id"`
-		Results             []map[string]interface{} `json:"results"`
-		LinkData            []interface{}            `json:"ld"` // Link data from connected SMB agents
-		LinkHandshake       map[string]interface{}   `json:"lh"` // Link handshake from new SMB/TCP agent
-		UnlinkNotifications []interface{}            `json:"lu"` // Unlink notifications (routing IDs)
+	// Load unified link malleable configuration (shared between SMB and TCP)
+	linkMalleable, cfgErr := config.GetLinkMalleable()
+	if cfgErr != nil {
+		log.Printf("[Async] Warning: Failed to load link config, using defaults: %v", cfgErr)
 	}
 
-	if err := json.Unmarshal(plaintext, &decryptedData); err != nil {
+	// Parse the decrypted data into a map for dynamic field access
+	var decryptedDataMap map[string]interface{}
+	if err := json.Unmarshal(plaintext, &decryptedDataMap); err != nil {
 		log.Printf("[Async] Failed to parse decrypted data: %v", err)
 		http.Error(w, "Invalid data format", http.StatusBadRequest)
 		return
 	}
 
-	resultCount := len(decryptedData.Results)
+	// Extract fixed fields (agent_id and results)
+	agentID, _ := decryptedDataMap["agent_id"].(string)
+	if agentID == "" {
+		agentID = conn.ClientID // Fall back to connection client ID
+	}
+
+	var results []map[string]interface{}
+	if resultsRaw, ok := decryptedDataMap["results"].([]interface{}); ok {
+		for _, r := range resultsRaw {
+			if rm, ok := r.(map[string]interface{}); ok {
+				results = append(results, rm)
+			}
+		}
+	}
+
+	resultCount := len(results)
 	log.Printf("[Async] Received %d results from agent %s", resultCount, conn.ClientID)
 
 	// Process link data if present (from connected SMB agents)
-	if len(decryptedData.LinkData) > 0 {
-		log.Printf("[Async] Processing %d link data items from edge agent %s", len(decryptedData.LinkData), conn.ClientID)
+	// Use configurable field name from config
+	if linkData, ok := decryptedDataMap[linkMalleable.LinkDataField].([]interface{}); ok && len(linkData) > 0 {
+		log.Printf("[Async] Processing %d link data items from edge agent %s", len(linkData), conn.ClientID)
 		ctx := context.Background()
 		tx, err := ah.db.BeginTx(ctx, nil)
 		if err != nil {
 			log.Printf("[Async] Failed to begin transaction for link data: %v", err)
 		} else {
-			if err := ah.Manager.processLinkData(ctx, tx, conn.ClientID, decryptedData.LinkData); err != nil {
+			if err := ah.Manager.processLinkData(ctx, tx, conn.ClientID, linkData); err != nil {
 				log.Printf("[Async] Failed to process link data: %v", err)
 				tx.Rollback()
 			} else {
@@ -347,10 +362,11 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 	}
 
 	// Process link handshake if present (new SMB/TCP agent connecting)
-	if decryptedData.LinkHandshake != nil && len(decryptedData.LinkHandshake) > 0 {
+	// Use configurable field name from config
+	if linkHandshake, ok := decryptedDataMap[linkMalleable.LinkHandshakeField].(map[string]interface{}); ok && len(linkHandshake) > 0 {
 		log.Printf("[Async] Processing link handshake from edge agent %s", conn.ClientID)
 		ctx := context.Background()
-		response, err := ah.Manager.processLinkHandshake(ctx, conn.ClientID, decryptedData.LinkHandshake)
+		response, err := ah.Manager.processLinkHandshake(ctx, conn.ClientID, linkHandshake)
 		if err != nil {
 			log.Printf("[Async] Link handshake failed: %v", err)
 		} else if response != nil {
@@ -360,10 +376,11 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 	}
 
 	// Process unlink notifications if present (when edge agent disconnects from SMB agent)
-	if len(decryptedData.UnlinkNotifications) > 0 {
-		log.Printf("[Async] Processing %d unlink notifications from edge agent %s", len(decryptedData.UnlinkNotifications), conn.ClientID)
+	// Use configurable field name from config
+	if unlinkNotifications, ok := decryptedDataMap[linkMalleable.LinkUnlinkField].([]interface{}); ok && len(unlinkNotifications) > 0 {
+		log.Printf("[Async] Processing %d unlink notifications from edge agent %s", len(unlinkNotifications), conn.ClientID)
 		ctx := context.Background()
-		ah.Manager.processUnlinkNotifications(ctx, conn.ClientID, decryptedData.UnlinkNotifications)
+		ah.Manager.processUnlinkNotifications(ctx, conn.ClientID, unlinkNotifications)
 	}
 
 	// Update metrics if available
@@ -389,8 +406,8 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 
 		// Queue for async processing
 		batch := &ResultBatch{
-			AgentID:    decryptedData.AgentID,
-			Results:    decryptedData.Results,
+			AgentID:    agentID,
+			Results:    results,
 			Connection: conn,
 			Timestamp:  time.Now(),
 			Priority:   priority,
@@ -413,7 +430,7 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 		}
 
 		// Immediately broadcast preliminary status to WebSocket
-		ah.broadcastPreliminaryStatus(decryptedData.AgentID, resultCount)
+		ah.broadcastPreliminaryStatus(agentID, resultCount)
 
 		// Send immediate success response to agent
 		w.Header().Set("Content-Type", "application/json")
@@ -429,12 +446,12 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 		log.Printf("[Async] Small payload (%d results), using hybrid processing", resultCount)
 
 		// Process WebSocket notifications immediately
-		for _, result := range decryptedData.Results {
-			ah.broadcastResultImmediate(decryptedData.AgentID, result)
+		for _, result := range results {
+			ah.broadcastResultImmediate(agentID, result)
 		}
 
 		// Queue database writes asynchronously
-		go ah.processDBWritesAsync(decryptedData.AgentID, decryptedData.Results, conn)
+		go ah.processDBWritesAsync(agentID, results, conn)
 
 		// Send immediate response
 		w.Header().Set("Content-Type", "application/json")

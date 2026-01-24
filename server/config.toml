@@ -1053,6 +1053,22 @@ name = "Connection"
 value = "close"
 
 # =============================================================================
+# LINK MALLEABLE CONFIGURATION
+# =============================================================================
+# These field names are shared between SMB and TCP links since they can
+# communicate with each other. Customize to avoid structural fingerprinting.
+# These fields are only visible inside the encrypted layer - not on the wire.
+
+[link.malleable]
+link_data_field = "ld"                    # Array of linked agent data in POST
+link_commands_field = "lc"                # Array of commands for linked agents in GET response
+link_handshake_field = "lh"               # Initial handshake from linked agent
+link_handshake_response_field = "lr"      # Handshake response for linked agent
+link_unlink_field = "lu"                  # Unlink notifications array in POST
+routing_id_field = "r"                    # Short routing identifier
+payload_field = "p"                       # Encrypted payload blob
+
+# =============================================================================
 # SMB LINK CONFIGURATION
 # =============================================================================
 # Settings for SMB-based agent linking (lateral movement)
@@ -1063,15 +1079,19 @@ connection_timeout = 30        # Timeout for pipe connections in seconds
 max_message_size = 1048576     # Maximum message size in bytes (1MB)
 heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
 
-# Malleable field names for link protocol (inside encrypted layer)
-# Customize these to avoid structural fingerprinting
-[smb_link.malleable]
-link_data_field = "ld"                    # Array of linked agent data in POST
-link_commands_field = "lc"                # Array of commands for linked agents in GET response
-link_handshake_field = "lh"               # Initial handshake from SMB agent
-link_handshake_response_field = "lr"      # Handshake response for SMB agent
-routing_id_field = "r"                    # Short routing identifier
-payload_field = "p"                       # Encrypted payload blob
+# =============================================================================
+# TCP LINK CONFIGURATION
+# =============================================================================
+# Settings for TCP-based agent linking (lateral movement across platforms)
+# TCP links work similarly to SMB but use TCP sockets instead of named pipes,
+# enabling cross-platform linking (Linux, Darwin, Windows).
+
+[tcp_link]
+# Connection settings
+default_port = 4444            # Default TCP port for listeners
+connection_timeout = 30        # Timeout for TCP connections in seconds
+max_message_size = 10485760    # Maximum message size in bytes (10MB)
+heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
 
 # =============================================================================
 # SMB PIPE PROFILES - Transform configurations for named pipe traffic
@@ -1328,30 +1348,6 @@ name = "browser-profile"
 output = "body"
 [[smb_link.profiles.data.transforms]]
 type = "netbios"
-
-# =============================================================================
-# TCP LINK CONFIGURATION
-# =============================================================================
-# Settings for TCP-based agent linking (lateral movement across platforms)
-# TCP links work similarly to SMB but use TCP sockets instead of named pipes,
-# enabling cross-platform linking (Linux, Darwin, Windows).
-
-[tcp_link]
-# Connection settings
-default_port = 4444            # Default TCP port for listeners
-connection_timeout = 30        # Timeout for TCP connections in seconds
-max_message_size = 10485760    # Maximum message size in bytes (10MB)
-heartbeat_interval = 60        # Heartbeat interval in seconds for detecting dead links
-
-# Malleable field names for link protocol (inside encrypted layer)
-# Uses the same field names as SMB for consistency
-[tcp_link.malleable]
-link_data_field = "ld"                    # Array of linked agent data in POST
-link_commands_field = "lc"                # Array of commands for linked agents in GET response
-link_handshake_field = "lh"               # Initial handshake from TCP agent
-link_handshake_response_field = "lr"      # Handshake response for TCP agent
-routing_id_field = "r"                    # Short routing identifier
-payload_field = "p"                       # Encrypted payload blob
 
 # =============================================================================
 # TCP PROFILES - Transform configurations for TCP traffic
