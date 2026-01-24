@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,12 @@ var (
 	lmFmtLinks      = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x4c, 0x69, 0x6e, 0x6b, 0x73, 0x20, 0x28, 0x25, 0x64, 0x29, 0x3a, 0x0a}) // Active Links (%d):\n
 	lmFmtLinkRow    = string([]byte{0x20, 0x20, 0x5b, 0x25, 0x73, 0x5d, 0x20, 0x25, 0x73, 0x20, 0x2d, 0x20, 0x25, 0x73, 0x20, 0x28, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x65, 0x64, 0x3a, 0x20, 0x25, 0x73, 0x2c, 0x20, 0x6c, 0x61, 0x73, 0x74, 0x20, 0x73, 0x65, 0x65, 0x6e, 0x3a, 0x20, 0x25, 0x73, 0x29, 0x0a}) //   [%s] %s - %s (connected: %s, last seen: %s)\n
 	lmTimeFmt       = string([]byte{0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 15:04:05
+)
+
+// Timeout configuration for linked agent communication
+const (
+	linkWriteTimeout = 60 * time.Second  // Timeout for writing to linked agents
+	linkReadTimeout  = 120 * time.Second // Timeout for reading from linked agents
 )
 
 // LinkedAgent represents a connected TCP agent (child link)
@@ -287,11 +294,14 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string, tr
 		}
 	}
 
-	// Write length-prefixed message
+	// Write length-prefixed message with timeout
+	link.Conn.SetWriteDeadline(time.Now().Add(linkWriteTimeout))
 	if err := writeMessage(link.Conn, data); err != nil {
+		link.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
 		link.IsActive = false
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
+	link.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
 
 	link.LastSeen = time.Now()
 	return nil
@@ -397,6 +407,7 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 // handleIncomingData reads data from a linked agent and queues it for the parent
 func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 	defer func() {
+		log.Printf("[LINK] handleIncomingData exiting for routingID=%s", link.RoutingID)
 		link.mu.Lock()
 		link.IsActive = false
 		link.mu.Unlock()
@@ -406,8 +417,11 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 		// Read length-prefixed message
 		data, err := readMessage(link.Conn)
 		if err != nil {
+			log.Printf("[LINK] readMessage error for routingID=%s: %v", link.RoutingID, err)
 			return
 		}
+
+		log.Printf("[LINK] Received %d bytes from routingID=%s", len(data), link.RoutingID)
 
 		// Try to parse as JSON
 		var message map[string]string
@@ -483,16 +497,22 @@ func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut)
 	respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
 	lm.responseMu.RUnlock()
 
+	log.Printf("[LINK] deliverOutbound: routingID=%s, hasSyncWaiter=%v, payloadLen=%d",
+		link.RoutingID, hasSyncWaiter, len(outbound.Payload))
+
 	if hasSyncWaiter {
 		// Send to synchronous waiter (non-blocking)
 		select {
 		case respChan <- outbound:
+			log.Printf("[LINK] Delivered to sync waiter for routingID=%s", link.RoutingID)
 		default:
 			// Channel full or closed, fall back to async queue
+			log.Printf("[LINK] Sync waiter channel full, queueing for routingID=%s", link.RoutingID)
 			lm.queueOutboundData(outbound)
 		}
 	} else {
 		// No synchronous waiter, queue for normal async processing
+		log.Printf("[LINK] No sync waiter, queueing for routingID=%s", link.RoutingID)
 		lm.queueOutboundData(outbound)
 	}
 }
@@ -501,7 +521,9 @@ func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut)
 func (lm *LinkManager) queueOutboundData(outbound *LinkDataOut) {
 	select {
 	case lm.outboundData <- outbound:
+		log.Printf("[LINK] Queued outbound data for routingID=%s, payloadLen=%d", outbound.RoutingID, len(outbound.Payload))
 	default:
+		log.Printf("[LINK-WARN] outboundData channel full, DATA DROPPED for routingID=%s, payloadLen=%d", outbound.RoutingID, len(outbound.Payload))
 	}
 }
 
@@ -563,6 +585,10 @@ func writeMessage(conn net.Conn, data []byte) error {
 }
 
 func readMessage(conn net.Conn) ([]byte, error) {
+	// Set read deadline to prevent indefinite blocking
+	conn.SetReadDeadline(time.Now().Add(linkReadTimeout))
+	defer conn.SetReadDeadline(time.Time{}) // Clear deadline when done
+
 	// Read 4-byte length header
 	header := make([]byte, 4)
 	if _, err := conn.Read(header); err != nil {

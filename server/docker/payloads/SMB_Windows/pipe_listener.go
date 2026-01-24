@@ -46,10 +46,12 @@ func NewPipeListener(pipeName string) (*PipeListener, error) {
 	}
 
 	// Create the named pipe
+	// Use byte mode instead of message mode to support large transfers (>64KB)
+	// Length-prefixed framing is already used, so byte mode works correctly
 	handle, err := windows.CreateNamedPipe(
 		pipePathPtr,
 		windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED,
-		windows.PIPE_TYPE_MESSAGE|windows.PIPE_READMODE_MESSAGE|windows.PIPE_WAIT,
+		windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT,
 		maxInstances,
 		pipeBufferSize,
 		pipeBufferSize,
@@ -106,7 +108,7 @@ func (pl *PipeListener) Accept() (*PipeConnection, error) {
 		newHandle, err := windows.CreateNamedPipe(
 			pipePathPtr,
 			windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED,
-			windows.PIPE_TYPE_MESSAGE|windows.PIPE_READMODE_MESSAGE|windows.PIPE_WAIT,
+			windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT,
 			maxInstances,
 			pipeBufferSize,
 			pipeBufferSize,

