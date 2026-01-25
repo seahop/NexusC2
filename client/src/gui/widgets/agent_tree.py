@@ -689,9 +689,13 @@ class AgentTreeWidget(QWidget):
             else:
                 # Multiple agents selected - show bulk actions
                 count = len(selected_guids)
+                open_terminals_action = menu.addAction(f"Open {count} Terminals")
+                menu.addSeparator()
                 remove_all_action = menu.addAction(f"Remove {count} Agents")
                 action = menu.exec(self.tree.viewport().mapToGlobal(position))
-                if action == remove_all_action:
+                if action == open_terminals_action:
+                    self.open_terminals_for_agents(selected_guids)
+                elif action == remove_all_action:
                     self.remove_agents(selected_guids)
 
     def copy_agent_guid(self, item):
@@ -1272,6 +1276,16 @@ class AgentTreeWidget(QWidget):
             self.terminal_widget.log_message(f"Removed {len(removed_guids)} agent(s)")
             # Emit signal to sync other views
             self.agents_removed.emit(removed_guids)
+
+    def open_terminals_for_agents(self, guids):
+        """Open terminal tabs for multiple agents by their GUIDs"""
+        if not guids or not self.terminal_widget:
+            return
+
+        for guid in guids:
+            agent = self.agent_by_guid.get(guid)
+            if agent:
+                self.terminal_widget.add_agent_tab(agent['name'], guid)
 
     def handle_agent_reactivation(self, conn_data):
         """Handle reactivation of an existing agent"""

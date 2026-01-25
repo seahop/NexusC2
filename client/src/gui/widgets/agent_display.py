@@ -123,62 +123,6 @@ class AgentDisplayWidget(QWidget):
         top_row.addLayout(view_toggle_layout)
         header_layout.addLayout(top_row)
 
-        # Selection info bar (shown when multiple agents selected)
-        self.selection_bar = QFrame()
-        self.selection_bar.setStyleSheet("""
-            QFrame {
-                background-color: #094771;
-                border-radius: 4px;
-                padding: 4px;
-            }
-        """)
-        self.selection_bar.setVisible(False)
-
-        selection_layout = QHBoxLayout()
-        selection_layout.setContentsMargins(8, 4, 8, 4)
-
-        self.selection_label = QLabel("0 agents selected")
-        self.selection_label.setStyleSheet("color: white; font-weight: bold;")
-        selection_layout.addWidget(self.selection_label)
-
-        selection_layout.addStretch()
-
-        # Batch action buttons
-        self.open_all_btn = QPushButton("Open Terminals")
-        self.open_all_btn.clicked.connect(self.open_selected_terminals)
-        self.open_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2ecc71;
-                color: white;
-                border: none;
-                padding: 4px 12px;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #27ae60;
-            }
-        """)
-        selection_layout.addWidget(self.open_all_btn)
-
-        self.clear_selection_btn = QPushButton("Clear")
-        self.clear_selection_btn.clicked.connect(self.clear_selection)
-        self.clear_selection_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #555555;
-                color: white;
-                border: none;
-                padding: 4px 12px;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #666666;
-            }
-        """)
-        selection_layout.addWidget(self.clear_selection_btn)
-
-        self.selection_bar.setLayout(selection_layout)
-        header_layout.addWidget(self.selection_bar)
-
         header.setLayout(header_layout)
         layout.addWidget(header)
 
@@ -340,14 +284,6 @@ class AgentDisplayWidget(QWidget):
         """Update selection across all views"""
         self.selected_guids = guids
 
-        # Update selection bar
-        count = len(guids)
-        if count > 1:
-            self.selection_bar.setVisible(True)
-            self.selection_label.setText(f"{count} agents selected")
-        else:
-            self.selection_bar.setVisible(False)
-
         # Sync selection to other views (if they're not the source)
         if source != 'tree':
             self._select_in_tree(guids)
@@ -396,13 +332,6 @@ class AgentDisplayWidget(QWidget):
         """Handle agents being removed - sync all views"""
         # Remove from selection if any removed agents were selected
         self.selected_guids = [g for g in self.selected_guids if g not in guids]
-
-        # Update selection bar
-        count = len(self.selected_guids)
-        if count > 1:
-            self.selection_label.setText(f"{count} agents selected")
-        else:
-            self.selection_bar.setVisible(False)
 
         # Refresh table and graph views to sync with tree
         # (tree handles its own items via setHidden)

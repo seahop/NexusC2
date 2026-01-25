@@ -185,13 +185,83 @@ class AgentNode(QGraphicsEllipseItem):
         return '<br>'.join(lines)
 
     def mousePressEvent(self, event):
-        """Handle single click to open agent terminal (matches tree view behavior)"""
-        super().mousePressEvent(event)
-        # Open terminal on single click
+        """Handle mouse press with shift-click support for multi-selection"""
         if event.button() == Qt.MouseButton.LeftButton:
+            modifiers = event.modifiers()
             scene = self.scene()
-            if scene and hasattr(scene, 'parent_widget'):
-                scene.parent_widget.open_agent_terminal(self.guid)
+
+            if modifiers & Qt.KeyboardModifier.ShiftModifier and scene:
+                # Shift+click: select all nodes in path from anchor to this node
+                # Find the current anchor (first selected node, or use this one)
+                selected_nodes = [item for item in scene.selectedItems() if isinstance(item, AgentNode)]
+
+                if selected_nodes:
+                    # Find path from first selected node to this node
+                    anchor = selected_nodes[0]
+                    path_guids = self._find_path_guids(scene, anchor.guid, self.guid)
+
+                    if path_guids:
+                        # Select all nodes in the path (keep existing selection)
+                        for guid in path_guids:
+                            parent_widget = getattr(scene, 'parent_widget', None)
+                            if parent_widget and guid in parent_widget.nodes:
+                                parent_widget.nodes[guid].setSelected(True)
+                    else:
+                        # No path found, just add this node to selection
+                        self.setSelected(True)
+                else:
+                    # No anchor, just select this node
+                    self.setSelected(True)
+
+                event.accept()
+                return
+
+            elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                # Ctrl+click: toggle selection (add/remove from selection)
+                self.setSelected(not self.isSelected())
+                event.accept()
+                return
+
+        # Default behavior for non-modified clicks
+        super().mousePressEvent(event)
+
+    def _find_path_guids(self, scene, from_guid, to_guid):
+        """Find all node GUIDs on the path between two nodes using BFS"""
+        parent_widget = getattr(scene, 'parent_widget', None)
+        if not parent_widget:
+            return []
+
+        # Build adjacency map from edges
+        adjacency = {}
+        for edge in parent_widget.edges:
+            source_guid = edge.source_node.guid
+            target_guid = edge.target_node.guid
+
+            if source_guid not in adjacency:
+                adjacency[source_guid] = []
+            if target_guid not in adjacency:
+                adjacency[target_guid] = []
+
+            adjacency[source_guid].append(target_guid)
+            adjacency[target_guid].append(source_guid)
+
+        # BFS to find shortest path
+        visited = {from_guid}
+        queue = [(from_guid, [from_guid])]
+
+        while queue:
+            current, path = queue.pop(0)
+
+            if current == to_guid:
+                return path
+
+            for neighbor in adjacency.get(current, []):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
+
+        # No path found - might be disconnected nodes
+        return [from_guid, to_guid]
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click to open agent terminal"""
@@ -205,29 +275,58 @@ class AgentNode(QGraphicsEllipseItem):
 
     def contextMenuEvent(self, event):
         """Handle right-click context menu"""
+        scene = self.scene()
+        if not scene:
+            return
+
+        # Get all selected agent nodes
+        selected_guids = []
+        for item in scene.selectedItems():
+            if isinstance(item, AgentNode):
+                selected_guids.append(item.guid)
+
+        # Make sure this node is included in selection
+        if self.guid not in selected_guids:
+            selected_guids = [self.guid]
+
         menu = QMenu()
 
-        open_action = menu.addAction("Open Terminal")
-        copy_guid_action = menu.addAction("Copy GUID")
-        menu.addSeparator()
-        center_action = menu.addAction("Center on Graph")
+        if len(selected_guids) > 1:
+            # Multiple agents selected - show bulk actions
+            count = len(selected_guids)
+            open_terminals_action = menu.addAction(f"Open {count} Terminals")
+            menu.addSeparator()
+            remove_all_action = menu.addAction(f"Remove {count} Agents")
 
-        action = menu.exec(event.screenPos())
+            action = menu.exec(event.screenPos())
 
-        if action == open_action:
-            scene = self.scene()
-            if scene and hasattr(scene, 'parent_widget'):
-                scene.parent_widget.agent_activated.emit(
-                    self.agent_data.get('name', ''),
-                    self.guid
-                )
-        elif action == copy_guid_action:
-            clipboard = QApplication.clipboard()
-            clipboard.setText(self.guid)
-        elif action == center_action:
-            scene = self.scene()
-            if scene and hasattr(scene, 'parent_widget'):
-                scene.parent_widget.center_on_node(self)
+            if action == open_terminals_action:
+                if hasattr(scene, 'parent_widget') and scene.parent_widget.agent_tree_widget:
+                    scene.parent_widget.agent_tree_widget.open_terminals_for_agents(selected_guids)
+            elif action == remove_all_action:
+                if hasattr(scene, 'parent_widget') and scene.parent_widget.agent_tree_widget:
+                    scene.parent_widget.agent_tree_widget.remove_agents(selected_guids)
+        else:
+            # Single agent - show full menu
+            open_action = menu.addAction("Open Terminal")
+            copy_guid_action = menu.addAction("Copy GUID")
+            menu.addSeparator()
+            center_action = menu.addAction("Center on Graph")
+
+            action = menu.exec(event.screenPos())
+
+            if action == open_action:
+                if hasattr(scene, 'parent_widget'):
+                    scene.parent_widget.agent_activated.emit(
+                        self.agent_data.get('name', ''),
+                        self.guid
+                    )
+            elif action == copy_guid_action:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(self.guid)
+            elif action == center_action:
+                if hasattr(scene, 'parent_widget'):
+                    scene.parent_widget.center_on_node(self)
 
 
 class EdgeLine(QGraphicsLineItem):
