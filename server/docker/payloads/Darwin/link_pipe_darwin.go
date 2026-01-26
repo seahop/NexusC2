@@ -239,7 +239,7 @@ func performLinkAuth(conn net.Conn) error {
 	}
 
 	// Simple challenge-response (matches Windows implementation)
-	response := append([]byte(lmAuthPrefix), challenge...)
+	response := append([]byte(lmAuthPrefix()), challenge...)
 
 	if err := writeMessage(conn, response); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
@@ -251,7 +251,7 @@ func performLinkAuth(conn net.Conn) error {
 		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	if string(confirm) != lmAuthOK {
+	if string(confirm) != lmAuthOK() {
 		return fmt.Errorf(Err(E3))
 	}
 
