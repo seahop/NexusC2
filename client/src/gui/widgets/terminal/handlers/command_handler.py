@@ -324,8 +324,8 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                     self.terminal.update_display()
                     return True
             else:
-                # Get help for specific command
-                help_text = self.command_validator.get_help(cmd_parts[1])
+                # Get help for specific command (pass agent_os for OS-specific help)
+                help_text = self.command_validator.get_help(cmd_parts[1], agent_os=self.agent_os)
         else:
             # Get general help filtered by OS
             help_text = ""

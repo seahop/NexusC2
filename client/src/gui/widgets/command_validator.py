@@ -467,12 +467,18 @@ class CommandValidator:
         
         return None
     
-    def get_help(self, command=None, include_extensions=True) -> str:
-            """Get help text for commands"""
+    def get_help(self, command=None, include_extensions=True, agent_os=None) -> str:
+            """Get help text for commands
+
+            Args:
+                command: Specific command to get help for, or None for general help
+                include_extensions: Whether to include extension commands
+                agent_os: The agent's OS for filtering OS-specific help (e.g., 'linux', 'darwin', 'windows')
+            """
             if not command:
                 # General help - show all commands grouped by category
                 help_text = "Available commands:\n\n"
-                
+
                 # Group commands by category
                 categories = {
                     "Shell & System": ['shell', 'ps', 'whoami', 'sudo-session', 'env'],
@@ -492,13 +498,13 @@ class CommandValidator:
                     "Job Management": ['jobs', 'jobkill'],
                     "Help": ['help']
                 }
-                
+
                 for category, cmds in categories.items():
                     help_text += f"\n{category}:\n"
                     for cmd in cmds:
                         # For display, convert underscores back to dashes
                         display_cmd = cmd.replace('_', '-')
-                        
+
                         # Look for the command in self.commands dict (not self.command_validator.commands)
                         if cmd in self.commands:
                             desc = self.commands[cmd].get('description', 'No description')
@@ -509,44 +515,88 @@ class CommandValidator:
                             if config_key in self.commands:
                                 desc = self.commands[config_key].get('description', 'No description')
                                 help_text += f"  {display_cmd:<30} {desc}\n"
-                
+
                 help_text += "\nType 'help <command>' for detailed information about a specific command."
                 return help_text
-            
+
             # Get help for specific command
-            # First try the command as-is
-            if command in self.commands:
-                cmd_data = self.commands[command]
-            else:
-                # Try with underscores replaced by dashes
-                config_key = command.replace('-', '_')
-                if config_key in self.commands:
-                    cmd_data = self.commands[config_key]
-                else:
-                    # Try the reverse - dashes replaced by underscores
-                    config_key = command.replace('_', '-')
-                    if config_key in self.commands:
-                        cmd_data = self.commands[config_key]
-                    else:
-                        return f"No help available for '{command}'"
-            
+            # Find the best matching command entry, considering OS compatibility
+            cmd_data = self._find_command_for_help(command, agent_os)
+
+            if cmd_data is None:
+                return f"No help available for '{command}'"
+
             # Build detailed help text
             help_text = f"Command: {cmd_data.get('name', command)}\n"
             help_text += f"Description: {cmd_data.get('description', 'No description available')}\n\n"
-            
+
             if 'syntax' in cmd_data:
                 help_text += f"Syntax:\n{cmd_data['syntax']}\n\n"
-            
+
             if 'examples' in cmd_data:
                 help_text += "Examples:\n"
                 for example in cmd_data['examples']:
                     help_text += f"  {example}\n"
                 help_text += "\n"
-            
+
             if 'help' in cmd_data:
                 help_text += f"Details:\n{cmd_data['help']}\n"
-            
+
             return help_text
+
+    def _find_command_for_help(self, command: str, agent_os: str = None):
+        """Find the best matching command entry for help, considering OS compatibility.
+
+        When multiple entries have the same command name but different OS compatibility,
+        this returns the one matching the agent's OS.
+        """
+        # Normalize agent OS
+        agent_os_normalized = None
+        if agent_os:
+            agent_os_lower = agent_os.lower()
+            os_mappings = {
+                'win': 'windows', 'win32': 'windows', 'win64': 'windows',
+                'windows': 'windows', 'windows_amd64': 'windows',
+                'linux': 'linux', 'ubuntu': 'linux', 'debian': 'linux',
+                'darwin': 'darwin', 'macos': 'darwin', 'osx': 'darwin',
+            }
+            agent_os_normalized = os_mappings.get(agent_os_lower, agent_os_lower)
+
+        # First, collect all command entries that match the command name
+        matching_entries = []
+
+        for cmd_key, cmd_data in self.commands.items():
+            cmd_name = cmd_data.get('name', cmd_key)
+            # Check if this entry's name matches the requested command
+            if cmd_name == command or cmd_key == command or cmd_key.replace('_', '-') == command or cmd_key.replace('-', '_') == command:
+                matching_entries.append((cmd_key, cmd_data))
+
+        if not matching_entries:
+            return None
+
+        # If only one match, return it
+        if len(matching_entries) == 1:
+            return matching_entries[0][1]
+
+        # Multiple matches - filter by OS compatibility
+        if agent_os_normalized:
+            for cmd_key, cmd_data in matching_entries:
+                os_compat = cmd_data.get('os_compatibility', 'all')
+
+                # Normalize os_compat to list
+                if os_compat == 'all':
+                    compat_list = ['all']
+                elif isinstance(os_compat, str):
+                    compat_list = [os_compat]
+                else:
+                    compat_list = os_compat
+
+                # Check if this entry is compatible with the agent OS
+                if 'all' in compat_list or agent_os_normalized in compat_list:
+                    return cmd_data
+
+        # No OS-specific match found, return the first entry
+        return matching_entries[0][1]
 
     def _format_os_compatibility(self, os_compat):
         """Format OS compatibility for display"""

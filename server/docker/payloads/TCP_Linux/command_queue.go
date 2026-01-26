@@ -86,10 +86,10 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdRm, wrapCommand(&RmCommand{}))
 	queue.RegisterHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
-	// Linux/Darwin specific commands (100-102)
+	// Linux/Darwin specific commands (100-101)
 	queue.RegisterHandler(CmdSudoSession, wrapCommand(&SudoSessionCommand{}))
 	queue.RegisterHandler(CmdPersist, wrapCommand(&PersistenceCommand{}))
-	queue.RegisterHandler(CmdPersistCron, wrapCommand(&CronPersistenceCommand{}))
+	// Note: CmdPersistCron removed - cron persistence now accessed via "persist cron" subcommand
 
 	// Link commands (230-232) - for multi-hop TCP agent chains
 	queue.RegisterHandler(CmdLink, wrapCommand(&LinkCommand{}))

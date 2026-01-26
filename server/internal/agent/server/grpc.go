@@ -1456,6 +1456,30 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			}
 		}
 
+		// Transform persist flags from user-friendly to short obscure flags
+		if strings.HasPrefix(processedCommand, "persist") {
+			originalCmd := processedCommand
+			// Payload wrapper flags (persist bashrc)
+			processedCommand = strings.ReplaceAll(processedCommand, "--raw", "-1")
+			processedCommand = strings.ReplaceAll(processedCommand, "--no-nohup", "-2")
+			processedCommand = strings.ReplaceAll(processedCommand, "--no-silence", "-3")
+			processedCommand = strings.ReplaceAll(processedCommand, "--no-pgrep", "-4")
+			processedCommand = strings.ReplaceAll(processedCommand, "--no-sudo-check", "-5")
+			// Common flags (order matters: longer flags first to avoid partial matches)
+			processedCommand = strings.ReplaceAll(processedCommand, "--command", "-6")
+			processedCommand = strings.ReplaceAll(processedCommand, "--files", "-7")
+			processedCommand = strings.ReplaceAll(processedCommand, "--file", "-8")
+			processedCommand = strings.ReplaceAll(processedCommand, "--user", "-9")
+			processedCommand = strings.ReplaceAll(processedCommand, "--name", "-n")
+			processedCommand = strings.ReplaceAll(processedCommand, "--all", "-a")
+			// Persist-cron specific flags
+			processedCommand = strings.ReplaceAll(processedCommand, "--method", "-m")
+			processedCommand = strings.ReplaceAll(processedCommand, "--interval", "-i")
+			if processedCommand != originalCmd {
+				log.Printf("[ProcessMessage] Transformed persist flags: '%s' -> '%s'", originalCmd, processedCommand)
+			}
+		}
+
 		// Store command in database (unless already stored by caller who provided db_id)
 		var commandDBID int
 		if commandData.DBID > 0 {
