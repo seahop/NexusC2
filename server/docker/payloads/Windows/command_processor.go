@@ -213,15 +213,13 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Parse command for everything else
-	cmdType := cmd.Command
 	var cmdArgs []string
 
 	// For BOF commands and variants, handle them specially (by numeric ID)
 	if cmd.CommandType == CmdBof || cmd.CommandType == CmdBofAsync ||
 		cmd.CommandType == CmdBofJobs || cmd.CommandType == CmdBofOutput || cmd.CommandType == CmdBofKill {
 		parts := strings.Fields(cmd.Command)
-		if len(parts) > 0 {
-			cmdType = parts[0]
+		if len(parts) > 1 {
 			cmdArgs = parts[1:]
 		}
 	} else {
@@ -250,7 +248,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
 		}
-		cmdType = args[0]
 		cmdArgs = args[1:]
 	}
 

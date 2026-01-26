@@ -32,13 +32,8 @@ func dialPipe(pipePath string) (net.Conn, error) {
 		return nil, err
 	}
 
-	// Set pipe mode to message mode
-	var mode uint32 = windows.PIPE_READMODE_MESSAGE
-	err = windows.SetNamedPipeHandleState(handle, &mode, nil, nil)
-	if err != nil {
-		windows.CloseHandle(handle)
-		return nil, err
-	}
+	// Pipe is in byte mode - no need to set message mode
+	// Length-prefixed framing is used for message boundaries
 
 	// Create a net.Conn wrapper for the pipe
 	return newPipeClientConn(handle, pipePath), nil
