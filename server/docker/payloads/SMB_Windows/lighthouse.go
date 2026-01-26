@@ -1,4 +1,4 @@
-// server/docker/payloads/SMB_Windows/lighthouse.go
+// server/docker/payloads/Windows/lighthouse.go
 //go:build windows
 // +build windows
 
@@ -193,22 +193,118 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 				case 'c':
 					fString += string(byte(args[argOffset]))
 				case 'l':
-					if i+2 < len(formatStr) && formatStr[i+2] == 'l' {
-						if i+3 < len(formatStr) && formatStr[i+3] == 'd' {
-							// %lld - long long
-							fString += fmt.Sprintf("%d", int64(args[argOffset]))
-							i += 2
+					if i+2 < len(formatStr) {
+						nextChar := formatStr[i+2]
+						if nextChar == 'l' && i+3 < len(formatStr) {
+							// %ll* - long long variants
+							llChar := formatStr[i+3]
+							if llChar == 'd' {
+								// %lld - long long decimal
+								fString += fmt.Sprintf("%d", int64(args[argOffset]))
+								i += 2
+								skipChar = true
+							} else if llChar == 'u' {
+								// %llu - unsigned long long
+								fString += fmt.Sprintf("%d", uint64(args[argOffset]))
+								i += 2
+								skipChar = true
+							} else if llChar == 'x' {
+								// %llx - long long hex
+								fString += fmt.Sprintf("%x", uint64(args[argOffset]))
+								i += 2
+								skipChar = true
+							} else if llChar == 'X' {
+								// %llX - long long hex uppercase
+								fString += fmt.Sprintf("%X", uint64(args[argOffset]))
+								i += 2
+								skipChar = true
+							}
+						} else if nextChar == 's' || nextChar == 'S' {
+							// %ls / %lS - wide string (wchar_t*)
+							s := ReadWStringFromPtr(args[argOffset])
+							fString += s
+							i += 1
+							skipChar = true
+						} else if nextChar == 'x' {
+							// %lx - long hex
+							fString += fmt.Sprintf("%x", uint32(args[argOffset]))
+							i += 1
+							skipChar = true
+						} else if nextChar == 'X' {
+							// %lX - long hex uppercase
+							fString += fmt.Sprintf("%X", uint32(args[argOffset]))
+							i += 1
+							skipChar = true
+						} else if nextChar == 'u' {
+							// %lu - long unsigned
+							fString += fmt.Sprintf("%d", uint32(args[argOffset]))
+							i += 1
+							skipChar = true
+						} else if nextChar == 'd' || nextChar == 'i' {
+							// %ld / %li - long decimal
+							fString += fmt.Sprintf("%d", int32(args[argOffset]))
+							i += 1
 							skipChar = true
 						}
 					}
 				case '0':
-					// Handle %02d style formatting
-					if i+3 < len(formatStr) && formatStr[i+2] >= '0' && formatStr[i+2] <= '9' {
-						width := int(formatStr[i+2] - '0')
-						if formatStr[i+3] == 'd' {
+					// Handle %0Nd, %0Nx, %0NX, %0Nlx, %0NlX style formatting
+					// Parse width: %0N... where N can be multiple digits
+					width := 0
+					j := i + 2
+					for j < len(formatStr) && formatStr[j] >= '0' && formatStr[j] <= '9' {
+						width = width*10 + int(formatStr[j]-'0')
+						j++
+					}
+					if j < len(formatStr) && width > 0 {
+						specifier := formatStr[j]
+						switch specifier {
+						case 'd', 'i':
+							// %0Nd - zero-padded decimal
 							fString += fmt.Sprintf("%0*d", width, int32(args[argOffset]))
-							i += 2
+							i = j - 1
 							skipChar = true
+						case 'u':
+							// %0Nu - zero-padded unsigned
+							fString += fmt.Sprintf("%0*d", width, uint32(args[argOffset]))
+							i = j - 1
+							skipChar = true
+						case 'x':
+							// %0Nx - zero-padded hex lowercase
+							fString += fmt.Sprintf("%0*x", width, uint32(args[argOffset]))
+							i = j - 1
+							skipChar = true
+						case 'X':
+							// %0NX - zero-padded hex uppercase
+							fString += fmt.Sprintf("%0*X", width, uint32(args[argOffset]))
+							i = j - 1
+							skipChar = true
+						case 'l':
+							// %0Nl* - zero-padded long variants
+							if j+1 < len(formatStr) {
+								lSpec := formatStr[j+1]
+								if lSpec == 'x' {
+									// %0Nlx - zero-padded long hex lowercase
+									fString += fmt.Sprintf("%0*x", width, uint32(args[argOffset]))
+									i = j
+									skipChar = true
+								} else if lSpec == 'X' {
+									// %0NlX - zero-padded long hex uppercase
+									fString += fmt.Sprintf("%0*X", width, uint32(args[argOffset]))
+									i = j
+									skipChar = true
+								} else if lSpec == 'd' {
+									// %0Nld - zero-padded long decimal
+									fString += fmt.Sprintf("%0*d", width, int32(args[argOffset]))
+									i = j
+									skipChar = true
+								} else if lSpec == 'u' {
+									// %0Nlu - zero-padded long unsigned
+									fString += fmt.Sprintf("%0*d", width, uint32(args[argOffset]))
+									i = j
+									skipChar = true
+								}
+							}
 						}
 					}
 				default:
@@ -265,8 +361,41 @@ func DataExtract(datap *DataParser, size *uint32) uintptr {
 		return 0
 	}
 
-	out := make([]byte, binaryLength)
-	CopyMemory(uintptr(unsafe.Pointer(&out[0])), datap.buffer, binaryLength)
+	// CRITICAL: Use VirtualAlloc for persistent memory that won't be moved by Go's GC
+	// The BOF will hold pointers into this memory, so it must remain valid
+	addr, _, _ := procVirtualAlloc.Call(
+		0,
+		uintptr(binaryLength),
+		MEM_COMMIT|MEM_RESERVE,
+		PAGE_READWRITE,
+	)
+
+	if addr == 0 {
+		// Fallback: use Go allocation but pin it in bofAllocations
+		bofAllocMutex.Lock()
+		out := make([]byte, binaryLength)
+		CopyMemory(uintptr(unsafe.Pointer(&out[0])), datap.buffer, binaryLength)
+		ptr := uintptr(unsafe.Pointer(&out[0]))
+		bofAllocations[ptr] = out // Keep slice alive
+		bofAllocMutex.Unlock()
+
+		if uintptr(unsafe.Pointer(size)) != uintptr(0) && binaryLength != 0 {
+			*size = binaryLength
+		}
+
+		datap.buffer += uintptr(binaryLength)
+		datap.length -= binaryLength
+
+		return ptr
+	}
+
+	// Copy data to VirtualAlloc'd memory
+	CopyMemory(addr, datap.buffer, binaryLength)
+
+	// Track allocation for cleanup
+	bofAllocMutex.Lock()
+	bofAllocations[addr] = nil // nil means VirtualAlloc'd
+	bofAllocMutex.Unlock()
 
 	if uintptr(unsafe.Pointer(size)) != uintptr(0) && binaryLength != 0 {
 		*size = binaryLength
@@ -275,12 +404,7 @@ func DataExtract(datap *DataParser, size *uint32) uintptr {
 	datap.buffer += uintptr(binaryLength)
 	datap.length -= binaryLength
 
-	// Log extracted string for debugging
-	if binaryLength > 0 && binaryLength < 1000 {
-		_ = string(out[:binaryLength-1]) // -1 to exclude null terminator if present
-	}
-
-	return uintptr(unsafe.Pointer(&out[0]))
+	return addr
 }
 
 func DataInt(datap *DataParser, size *uint32) uintptr {

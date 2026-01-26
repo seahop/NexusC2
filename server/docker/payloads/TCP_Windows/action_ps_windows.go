@@ -5,22 +5,51 @@
 package main
 
 import (
+	"sync"
 	"syscall"
 )
 
-// PS strings (constructed to avoid static signatures)
-var (
-	psRunningAs    = string([]byte{0x52, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x20, 0x61, 0x73, 0x3a, 0x20}) // Running as:
-	psBackslash    = string([]byte{0x5c})                                                                   // \
-	psImpersonated = string([]byte{0x20, 0x28, 0x69, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x65, 0x64, 0x29}) // (impersonated)
+// Template indices for PS Windows - must match server's common.go
+const (
+	idxPsRunningAs    = 186
+	idxPsBackslash    = 187
+	idxPsImpersonated = 188
 )
+
+// Global ps template storage for Windows-specific functions
+var (
+	psWindowsTemplate   []string
+	psWindowsTemplateMu sync.RWMutex
+)
+
+// SetPsWindowsTemplate stores the ps template for Windows helpers
+func SetPsWindowsTemplate(templates []string) {
+	psWindowsTemplateMu.Lock()
+	psWindowsTemplate = templates
+	psWindowsTemplateMu.Unlock()
+}
+
+// pswTpl retrieves a ps windows template string by index
+func pswTpl(idx int) string {
+	psWindowsTemplateMu.RLock()
+	defer psWindowsTemplateMu.RUnlock()
+	if psWindowsTemplate != nil && idx < len(psWindowsTemplate) {
+		return psWindowsTemplate[idx]
+	}
+	return ""
+}
+
+// Convenience functions for ps windows template values
+func psRunningAs() string    { return pswTpl(idxPsRunningAs) }
+func psBackslash() string    { return pswTpl(idxPsBackslash) }
+func psImpersonated() string { return pswTpl(idxPsImpersonated) }
 
 // getWindowsSecurityContext returns Windows-specific security context info
 func getWindowsSecurityContext() string {
 	if threadToken := GetThreadToken(); threadToken != 0 {
 		defer syscall.Token(threadToken).Close()
 		if user, domain := GetTokenUser(syscall.Handle(threadToken)); user != "" {
-			return psRunningAs + domain + psBackslash + user + psImpersonated
+			return psRunningAs() + domain + psBackslash() + user + psImpersonated()
 		}
 	}
 	return ""

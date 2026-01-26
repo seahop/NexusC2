@@ -206,6 +206,7 @@ type Command struct {
 	CurrentChunk int    `json:"currentChunk"`
 	TotalChunks  int    `json:"totalChunks"`
 	Data         string `json:"data"`
+	Arguments    string `json:"arguments"`     // Base64-encoded packed BOF arguments
 	Timestamp    string `json:"timestamp"`
 }
 
@@ -1532,6 +1533,7 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			CurrentChunk: commandData.CurrentChunk,
 			TotalChunks:  commandData.TotalChunks,
 			Data:         commandData.Data,
+			Arguments:    commandData.Arguments,
 			Timestamp:    commandData.Timestamp,
 		}
 

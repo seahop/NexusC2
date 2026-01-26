@@ -22,6 +22,7 @@ type Command struct {
 	CurrentChunk     int    `json:"currentChunk"`
 	TotalChunks      int    `json:"totalChunks"`
 	Data             string `json:"data"`
+	Arguments        string `json:"arguments"`          // Base64-encoded packed BOF arguments
 	Timestamp        string `json:"timestamp"`
 	JobID            string `json:"job_id"`
 }

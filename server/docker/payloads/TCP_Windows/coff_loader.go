@@ -904,16 +904,15 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
-
-				if p.length < 2 {
+				// Need 4 bytes for length prefix + 2 bytes for the short value
+				if p.length < 4 {
 					return 0
 				}
 
-				// Read 2-byte length prefix
-				_ = *(*uint16)(unsafe.Pointer(p.buffer))
-				p.buffer += 2
-				p.length -= 2
-
+				// Read 4-byte length prefix (standard BOF/Beacon format)
+				_ = *(*uint32)(unsafe.Pointer(p.buffer))
+				p.buffer += 4
+				p.length -= 4
 
 				if p.length < 2 {
 					return 0
@@ -937,21 +936,20 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(func(parser uintptr, sizePtr uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
-
-				if p.length < 2 {
+				// Need at least 4 bytes for the length prefix
+				if p.length < 4 {
 					if sizePtr != 0 {
 						*(*uint32)(unsafe.Pointer(sizePtr)) = 0
 					}
 					return 0
 				}
 
-				// Read 2-byte length prefix (for strings, BOFs use 2-byte length)
-				binLen := *(*uint16)(unsafe.Pointer(p.buffer))
-				p.buffer += 2
-				p.length -= 2
+				// Read 4-byte length prefix (standard BOF/Beacon format)
+				binLen := *(*uint32)(unsafe.Pointer(p.buffer))
+				p.buffer += 4
+				p.length -= 4
 
-
-				if uint32(binLen) > p.length {
+				if binLen > p.length {
 					if sizePtr != 0 {
 						*(*uint32)(unsafe.Pointer(sizePtr)) = 0
 					}
@@ -962,24 +960,11 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				// Return the pointer directly from the original buffer
 				dataPtr := p.buffer
 				p.buffer += uintptr(binLen)
-				p.length -= uint32(binLen)
+				p.length -= binLen
 
 				// Set size if requested
 				if sizePtr != 0 {
-					*(*uint32)(unsafe.Pointer(sizePtr)) = uint32(binLen)
-				}
-
-				// Debug: print the extracted string
-				if binLen > 0 && binLen < 1000 {
-					extractedBytes := make([]byte, binLen)
-					for i := uint16(0); i < binLen; i++ {
-						extractedBytes[i] = *(*byte)(unsafe.Pointer(dataPtr + uintptr(i)))
-					}
-					// Remove null terminator if present
-					extractedStr := string(extractedBytes)
-					if len(extractedStr) > 0 && extractedStr[len(extractedStr)-1] == 0 {
-						extractedStr = extractedStr[:len(extractedStr)-1]
-					}
+					*(*uint32)(unsafe.Pointer(sizePtr)) = binLen
 				}
 
 				// Return the pointer directly from the buffer

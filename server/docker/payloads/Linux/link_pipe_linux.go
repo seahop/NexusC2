@@ -47,7 +47,7 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 	// Connect to SMB port (445)
 	tcpConn, err := net.DialTimeout("tcp", server+":445", 30*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to SMB server: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E12, server))
 	}
 
 	// Set up credentials - use provided or fall back to anonymous
@@ -73,7 +73,7 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 	session, err := d.Dial(tcpConn)
 	if err != nil {
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to establish SMB session: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E31, server))
 	}
 
 	// Mount IPC$ share (required for named pipes)
@@ -81,7 +81,7 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 	if err != nil {
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to mount IPC$ share: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E12, server))
 	}
 
 	// Open the named pipe
@@ -90,7 +90,7 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 		share.Umount()
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to open named pipe: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E33, pipeName))
 	}
 
 	return &smbPipeConn{
@@ -112,12 +112,12 @@ func parsePipePath(pipePath string) (string, string, error) {
 	// Split by backslash
 	parts := strings.SplitN(path, "\\", 3)
 	if len(parts) < 3 {
-		return "", "", fmt.Errorf("invalid pipe path format: %s", pipePath)
+		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
 	}
 
 	server := parts[0]
 	if strings.ToLower(parts[1]) != "pipe" {
-		return "", "", fmt.Errorf("expected 'pipe' in path, got: %s", parts[1])
+		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
 	}
 
 	pipeName := parts[2]
@@ -239,7 +239,7 @@ func performLinkAuth(conn net.Conn) error {
 	}
 
 	// Simple challenge-response (matches Windows implementation)
-	response := append([]byte(lmAuthPrefix), challenge...)
+	response := append([]byte(lmAuthPrefix()), challenge...)
 
 	if err := writeMessage(conn, response); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
@@ -251,7 +251,7 @@ func performLinkAuth(conn net.Conn) error {
 		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	if string(confirm) != lmAuthOK {
+	if string(confirm) != lmAuthOK() {
 		return fmt.Errorf(Err(E3))
 	}
 

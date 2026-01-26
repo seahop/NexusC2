@@ -12,11 +12,8 @@ import (
 	"time"
 )
 
-// Auth strings (constructed to avoid static signatures)
-var (
-	lmAuthPrefixTCPLink = string([]byte{0x41, 0x55, 0x54, 0x48, 0x3a}) // AUTH:
-	lmAuthOKTCPLink     = string([]byte{0x4f, 0x4b})                   // OK
-)
+// Auth strings are now defined in link_manager.go (lmAuthPrefix, lmAuthOK)
+// to avoid duplication and enable server-side template support
 
 // dialTCP connects to a TCP agent at the specified address
 func dialTCP(address string, timeout time.Duration) (net.Conn, error) {
@@ -48,7 +45,7 @@ func performLinkAuthTCP(conn net.Conn) error {
 	}
 
 	// Step 2: Send "AUTH:" + challenge
-	response := append([]byte(lmAuthPrefixTCPLink), challenge...)
+	response := append([]byte(lmAuthPrefix()), challenge...)
 	if err := writeLinkMessage(conn, response); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
@@ -59,7 +56,7 @@ func performLinkAuthTCP(conn net.Conn) error {
 		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	if string(confirm) != lmAuthOKTCPLink {
+	if string(confirm) != lmAuthOK() {
 		return fmt.Errorf(Err(E3))
 	}
 

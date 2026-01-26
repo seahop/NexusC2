@@ -29,15 +29,16 @@ class BOFArgumentParser:
         Parse arguments into BOF format
         Argument types:
         - -s:string : String (char*)
-        - -w:string : Wide string (wchar_t*)  
+        - -w:string : Wide string (wchar_t*)
         - -i:number : 32-bit integer
         - -I:number : 64-bit integer
+        - -h:number : 16-bit short integer
         - -z:data   : Binary data (base64)
         - -Z:data   : Binary data with size
         - plain str : Treated as string
         """
         buffer = bytearray()
-        
+
         for arg in args:
             if arg.startswith('-'):
                 # Typed argument
@@ -45,9 +46,9 @@ class BOFArgumentParser:
                     # Plain string if no type specifier
                     buffer.extend(BOFArgumentParser._pack_string(arg))
                     continue
-                    
+
                 arg_type, value = arg.split(':', 1)
-                
+
                 if arg_type == '-s':
                     # String
                     buffer.extend(BOFArgumentParser._pack_string(value))
@@ -60,6 +61,9 @@ class BOFArgumentParser:
                 elif arg_type == '-I':
                     # 64-bit int
                     buffer.extend(BOFArgumentParser._pack_int64(int(value)))
+                elif arg_type == '-h':
+                    # 16-bit short int
+                    buffer.extend(BOFArgumentParser._pack_int16(int(value)))
                 elif arg_type == '-z':
                     # Binary data (base64)
                     buffer.extend(base64.b64decode(value))
@@ -76,8 +80,18 @@ class BOFArgumentParser:
     
     @staticmethod
     def _pack_string(s: str) -> bytes:
-        """Pack a null-terminated string"""
-        return s.encode('utf-8') + b'\x00'
+        """Pack a string in BOF format with length prefix"""
+        # Format: length (4 bytes) + string data + null terminator
+        # BeaconDataExtract expects length-prefixed data
+        data = s.encode('utf-8') + b'\x00'
+        length = len(data)
+        result = bytearray(4)
+        result[0] = length & 0xFF
+        result[1] = (length >> 8) & 0xFF
+        result[2] = (length >> 16) & 0xFF
+        result[3] = (length >> 24) & 0xFF
+        result.extend(data)
+        return bytes(result)
     
     @staticmethod
     def _pack_bof_string(s: str) -> bytes:
@@ -95,9 +109,24 @@ class BOFArgumentParser:
     
     @staticmethod
     def _pack_wstring(s: str) -> bytes:
-        """Pack a null-terminated wide string"""
-        return s.encode('utf-16le') + b'\x00\x00'
+        """Pack a wide string in BOF format with length prefix"""
+        # Format: length (4 bytes) + wide string data + null terminator
+        # BeaconDataExtract expects length-prefixed data
+        data = s.encode('utf-16le') + b'\x00\x00'
+        length = len(data)
+        result = bytearray(4)
+        result[0] = length & 0xFF
+        result[1] = (length >> 8) & 0xFF
+        result[2] = (length >> 16) & 0xFF
+        result[3] = (length >> 24) & 0xFF
+        result.extend(data)
+        return bytes(result)
     
+    @staticmethod
+    def _pack_int16(i: int) -> bytes:
+        """Pack a 16-bit short integer (little endian)"""
+        return i.to_bytes(2, 'little', signed=True)
+
     @staticmethod
     def _pack_int32(i: int) -> bytes:
         """Pack a 32-bit integer (little endian)"""

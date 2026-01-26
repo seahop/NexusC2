@@ -417,29 +417,42 @@ class CNAInterpreter:
             return False
     
     def _format_bof_args(self, args: List[str], pack_format: str) -> List[str]:
-        """Format arguments based on CNA pack format"""
+        """Format arguments based on CNA pack format
+
+        CNA/Cobalt Strike bof_pack format specifiers:
+        - z = null-terminated string (char*)
+        - Z = null-terminated wide string (wchar_t*)
+        - i = 32-bit integer
+        - I = 64-bit integer
+        - s = 16-bit short integer
+        - b = binary data (length-prefixed)
+        """
         if not pack_format:
             return args
-        
+
         formatted = []
         format_chars = list(pack_format)
-        
+
         for i, (arg, fmt) in enumerate(zip(args, format_chars)):
-            if fmt == 'z' or fmt == 'Z':  # String types
-                formatted.append(arg)
+            if fmt == 'z':  # Narrow string (char*)
+                formatted.append(f"-s:{arg}")
+            elif fmt == 'Z':  # Wide string (wchar_t*)
+                formatted.append(f"-w:{arg}")
             elif fmt == 'i':  # 32-bit int
                 formatted.append(f"-i:{arg}")
             elif fmt == 'I':  # 64-bit int
                 formatted.append(f"-I:{arg}")
-            elif fmt == 's':  # Short
-                formatted.append(f"-s:{arg}")
+            elif fmt == 's':  # Short (16-bit)
+                formatted.append(f"-h:{arg}")
+            elif fmt == 'b':  # Binary data
+                formatted.append(f"-z:{arg}")
             else:
                 formatted.append(arg)
-        
+
         # Add any remaining args
         if len(args) > len(format_chars):
             formatted.extend(args[len(format_chars):])
-        
+
         return formatted
     
     def _find_bof_file(self, bof_name: str) -> Optional[str]:

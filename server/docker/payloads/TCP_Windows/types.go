@@ -1,6 +1,4 @@
-// server/docker/payloads/SMB_Windows/types.go
-// Type definitions for SMB agent - matches Windows agent types for compatibility
-
+// server/docker/payloads/Windows/shared/types.go
 //go:build windows
 // +build windows
 
@@ -24,6 +22,7 @@ type Command struct {
 	CurrentChunk     int    `json:"currentChunk"`
 	TotalChunks      int    `json:"totalChunks"`
 	Data             string `json:"data"`
+	Arguments        string `json:"arguments"`          // Base64-encoded packed BOF arguments
 	Timestamp        string `json:"timestamp"`
 	JobID            string `json:"job_id"`
 }
@@ -36,7 +35,7 @@ type CommandResult struct {
 	ErrorString string
 	ExitCode    int
 	CompletedAt string
-	JobID       string
+	JobID       string // Add this field for async BOF tracking
 }
 
 // CommandResponse represents the response to send back to server
@@ -54,19 +53,19 @@ type CommandResponse struct {
 	Error        string `json:"error,omitempty"`
 	ExitCode     int    `json:"exit_code"`
 	Timestamp    string `json:"timestamp"`
-	JobID        string `json:"job_id"`
+	JobID        string `json:"job_id"` // Add this field
 }
 
 // CommandContext holds shared state and functionality for commands
 type CommandContext struct {
 	mu             sync.RWMutex
 	WorkingDir     string
-	CurrentCommand *Command
-	SudoSession    interface{}
-	SessionEnv     map[string]string
-	StolenToken    interface{}
-	TokenStore     interface{}
-	MakeToken      interface{}
+	CurrentCommand *Command          // Add this field for BOF support
+	SudoSession    interface{}       // Add this field for storing sudo session
+	SessionEnv     map[string]string // Add this field for persistent environment variables
+	StolenToken    interface{}       // Keep for backward compatibility
+	TokenStore     interface{}       // Unified token store for both steal-token and make-token
+	MakeToken      interface{}       // Keep for backward compatibility
 }
 
 // CommandHandler is the function signature for command execution.
@@ -81,11 +80,11 @@ type CommandInterface interface {
 
 // JobInfo represents information about an active job
 type JobInfo struct {
-	ID        string
+	ID        string // Unique job identifier
 	StartTime time.Time
 	Filename  string
 	Active    bool
-	Type      string
+	Type      string // "download", "upload", etc
 }
 
 // UploadInfo tracks active upload operations
@@ -94,8 +93,8 @@ type UploadInfo struct {
 	TotalChunks int
 	RemotePath  string
 	Filename    string
-	LastUpdate  time.Time
-	StartTime   time.Time
+	LastUpdate  time.Time // Track last chunk received time
+	StartTime   time.Time // Track when upload started
 }
 
 // DownloadInfo tracks active download operations
