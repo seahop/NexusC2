@@ -342,6 +342,16 @@ build_binary() {
             -X 'main.postClientIDTransforms=${POST_CLIENTID_TRANSFORMS}' \
             -X 'main.postDataTransforms=${POST_DATA_TRANSFORMS}' \
             -X 'main.responseDataTransforms=${RESPONSE_DATA_TRANSFORMS}' \
+            -X 'main.geMethodGet=${GE_METHOD_GET}' \
+            -X 'main.geMethodPost=${GE_METHOD_POST}' \
+            -X 'main.geProtoHttps=${GE_PROTO_HTTPS}' \
+            -X 'main.geProtoHttp=${GE_PROTO_HTTP}' \
+            -X 'main.gePort443=${GE_PORT_443}' \
+            -X 'main.gePort80=${GE_PORT_80}' \
+            -X 'main.geFmtUrlNoPort=${GE_FMT_URL_NO_PORT}' \
+            -X 'main.geFmtUrlWithPort=${GE_FMT_URL_WITH_PORT}' \
+            -X 'main.geFmtUrlQuery=${GE_FMT_URL_QUERY}' \
+            -X 'main.geSlash=${GE_SLASH}' \
             ${TOGGLE_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"

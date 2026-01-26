@@ -64,7 +64,7 @@ func placeInLocation(req *http.Request, output string, data []byte, prependLen, 
 
 // buildRequestWithTransforms creates an HTTP request with transformed clientID placed correctly
 // Returns the request and body data (if output is "body")
-func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted map[string]string) (*http.Request, []byte, error) {
+func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted *DecryptedConfig) (*http.Request, []byte, error) {
 	req, err := http.NewRequest(method, baseURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf(ErrCtx(E12, err.Error()))
@@ -94,7 +94,7 @@ func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataB
 		}
 	} else {
 		// Legacy: use query param with clientID name/format from decrypted values
-		clientIDName := decrypted[geKeyGetClientIDName]
+		clientIDName := decrypted.GetClientIDName
 		if clientIDName != "" {
 			q := req.URL.Query()
 			q.Set(clientIDName, clientIDVal)
@@ -130,8 +130,8 @@ func parseCustomHeaders(headerJSON string) (map[string]string, error) {
 	return headers, nil
 }
 
-func sendInitialPost(url string, encryptedData string, decrypted map[string]string) (string, error) {
-	method := decrypted[geKeyPostMethod]
+func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfig) (string, error) {
+	method := decrypted.PostMethod
 	if method == "" {
 		method = geMethodPost
 	}
@@ -155,13 +155,13 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
-	customHeaders, err := parseCustomHeaders(decrypted[geKeyCustomHeaders])
+	customHeaders, err := parseCustomHeaders(decrypted.CustomHeaders)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	req.Header.Set(httpHeaderUserAgent, decrypted[geKeyUserAgent])
-	req.Header.Set(httpHeaderContentType, decrypted[geKeyContentType])
+	req.Header.Set(httpHeaderUserAgent, decrypted.UserAgent)
+	req.Header.Set(httpHeaderContentType, decrypted.ContentType)
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -189,7 +189,7 @@ func sendInitialPost(url string, encryptedData string, decrypted map[string]stri
 	hashed := sha256.Sum256([]byte(verificationData))
 
 	// Parse server's public key
-	block, _ := pem.Decode([]byte(decrypted[geKeyPublicKey]))
+	block, _ := pem.Decode([]byte(decrypted.PublicKey))
 	if block == nil {
 		return "", fmt.Errorf(Err(E18))
 	}

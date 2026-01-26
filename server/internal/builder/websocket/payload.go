@@ -245,8 +245,8 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 			fmt.Sprintf("OUTPUT_FILENAME=%s_project.zip", strings.TrimSuffix(buildData.binaryName, ".exe")),
 		}
 
-		// Add safety check environment variables for project export
-		safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks)
+		// Add safety check environment variables for project export (XOR encrypted)
+		safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks, buildData.xorKey)
 		envVars = append(envVars, safetyEnvVars...)
 
 		zipPath, err := b.buildPayloadBinary(ctx, fmt.Sprintf("%s_project.zip", strings.TrimSuffix(buildData.binaryName, ".exe")), envVars)
@@ -263,8 +263,8 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 		return err
 	}
 
-	// Add safety check environment variables
-	safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks)
+	// Add safety check environment variables (XOR encrypted)
+	safetyEnvVars := b.prepareSafetyCheckEnvironment(buildData.safetyChecks, buildData.xorKey)
 	envVars = append(envVars, safetyEnvVars...)
 
 	binaryPath, err := b.buildPayloadBinary(ctx, buildData.binaryName, envVars)
@@ -276,44 +276,45 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 }
 
 // prepareSafetyCheckEnvironment prepares environment variables for safety checks
-func (b *Builder) prepareSafetyCheckEnvironment(safetyChecks SafetyChecks) []string {
+// Safety values are XOR encrypted to protect target identifiers in the binary
+func (b *Builder) prepareSafetyCheckEnvironment(safetyChecks SafetyChecks, xorKey string) []string {
 	var envVars []string
 
 	if safetyChecks.Hostname != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_HOSTNAME=%s", safetyChecks.Hostname))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_HOSTNAME=%s", xorEncrypt(safetyChecks.Hostname, xorKey)))
 	}
 
 	if safetyChecks.Username != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_USERNAME=%s", safetyChecks.Username))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_USERNAME=%s", xorEncrypt(safetyChecks.Username, xorKey)))
 	}
 
 	if safetyChecks.Domain != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_DOMAIN=%s", safetyChecks.Domain))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_DOMAIN=%s", xorEncrypt(safetyChecks.Domain, xorKey)))
 	}
 
 	if safetyChecks.FileCheck != nil && safetyChecks.FileCheck.Path != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_PATH=%s", safetyChecks.FileCheck.Path))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_PATH=%s", xorEncrypt(safetyChecks.FileCheck.Path, xorKey)))
 		mustExist := "false"
 		if safetyChecks.FileCheck.MustExist {
 			mustExist = "true"
 		}
-		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_MUST_EXIST=%s", mustExist))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_FILE_MUST_EXIST=%s", xorEncrypt(mustExist, xorKey)))
 	}
 
 	if safetyChecks.Process != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_PROCESS=%s", safetyChecks.Process))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_PROCESS=%s", xorEncrypt(safetyChecks.Process, xorKey)))
 	}
 
 	if safetyChecks.KillDate != "" {
-		envVars = append(envVars, fmt.Sprintf("SAFETY_KILL_DATE=%s", safetyChecks.KillDate))
+		envVars = append(envVars, fmt.Sprintf("SAFETY_KILL_DATE=%s", xorEncrypt(safetyChecks.KillDate, xorKey)))
 	}
 
 	if safetyChecks.WorkingHours != nil {
 		if safetyChecks.WorkingHours.Start != "" {
-			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_START=%s", safetyChecks.WorkingHours.Start))
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_START=%s", xorEncrypt(safetyChecks.WorkingHours.Start, xorKey)))
 		}
 		if safetyChecks.WorkingHours.End != "" {
-			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", safetyChecks.WorkingHours.End))
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", xorEncrypt(safetyChecks.WorkingHours.End, xorKey)))
 		}
 	}
 
@@ -645,33 +646,58 @@ func init() {
 		data.os, data.arch,
 		getMethod, postMethod,
 		safetyCheckComment,
-		// Safety check values
-		data.safetyChecks.Hostname,
-		data.safetyChecks.Username,
-		data.safetyChecks.Domain,
+		// Safety check values (XOR encrypted for memory protection)
 		func() string {
-			if data.safetyChecks.FileCheck != nil {
-				return data.safetyChecks.FileCheck.Path
+			if data.safetyChecks.Hostname == "" {
+				return ""
+			}
+			return xorEncrypt(data.safetyChecks.Hostname, data.xorKey)
+		}(),
+		func() string {
+			if data.safetyChecks.Username == "" {
+				return ""
+			}
+			return xorEncrypt(data.safetyChecks.Username, data.xorKey)
+		}(),
+		func() string {
+			if data.safetyChecks.Domain == "" {
+				return ""
+			}
+			return xorEncrypt(data.safetyChecks.Domain, data.xorKey)
+		}(),
+		func() string {
+			if data.safetyChecks.FileCheck != nil && data.safetyChecks.FileCheck.Path != "" {
+				return xorEncrypt(data.safetyChecks.FileCheck.Path, data.xorKey)
 			}
 			return ""
 		}(),
 		func() string {
 			if data.safetyChecks.FileCheck != nil && data.safetyChecks.FileCheck.MustExist {
-				return "true"
+				return xorEncrypt("true", data.xorKey)
 			}
-			return "false"
+			return xorEncrypt("false", data.xorKey)
 		}(),
-		data.safetyChecks.Process,
-		data.safetyChecks.KillDate,
 		func() string {
-			if data.safetyChecks.WorkingHours != nil {
-				return data.safetyChecks.WorkingHours.Start
+			if data.safetyChecks.Process == "" {
+				return ""
+			}
+			return xorEncrypt(data.safetyChecks.Process, data.xorKey)
+		}(),
+		func() string {
+			if data.safetyChecks.KillDate == "" {
+				return ""
+			}
+			return xorEncrypt(data.safetyChecks.KillDate, data.xorKey)
+		}(),
+		func() string {
+			if data.safetyChecks.WorkingHours != nil && data.safetyChecks.WorkingHours.Start != "" {
+				return xorEncrypt(data.safetyChecks.WorkingHours.Start, data.xorKey)
 			}
 			return ""
 		}(),
 		func() string {
-			if data.safetyChecks.WorkingHours != nil {
-				return data.safetyChecks.WorkingHours.End
+			if data.safetyChecks.WorkingHours != nil && data.safetyChecks.WorkingHours.End != "" {
+				return xorEncrypt(data.safetyChecks.WorkingHours.End, data.xorKey)
 			}
 			return ""
 		}(),
@@ -1324,6 +1350,17 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		"POST_CLIENTID_TRANSFORMS": postClientIDTransforms,
 		"POST_DATA_TRANSFORMS":     postDataTransforms,
 		"RESPONSE_DATA_TRANSFORMS": responseDataTransforms,
+		// HTTP protocol strings (pre-connection, must be XOR encrypted)
+		"GE_METHOD_GET":       "GET",
+		"GE_METHOD_POST":      "POST",
+		"GE_PROTO_HTTPS":      "https",
+		"GE_PROTO_HTTP":       "http",
+		"GE_PORT_443":         "443",
+		"GE_PORT_80":          "80",
+		"GE_FMT_URL_NO_PORT":  "%s://%s",
+		"GE_FMT_URL_WITH_PORT": "%s://%s:%s",
+		"GE_FMT_URL_QUERY":    "%s%s?%s=%s",
+		"GE_SLASH":            "/",
 	}
 
 	// Encrypt all values

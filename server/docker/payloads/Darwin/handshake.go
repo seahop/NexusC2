@@ -10,7 +10,7 @@ import (
 )
 
 type HandshakeManager struct {
-	decryptedValues map[string]string
+	decryptedValues *DecryptedConfig
 	currentClientID string
 	initialClientID string // Store the very first client ID
 	getURL          string
@@ -33,16 +33,16 @@ func NewHandshakeManager() (*HandshakeManager, error) {
 	}
 
 	// Parse transform DataBlocks if configured
-	if jsonStr := decrypted[geKeyGetClientIDTransforms]; jsonStr != "" {
+	if jsonStr := decrypted.GetClientIDTransforms; jsonStr != "" {
 		hm.getClientIDDataBlock = parseDataBlock(jsonStr)
 	}
-	if jsonStr := decrypted[geKeyPostClientIDTransforms]; jsonStr != "" {
+	if jsonStr := decrypted.PostClientIDTransforms; jsonStr != "" {
 		hm.postClientIDDataBlock = parseDataBlock(jsonStr)
 	}
-	if jsonStr := decrypted[geKeyPostDataTransforms]; jsonStr != "" {
+	if jsonStr := decrypted.PostDataTransforms; jsonStr != "" {
 		hm.postDataDataBlock = parseDataBlock(jsonStr)
 	}
-	if jsonStr := decrypted[geKeyResponseDataTransforms]; jsonStr != "" {
+	if jsonStr := decrypted.ResponseDataTransforms; jsonStr != "" {
 		hm.responseDataDataBlock = parseDataBlock(jsonStr)
 	}
 
@@ -65,8 +65,8 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 3: Double encrypt the JSON (AES + RSA)
 	encryptedJSON, err := EncryptInitialHandshake(
 		jsonOutput,
-		hm.decryptedValues[geKeySecret],
-		hm.decryptedValues[geKeyPublicKey],
+		hm.decryptedValues.Secret,
+		hm.decryptedValues.PublicKey,
 	)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
@@ -74,14 +74,14 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Step 4: Build POST URL with initial clientID
 	baseURL := buildBaseURL(
-		hm.decryptedValues[geKeyProtocol],
-		hm.decryptedValues[geKeyIP],
-		hm.decryptedValues[geKeyPort],
+		hm.decryptedValues.Protocol,
+		hm.decryptedValues.IP,
+		hm.decryptedValues.Port,
 	)
 	postURL := buildPostURL(
 		baseURL,
-		hm.decryptedValues[geKeyPostRoute],
-		hm.decryptedValues[geKeyPostClientIDName],
+		hm.decryptedValues.PostRoute,
+		hm.decryptedValues.PostClientIDName,
 		hm.initialClientID, // Use initial client ID for the handshake
 	)
 
@@ -102,7 +102,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Build new URLs with new client ID for subsequent communications
 	if hm.getClientIDDataBlock != nil {
-		getRoute := hm.decryptedValues[geKeyGetRoute]
+		getRoute := hm.decryptedValues.GetRoute
 		if len(getRoute) > 0 && getRoute[0] != '/' {
 			getRoute = "/" + getRoute
 		}
@@ -110,14 +110,14 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	} else {
 		hm.getURL = buildGetURL(
 			baseURL,
-			hm.decryptedValues[geKeyGetRoute],
-			hm.decryptedValues[geKeyGetClientIDName],
+			hm.decryptedValues.GetRoute,
+			hm.decryptedValues.GetClientIDName,
 			newClientID,
 		)
 	}
 
 	if hm.postClientIDDataBlock != nil {
-		postRoute := hm.decryptedValues[geKeyPostRoute]
+		postRoute := hm.decryptedValues.PostRoute
 		if len(postRoute) > 0 && postRoute[0] != '/' {
 			postRoute = "/" + postRoute
 		}
@@ -125,8 +125,8 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	} else {
 		hm.postURL = buildPostURL(
 			baseURL,
-			hm.decryptedValues[geKeyPostRoute],
-			hm.decryptedValues[geKeyPostClientIDName],
+			hm.decryptedValues.PostRoute,
+			hm.decryptedValues.PostClientIDName,
 			newClientID,
 		)
 	}
@@ -140,7 +140,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Step 9: Initialize SecureComms with initial secret and new seed
 	hm.secureComms = NewSecureComms(
-		hm.decryptedValues[geKeySecret],
+		hm.decryptedValues.Secret,
 		sysInfoReport.AgentInfo.Seed,
 	)
 

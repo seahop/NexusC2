@@ -580,27 +580,37 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		fmt.Sprintf("POST_SECRET_FORMAT=%s", xorEncrypt(postSecretFormat, xorKey)),
 	)
 
-	// Add safety checks
-	envVars = append(envVars,
-		fmt.Sprintf("SAFETY_HOSTNAME=%s", req.SafetyChecks.Hostname),
-		fmt.Sprintf("SAFETY_USERNAME=%s", req.SafetyChecks.Username),
-		fmt.Sprintf("SAFETY_DOMAIN=%s", req.SafetyChecks.Domain),
-		fmt.Sprintf("SAFETY_PROCESS=%s", req.SafetyChecks.Process),
-		fmt.Sprintf("SAFETY_KILL_DATE=%s", req.SafetyChecks.KillDate),
-	)
+	// Add safety checks (XOR encrypted to protect target identifiers)
+	if req.SafetyChecks.Hostname != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_HOSTNAME=%s", xorEncrypt(req.SafetyChecks.Hostname, xorKey)))
+	}
+	if req.SafetyChecks.Username != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_USERNAME=%s", xorEncrypt(req.SafetyChecks.Username, xorKey)))
+	}
+	if req.SafetyChecks.Domain != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_DOMAIN=%s", xorEncrypt(req.SafetyChecks.Domain, xorKey)))
+	}
+	if req.SafetyChecks.Process != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_PROCESS=%s", xorEncrypt(req.SafetyChecks.Process, xorKey)))
+	}
+	if req.SafetyChecks.KillDate != "" {
+		envVars = append(envVars, fmt.Sprintf("SAFETY_KILL_DATE=%s", xorEncrypt(req.SafetyChecks.KillDate, xorKey)))
+	}
 
-	if req.SafetyChecks.FileCheck != nil {
+	if req.SafetyChecks.FileCheck != nil && req.SafetyChecks.FileCheck.Path != "" {
 		envVars = append(envVars,
-			fmt.Sprintf("SAFETY_FILE_PATH=%s", req.SafetyChecks.FileCheck.Path),
-			fmt.Sprintf("SAFETY_FILE_MUST_EXIST=%t", req.SafetyChecks.FileCheck.MustExist),
+			fmt.Sprintf("SAFETY_FILE_PATH=%s", xorEncrypt(req.SafetyChecks.FileCheck.Path, xorKey)),
+			fmt.Sprintf("SAFETY_FILE_MUST_EXIST=%s", xorEncrypt(fmt.Sprintf("%t", req.SafetyChecks.FileCheck.MustExist), xorKey)),
 		)
 	}
 
 	if req.SafetyChecks.WorkingHours != nil {
-		envVars = append(envVars,
-			fmt.Sprintf("SAFETY_WORK_HOURS_START=%s", req.SafetyChecks.WorkingHours.Start),
-			fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", req.SafetyChecks.WorkingHours.End),
-		)
+		if req.SafetyChecks.WorkingHours.Start != "" {
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_START=%s", xorEncrypt(req.SafetyChecks.WorkingHours.Start, xorKey)))
+		}
+		if req.SafetyChecks.WorkingHours.End != "" {
+			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", xorEncrypt(req.SafetyChecks.WorkingHours.End, xorKey)))
+		}
 	}
 
 	return envVars
