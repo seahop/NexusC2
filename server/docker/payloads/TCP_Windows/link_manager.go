@@ -29,6 +29,10 @@ const (
 	idxLinkFmtList      = 344
 	idxLinkFmtRow       = 345
 	idxLinkTimeFmt      = 346
+
+	// SMB pipe strings (for link_pipe_windows.go)
+	idxLinkPipeWord  = 682
+	idxLinkLocalWord = 683
 )
 
 // Template storage for link manager strings

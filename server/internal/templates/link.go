@@ -48,6 +48,13 @@ func GetLinkTemplate() *CommandTemplate {
 	tpl[IdxLinkFmtRow] = "  [%s] %s - %s (connected: %s, last seen: %s)\n"
 	tpl[IdxLinkTimeFmt] = "15:04:05"
 
+	// SMB pipe strings (for link_pipe_*.go)
+	tpl[IdxLinkSmbPort] = ":445"
+	tpl[IdxLinkIpcShare] = "IPC$"
+	tpl[IdxLinkPipeWord] = "pipe"
+	tpl[IdxLinkLocalWord] = "local"
+	tpl[IdxLinkSmbPipe] = "smb-pipe"
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeLink,

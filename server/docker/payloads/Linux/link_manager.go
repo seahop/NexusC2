@@ -18,6 +18,7 @@ import (
 )
 
 // Template indices for link manager strings (must match server's common.go)
+// Note: idxLinkProtoSmb and idxLinkProtoTcp are defined in action_link.go
 const (
 	idxLinkKeyType      = 133
 	idxLinkKeyPayload   = 134
@@ -219,7 +220,7 @@ func (lm *LinkManager) Link(pipePath string, creds *SMBCredentials) (string, err
 	link := &LinkedAgent{
 		RoutingID:         routingID,
 		PipePath:          pipePath,
-		LinkType:          "smb",
+		LinkType:          lmTpl(idxLinkProtoSmb),
 		Conn:              conn,
 		Connected:         time.Now(),
 		LastSeen:          time.Now(),
@@ -310,7 +311,7 @@ func (lm *LinkManager) LinkTCP(address string) (string, error) {
 	link := &LinkedAgent{
 		RoutingID:         routingID,
 		Address:           address,
-		LinkType:          "tcp",
+		LinkType:          lmTpl(idxLinkProtoTcp),
 		Conn:              conn,
 		Connected:         time.Now(),
 		LastSeen:          time.Now(),
@@ -357,7 +358,7 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	}
 
 	// Remove from maps based on link type
-	if link.LinkType == "tcp" {
+	if link.LinkType == lmTpl(idxLinkProtoTcp) {
 		delete(lm.addressToRoute, link.Address)
 	} else {
 		delete(lm.pipeToRoute, link.PipePath)
@@ -498,7 +499,7 @@ func (lm *LinkManager) ForwardToLinkedAgentAndWait(routingID string, payload str
 
 	// For SMB links, use synchronous request-response pattern
 	// go-smb2 doesn't support concurrent read/write on the same file handle
-	if link.LinkType == "smb" {
+	if link.LinkType == lmTpl(idxLinkProtoSmb) {
 		return lm.forwardToSMBAgentAndWait(link, payload, timeout)
 	}
 
@@ -598,7 +599,7 @@ func (lm *LinkManager) ForwardToLinkedAgentRawAndWait(routingID string, payload 
 	}
 
 	// For SMB links, use synchronous request-response pattern
-	if link.LinkType == "smb" {
+	if link.LinkType == lmTpl(idxLinkProtoSmb) {
 		return lm.forwardToSMBAgentRawAndWait(link, rawData, prependLen, appendLen, timeout)
 	}
 
@@ -898,7 +899,7 @@ func (lm *LinkManager) ListLinks() string {
 		}
 		// Show pipe path for SMB, address for TCP
 		displayPath := link.Address
-		if link.LinkType == "smb" {
+		if link.LinkType == lmTpl(idxLinkProtoSmb) {
 			displayPath = link.PipePath
 		}
 		result += fmt.Sprintf(lmFmtLinkRow(),
@@ -986,7 +987,7 @@ func (lm *LinkManager) pingAllLinks() {
 	for _, link := range links {
 		// Skip heartbeats for SMB links - go-smb2 requires synchronous request-response
 		// and we can't read the pong without interfering with command responses
-		if link.LinkType == "smb" {
+		if link.LinkType == lmTpl(idxLinkProtoSmb) {
 			continue
 		}
 		lm.sendPing(link)

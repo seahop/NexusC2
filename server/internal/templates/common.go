@@ -37,7 +37,7 @@ const (
 )
 
 // MaxTemplateSize ensures all indices have values across all command types
-const MaxTemplateSize = 700
+const MaxTemplateSize = 710
 
 // ============================================================================
 // SHELL TEMPLATE INDICES (100-119)
@@ -711,6 +711,41 @@ const (
 	IdxKcMPassword    = 652 // password
 
 	_keychainEnd = 679
+)
+
+// ============================================================================
+// SMB PIPE TEMPLATE INDICES (680-689) - for link_pipe_*.go
+// ============================================================================
+const (
+	IdxLinkSmbPort   = 680 // :445
+	IdxLinkIpcShare  = 681 // IPC$
+	IdxLinkPipeWord  = 682 // pipe
+	IdxLinkLocalWord = 683 // local
+	IdxLinkSmbPipe   = 684 // smb-pipe
+
+	_smbPipeEnd = 689
+)
+
+// ============================================================================
+// PTY HELPER TEMPLATE INDICES (690-709) - for pty_helper.go
+// ============================================================================
+const (
+	IdxPtySudo      = 690 // sudo
+	IdxPtySu        = 691 // su
+	IdxPtySh        = 692 // sh
+	IdxPtyFlagS     = 693 // -S
+	IdxPtyFlagP     = 694 // -p
+	IdxPtyFlagC     = 695 // -c
+	IdxPtyFlagDash  = 696 // -
+	IdxPtyPassword  = 697 // Password:
+	IdxPtyPasswordL = 698 // password
+	IdxPtySorry     = 699 // Sorry
+	IdxPtyTryAgain  = 700 // try again
+	IdxPtyIncorrect = 701 // incorrect
+	IdxPtyExit      = 702 // exit
+	IdxPtyRoot      = 703 // root
+
+	_ptyHelperEnd = 709
 )
 
 // ToJSON serializes the template to JSON bytes

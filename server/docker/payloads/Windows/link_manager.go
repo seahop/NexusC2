@@ -14,6 +14,7 @@ import (
 )
 
 // Template indices for link manager strings (must match server's common.go)
+// Note: idxLinkProtoSmb and idxLinkProtoTcp are defined in action_link.go
 const (
 	idxLinkKeyType      = 133
 	idxLinkKeyPayload   = 134
@@ -29,6 +30,9 @@ const (
 	idxLinkFmtList      = 344
 	idxLinkFmtRow       = 345
 	idxLinkTimeFmt      = 346
+	// SMB pipe strings for link_pipe_windows.go
+	idxLinkLocalWord = 683
+	idxLinkPipeWord  = 682
 )
 
 // linkManagerTemplate stores the template received from the server
@@ -214,7 +218,7 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 	link := &LinkedAgent{
 		RoutingID:         routingID,
 		PipePath:          pipePath,
-		LinkType:          "smb",
+		LinkType:          lmTpl(idxLinkProtoSmb),
 		Conn:              conn,
 		Connected:         time.Now(),
 		LastSeen:          time.Now(),
@@ -264,7 +268,7 @@ func (lm *LinkManager) LinkTCP(address string) (string, error) {
 	link := &LinkedAgent{
 		RoutingID:         routingID,
 		Address:           address,
-		LinkType:          "tcp",
+		LinkType:          lmTpl(idxLinkProtoTcp),
 		Conn:              conn,
 		Connected:         time.Now(),
 		LastSeen:          time.Now(),
@@ -313,7 +317,7 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	}
 
 	// Remove from maps based on link type
-	if link.LinkType == "tcp" {
+	if link.LinkType == lmTpl(idxLinkProtoTcp) {
 		delete(lm.addressToRoute, link.Address)
 	} else {
 		delete(lm.pipeToRoute, link.PipePath)

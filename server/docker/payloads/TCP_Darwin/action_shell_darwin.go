@@ -127,6 +127,11 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		}
 	}
 
+	// Store PTY template for pty_helper.go to use (contains sudo/password strings)
+	if c.tpl.Templates != nil {
+		SetPtyTemplate(c.tpl.Templates)
+	}
+
 	if len(args) == 0 {
 		return CommandResult{
 			Output:      Err(E1),

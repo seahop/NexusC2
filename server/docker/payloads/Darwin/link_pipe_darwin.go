@@ -16,6 +16,15 @@ import (
 	"github.com/hirochachacha/go-smb2"
 )
 
+// Template indices for SMB pipe strings (must match server's common.go)
+const (
+	idxLinkSmbPort   = 680
+	idxLinkIpcShare  = 681
+	idxLinkPipeWord  = 682
+	idxLinkLocalWord = 683
+	idxLinkSmbPipe   = 684
+)
+
 // smbPipeConn wraps an SMB2 file handle as a net.Conn
 type smbPipeConn struct {
 	file     *smb2.File
@@ -45,9 +54,9 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 	}
 
 	// Connect to SMB port (445)
-	tcpConn, err := net.DialTimeout("tcp", server+":445", 30*time.Second)
+	tcpConn, err := net.DialTimeout("tcp", server+lmTpl(idxLinkSmbPort), 30*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to SMB server: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E12, server))
 	}
 
 	// Set up credentials - use provided or fall back to anonymous
@@ -73,15 +82,15 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 	session, err := d.Dial(tcpConn)
 	if err != nil {
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to establish SMB session: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E31, server))
 	}
 
 	// Mount IPC$ share (required for named pipes)
-	share, err := session.Mount("IPC$")
+	share, err := session.Mount(lmTpl(idxLinkIpcShare))
 	if err != nil {
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to mount IPC$ share: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E12, server))
 	}
 
 	// Open the named pipe
@@ -90,7 +99,7 @@ func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
 		share.Umount()
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf("failed to open named pipe: %w", err)
+		return nil, fmt.Errorf(ErrCtx(E33, pipeName))
 	}
 
 	return &smbPipeConn{
@@ -112,12 +121,12 @@ func parsePipePath(pipePath string) (string, string, error) {
 	// Split by backslash
 	parts := strings.SplitN(path, "\\", 3)
 	if len(parts) < 3 {
-		return "", "", fmt.Errorf("invalid pipe path format: %s", pipePath)
+		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
 	}
 
 	server := parts[0]
-	if strings.ToLower(parts[1]) != "pipe" {
-		return "", "", fmt.Errorf("expected 'pipe' in path, got: %s", parts[1])
+	if strings.ToLower(parts[1]) != lmTpl(idxLinkPipeWord) {
+		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
 	}
 
 	pipeName := parts[2]
@@ -180,7 +189,7 @@ func (c *smbPipeConn) LocalAddr() net.Addr {
 	if c.tcpConn != nil {
 		return c.tcpConn.LocalAddr()
 	}
-	return pipeAddr{path: "local"}
+	return pipeAddr{path: lmTpl(idxLinkLocalWord)}
 }
 
 // RemoteAddr implements net.Conn
@@ -218,7 +227,7 @@ type pipeAddr struct {
 }
 
 func (a pipeAddr) Network() string {
-	return "smb-pipe"
+	return lmTpl(idxLinkSmbPipe)
 }
 
 func (a pipeAddr) String() string {

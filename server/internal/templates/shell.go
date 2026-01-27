@@ -27,6 +27,22 @@ func GetShellTemplate() *CommandTemplate {
 	// Output markers
 	tpl[IdxShellStderrMarker] = "[STDERR]\n"
 
+	// PTY helper strings (for pty_helper.go when -s/sudo flag is used)
+	tpl[IdxPtySudo] = "sudo"
+	tpl[IdxPtySu] = "su"
+	tpl[IdxPtySh] = "sh"
+	tpl[IdxPtyFlagS] = "-S"
+	tpl[IdxPtyFlagP] = "-p"
+	tpl[IdxPtyFlagC] = "-c"
+	tpl[IdxPtyFlagDash] = "-"
+	tpl[IdxPtyPassword] = "Password:"
+	tpl[IdxPtyPasswordL] = "password"
+	tpl[IdxPtySorry] = "Sorry"
+	tpl[IdxPtyTryAgain] = "try again"
+	tpl[IdxPtyIncorrect] = "incorrect"
+	tpl[IdxPtyExit] = "exit"
+	tpl[IdxPtyRoot] = "root"
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeShell,
