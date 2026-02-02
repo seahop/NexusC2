@@ -146,11 +146,11 @@ func (s *GRPCServer) HandleUpload(ctx context.Context, req *pb.HandleUploadReque
 
 	// Store metadata for next chunks
 	uploadInfo := struct {
-		AgentID          string `json:"agent_id"`
-		CommandDBID      int    `json:"command_db_id"`
-		OriginalFilename string `json:"original_filename"`
+		AgentID          string `json:"ai"`
+		CommandDBID      int    `json:"cb"`
+		OriginalFilename string `json:"of"`
 		CurrentFilename  string `json:"current_filename"`
-		RemotePath       string `json:"remote_path"`
+		RemotePath       string `json:"rp"`
 		TotalChunks      int    `json:"total_chunks"`
 		ChunkDir         string `json:"chunk_dir"`
 		CurrentChunk     int    `json:"current_chunk"`
@@ -208,11 +208,11 @@ func (s *GRPCServer) queueNextChunk(agentID string, chunkDir string) error {
 	}
 
 	var metadata struct {
-		AgentID          string `json:"agent_id"`
-		CommandDBID      int    `json:"command_db_id"`
-		OriginalFilename string `json:"original_filename"`
+		AgentID          string `json:"ai"`
+		CommandDBID      int    `json:"cb"`
+		OriginalFilename string `json:"of"`
 		CurrentFilename  string `json:"current_filename"`
-		RemotePath       string `json:"remote_path"`
+		RemotePath       string `json:"rp"`
 		TotalChunks      int    `json:"total_chunks"`
 		ChunkDir         string `json:"chunk_dir"`
 		CurrentChunk     int    `json:"current_chunk"`

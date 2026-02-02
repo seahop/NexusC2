@@ -130,11 +130,11 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 
 		// Parse commands to log summary info
 		var cmdData []struct {
-			Command      string `json:"command"`
-			CommandDBID  int    `json:"command_db_id"`
-			Filename     string `json:"filename"`
-			CurrentChunk int    `json:"currentChunk"`
-			TotalChunks  int    `json:"totalChunks"`
+			Command      string `json:"co"`
+			CommandDBID  int    `json:"cb"`
+			Filename     string `json:"fn"`
+			CurrentChunk int    `json:"cc"`
+			TotalChunks  int    `json:"tc"`
 			Data         string `json:"data"`
 		}
 
@@ -155,8 +155,8 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 
 		// Check if this is a rekey command
 		var rekeyCheck []struct {
-			Command     string `json:"command"`
-			CommandDBID int    `json:"command_db_id"`
+			Command     string `json:"co"`
+			CommandDBID int    `json:"cb"`
 		}
 
 		if err := json.Unmarshal([]byte(commands[0]), &rekeyCheck); err == nil {

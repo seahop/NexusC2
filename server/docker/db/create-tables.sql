@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS connections (
     os VARCHAR NULL,
     proto VARCHAR NOT NULL,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    alias VARCHAR DEFAULT NULL
+    alias VARCHAR DEFAULT NULL,
+    field_mapping TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS agent_tags (
@@ -204,6 +205,15 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name = 'inits' AND column_name = 'http_xor_key') THEN
         ALTER TABLE inits ADD COLUMN http_xor_key VARCHAR(32) NULL;
+    END IF;
+END $$;
+
+-- Add field_mapping column to connections table for per-agent JSON field name mapping
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'connections' AND column_name = 'field_mapping') THEN
+        ALTER TABLE connections ADD COLUMN field_mapping TEXT NULL;
     END IF;
 END $$;
 

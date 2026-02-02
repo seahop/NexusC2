@@ -14,110 +14,35 @@ import (
 )
 
 // Make token convenience functions using shared tokTpl() from action_token_windows.go
-func mtBackslash() string {
-	if s := tokTpl(idxTokBackslash); s != "" {
-		return s
-	}
-	return "\\"
-}
+func mtBackslash() string { return tokTpl(idxTokBackslash) }
 
-func mtAtSign() string {
-	if s := tokTpl(idxTokAtSign); s != "" {
-		return s
-	}
-	return "@"
-}
+func mtAtSign() string { return tokTpl(idxTokAtSign) }
 
-func mtDot() string {
-	if s := tokTpl(idxTokDot); s != "" {
-		return s
-	}
-	return "."
-}
+func mtDot() string { return tokTpl(idxTokDot) }
 
-func mtNetwork() string {
-	if s := tokTpl(idxTokLogonNetwork); s != "" {
-		return s
-	}
-	return "network"
-}
+func mtNetwork() string { return tokTpl(idxTokLogonNetwork) }
 
-func mtBatch() string {
-	if s := tokTpl(idxTokLogonBatch); s != "" {
-		return s
-	}
-	return "batch"
-}
+func mtBatch() string { return tokTpl(idxTokLogonBatch) }
 
-func mtService() string {
-	if s := tokTpl(idxTokLogonService); s != "" {
-		return s
-	}
-	return "service"
-}
+func mtService() string { return tokTpl(idxTokLogonService) }
 
-func mtNetCleartext() string {
-	if s := tokTpl(idxTokLogonNetCleartext); s != "" {
-		return s
-	}
-	return "network_cleartext"
-}
+func mtNetCleartext() string { return tokTpl(idxTokLogonNetCleartext) }
 
-func mtNetClear() string {
-	if s := tokTpl(idxTokLogonNetClear); s != "" {
-		return s
-	}
-	return "network_clear"
-}
+func mtNetClear() string { return tokTpl(idxTokLogonNetClear) }
 
-func mtNewCredentials() string {
-	if s := tokTpl(idxTokLogonNewCreds); s != "" {
-		return s
-	}
-	return "new_credentials"
-}
+func mtNewCredentials() string { return tokTpl(idxTokLogonNewCreds) }
 
-func mtNewCreds() string {
-	if s := tokTpl(idxTokLogonNewCredsAlt); s != "" {
-		return s
-	}
-	return "newcreds"
-}
+func mtNewCreds() string { return tokTpl(idxTokLogonNewCredsAlt) }
 
-func mtInteractive() string {
-	if s := tokTpl(idxTokLogonInteractive); s != "" {
-		return s
-	}
-	return "interactive"
-}
+func mtInteractive() string { return tokTpl(idxTokLogonInteractive) }
 
-func mtSourceCreated() string {
-	if s := tokTpl(idxTokSourceCreated); s != "" {
-		return s
-	}
-	return "c"
-}
+func mtSourceCreated() string { return tokTpl(idxTokSourceCreated) }
 
-func mtSourceCompare() string {
-	if s := tokTpl(idxTokCreatedCmp); s != "" {
-		return s
-	}
-	return "created"
-}
+func mtSourceCompare() string { return tokTpl(idxTokCreatedCmp) }
 
-func mtTokenTypePrimary() string {
-	if s := tokTpl(idxTokTypePrimary); s != "" {
-		return s
-	}
-	return "primary"
-}
+func mtTokenTypePrimary() string { return tokTpl(idxTokTypePrimary) }
 
-func mtUnknown() string {
-	if s := tokTpl(idxTokUnknown); s != "" {
-		return s
-	}
-	return "Unknown"
-}
+func mtUnknown() string { return tokTpl(idxTokUnknown) }
 
 // MakeTokenCommand handles Windows token creation with credentials (kept for delegation from TokenCommand)
 type MakeTokenCommand struct{}

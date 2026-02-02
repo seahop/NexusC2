@@ -41,13 +41,6 @@ const (
 	idxShellStderrMarker   = 111
 )
 
-// Short flags (transformed by server, stored as byte arrays for minimal footprint)
-var (
-	flagSudo    = string([]byte{0x2d, 0x73}) // -s
-	flagTimeout = string([]byte{0x2d, 0x74}) // -t
-	fallbackSh  = string([]byte{0x73, 0x68}) // sh
-	fallbackArg = string([]byte{0x2d, 0x63}) // -c
-)
 
 type ShellCommand struct {
 	tpl *ShellTemplate
@@ -92,11 +85,8 @@ func (c *ShellCommand) getUnixShell() string {
 		}
 	}
 
-	// Last resort fallback
-	if fb := c.getTpl(idxShellFallback); fb != "" {
-		return fb
-	}
-	return fallbackSh
+	// Last resort fallback from template
+	return c.getTpl(idxShellFallback)
 }
 
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
@@ -146,15 +136,9 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	useSudo := false
 	sudoPassword := ""
 
-	// Get flag strings from template (or use minimal fallbacks)
+	// Get flag strings from template
 	sudoFlag := c.getTpl(idxShellFlagSudo)
-	if sudoFlag == "" {
-		sudoFlag = flagSudo
-	}
 	timeoutFlag := c.getTpl(idxShellFlagTimeout)
-	if timeoutFlag == "" {
-		timeoutFlag = flagTimeout
-	}
 
 	// Parse flags
 	i := 0
@@ -231,9 +215,6 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 		// Get -c argument from template
 		shellArg := c.getTpl(idxShellArgC)
-		if shellArg == "" {
-			shellArg = fallbackArg
-		}
 
 		execContext, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()

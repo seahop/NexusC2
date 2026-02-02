@@ -129,8 +129,8 @@ func encryptWithNonce(data string, key string) (string, error) {
 }
 
 type HybridEncryptedData struct {
-	EncryptedKey  string `json:"encrypted_key"`
-	EncryptedData string `json:"encrypted_data"`
+	EncryptedKey  string `json:"ek"`
+	EncryptedData string `json:"ed"`
 }
 
 func DecryptDoubleEncrypted(encryptedData string, privateKeyPEM string, secret string) (string, error) {

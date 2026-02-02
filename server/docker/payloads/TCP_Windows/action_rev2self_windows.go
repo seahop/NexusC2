@@ -13,15 +13,7 @@ import (
 	"unsafe"
 )
 
-// Rev2self DLL/API names - MUST remain as byte arrays (used in init() before templates arrive)
 var (
-	r2sMprDll          = string([]byte{0x6d, 0x70, 0x72, 0x2e, 0x64, 0x6c, 0x6c})                                                                                           // mpr.dll
-	r2sWNetCancelConn2 = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x43, 0x61, 0x6e, 0x63, 0x65, 0x6c, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x32, 0x57}) // WNetCancelConnection2W
-	r2sWNetOpenEnum    = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x4f, 0x70, 0x65, 0x6e, 0x45, 0x6e, 0x75, 0x6d, 0x57})                                                       // WNetOpenEnumW
-	r2sWNetEnumRes     = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x45, 0x6e, 0x75, 0x6d, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x57})                               // WNetEnumResourceW
-	r2sWNetCloseEnum   = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x45, 0x6e, 0x75, 0x6d})                                                       // WNetCloseEnum
-	r2sWNetGetConn     = string([]byte{0x57, 0x4e, 0x65, 0x74, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x57})                         // WNetGetConnectionW
-
 	// Lazy DLL/proc variables (initialized in init)
 	modmpr                    *syscall.LazyDLL
 	procWNetCancelConnection2 *syscall.LazyProc
@@ -59,163 +51,78 @@ const (
 	idxR2sSmbCache     = 539
 	idxR2sTokensStored = 540
 	idxR2sTokensSuffix = 541
+	// DLL/API names
+	idxR2sMprDll          = 542
+	idxR2sWNetCancelConn2 = 543
+	idxR2sWNetOpenEnum    = 544
+	idxR2sWNetEnumRes     = 545
+	idxR2sWNetCloseEnum   = 546
+	idxR2sWNetGetConn     = 547
 )
 
 // Rev2self convenience functions using shared tokTpl() from action_token_windows.go
-func r2sArgAll() string {
-	if s := tokTpl(idxR2sArgAll); s != "" {
-		return s
-	}
-	return "/all"
-}
+func r2sArgAll() string { return tokTpl(idxR2sArgAll) }
 
-func r2sUncPrefix() string {
-	if s := tokTpl(idxR2sUncPrefix); s != "" {
-		return s
-	}
-	return "\\\\"
-}
+func r2sUncPrefix() string { return tokTpl(idxR2sUncPrefix) }
 
-func r2sBackslash() string {
-	if s := tokTpl(idxR2sBackslash); s != "" {
-		return s
-	}
-	return "\\"
-}
+func r2sBackslash() string { return tokTpl(idxR2sBackslash) }
 
-func r2sIpcSuffix() string {
-	if s := tokTpl(idxR2sIpcSuffix); s != "" {
-		return s
-	}
-	return "\\IPC$"
-}
+func r2sIpcSuffix() string { return tokTpl(idxR2sIpcSuffix) }
 
-func r2sUnknown() string {
-	if s := tokTpl(idxR2sUnknown); s != "" {
-		return s
-	}
-	return "Unknown"
-}
+func r2sUnknown() string { return tokTpl(idxR2sUnknown) }
 
-func r2sNewline() string {
-	if s := tokTpl(idxR2sNewline); s != "" {
-		return s
-	}
-	return "\n"
-}
+func r2sNewline() string { return tokTpl(idxR2sNewline) }
 
-func r2sNoImperson() string {
-	if s := tokTpl(idxR2sNoImperson); s != "" {
-		return s
-	}
-	return "No active impersonation detected"
-}
+func r2sNoImperson() string { return tokTpl(idxR2sNoImperson) }
 
-func r2sCurUser() string {
-	if s := tokTpl(idxR2sCurUser); s != "" {
-		return s
-	}
-	return "Current user: "
-}
+func r2sCurUser() string { return tokTpl(idxR2sCurUser) }
 
-func r2sImpReverted() string {
-	if s := tokTpl(idxR2sImpReverted); s != "" {
-		return s
-	}
-	return "\n    Impersonation reverted:\n"
-}
+func r2sImpReverted() string { return tokTpl(idxR2sImpReverted) }
 
-func r2sWas() string {
-	if s := tokTpl(idxR2sWas); s != "" {
-		return s
-	}
-	return "    Was: "
-}
+func r2sWas() string { return tokTpl(idxR2sWas) }
 
-func r2sNow() string {
-	if s := tokTpl(idxR2sNow); s != "" {
-		return s
-	}
-	return "    Now: "
-}
+func r2sNow() string { return tokTpl(idxR2sNow) }
 
-func r2sNetOnlyClr() string {
-	if s := tokTpl(idxR2sNetOnlyClr); s != "" {
-		return s
-	}
-	return "\n    Network-only token cleared: "
-}
+func r2sNetOnlyClr() string { return tokTpl(idxR2sNetOnlyClr) }
 
-func r2sDisconnected() string {
-	if s := tokTpl(idxR2sDisconnected); s != "" {
-		return s
-	}
-	return "\n    Disconnected "
-}
+func r2sDisconnected() string { return tokTpl(idxR2sDisconnected) }
 
-func r2sNetConns() string {
-	if s := tokTpl(idxR2sNetConns); s != "" {
-		return s
-	}
-	return " network connection(s)\n"
-}
+func r2sNetConns() string { return tokTpl(idxR2sNetConns) }
 
-func r2sSharePrefix() string {
-	if s := tokTpl(idxR2sSharePrefix); s != "" {
-		return s
-	}
-	return "      - "
-}
+func r2sSharePrefix() string { return tokTpl(idxR2sSharePrefix) }
 
-func r2sAndMore() string {
-	if s := tokTpl(idxR2sAndMore); s != "" {
-		return s
-	}
-	return "      ... and "
-}
+func r2sAndMore() string { return tokTpl(idxR2sAndMore) }
 
-func r2sMore() string {
-	if s := tokTpl(idxR2sMore); s != "" {
-		return s
-	}
-	return " more\n"
-}
+func r2sMore() string { return tokTpl(idxR2sMore) }
 
-func r2sNoNetConns() string {
-	if s := tokTpl(idxR2sNoNetConns); s != "" {
-		return s
-	}
-	return "\n    Note: No active network connections found to disconnect\n"
-}
+func r2sNoNetConns() string { return tokTpl(idxR2sNoNetConns) }
 
-func r2sSmbCache() string {
-	if s := tokTpl(idxR2sSmbCache); s != "" {
-		return s
-	}
-	return "    (SMB cache may still allow one more access)\n"
-}
+func r2sSmbCache() string { return tokTpl(idxR2sSmbCache) }
 
-func r2sTokensStored() string {
-	if s := tokTpl(idxR2sTokensStored); s != "" {
-		return s
-	}
-	return "\n"
-}
+func r2sTokensStored() string { return tokTpl(idxR2sTokensStored) }
 
-func r2sTokensSuffix() string {
-	if s := tokTpl(idxR2sTokensSuffix); s != "" {
-		return s
-	}
-	return " token(s) stored"
-}
+func r2sTokensSuffix() string { return tokTpl(idxR2sTokensSuffix) }
+
+// DLL/API name helper functions using template lookups
+func r2sMprDll() string { return tokTpl(idxR2sMprDll) }
+
+func r2sWNetCancelConn2() string { return tokTpl(idxR2sWNetCancelConn2) }
+
+func r2sWNetOpenEnumW() string { return tokTpl(idxR2sWNetOpenEnum) }
+
+func r2sWNetEnumRes() string { return tokTpl(idxR2sWNetEnumRes) }
+
+func r2sWNetCloseEnumW() string { return tokTpl(idxR2sWNetCloseEnum) }
+
+func r2sWNetGetConn() string { return tokTpl(idxR2sWNetGetConn) }
 
 func init() {
-	modmpr = syscall.NewLazyDLL(r2sMprDll)
-	procWNetCancelConnection2 = modmpr.NewProc(r2sWNetCancelConn2)
-	procWNetOpenEnum = modmpr.NewProc(r2sWNetOpenEnum)
-	procWNetEnumResource = modmpr.NewProc(r2sWNetEnumRes)
-	procWNetCloseEnum = modmpr.NewProc(r2sWNetCloseEnum)
-	procWNetGetConnection = modmpr.NewProc(r2sWNetGetConn)
+	modmpr = syscall.NewLazyDLL(r2sMprDll())
+	procWNetCancelConnection2 = modmpr.NewProc(r2sWNetCancelConn2())
+	procWNetOpenEnum = modmpr.NewProc(r2sWNetOpenEnumW())
+	procWNetEnumResource = modmpr.NewProc(r2sWNetEnumRes())
+	procWNetCloseEnum = modmpr.NewProc(r2sWNetCloseEnumW())
+	procWNetGetConnection = modmpr.NewProc(r2sWNetGetConn())
 }
 
 // Windows constants for WNet functions

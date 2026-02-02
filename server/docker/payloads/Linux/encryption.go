@@ -96,9 +96,9 @@ func EncryptJSON(jsonStr string, secret string) (string, error) {
 // HybridEncryptedData represents our layered encryption structure
 type HybridEncryptedData struct {
 	// The AES key encrypted with RSA
-	EncryptedKey string `json:"encrypted_key"`
+	EncryptedKey string `json:"ek"`
 	// The actual data encrypted with AES
-	EncryptedData string `json:"encrypted_data"`
+	EncryptedData string `json:"ed"`
 }
 
 func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (string, error) {

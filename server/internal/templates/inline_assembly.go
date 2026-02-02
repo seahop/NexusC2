@@ -3,7 +3,6 @@ package templates
 
 // GetInlineAssemblyTemplate returns a template for inline assembly commands
 // This covers inline-assembly, inline-assembly-async, inline-assembly-jobs, etc.
-// Note: DLL names and API function names used in init() CANNOT be templated
 func GetInlineAssemblyTemplate() *CommandTemplate {
 	tpl := make([]string, MaxTemplateSize)
 
@@ -73,6 +72,48 @@ func GetInlineAssemblyTemplate() *CommandTemplate {
 	tpl[IdxIAStatsFailLbl] = "Failed:         "
 	tpl[IdxIAStatsKillLbl] = "Killed:         "
 	tpl[IdxIAStatsTimeLbl] = "Timeout:        "
+
+	// DLL names (800-803)
+	tpl[IdxIADllKernel32] = "kernel32.dll"
+	tpl[IdxIADllOle32] = "ole32.dll"
+	tpl[IdxIADllUser32] = "user32.dll"
+	tpl[IdxIADllMsvcrt] = "msvcrt.dll"
+
+	// API function names (804-821)
+	tpl[IdxIAFnGetStdHandle] = "GetStdHandle"
+	tpl[IdxIAFnSetStdHandle] = "SetStdHandle"
+	tpl[IdxIAFnAllocConsole] = "AllocConsole"
+	tpl[IdxIAFnFreeConsole] = "FreeConsole"
+	tpl[IdxIAFnGetConsoleWindow] = "GetConsoleWindow"
+	tpl[IdxIAFnPeekNamedPipe] = "PeekNamedPipe"
+	tpl[IdxIAFnCreateFileW] = "CreateFileW"
+	tpl[IdxIAFnCreateFileA] = "CreateFileA"
+	tpl[IdxIAFnCloseHandle] = "CloseHandle"
+	tpl[IdxIAFnReadFile] = "ReadFile"
+	tpl[IdxIAFnWriteFile] = "WriteFile"
+	tpl[IdxIAFnCoInitializeEx] = "CoInitializeEx"
+	tpl[IdxIAFnCoUninitialize] = "CoUninitialize"
+	tpl[IdxIAFnFlushInstructionCache] = "FlushInstructionCache"
+	tpl[IdxIAFnShowWindow] = "ShowWindow"
+	tpl[IdxIAFnOpenOsfhandle] = "_open_osfhandle"
+	tpl[IdxIAFnDup2] = "_dup2"
+	tpl[IdxIAFnClose] = "_close"
+
+	// Core inline assembly strings (830-843)
+	tpl[IdxIAOsWindows] = "windows"
+	tpl[IdxIACmdName] = "inline-assembly"
+	tpl[IdxIACmdNameAsync] = "inline-assembly-async"
+	tpl[IdxIATypeExe] = "EXE"
+	tpl[IdxIATypeDll] = "DLL"
+	tpl[IdxIAJobPrefix] = "inline_asm_%d"
+	tpl[IdxIATerminated] = "terminated by user"
+	tpl[IdxIAExitCodeLabel] = "Exit code:"
+	tpl[IdxIAFmtDoneCode] = "\nDone (code: %d)\n"
+	tpl[IdxIAFmtStartedID] = "Started (ID: %s)"
+	tpl[IdxIAFmtExecFail] = "\n[!] Execution failed: %v\n"
+	tpl[IdxIAFmtExecDone] = "\n[+] Execution completed (exit code: %d)\n"
+	tpl[IdxIAFmtAsyncStarted] = "Async inline assembly execution started (Job ID: %s)\n"
+	tpl[IdxIAFmtOutputHint] = "Use 'inline-assembly-output %s' to retrieve output"
 
 	return &CommandTemplate{
 		Version:   2,

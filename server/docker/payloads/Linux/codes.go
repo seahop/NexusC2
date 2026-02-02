@@ -101,11 +101,11 @@ const (
 	WUnknown = "?" // Unknown value fallback
 )
 
-// Environment variable name builders - prevents raw strings in binary
-func EnvUser() string     { return string([]byte{0x55, 0x53, 0x45, 0x52}) }                         // USER
-func EnvLogname() string  { return string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45}) }       // LOGNAME
-func EnvHostname() string { return string([]byte{0x48, 0x4f, 0x53, 0x54, 0x4e, 0x41, 0x4d, 0x45}) } // HOSTNAME
-func EnvShell() string    { return string([]byte{0x53, 0x48, 0x45, 0x4c, 0x4c}) }                   // SHELL
+// Environment variable name builders - uses exec req template
+func EnvUser() string     { return erTpl(idxExecReqEnvUser) }     // USER
+func EnvLogname() string  { return erTpl(idxExecReqEnvLogname) }  // LOGNAME
+func EnvHostname() string { return erTpl(idxExecReqEnvHostname) } // HOSTNAME
+func EnvShell() string    { return erTpl(idxExecReqEnvShell) }    // SHELL
 
 // Table returns table marker with count
 func Table(tableType string, count int) string {

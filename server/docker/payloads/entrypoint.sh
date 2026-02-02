@@ -279,6 +279,37 @@ build_binary() {
             -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
             -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
             -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
+            -X 'main.jfCT=${JF_CT}' \
+            -X 'main.jfCO=${JF_CO}' \
+            -X 'main.jfCI=${JF_CI}' \
+            -X 'main.jfCB=${JF_CB}' \
+            -X 'main.jfAI=${JF_AI}' \
+            -X 'main.jfFN=${JF_FN}' \
+            -X 'main.jfOF=${JF_OF}' \
+            -X 'main.jfRP=${JF_RP}' \
+            -X 'main.jfCC=${JF_CC}' \
+            -X 'main.jfTC=${JF_TC}' \
+            -X 'main.jfDA=${JF_DA}' \
+            -X 'main.jfAR=${JF_AR}' \
+            -X 'main.jfTS=${JF_TS}' \
+            -X 'main.jfJI=${JF_JI}' \
+            -X 'main.jfOU=${JF_OU}' \
+            -X 'main.jfEC=${JF_EC}' \
+            -X 'main.jfER=${JF_ER}' \
+            -X 'main.jfV=${JF_V}' \
+            -X 'main.jfT=${JF_T}' \
+            -X 'main.jfTPL=${JF_TPL}' \
+            -X 'main.jfP=${JF_P}' \
+            -X 'main.jfBD=${JF_BD}' \
+            -X 'main.jfCD=${JF_CD}' \
+            -X 'main.jfST=${JF_ST}' \
+            -X 'main.jfNC=${JF_NC}' \
+            -X 'main.jfSI=${JF_SI}' \
+            -X 'main.jfSG=${JF_SG}' \
+            -X 'main.jfSD=${JF_SD}' \
+            -X 'main.jfCT2=${JF_CT2}' \
+            -X 'main.jfET=${JF_ET}' \
+            -X 'main.jfMD=${JF_MD}' \
             ${SMB_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
@@ -298,6 +329,37 @@ build_binary() {
             -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
             -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
             -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
+            -X 'main.jfCT=${JF_CT}' \
+            -X 'main.jfCO=${JF_CO}' \
+            -X 'main.jfCI=${JF_CI}' \
+            -X 'main.jfCB=${JF_CB}' \
+            -X 'main.jfAI=${JF_AI}' \
+            -X 'main.jfFN=${JF_FN}' \
+            -X 'main.jfOF=${JF_OF}' \
+            -X 'main.jfRP=${JF_RP}' \
+            -X 'main.jfCC=${JF_CC}' \
+            -X 'main.jfTC=${JF_TC}' \
+            -X 'main.jfDA=${JF_DA}' \
+            -X 'main.jfAR=${JF_AR}' \
+            -X 'main.jfTS=${JF_TS}' \
+            -X 'main.jfJI=${JF_JI}' \
+            -X 'main.jfOU=${JF_OU}' \
+            -X 'main.jfEC=${JF_EC}' \
+            -X 'main.jfER=${JF_ER}' \
+            -X 'main.jfV=${JF_V}' \
+            -X 'main.jfT=${JF_T}' \
+            -X 'main.jfTPL=${JF_TPL}' \
+            -X 'main.jfP=${JF_P}' \
+            -X 'main.jfBD=${JF_BD}' \
+            -X 'main.jfCD=${JF_CD}' \
+            -X 'main.jfST=${JF_ST}' \
+            -X 'main.jfNC=${JF_NC}' \
+            -X 'main.jfSI=${JF_SI}' \
+            -X 'main.jfSG=${JF_SG}' \
+            -X 'main.jfSD=${JF_SD}' \
+            -X 'main.jfCT2=${JF_CT2}' \
+            -X 'main.jfET=${JF_ET}' \
+            -X 'main.jfMD=${JF_MD}' \
             ${TCP_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
@@ -352,6 +414,44 @@ build_binary() {
             -X 'main.geFmtUrlWithPort=${GE_FMT_URL_WITH_PORT}' \
             -X 'main.geFmtUrlQuery=${GE_FMT_URL_QUERY}' \
             -X 'main.geSlash=${GE_SLASH}' \
+            -X 'main.httpHeaderUserAgent=${HTTP_HEADER_USER_AGENT}' \
+            -X 'main.httpHeaderContentType=${HTTP_HEADER_CONTENT_TYPE}' \
+            -X 'main.httpHeaderPadPre=${HTTP_HEADER_PAD_PRE}' \
+            -X 'main.httpHeaderPadApp=${HTTP_HEADER_PAD_APP}' \
+            -X 'main.httpMetaId=${HTTP_META_ID}' \
+            -X 'main.httpMetaEncryption=${HTTP_META_ENCRYPTION}' \
+            -X 'main.httpEncRsaAes=${HTTP_ENC_RSA_AES}' \
+            -X 'main.jfCT=${JF_CT}' \
+            -X 'main.jfCO=${JF_CO}' \
+            -X 'main.jfCI=${JF_CI}' \
+            -X 'main.jfCB=${JF_CB}' \
+            -X 'main.jfAI=${JF_AI}' \
+            -X 'main.jfFN=${JF_FN}' \
+            -X 'main.jfOF=${JF_OF}' \
+            -X 'main.jfRP=${JF_RP}' \
+            -X 'main.jfCC=${JF_CC}' \
+            -X 'main.jfTC=${JF_TC}' \
+            -X 'main.jfDA=${JF_DA}' \
+            -X 'main.jfAR=${JF_AR}' \
+            -X 'main.jfTS=${JF_TS}' \
+            -X 'main.jfJI=${JF_JI}' \
+            -X 'main.jfOU=${JF_OU}' \
+            -X 'main.jfEC=${JF_EC}' \
+            -X 'main.jfER=${JF_ER}' \
+            -X 'main.jfV=${JF_V}' \
+            -X 'main.jfT=${JF_T}' \
+            -X 'main.jfTPL=${JF_TPL}' \
+            -X 'main.jfP=${JF_P}' \
+            -X 'main.jfBD=${JF_BD}' \
+            -X 'main.jfCD=${JF_CD}' \
+            -X 'main.jfST=${JF_ST}' \
+            -X 'main.jfNC=${JF_NC}' \
+            -X 'main.jfSI=${JF_SI}' \
+            -X 'main.jfSG=${JF_SG}' \
+            -X 'main.jfSD=${JF_SD}' \
+            -X 'main.jfCT2=${JF_CT2}' \
+            -X 'main.jfET=${JF_ET}' \
+            -X 'main.jfMD=${JF_MD}' \
             ${TOGGLE_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"

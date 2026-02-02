@@ -22,6 +22,48 @@ import (
 	"time"
 )
 
+// Field name mappings: short (agent) -> long (legacy) names
+// Agent sends short names like "cb", "ou", "co" but some code expects long names
+var fieldShortToLong = map[string]string{
+	"cb":   "command_db_id",
+	"ou":   "output",
+	"co":   "command",
+	"cc":   "currentChunk",
+	"tc":   "totalChunks",
+	"fn":   "filename",
+	"ai":   "agent_id",
+	"ci":   "command_id",
+	"data": "data",
+	"rp":   "remote_path",
+	"ec":   "exit_code",
+}
+
+// getResultString extracts a string field from result, trying short name first then long name
+func getResultString(result map[string]interface{}, shortName string) string {
+	if val, ok := result[shortName].(string); ok && val != "" {
+		return val
+	}
+	if longName, exists := fieldShortToLong[shortName]; exists {
+		if val, ok := result[longName].(string); ok {
+			return val
+		}
+	}
+	return ""
+}
+
+// getResultFloat extracts a float64 field from result, trying short name first then long name
+func getResultFloat(result map[string]interface{}, shortName string) (float64, bool) {
+	if val, ok := result[shortName].(float64); ok {
+		return val, true
+	}
+	if longName, exists := fieldShortToLong[shortName]; exists {
+		if val, ok := result[longName].(float64); ok {
+			return val, true
+		}
+	}
+	return 0, false
+}
+
 // ResultBatch represents a batch of results to process
 type ResultBatch struct {
 	AgentID    string
@@ -292,7 +334,7 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 		// Legacy: Read and parse JSON body
 		var postData struct {
 			Data    string `json:"data"`
-			AgentID string `json:"agent_id"`
+			AgentID string `json:"ai"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
@@ -335,7 +377,9 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 	if resultsRaw, ok := decryptedDataMap["results"].([]interface{}); ok {
 		for _, r := range resultsRaw {
 			if rm, ok := r.(map[string]interface{}); ok {
-				results = append(results, rm)
+				// Translate randomized field names to standard short names
+				translated := conn.TranslateResult(rm)
+				results = append(results, translated)
 			}
 		}
 	}
@@ -551,15 +595,15 @@ func (ah *AsyncHandler) broadcastPreliminaryStatus(agentID string, resultCount i
 
 // broadcastResultImmediate sends result to WebSocket immediately
 func (ah *AsyncHandler) broadcastResultImmediate(agentID string, result map[string]interface{}) {
-	command, _ := result["command"].(string)
-	commandDBID, _ := result["command_db_id"].(float64)
-	output, _ := result["output"].(string)
+	command := getResultString(result, "co")
+	commandDBID, _ := getResultFloat(result, "cb")
+	output := getResultString(result, "ou")
 
 	// Determine result type
 	resultType := "command_result"
 	if strings.HasPrefix(command, "inline-assembly") {
 		resultType = "inline_assembly_result"
-	} else if strings.Contains(output, "BOF_ASYNC_") {
+	} else if isBOFAsyncOutput(output) {
 		resultType = "bof_async_result"
 	}
 
@@ -578,15 +622,14 @@ func (ah *AsyncHandler) broadcastResultImmediate(agentID string, result map[stri
 }
 
 // processDBWritesAsync handles database writes asynchronously
-// processDBWritesAsync handles database writes asynchronously
 func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[string]interface{}, conn *ActiveConnection) {
 	for _, result := range results {
-		command, _ := result["command"].(string)
-		filename, _ := result["filename"].(string)
-		currentChunk, _ := result["currentChunk"].(float64)
-		totalChunks, _ := result["totalChunks"].(float64)
-		data, _ := result["data"].(string)
-		commandDBID, _ := result["command_db_id"].(float64)
+		command := getResultString(result, "co")
+		filename := getResultString(result, "fn")
+		currentChunk, _ := getResultFloat(result, "cc")
+		totalChunks, _ := getResultFloat(result, "tc")
+		data := getResultString(result, "data")
+		commandDBID, _ := getResultFloat(result, "cb")
 
 		// Handle UPLOAD commands
 		if strings.HasPrefix(command, "upload") && filename != "" {
@@ -752,21 +795,44 @@ func (ah *AsyncHandler) processDBWritesAsync(agentID string, results []map[strin
 }
 
 // processResultToDB writes a single result to database
+// Field names use short JSON tags from agent: cb=command_db_id, ou=output, co=command, etc.
 func (ah *AsyncHandler) processResultToDB(ctx context.Context, stmt *sql.Stmt, result map[string]interface{}) error {
-	commandDBID, ok := result["command_db_id"].(float64)
+	// Try short name first (cb), then full name for backwards compatibility
+	commandDBID, ok := result["cb"].(float64)
 	if !ok {
-		return fmt.Errorf("missing command_db_id")
+		commandDBID, ok = result["command_db_id"].(float64)
+		if !ok {
+			return fmt.Errorf("missing command_db_id")
+		}
 	}
 
-	output, _ := result["output"].(string)
-	command, _ := result["command"].(string)
+	// Try short name first (ou), then full name
+	output, _ := result["ou"].(string)
+	if output == "" {
+		output, _ = result["output"].(string)
+	}
+
+	// Try short name first (co), then full name
+	command, _ := result["co"].(string)
+	if command == "" {
+		command, _ = result["command"].(string)
+	}
 
 	// Format output based on command type
 	if strings.HasPrefix(command, "upload") || strings.HasPrefix(command, "download") {
-		// Handle file operation progress
-		currentChunk, _ := result["currentChunk"].(float64)
-		totalChunks, _ := result["totalChunks"].(float64)
-		filename, _ := result["filename"].(string)
+		// Handle file operation progress - try short names first
+		currentChunk, _ := result["cc"].(float64)
+		if currentChunk == 0 {
+			currentChunk, _ = result["currentChunk"].(float64)
+		}
+		totalChunks, _ := result["tc"].(float64)
+		if totalChunks == 0 {
+			totalChunks, _ = result["totalChunks"].(float64)
+		}
+		filename, _ := result["fn"].(string)
+		if filename == "" {
+			filename, _ = result["filename"].(string)
+		}
 
 		output = fmt.Sprintf("%s chunk %d/%d of %s",
 			strings.Split(command, " ")[0],

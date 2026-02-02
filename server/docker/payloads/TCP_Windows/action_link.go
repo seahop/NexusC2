@@ -29,11 +29,7 @@ const (
 	idxLinkPingMarker   = 128
 	idxLinkQuitMarker   = 129
 	idxLinkDot          = 132
-)
-
-// Single-char byte arrays (innocuous, minimal footprint)
-var (
-	lnkPipe = string([]byte{0x7c}) // |
+	idxLinkPipe         = 348
 )
 
 // LinkCommand handles the 'link' command for connecting to other SMB agents
@@ -142,7 +138,7 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + pipePath + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + pipePath + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

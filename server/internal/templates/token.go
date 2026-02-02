@@ -128,6 +128,14 @@ func GetRev2SelfTemplate() *CommandTemplate {
 	tpl[IdxR2sTokensStored] = "\n"
 	tpl[IdxR2sTokensSuffix] = " token(s) stored"
 
+	// DLL/API names (542-547)
+	tpl[IdxR2sMprDll] = "mpr.dll"
+	tpl[IdxR2sWNetCancelConn2] = "WNetCancelConnection2W"
+	tpl[IdxR2sWNetOpenEnum] = "WNetOpenEnumW"
+	tpl[IdxR2sWNetEnumRes] = "WNetEnumResourceW"
+	tpl[IdxR2sWNetCloseEnum] = "WNetCloseEnum"
+	tpl[IdxR2sWNetGetConn] = "WNetGetConnectionW"
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeRev2Self,

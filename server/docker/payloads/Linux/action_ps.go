@@ -53,27 +53,22 @@ const (
 	idxPsSortPid      = 180
 )
 
-// Minimal fallback strings as byte arrays
-var (
-	fallbackLinux   = string([]byte{0x6c, 0x69, 0x6e, 0x75, 0x78})             // linux
-	fallbackWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73}) // windows
-)
 
 // ProcessInfo represents information about a process
 type ProcessInfo struct {
 	PID         int32   `json:"pid"`
 	PPID        int32   `json:"ppid"`
 	Name        string  `json:"name"`
-	Username    string  `json:"username,omitempty"`
+	Username    string  `json:"un,omitempty"`
 	CommandLine string  `json:"cmdline,omitempty"`
 	Executable  string  `json:"exe,omitempty"`
-	CPU         float64 `json:"cpu_percent,omitempty"`
-	Memory      float32 `json:"memory_percent,omitempty"`
-	MemoryMB    float64 `json:"memory_mb,omitempty"`
+	CPU         float64 `json:"cp,omitempty"`
+	Memory      float32 `json:"mp,omitempty"`
+	MemoryMB    float64 `json:"mb,omitempty"`
 	CreateTime  string  `json:"create_time,omitempty"`
-	Status      string  `json:"status,omitempty"`
-	NumThreads  int32   `json:"num_threads,omitempty"`
-	NumFDs      int32   `json:"num_fds,omitempty"`
+	Status      string  `json:"st,omitempty"`
+	NumThreads  int32   `json:"nt,omitempty"`
+	NumFDs      int32   `json:"nf,omitempty"`
 	Nice        int32   `json:"nice,omitempty"`
 }
 
@@ -104,15 +99,8 @@ func (c *PSCommand) getTpl(idx int) string {
 // getFullCommandLine attempts to get the full command line without truncation
 func (c *PSCommand) getFullCommandLine(pid int32) string {
 	osLinux := c.getTpl(idxPsOsLinux)
-	if osLinux == "" {
-		osLinux = fallbackLinux
-	}
-
 	if runtime.GOOS == osLinux {
 		cmdlineFmt := c.getTpl(idxPsProcCmdline)
-		if cmdlineFmt == "" {
-			cmdlineFmt = "/proc/%d/cmdline"
-		}
 		cmdlineFile := fmt.Sprintf(cmdlineFmt, pid)
 		data, err := ioutil.ReadFile(cmdlineFile)
 		if err == nil && len(data) > 0 {
@@ -127,15 +115,8 @@ func (c *PSCommand) getFullCommandLine(pid int32) string {
 // getFullExecutablePath attempts to get the full executable path without truncation
 func (c *PSCommand) getFullExecutablePath(pid int32) string {
 	osLinux := c.getTpl(idxPsOsLinux)
-	if osLinux == "" {
-		osLinux = fallbackLinux
-	}
-
 	if runtime.GOOS == osLinux {
 		exeFmt := c.getTpl(idxPsProcExe)
-		if exeFmt == "" {
-			exeFmt = "/proc/%d/exe"
-		}
 		exeLink := fmt.Sprintf(exeFmt, pid)
 		if path, err := os.Readlink(exeLink); err == nil {
 			return path
@@ -187,13 +168,7 @@ func (c *PSCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	processes := make([]ProcessInfo, 0, len(procs))
 
 	osLinux := c.getTpl(idxPsOsLinux)
-	if osLinux == "" {
-		osLinux = fallbackLinux
-	}
 	osWindows := c.getTpl(idxPsOsWindows)
-	if osWindows == "" {
-		osWindows = fallbackWindows
-	}
 
 	for _, p := range procs {
 		procInfo := ProcessInfo{
@@ -325,33 +300,12 @@ func (c *PSCommand) parsePSFlags(args []string) PSFlags {
 
 	// Get flag strings from template
 	flagV := c.getTpl(idxPsFlagVerbose)
-	if flagV == "" {
-		flagV = "-v"
-	}
 	flagX := c.getTpl(idxPsFlagExtended)
-	if flagX == "" {
-		flagX = "-x"
-	}
 	flagJ := c.getTpl(idxPsFlagJson)
-	if flagJ == "" {
-		flagJ = "-j"
-	}
 	flagN := c.getTpl(idxPsFlagNoTrunc)
-	if flagN == "" {
-		flagN = "-n"
-	}
 	flagF := c.getTpl(idxPsFlagFilter)
-	if flagF == "" {
-		flagF = "-f"
-	}
 	flagU := c.getTpl(idxPsFlagUser)
-	if flagU == "" {
-		flagU = "-u"
-	}
 	flagS := c.getTpl(idxPsFlagSort)
-	if flagS == "" {
-		flagS = "-s"
-	}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -412,25 +366,10 @@ func parseStatus(status []string) string {
 // sortProcesses sorts the process list based on the sort field
 func (c *PSCommand) sortProcesses(processes []ProcessInfo, sortField string) {
 	sortCpu := c.getTpl(idxPsSortCpu)
-	if sortCpu == "" {
-		sortCpu = "cpu"
-	}
 	sortMem := c.getTpl(idxPsSortMem)
-	if sortMem == "" {
-		sortMem = "mem"
-	}
 	sortMemory := c.getTpl(idxPsSortMemory)
-	if sortMemory == "" {
-		sortMemory = "memory"
-	}
 	sortName := c.getTpl(idxPsSortName)
-	if sortName == "" {
-		sortName = "name"
-	}
 	sortUser := c.getTpl(idxPsSortUser)
-	if sortUser == "" {
-		sortUser = "user"
-	}
 
 	switch strings.ToLower(sortField) {
 	case sortCpu:
@@ -480,9 +419,6 @@ func (c *PSCommand) formatProcessTable(output *strings.Builder, processes []Proc
 
 		if flags.Extended {
 			user := truncatePS(p.Username, 20, flags.NoTruncate)
-			if user == "" {
-				user = "?"
-			}
 			if w := len(user); w > widths.user {
 				widths.user = w
 			}
@@ -505,9 +441,6 @@ func (c *PSCommand) formatProcessTable(output *strings.Builder, processes []Proc
 			cmd := p.CommandLine
 			if cmd == "" {
 				cmd = p.Executable
-			}
-			if cmd == "" {
-				cmd = "?"
 			}
 			cmd = truncatePS(cmd, 100, flags.NoTruncate)
 			if w := len(cmd); w > widths.cmd {
@@ -550,9 +483,6 @@ func (c *PSCommand) formatProcessTable(output *strings.Builder, processes []Proc
 
 		if flags.Extended {
 			user := truncatePS(p.Username, 20, flags.NoTruncate)
-			if user == "" {
-				user = "?"
-			}
 			status := truncatePS(p.Status, 12, flags.NoTruncate)
 			line += fmt.Sprintf(extFormat,
 				user,
@@ -566,9 +496,6 @@ func (c *PSCommand) formatProcessTable(output *strings.Builder, processes []Proc
 			cmd := p.CommandLine
 			if cmd == "" {
 				cmd = p.Executable
-			}
-			if cmd == "" {
-				cmd = "?"
 			}
 			line += fmt.Sprintf(verboseFormat, truncatePS(cmd, 100, flags.NoTruncate))
 		}

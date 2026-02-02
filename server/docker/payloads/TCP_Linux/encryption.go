@@ -98,9 +98,9 @@ func EncryptJSON(jsonStr string, secret string) (string, error) {
 // HybridEncryptedData represents our layered encryption structure
 type HybridEncryptedData struct {
 	// The AES key encrypted with RSA
-	EncryptedKey string `json:"encrypted_key"`
+	EncryptedKey string `json:"ek"`
 	// The actual data encrypted with AES
-	EncryptedData string `json:"encrypted_data"`
+	EncryptedData string `json:"ed"`
 }
 
 // xorDecrypt decrypts a base64-encoded XOR-encrypted string using the given key
@@ -175,8 +175,8 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 
 	// Create envelope
 	envelope := struct {
-		EncryptedKey  string `json:"encrypted_key"`
-		EncryptedData string `json:"encrypted_data"`
+		EncryptedKey  string `json:"ek"`
+		EncryptedData string `json:"ed"`
 	}{
 		EncryptedKey:  base64.StdEncoding.EncodeToString(encryptedKey),
 		EncryptedData: base64.StdEncoding.EncodeToString(encryptedData),

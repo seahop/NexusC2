@@ -1,0 +1,70 @@
+# JSON Tag Shortening Map
+# Format: long_name -> short_tag
+# These are used in BOTH payload files AND server files
+
+# Command struct (types.go)
+command_type:ct
+command:co
+command_id:ci
+command_db_id:cb
+agent_id:ai
+filename:fn
+original_filename:of
+remote_path:rp
+current_chunk:cc
+total_chunks:tc
+arguments:ar
+timestamp:ts
+job_id:ji
+
+# CommandResponse struct (types.go)
+output:ou
+exit_code:ec
+
+# System info / Handshake
+process_name:pn
+username:un
+hostname:hn
+internal_ip:ip
+architecture:ac
+client_id:cl
+agent_info:ag
+metadata:md
+new_client_id:nc
+secrets_initialized:si
+signature:sg
+
+# SOCKS
+socks_port:sp
+wss_port:wp
+wss_host:wh
+credentials:cr
+ssh_key:sk
+password:pw
+
+# Encryption
+encrypted_key:ek
+encrypted_data:ed
+
+# Inline assembly
+assembly_b64:ab
+app_domain:ad
+entry_point:ep
+bypass_amsi:ba
+bypass_etw:be
+revert_etw:re
+use_pipe:up
+pipe_name:pm
+
+# BOF
+bof_data:bd
+chunk_data:cd
+
+# PS/Process info
+cpu_percent:cp
+memory_mb:mb
+memory_percent:mp
+num_threads:nt
+num_fds:nf
+
+# Keep unchanged (already short): pid, ppid, name, data, seed, path, status, type, action, error, os, exe, nice, pre, app

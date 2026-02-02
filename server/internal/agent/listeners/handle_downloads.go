@@ -12,9 +12,9 @@ import (
 
 // Add these structs to your package
 type DownloadChunk struct {
-	Filename     string `json:"filename"`
-	CurrentChunk int    `json:"currentChunk"`
-	TotalChunks  int    `json:"totalChunks"`
+	Filename     string `json:"fn"`
+	CurrentChunk int    `json:"cc"`
+	TotalChunks  int    `json:"tc"`
 	Data         string `json:"data"`
 }
 

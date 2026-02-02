@@ -163,6 +163,7 @@ func handleConnection(conn *TCPConnection, config map[string]string) {
 		}
 
 		// Try to parse as legacy JSON format first
+		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
 		var msgEnvelope struct {
 			Type    string `json:"type"`
 			Payload string `json:"payload"`
@@ -171,27 +172,30 @@ func handleConnection(conn *TCPConnection, config map[string]string) {
 		var messageData []byte
 		var isTransformed bool
 
-		if err := json.Unmarshal(rawMessage, &msgEnvelope); err == nil && msgEnvelope.Type != "" {
+		jsonErr := json.Unmarshal(rawMessage, &msgEnvelope)
+		if jsonErr == nil && msgEnvelope.Type != "" {
 			// Successfully parsed as JSON with type field - legacy format
 			isTransformed = false
 			messageData = rawMessage
-		} else if parsedTCPTransforms != nil && len(parsedTCPTransforms.Transforms) > 0 {
-			// Not valid legacy JSON and we have transforms configured
-			// Assume it's transformed data - reverse transforms to get JSON envelope
-			reversed, err := reverseSMBTransforms(rawMessage, parsedTCPTransforms.Transforms, currentPrependLen, currentAppendLen)
-			if err != nil {
-				continue
-			}
-
-			// Parse the reversed data as JSON envelope
-			if err := json.Unmarshal(reversed, &msgEnvelope); err != nil {
-				continue
-			}
-			isTransformed = true
-			messageData = reversed
 		} else {
-			// No transforms configured and not valid JSON - skip
-			continue
+			if parsedTCPTransforms != nil && len(parsedTCPTransforms.Transforms) > 0 {
+				// Not valid legacy JSON and we have transforms configured
+				// Assume it's transformed data - reverse transforms to get JSON envelope
+				reversed, err := reverseSMBTransforms(rawMessage, parsedTCPTransforms.Transforms, currentPrependLen, currentAppendLen)
+				if err != nil {
+					continue
+				}
+
+				// Parse the reversed data as JSON envelope
+				if err := json.Unmarshal(reversed, &msgEnvelope); err != nil {
+					continue
+				}
+				isTransformed = true
+				messageData = reversed
+			} else {
+				// No transforms configured and not valid JSON - skip
+				continue
+			}
 		}
 
 		// Store transform mode for response handling

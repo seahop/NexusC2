@@ -45,6 +45,15 @@ var (
 	postClientIDTransforms string // DataBlock for POST clientID placement/transforms
 	postDataTransforms     string // DataBlock for POST body data transforms
 	responseDataTransforms string // DataBlock for parsing server response transforms
+
+	// HTTP header names (encrypted to avoid static signatures)
+	httpHeaderUserAgent   string // User-Agent
+	httpHeaderContentType string // Content-Type
+	httpHeaderPadPre      string // X-Pad-Pre
+	httpHeaderPadApp      string // X-Pad-App
+	httpMetaId            string // id
+	httpMetaEncryption    string // encryption
+	httpEncRsaAes         string // rsa+aes
 )
 
 // Global HandshakeManager instance

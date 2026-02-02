@@ -10,10 +10,38 @@ import (
 	"time"
 )
 
-// Job manager strings (constructed to avoid static signatures)
-var (
-	jmTypeDownload = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64}) // download
-)
+// CommsTemplate stores communications-related template strings
+type CommsTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Global comms template storage for job manager (uses SecureTemplate for memory zeroing)
+var globalCommsTpl *SecureTemplate
+
+// Job manager template index constant
+const idxJmTypeDownload = 785 // download - matches server's IdxCqCmdDownload
+
+// setCommsTemplate stores the comms template (converts to SecureTemplate)
+func setCommsTemplate(tpl *CommsTemplate) {
+	// Zero old template before replacing
+	if globalCommsTpl != nil {
+		globalCommsTpl.Zero()
+	}
+	globalCommsTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
+}
+
+// jmTpl safely retrieves a template string by index for job manager
+func jmTpl(idx int) string {
+	return globalCommsTpl.Get(idx)
+}
+
+// commsTpl alias for compatibility with shared code (command_queue.go, transforms.go)
+func commsTpl(idx int) string {
+	return globalCommsTpl.Get(idx)
+}
 
 // CreateJob creates a new job with specified type and filename
 func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
@@ -54,7 +82,7 @@ func (cq *CommandQueue) KillJob(jobID string) error {
 	}
 
 	// Remove from active downloads if it's a download job
-	if job.Type == jmTypeDownload {
+	if job.Type == jmTpl(idxJmTypeDownload) {
 		delete(cq.activeDownloads, job.Filename)
 	}
 

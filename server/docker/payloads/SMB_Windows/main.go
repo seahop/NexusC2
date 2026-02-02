@@ -171,6 +171,7 @@ func handleConnection(conn *PipeConnection, config map[string]string) {
 		}
 
 		// Try to parse as legacy JSON format first
+		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
 		var msgEnvelope struct {
 			Type    string `json:"type"`
 			Payload string `json:"payload"`

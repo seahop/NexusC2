@@ -127,124 +127,39 @@ const (
 )
 
 // Convenience functions for token verbs with fallbacks
-func tokVerbCreate() string {
-	if s := tokTpl(idxTokVerbCreate); s != "" {
-		return s
-	}
-	return "create"
-}
+func tokVerbCreate() string { return tokTpl(idxTokVerbCreate) }
 
-func tokVerbSteal() string {
-	if s := tokTpl(idxTokVerbSteal); s != "" {
-		return s
-	}
-	return "steal"
-}
+func tokVerbSteal() string { return tokTpl(idxTokVerbSteal) }
 
-func tokVerbStore() string {
-	if s := tokTpl(idxTokVerbStore); s != "" {
-		return s
-	}
-	return "store"
-}
+func tokVerbStore() string { return tokTpl(idxTokVerbStore) }
 
-func tokVerbUse() string {
-	if s := tokTpl(idxTokVerbUse); s != "" {
-		return s
-	}
-	return "use"
-}
+func tokVerbUse() string { return tokTpl(idxTokVerbUse) }
 
-func tokVerbImpersonate() string {
-	if s := tokTpl(idxTokVerbImpersonate); s != "" {
-		return s
-	}
-	return "impersonate"
-}
+func tokVerbImpersonate() string { return tokTpl(idxTokVerbImpersonate) }
 
-func tokVerbNetonly() string {
-	if s := tokTpl(idxTokVerbNetonly); s != "" {
-		return s
-	}
-	return "netonly"
-}
+func tokVerbNetonly() string { return tokTpl(idxTokVerbNetonly) }
 
-func tokVerbList() string {
-	if s := tokTpl(idxTokVerbList); s != "" {
-		return s
-	}
-	return "list"
-}
+func tokVerbList() string { return tokTpl(idxTokVerbList) }
 
-func tokVerbStored() string {
-	if s := tokTpl(idxTokVerbStored); s != "" {
-		return s
-	}
-	return "stored"
-}
+func tokVerbStored() string { return tokTpl(idxTokVerbStored) }
 
-func tokVerbCurrent() string {
-	if s := tokTpl(idxTokVerbCurrent); s != "" {
-		return s
-	}
-	return "current"
-}
+func tokVerbCurrent() string { return tokTpl(idxTokVerbCurrent) }
 
-func tokVerbStatus() string {
-	if s := tokTpl(idxTokVerbStatus); s != "" {
-		return s
-	}
-	return "status"
-}
+func tokVerbStatus() string { return tokTpl(idxTokVerbStatus) }
 
-func tokVerbRemove() string {
-	if s := tokTpl(idxTokVerbRemove); s != "" {
-		return s
-	}
-	return "remove"
-}
+func tokVerbRemove() string { return tokTpl(idxTokVerbRemove) }
 
-func tokVerbClear() string {
-	if s := tokTpl(idxTokVerbClear); s != "" {
-		return s
-	}
-	return "clear"
-}
+func tokVerbClear() string { return tokTpl(idxTokVerbClear) }
 
-func tokVerbRevert() string {
-	if s := tokTpl(idxTokVerbRevert); s != "" {
-		return s
-	}
-	return "revert"
-}
+func tokVerbRevert() string { return tokTpl(idxTokVerbRevert) }
 
-func tokVerbRev2self() string {
-	if s := tokTpl(idxTokVerbRev2self); s != "" {
-		return s
-	}
-	return "rev2self"
-}
+func tokVerbRev2self() string { return tokTpl(idxTokVerbRev2self) }
 
-func tokActSet() string {
-	if s := tokTpl(idxTokActSet); s != "" {
-		return s
-	}
-	return "set"
-}
+func tokActSet() string { return tokTpl(idxTokActSet) }
 
-func tokActProcesses() string {
-	if s := tokTpl(idxTokActProcesses); s != "" {
-		return s
-	}
-	return "processes"
-}
+func tokActProcesses() string { return tokTpl(idxTokActProcesses) }
 
-func tokDefInteractive() string {
-	if s := tokTpl(idxTokLogonInteractive); s != "" {
-		return s
-	}
-	return "interactive"
-}
+func tokDefInteractive() string { return tokTpl(idxTokLogonInteractive) }
 
 // TokenCommand consolidates all token management functionality
 type TokenCommand struct {

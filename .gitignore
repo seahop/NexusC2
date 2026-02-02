@@ -90,7 +90,7 @@ server/docker/temp/*
 !server/docker/temp/.gitkeep
 server/docker/downloads/*
 !server/docker/downloads/.gitkeep
-!server/docker/downloads/downloads.json
+server/docker/downloads/downloads.json
 server/docker/uploads/*
 !server/docker/uploads/.gitkeep
 *.bak

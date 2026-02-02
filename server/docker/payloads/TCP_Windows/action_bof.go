@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -75,27 +74,24 @@ const (
 	idxBofIPCPath = 388 // \IPC$
 )
 
-// Shared template storage for all BOF-related files
-var (
-	bofTemplate   []string
-	bofTemplateMu sync.RWMutex
-)
+// Shared template storage for all BOF-related files (uses SecureStringArray for memory zeroing)
+var bofTemplate *SecureStringArray
 
 // SetBOFTemplate sets the shared BOF template (called from command processing)
 func SetBOFTemplate(templates []string) {
-	bofTemplateMu.Lock()
-	bofTemplate = templates
-	bofTemplateMu.Unlock()
+	// Zero old template before replacing
+	if bofTemplate != nil {
+		bofTemplate.Zero()
+	}
+	bofTemplate = NewSecureStringArray(templates)
 }
 
 // bofTpl safely retrieves a template string by index
 func bofTpl(idx int) string {
-	bofTemplateMu.RLock()
-	defer bofTemplateMu.RUnlock()
-	if bofTemplate != nil && idx < len(bofTemplate) {
-		return bofTemplate[idx]
+	if bofTemplate == nil {
+		return ""
 	}
-	return ""
+	return bofTemplate.Get(idx)
 }
 
 // Convenience functions for common template strings
@@ -228,9 +224,6 @@ func parseBOFArguments(argString string) ([]byte, error) {
 // This will be implemented differently for Windows
 func executeBOF(bofBytes []byte, args []byte) (string, error) {
 	osWindows := bofOSWindows()
-	if osWindows == "" {
-		osWindows = "windows" // Fallback
-	}
 	if runtime.GOOS != osWindows {
 		return "", nil
 	}

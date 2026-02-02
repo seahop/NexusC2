@@ -64,6 +64,51 @@ func init() {
 	geFmtUrlWithPort, _ = xorDecrypt(geFmtUrlWithPort, xorKey)
 	geFmtUrlQuery, _ = xorDecrypt(geFmtUrlQuery, xorKey)
 	geSlash, _ = xorDecrypt(geSlash, xorKey)
+
+	// Decrypt HTTP header name strings at startup
+	httpHeaderUserAgent, _ = xorDecrypt(httpHeaderUserAgent, xorKey)
+	httpHeaderContentType, _ = xorDecrypt(httpHeaderContentType, xorKey)
+	httpHeaderPadPre, _ = xorDecrypt(httpHeaderPadPre, xorKey)
+	httpHeaderPadApp, _ = xorDecrypt(httpHeaderPadApp, xorKey)
+	httpMetaId, _ = xorDecrypt(httpMetaId, xorKey)
+	httpMetaEncryption, _ = xorDecrypt(httpMetaEncryption, xorKey)
+	httpEncRsaAes, _ = xorDecrypt(httpEncRsaAes, xorKey)
+
+	// Decrypt JSON field names at startup
+	jfCT, _ = xorDecrypt(jfCT, xorKey)
+	jfCO, _ = xorDecrypt(jfCO, xorKey)
+	jfCI, _ = xorDecrypt(jfCI, xorKey)
+	jfCB, _ = xorDecrypt(jfCB, xorKey)
+	jfAI, _ = xorDecrypt(jfAI, xorKey)
+	jfFN, _ = xorDecrypt(jfFN, xorKey)
+	jfOF, _ = xorDecrypt(jfOF, xorKey)
+	jfRP, _ = xorDecrypt(jfRP, xorKey)
+	jfCC, _ = xorDecrypt(jfCC, xorKey)
+	jfTC, _ = xorDecrypt(jfTC, xorKey)
+	jfDA, _ = xorDecrypt(jfDA, xorKey)
+	jfAR, _ = xorDecrypt(jfAR, xorKey)
+	jfTS, _ = xorDecrypt(jfTS, xorKey)
+	jfJI, _ = xorDecrypt(jfJI, xorKey)
+	jfOU, _ = xorDecrypt(jfOU, xorKey)
+	jfEC, _ = xorDecrypt(jfEC, xorKey)
+	jfER, _ = xorDecrypt(jfER, xorKey)
+	jfV, _ = xorDecrypt(jfV, xorKey)
+	jfT, _ = xorDecrypt(jfT, xorKey)
+	jfTPL, _ = xorDecrypt(jfTPL, xorKey)
+	jfP, _ = xorDecrypt(jfP, xorKey)
+	jfBD, _ = xorDecrypt(jfBD, xorKey)
+	jfCD, _ = xorDecrypt(jfCD, xorKey)
+	jfST, _ = xorDecrypt(jfST, xorKey)
+	jfNC, _ = xorDecrypt(jfNC, xorKey)
+	jfSI, _ = xorDecrypt(jfSI, xorKey)
+	jfSG, _ = xorDecrypt(jfSG, xorKey)
+	jfSD, _ = xorDecrypt(jfSD, xorKey)
+	jfCT2, _ = xorDecrypt(jfCT2, xorKey)
+	jfET, _ = xorDecrypt(jfET, xorKey)
+	jfMD, _ = xorDecrypt(jfMD, xorKey)
+
+	// Initialize JSON field fallback values
+	initJSONFields()
 }
 
 func xorDecrypt(encoded, key string) (string, error) {

