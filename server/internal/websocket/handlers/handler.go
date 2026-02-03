@@ -367,7 +367,8 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		logMessage(LOG_VERBOSE, "Processing file_upload message")
 		return h.handleFileUpload(client, message)
 
-	case "socks":
+	case "socks-ws", "socks_ws":
+		// WebSocket-based SOCKS proxy (real-time, direct agents only)
 		// Check gRPC connection
 		if _, err := h.GetAgentClient(); err != nil {
 			return h.handleOfflineMessage(client, msgType, err)

@@ -71,16 +71,17 @@ See the [CNA Import Guide](/howto/import-cna-scripts/) for detailed instructions
 
 ### SOCKS5 Proxy
 
-Create SOCKS5 proxies through agents to access internal networks:
+Two SOCKS5 proxy implementations for different scenarios:
 
-```
-Operator → SSH Tunnel → Server → Agent → Internal Network
-```
+| Method | Transport | Latency | Linked Agents |
+|--------|-----------|---------|---------------|
+| **socks-ws** | WebSocket | Real-time | No |
+| **socks-http** | HTTP Polling | Higher | Yes |
 
-- **Full SOCKS5 support** - TCP connect and UDP associate
-- **Authentication** - username/password if required
-- **Dynamic port forwarding** - access any internal host/port
-- **Multiple concurrent tunnels** - one per agent
+- **socks-ws** - WebSocket-based for low-latency, real-time tunneling (direct agents only)
+- **socks-http** - HTTP polling-based, works through linked agent chains (SMB/TCP)
+- **Full SOCKS5** - TCP CONNECT and UDP ASSOCIATE support
+- **Multiple concurrent sessions** - per agent
 
 ### SMB Agent Linking
 

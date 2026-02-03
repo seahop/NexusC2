@@ -62,6 +62,15 @@ const (
 	E33 = "E33" // Link failed to connect
 	E34 = "E34" // Unlink failed
 	E37 = "E37" // Network token exec failed
+
+	// SOCKS-HTTP errors (E40-E49)
+	E40 = "E40" // Session not found
+	E41 = "E41" // Failed to decode data
+	E42 = "E42" // Session timeout
+	E43 = "E43" // Connection failed
+	E44 = "E44" // Write error
+	E45 = "E45" // UDP resolve failed
+	E46 = "E46" // UDP socket error
 )
 
 // Table type markers - client adds full headers

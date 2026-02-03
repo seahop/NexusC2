@@ -12,7 +12,7 @@ help <command>           # Show detailed help for a specific command
 examples = [
     "help",
     "help upload",
-    "help socks"
+    "help socks-ws"
 ]
 help = """
 Client-side help viewer:
@@ -314,21 +314,51 @@ Examples of multiple filters and exclusions:
   ls -R -f .log --exclude archive --exclude backup   # Find logs, skip archive and backup dirs
 """
 
-[commands.socks]
-name = "socks"
+[commands.socks_ws]
+name = "socks-ws"
 fileName = "socks"
 os_compatibility = "all"
-description = "Start/stop SOCKS proxy server"
-syntax = "socks <start|stop> <socks_port> <path> <wss_port>"
+description = "Start/stop WebSocket-based SOCKS proxy server (real-time, direct agents only)"
+syntax = "socks-ws <start|stop> <socks_port> <path> <wss_port>"
 examples = [
-    "socks start 1080 https://domain.com/some/path 443",
-    "socks stop 1080"
+    "socks-ws start 1080 https://domain.com/some/path 443",
+    "socks-ws stop 1080"
 ]
 help = """
-Starts or stops a SOCKS proxy server:
-- Requires a valid WebSocket URL
-- Start requires ports for SOCKS and WSS
-- Stop requires only the SOCKS port
+WebSocket-based SOCKS proxy with real-time data transfer.
+
+This proxy establishes a dedicated WebSocket connection from the agent
+to the server for low-latency, real-time SOCKS5 proxying.
+
+REQUIREMENTS:
+- Agent must be able to make outbound WebSocket connections
+- Does NOT work through linked agents (SMB/TCP chains)
+- Requires direct HTTPS agent
+
+SYNTAX:
+  socks-ws start <socks_port> <wss_path> <wss_port>
+  socks-ws stop <socks_port>
+
+PARAMETERS:
+  socks_port   Local port for SOCKS5 listener (e.g., 1080)
+  wss_path     WebSocket URL path (e.g., https://domain.com/ws/path)
+  wss_port     WebSocket port on the server (e.g., 443)
+
+COMPARISON WITH socks-http:
+  socks-ws (this command):
+    + Real-time, low latency
+    + Better for interactive sessions
+    - Requires agent to make outbound WebSocket
+    - Does NOT work through linked agents
+
+  socks-http:
+    + Works through linked agents (SMB/TCP chains)
+    + No additional outbound connections
+    + Uses existing C2 channel
+    - Higher latency (polling-based)
+
+Use socks-ws for direct agents when you need low latency.
+Use socks-http when working through linked agent chains.
 """
 
 [commands.socks_http]
@@ -344,14 +374,14 @@ examples = [
 help = """
 HTTP-based SOCKS proxy that uses the normal agent polling mechanism.
 
-Unlike the WebSocket-based 'socks' command, socks-http:
+Unlike the WebSocket-based 'socks-ws' command, socks-http:
 - Uses the existing HTTP polling channel for all traffic
 - Works through linked agents (SMB/TCP agent chains)
 - Does NOT require an outbound WebSocket connection from the agent
 - Higher latency due to polling interval (best with lower sleep values)
 
 TRADE-OFFS:
-  WebSocket SOCKS (socks):
+  WebSocket SOCKS (socks-ws):
     + Real-time, low latency
     + Better for interactive use
     - Requires agent to make outbound WebSocket connection

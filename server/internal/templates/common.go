@@ -38,7 +38,7 @@ const (
 )
 
 // MaxTemplateSize ensures all indices have values across all command types
-const MaxTemplateSize = 1100
+const MaxTemplateSize = 1120
 
 // ============================================================================
 // SHELL TEMPLATE INDICES (100-119)
@@ -1052,15 +1052,15 @@ const (
 )
 
 // ============================================================================
-// SOCKS HTTP TEMPLATE INDICES (1060-1079) - HTTP-based SOCKS proxy
+// SOCKS HTTP TEMPLATE INDICES (1060-1099) - HTTP-based SOCKS proxy with UDP
 // ============================================================================
 const (
-	// Actions (1060-1062)
+	// TCP Actions (1060-1062)
 	IdxSocksHTTPActionConnect = 1060 // connect
 	IdxSocksHTTPActionData    = 1061 // data
 	IdxSocksHTTPActionClose   = 1062 // close
 
-	// Status responses (1063-1066)
+	// TCP Status responses (1063-1066)
 	IdxSocksHTTPStatusConnected = 1063 // connected
 	IdxSocksHTTPStatusData      = 1064 // data
 	IdxSocksHTTPStatusClosed    = 1065 // closed
@@ -1078,7 +1078,23 @@ const (
 	IdxSocksHTTPErrUnknownAct   = 1075 // unknown action
 	IdxSocksHTTPErrSessNotFound = 1076 // session not found
 
-	_socksHTTPEnd = 1079
+	// UDP Actions (1080-1082)
+	IdxSocksHTTPActionUDPAssoc = 1080 // udp_associate
+	IdxSocksHTTPActionUDPData  = 1081 // udp_data
+	IdxSocksHTTPActionUDPClose = 1082 // udp_close
+
+	// UDP Status responses (1083-1085)
+	IdxSocksHTTPStatusUDPReady  = 1083 // udp_ready
+	IdxSocksHTTPStatusUDPData   = 1084 // udp_data
+	IdxSocksHTTPStatusUDPClosed = 1085 // udp_closed
+
+	// UDP JSON field keys (1086-1089)
+	IdxSocksHTTPFieldDestAddr = 1086 // da (destination address)
+	IdxSocksHTTPFieldDestPort = 1087 // dp (destination port)
+	IdxSocksHTTPFieldFrag     = 1088 // fg (fragment number)
+	IdxSocksHTTPFieldAtyp     = 1089 // at (address type)
+
+	_socksHTTPEnd = 1099
 )
 
 // ============================================================================

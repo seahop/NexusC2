@@ -364,7 +364,7 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                 "macOS Exploitation": ['keychain', 'dyld-inject'],
                 "macOS Persistence": ['persist'],
                 "CNA Scripts": ['cna-load', 'cna-list'],
-                "Network": ['socks', 'socks-http'],
+                "Network": ['socks-ws', 'socks-http'],
                 "Agent Control": ['sleep', 'rekey', 'clear', 'exit'],
                 "Job Management": ['jobs', 'jobkill'],
                 "Help": ['help']

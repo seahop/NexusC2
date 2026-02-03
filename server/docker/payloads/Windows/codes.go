@@ -106,6 +106,15 @@ const (
 	E50 = "E50" // Privilege not held
 	E51 = "E51" // BOF execution failed
 	E52 = "E52" // Assembly execution failed
+
+	// SOCKS-HTTP errors (E60-E69)
+	E60 = "E60" // Session not found
+	E61 = "E61" // Failed to decode data
+	E62 = "E62" // Session timeout
+	E63 = "E63" // Connection failed
+	E64 = "E64" // Write error
+	E65 = "E65" // UDP resolve failed
+	E66 = "E66" // UDP socket error
 )
 
 // Table type markers - client adds full headers

