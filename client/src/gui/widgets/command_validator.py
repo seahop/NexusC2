@@ -493,7 +493,7 @@ class CommandValidator:
                                     'inline-assembly-kill', 'inline-assembly-jobs-clean',
                                     'inline-assembly-jobs-stats'],
                     "CNA Scripts": ['cna-load', 'cna-list'],
-                    "Network": ['socks'],
+                    "Network": ['socks', 'socks-http'],
                     "Agent Control": ['sleep', 'rekey', 'clear', 'exit'],
                     "Job Management": ['jobs', 'jobkill'],
                     "Help": ['help']

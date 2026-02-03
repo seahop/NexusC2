@@ -34,6 +34,7 @@ const (
 	TypeToken          = 24
 	TypeRev2Self       = 25
 	TypeKeychain       = 26
+	TypeSocksHTTP      = 27
 )
 
 // MaxTemplateSize ensures all indices have values across all command types
@@ -1048,6 +1049,36 @@ const (
 	IdxWcFnFreeEnvironmentStringsW  = 1051 // FreeEnvironmentStringsW
 
 	_winCommonApiEnd = 1059
+)
+
+// ============================================================================
+// SOCKS HTTP TEMPLATE INDICES (1060-1079) - HTTP-based SOCKS proxy
+// ============================================================================
+const (
+	// Actions (1060-1062)
+	IdxSocksHTTPActionConnect = 1060 // connect
+	IdxSocksHTTPActionData    = 1061 // data
+	IdxSocksHTTPActionClose   = 1062 // close
+
+	// Status responses (1063-1066)
+	IdxSocksHTTPStatusConnected = 1063 // connected
+	IdxSocksHTTPStatusData      = 1064 // data
+	IdxSocksHTTPStatusClosed    = 1065 // closed
+	IdxSocksHTTPStatusError     = 1066 // error
+
+	// JSON field keys (1067-1072)
+	IdxSocksHTTPFieldSid    = 1067 // sid
+	IdxSocksHTTPFieldStatus = 1068 // st
+	IdxSocksHTTPFieldData   = 1069 // d
+	IdxSocksHTTPFieldError  = 1070 // err
+
+	// Error messages (1073-1076)
+	IdxSocksHTTPErrNoData       = 1073 // no data provided
+	IdxSocksHTTPErrParseFailed  = 1074 // failed to parse command data
+	IdxSocksHTTPErrUnknownAct   = 1075 // unknown action
+	IdxSocksHTTPErrSessNotFound = 1076 // session not found
+
+	_socksHTTPEnd = 1079
 )
 
 // ============================================================================

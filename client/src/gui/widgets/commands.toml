@@ -331,6 +331,57 @@ Starts or stops a SOCKS proxy server:
 - Stop requires only the SOCKS port
 """
 
+[commands.socks_http]
+name = "socks-http"
+fileName = "socks-http"
+os_compatibility = "all"
+description = "Start/stop HTTP-based SOCKS proxy (works through linked agents)"
+syntax = "socks-http <start|stop> <port>"
+examples = [
+    "socks-http start 1080",
+    "socks-http stop 1080"
+]
+help = """
+HTTP-based SOCKS proxy that uses the normal agent polling mechanism.
+
+Unlike the WebSocket-based 'socks' command, socks-http:
+- Uses the existing HTTP polling channel for all traffic
+- Works through linked agents (SMB/TCP agent chains)
+- Does NOT require an outbound WebSocket connection from the agent
+- Higher latency due to polling interval (best with lower sleep values)
+
+TRADE-OFFS:
+  WebSocket SOCKS (socks):
+    + Real-time, low latency
+    + Better for interactive use
+    - Requires agent to make outbound WebSocket connection
+    - Does NOT work through linked agents
+
+  HTTP SOCKS (socks-http):
+    + Works through any agent chain (SMB, TCP linked agents)
+    + No additional outbound connections needed
+    + Uses existing C2 channel
+    - Higher latency (depends on agent sleep interval)
+    - Best for slower operations (API calls, browsing)
+
+USAGE:
+  Start the proxy on a local port:
+    socks-http start 1080
+
+  Configure your tools to use the proxy:
+    proxychains, curl --socks5, browser SOCKS settings, etc.
+    Point to 127.0.0.1:1080
+
+  Stop the proxy:
+    socks-http stop 1080
+
+TIPS:
+  - Reduce agent sleep interval for better responsiveness
+  - Use 'sleep 5' or lower for interactive browsing
+  - Works great for tools like nmap, curl, wget
+  - Ideal for pivoting through SMB-linked internal hosts
+"""
+
 [commands.clear]
 name = "clear"
 fileName = "clear"

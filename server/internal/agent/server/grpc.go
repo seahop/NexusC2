@@ -4,6 +4,7 @@ package server
 import (
 	"c2/internal/agent/listeners"
 	"c2/internal/agent/socks"
+	"c2/internal/agent/socks_http"
 	"c2/internal/common/commands"
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
@@ -69,8 +70,10 @@ type GRPCServer struct {
 		server *socks.Server
 		bridge *socks.Bridge
 	}
-	socksMutex sync.RWMutex
-	httpMux    *http.ServeMux
+	socksMutex       sync.RWMutex
+	socksHTTPServers map[string]*socks_http.Server // HTTP-based SOCKS servers by agentID
+	socksHTTPMutex   sync.RWMutex
+	httpMux          *http.ServeMux
 	// ADD: New fields for stream monitoring
 	streamConnections map[string]*StreamConnection
 	streamMutex       sync.RWMutex
@@ -104,6 +107,8 @@ func NewGRPCServer(manager *listeners.Manager, cmdBuffer map[string][]Command, d
 			bridge *socks.Bridge
 		}),
 		socksMutex:        sync.RWMutex{},
+		socksHTTPServers:  make(map[string]*socks_http.Server),
+		socksHTTPMutex:    sync.RWMutex{},
 		httpMux:           mux,
 		streamConnections: make(map[string]*StreamConnection), // ADD: Initialize stream connections
 		activeTransfers:   make(map[string]map[string]*ActiveTransfer),
@@ -1395,6 +1400,74 @@ func (s *GRPCServer) stopSocksServer(socksData map[string]interface{}) error {
 	return nil
 }
 
+// startSocksHTTPServer initializes and starts an HTTP-based SOCKS proxy
+// This uses the normal polling mechanism instead of WebSocket, enabling SOCKS through linked agents
+func (s *GRPCServer) startSocksHTTPServer(agentID string, port int) error {
+	s.socksHTTPMutex.Lock()
+	defer s.socksHTTPMutex.Unlock()
+
+	// Check if server already exists for this agent
+	if _, exists := s.socksHTTPServers[agentID]; exists {
+		return fmt.Errorf("SOCKS HTTP server already running for agent %s", agentID)
+	}
+
+	// Create command queue function that adds commands to the agent's CommandBuffer
+	queueFn := func(targetAgentID string, cmdType int, data string) error {
+		s.Mutex.Lock()
+		defer s.Mutex.Unlock()
+
+		// Create command for the agent
+		cmd := Command{
+			CommandType: cmdType,
+			Command:     "socks-http",
+			CommandID:   fmt.Sprintf("socks-http-%d", time.Now().UnixNano()),
+			AgentID:     targetAgentID,
+			Data:        data,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+
+		if s.CommandBuffer[targetAgentID] == nil {
+			s.CommandBuffer[targetAgentID] = make([]Command, 0)
+		}
+		s.CommandBuffer[targetAgentID] = append(s.CommandBuffer[targetAgentID], cmd)
+
+		log.Printf("[SOCKS-HTTP] Queued command for agent %s (buffer size: %d)", targetAgentID, len(s.CommandBuffer[targetAgentID]))
+		return nil
+	}
+
+	// Create and start server
+	server := socks_http.NewServer(port, agentID, queueFn)
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("failed to start SOCKS HTTP server: %v", err)
+	}
+
+	// Register the server
+	s.socksHTTPServers[agentID] = server
+	socks_http.RegisterServer(agentID, server)
+
+	log.Printf("[SOCKS-HTTP] Started HTTP-based SOCKS server on port %d for agent %s", port, agentID)
+	return nil
+}
+
+// stopSocksHTTPServer stops a running HTTP-based SOCKS proxy server
+func (s *GRPCServer) stopSocksHTTPServer(agentID string) error {
+	s.socksHTTPMutex.Lock()
+	defer s.socksHTTPMutex.Unlock()
+
+	server, exists := s.socksHTTPServers[agentID]
+	if !exists {
+		return fmt.Errorf("no SOCKS HTTP server running for agent %s", agentID)
+	}
+
+	// Stop the server
+	server.Stop()
+	socks_http.UnregisterServer(agentID)
+	delete(s.socksHTTPServers, agentID)
+
+	log.Printf("[SOCKS-HTTP] Stopped HTTP-based SOCKS server for agent %s", agentID)
+	return nil
+}
+
 func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 	switch msg.Type {
 	case "agent_command":
@@ -1697,8 +1770,87 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			return
 		}
 
-		// Handle SOCKS command
-		if strings.HasPrefix(commandData.Command, "socks") {
+		// Handle SOCKS-HTTP command (check BEFORE socks to avoid prefix match)
+		if strings.HasPrefix(commandData.Command, "socks-http") {
+			log.Printf("[ProcessMessage] Processing SOCKS-HTTP command: %s for agent %s",
+				commandData.Command, commandData.AgentID)
+
+			// Parse command: "socks-http start 9999" or "socks-http stop"
+			parts := strings.Fields(commandData.Command)
+			if len(parts) >= 2 {
+				action := parts[1] // start or stop
+
+				switch action {
+				case "start":
+					port := 1080 // default
+					if len(parts) >= 3 {
+						if p, err := strconv.Atoi(parts[2]); err == nil {
+							port = p
+						}
+					}
+
+					if err := s.startSocksHTTPServer(commandData.AgentID, port); err != nil {
+						log.Printf("[ProcessMessage] Failed to start SOCKS HTTP server: %v", err)
+						errorMsg := map[string]interface{}{
+							"type":       "socks_http_error",
+							"command_id": commandData.CommandID,
+							"agent_id":   commandData.AgentID,
+							"error":      fmt.Sprintf("Failed to start SOCKS HTTP server: %v", err),
+							"timestamp":  time.Now().Format(time.RFC3339),
+						}
+						s.BroadcastResult(errorMsg)
+					} else {
+						// Send success response
+						successMsg := map[string]interface{}{
+							"type":       "socks_http_started",
+							"command_id": commandData.CommandID,
+							"agent_id":   commandData.AgentID,
+							"port":       port,
+							"message":    fmt.Sprintf("SOCKS HTTP proxy started on port %d", port),
+							"timestamp":  time.Now().Format(time.RFC3339),
+						}
+						s.BroadcastResult(successMsg)
+					}
+					return // Don't add start command to buffer
+
+				case "stop":
+					if err := s.stopSocksHTTPServer(commandData.AgentID); err != nil {
+						log.Printf("[ProcessMessage] Failed to stop SOCKS HTTP server: %v", err)
+						errorMsg := map[string]interface{}{
+							"type":       "socks_http_error",
+							"command_id": commandData.CommandID,
+							"agent_id":   commandData.AgentID,
+							"error":      fmt.Sprintf("Failed to stop SOCKS HTTP server: %v", err),
+							"timestamp":  time.Now().Format(time.RFC3339),
+						}
+						s.BroadcastResult(errorMsg)
+					} else {
+						// Send success response
+						successMsg := map[string]interface{}{
+							"type":       "socks_http_stopped",
+							"command_id": commandData.CommandID,
+							"agent_id":   commandData.AgentID,
+							"message":    "SOCKS HTTP proxy stopped",
+							"timestamp":  time.Now().Format(time.RFC3339),
+						}
+						s.BroadcastResult(successMsg)
+					}
+					return // Don't add stop command to buffer
+
+				default:
+					// This is a data command (command == "socks-http" with data in Data field)
+					// Fall through to queue it to the agent
+					log.Printf("[ProcessMessage] SOCKS-HTTP data command for agent %s with %d bytes",
+						commandData.AgentID, len(commandData.Data))
+				}
+			} else if commandData.Command == "socks-http" && commandData.Data != "" {
+				// Pure data command without action - queue to agent
+				log.Printf("[ProcessMessage] SOCKS-HTTP data command for agent %s with %d bytes",
+					commandData.AgentID, len(commandData.Data))
+				// Fall through to queue it
+			}
+		} else if strings.HasPrefix(commandData.Command, "socks") {
+			// Handle traditional SOCKS command
 			log.Printf("[ProcessMessage] Processing SOCKS command: %s", commandData.Command)
 			socksData, err := parseSocksCommand(commandData.Command)
 			if err != nil {

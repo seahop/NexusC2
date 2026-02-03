@@ -221,6 +221,9 @@ func (h *WSHandler) handleAgentCommand(client *hub.Client, message []byte) error
 	log.Printf("Received agent_command: Command=%s, Agent=%s, Chunk=%d/%d",
 		msg.Data.Command, msg.Data.AgentID, msg.Data.CurrentChunk, msg.Data.TotalChunks)
 
+	// Note: socks-http commands are NOT intercepted here - they flow through to gRPC
+	// where the agent-handler service starts the SOCKS listener (same as regular socks)
+
 	// Check if this is a chunked command
 	if msg.Data.TotalChunks > 1 {
 		// Process chunk in a goroutine with semaphore to limit concurrency

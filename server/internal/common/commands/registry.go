@@ -18,24 +18,25 @@ import "strings"
 
 // Command IDs - Cross-platform (1-99)
 const (
-	CmdCd       = 1
-	CmdLs       = 2
-	CmdPwd      = 3
-	CmdDownload = 4
-	CmdUpload   = 5
-	CmdShell    = 6
-	CmdSocks    = 7
-	CmdJobkill  = 8
-	CmdExit     = 9
-	CmdSleep    = 10
-	CmdRekey    = 11
-	CmdEnv      = 12
-	CmdCat      = 13
-	CmdHash     = 14
-	CmdHashDir  = 15
-	CmdPs       = 16
-	CmdRm       = 17
-	CmdWhoami   = 18
+	CmdCd        = 1
+	CmdLs        = 2
+	CmdPwd       = 3
+	CmdDownload  = 4
+	CmdUpload    = 5
+	CmdShell     = 6
+	CmdSocks     = 7
+	CmdJobkill   = 8
+	CmdExit      = 9
+	CmdSleep     = 10
+	CmdRekey     = 11
+	CmdEnv       = 12
+	CmdCat       = 13
+	CmdHash      = 14
+	CmdHashDir   = 15
+	CmdPs        = 16
+	CmdRm        = 17
+	CmdWhoami    = 18
+	CmdSocksHTTP = 19 // HTTP-based SOCKS proxy (works through linked agents)
 )
 
 // Command IDs - Linux/Darwin specific (100-199)
@@ -78,24 +79,25 @@ const CmdUnknown = -1
 // The server uses this to translate user commands before sending to payloads.
 var NameToID = map[string]int{
 	// Cross-platform
-	"cd":       CmdCd,
-	"ls":       CmdLs,
-	"pwd":      CmdPwd,
-	"download": CmdDownload,
-	"upload":   CmdUpload,
-	"shell":    CmdShell,
-	"socks":    CmdSocks,
-	"jobkill":  CmdJobkill,
-	"exit":     CmdExit,
-	"sleep":    CmdSleep,
-	"rekey":    CmdRekey,
-	"env":      CmdEnv,
-	"cat":      CmdCat,
-	"hash":     CmdHash,
-	"hash-dir": CmdHashDir,
-	"ps":       CmdPs,
-	"rm":       CmdRm,
-	"whoami":   CmdWhoami,
+	"cd":         CmdCd,
+	"ls":         CmdLs,
+	"pwd":        CmdPwd,
+	"download":   CmdDownload,
+	"upload":     CmdUpload,
+	"shell":      CmdShell,
+	"socks":      CmdSocks,
+	"jobkill":    CmdJobkill,
+	"exit":       CmdExit,
+	"sleep":      CmdSleep,
+	"rekey":      CmdRekey,
+	"env":        CmdEnv,
+	"cat":        CmdCat,
+	"hash":       CmdHash,
+	"hash-dir":   CmdHashDir,
+	"ps":         CmdPs,
+	"rm":         CmdRm,
+	"whoami":     CmdWhoami,
+	"socks-http": CmdSocksHTTP,
 
 	// Linux/Darwin
 	"sudo-session": CmdSudoSession,

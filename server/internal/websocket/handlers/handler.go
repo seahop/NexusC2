@@ -374,6 +374,14 @@ func (h *WSHandler) HandleMessage(client *hub.Client, msgType string, message []
 		}
 		return h.handleSocksCommand(client, message)
 
+	case "socks-http", "socks_http":
+		// HTTP-based SOCKS proxy (works through linked agents)
+		// Check gRPC connection
+		if _, err := h.GetAgentClient(); err != nil {
+			return h.handleOfflineMessage(client, msgType, err)
+		}
+		return h.handleSocksHTTPCommand(client, message)
+
 	case "remove_agent":
 		return h.handleRemoveAgent(client, message)
 

