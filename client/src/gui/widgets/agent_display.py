@@ -457,11 +457,12 @@ class AgentDisplayWidget(QWidget):
             QTimer.singleShot(100, self.table_widget.refresh_from_tree)
 
     def handle_link_update(self, data):
+        print(f"AgentDisplayWidget: Received link_update: {data}")
         self.tree_widget.handle_link_update(data)
-        if self.stack.currentIndex() == 1:
-            QTimer.singleShot(100, self.table_widget.refresh_from_tree)
-        elif self.stack.currentIndex() == 2:
-            QTimer.singleShot(100, self.graph_widget.refresh_graph)
+        # Refresh ALL views on link updates (not just current view)
+        # This ensures all views stay in sync when links change
+        QTimer.singleShot(100, self.table_widget.refresh_from_tree)
+        QTimer.singleShot(100, self.graph_widget.refresh_graph)
 
     def handle_agent_reactivation(self, conn_data):
         self.tree_widget.handle_agent_reactivation(conn_data)

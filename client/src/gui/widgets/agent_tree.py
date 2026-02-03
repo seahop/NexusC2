@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (QTreeWidget, QTreeWidgetItem, QWidget, QVBoxLayout,
                               QMessageBox, QMenu, QInputDialog, QLineEdit, QHBoxLayout, QLabel)
 from PyQt6.QtCore import QTimer, QDateTime, Qt, pyqtSlot, pyqtSignal, QThread
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QBrush, QColor
 import json
 import asyncio
 import sqlite3
@@ -308,6 +309,7 @@ class AgentTreeWidget(QWidget):
             'hostname': conn_data.get('hostname', 'unknown'),
             'username': conn_data.get('username', 'unknown'),
             'ip': conn_data.get('ext_ip', conn_data.get('int_ip', 'unknown')),
+            'int_ip': conn_data.get('int_ip', ''),  # Store internal IP separately for linked agents
             'deleted': False,  # Initialize with not deleted
             'parent_client_id': conn_data.get('parent_client_id', ''),  # Parent agent for linked agents
             'link_type': conn_data.get('link_type', ''),  # Link type (e.g., "smb")
@@ -366,11 +368,20 @@ class AgentTreeWidget(QWidget):
         # Add link indicator for linked agents (visual hierarchy via prefix)
         link_type = agent.get('link_type', '')
         parent_client_id = agent.get('parent_client_id', '')
+        previous_link_type = agent.get('previous_link_type', '')
+        is_unlinked = previous_link_type and not link_type and not parent_client_id
+
         if link_type:
             # Calculate depth for visual indentation
             depth = self._get_agent_depth(agent)
-            indent = "    " * depth  # 4 spaces per level
-            display_name = f"{indent}↳ [{link_type.upper()}] {display_name}"
+            # Use tree-style connectors to distinguish siblings from nested children
+            # └─ for last sibling, ├─ for non-last siblings
+            connector = "└─" if self._is_last_sibling(agent) else "├─"
+            indent = "    " * (depth - 1) if depth > 1 else ""
+            display_name = f"{indent}{connector} [{link_type.upper()}] {display_name}"
+        elif is_unlinked:
+            # Agent was previously linked but is now unlinked - show indicator
+            display_name = f"[UNLINKED] {display_name}"
 
         # Add tag badges to display name
         agent_tags = self.agent_tags.get(agent['guid'], [])
@@ -386,6 +397,10 @@ class AgentTreeWidget(QWidget):
         # Mark this as an agent item (not a detail item)
         tree_item.setData(0, Qt.ItemDataRole.UserRole + 1, 'agent')
 
+        # Gray out unlinked agents
+        if is_unlinked:
+            tree_item.setForeground(0, QBrush(QColor('#888888')))
+
         # Build comprehensive tooltip with all agent info
         tooltip_parts = [
             f"Full GUID: {agent['guid']}",
@@ -396,7 +411,9 @@ class AgentTreeWidget(QWidget):
         ]
         if alias:
             tooltip_parts.insert(0, f"Alias: {alias}")
-        if link_type:
+        if is_unlinked:
+            tooltip_parts.append(f"Status: UNLINKED (was {previous_link_type.upper()})")
+        elif link_type:
             tooltip_parts.append(f"Link Type: {link_type.upper()}")
             if parent_client_id:
                 tooltip_parts.append(f"Parent Agent: {parent_client_id[:16]}...")
@@ -449,6 +466,22 @@ class AgentTreeWidget(QWidget):
             current = parent
 
         return depth
+
+    def _is_last_sibling(self, agent):
+        """Check if agent is the last child of its parent (for tree connector display)"""
+        parent_id = agent.get('parent_client_id', '')
+        if not parent_id:
+            return True  # Root agents are always "last" (no connector needed)
+
+        # Find all siblings (agents with the same parent, not deleted)
+        siblings = [a for a in self.agent_data
+                    if a.get('parent_client_id') == parent_id and not a.get('deleted')]
+
+        if not siblings:
+            return True
+
+        # Check if this agent is the last one in the sibling list
+        return agent == siblings[-1]
 
     def show_agents(self):
         """Render all agents in the tree regardless of deleted status.
@@ -1069,6 +1102,7 @@ class AgentTreeWidget(QWidget):
                             'hostname': row[1],
                             'username': row[4],
                             'ip': row[3] if row[3] else row[2],  # Prefer external IP, fallback to internal
+                            'int_ip': row[2] if row[2] else '',  # Store internal IP separately for linked agents
                             'deleted': is_deleted,
                             'parent_client_id': row[14] if row[14] else '',  # For linked agents
                             'link_type': row[15] if row[15] else '',         # Link type (e.g., "smb")
@@ -1153,6 +1187,8 @@ class AgentTreeWidget(QWidget):
                     "Last Seen: 0 seconds ago"
                 ]
                 agent['last_seen_timestamp'] = QDateTime.currentDateTime()
+                # Update int_ip field for linked agent IP display
+                agent['int_ip'] = connection_data.get('int_ip', '')
 
                 # Update the tree view
                 tree_item = self.agent_items.get(agent_name)
@@ -1323,6 +1359,8 @@ class AgentTreeWidget(QWidget):
                 f"Client ID: {conn_data['client_id']}",
                 last_seen_display
             ]
+            # Update int_ip field for linked agent IP display
+            agent['int_ip'] = conn_data.get('int_ip', '')
 
             # Update tree view if we're in agents view
             if self.current_view == 'agents':
@@ -1538,9 +1576,25 @@ class AgentTreeWidget(QWidget):
             print(f"AgentTreeWidget: No change in link status for {agent_id[:8]}")
             return
 
-        # Update agent data
+        # Track if this is an unlink operation (had parent, now doesn't)
+        is_unlink = old_parent and not parent_client_id
+        if is_unlink:
+            # Remember the previous link type so we can show "unlinked" status
+            agent['previous_link_type'] = old_link_type
+            print(f"AgentTreeWidget: Agent {agent_id[:8]} is being UNLINKED from {old_parent[:8]}")
+        elif parent_client_id:
+            # Clear previous_link_type if re-linking to a new parent
+            agent.pop('previous_link_type', None)
+            print(f"AgentTreeWidget: Agent {agent_id[:8]} is being LINKED to {parent_client_id[:8]}")
+
+        # Update agent data (in-memory)
         agent['parent_client_id'] = parent_client_id
         agent['link_type'] = link_type
+
+        # Persist to local database so changes survive app restart
+        from utils.database import StateDatabase
+        db = StateDatabase()
+        db.update_agent_link(agent_id, parent_client_id, link_type)
 
         # Rebuild the tree to get proper ordering and visual indentation
         # This is simpler than trying to reorder individual items

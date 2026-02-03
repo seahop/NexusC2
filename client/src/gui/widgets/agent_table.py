@@ -173,35 +173,40 @@ class AgentTableWidget(QWidget):
                 children_map[parent_id].append(agent)
 
         # Recursively build the display list with proper ordering
-        def add_agent_with_children(agent, depth):
+        def add_agent_with_children(agent, depth, is_last_sibling=True):
             """Add an agent and then immediately add all its children (depth-first)"""
-            result = [(agent, depth)]
+            result = [(agent, depth, is_last_sibling)]
             # Get children of this agent and add them recursively
             children = children_map.get(agent['guid'], [])
-            for child in children:
-                result.extend(add_agent_with_children(child, depth + 1))
+            for i, child in enumerate(children):
+                child_is_last = (i == len(children) - 1)
+                result.extend(add_agent_with_children(child, depth + 1, child_is_last))
             return result
 
         # Build the final ordered list
         agents_to_display = []
-        for root in root_agents:
-            agents_to_display.extend(add_agent_with_children(root, 0))
+        for i, root in enumerate(root_agents):
+            root_is_last = (i == len(root_agents) - 1)
+            agents_to_display.extend(add_agent_with_children(root, 0, root_is_last))
 
         # Add rows in hierarchical order
-        for agent, depth in agents_to_display:
-            self.add_agent_row(agent, depth)
+        for agent, depth, is_last_sibling in agents_to_display:
+            self.add_agent_row(agent, depth, is_last_sibling)
 
         # Keep sorting disabled to maintain hierarchy
         # User can still click headers to sort, but it will flatten the view
         self.table.setSortingEnabled(True)
 
-    def add_agent_row(self, agent, depth=0):
+    def add_agent_row(self, agent, depth=0, is_last_sibling=True):
         """Add a single agent row to the table with optional indentation for hierarchy"""
         row = self.table.rowCount()
         self.table.insertRow(row)
 
         guid = agent.get('guid', '')
         link_type = agent.get('link_type', '')
+        previous_link_type = agent.get('previous_link_type', '')
+        parent_client_id = agent.get('parent_client_id', '')
+        is_unlinked = previous_link_type and not link_type and not parent_client_id
 
         # Get GUID display length from tree widget settings
         guid_len = 16
@@ -222,16 +227,21 @@ class AgentTableWidget(QWidget):
 
         # Add visual hierarchy indicator based on depth
         if depth > 0:
-            # Indent with spaces and arrow for child agents
-            indent = "    " * (depth - 1)  # Extra indent for deeper nesting
-            display_name = f"{indent}↳ [{link_type.upper()}] {display_name}"
+            # Use tree-style connectors to distinguish siblings from nested children
+            # └─ for last sibling, ├─ for non-last siblings
+            connector = "└─" if is_last_sibling else "├─"
+            indent = "    " * (depth - 1) if depth > 1 else ""
+            display_name = f"{indent}{connector} [{link_type.upper()}] {display_name}"
+        elif is_unlinked:
+            # Agent was previously linked but is now unlinked - show indicator
+            display_name = f"[UNLINKED] {display_name}"
 
         # Column data (no Parent column - hierarchy shown in Name)
         columns_data = [
             display_name,
             agent.get('hostname', 'N/A'),
             agent.get('username', 'N/A'),
-            agent.get('ip', 'N/A'),
+            self._format_ip_with_link(agent),  # IP with optional 'via parent' for linked agents
             agent.get('os', 'N/A'),
             self._extract_arch(agent),
             agent.get('protocol', 'N/A'),
@@ -265,6 +275,10 @@ class AgentTableWidget(QWidget):
                     item.setForeground(QBrush(QColor('#2196F3')))  # Blue for TCP
                 else:
                     item.setForeground(QBrush(QColor('#9ca3af')))  # Gray for other
+
+            # Gray out unlinked agents (previously linked but now disconnected)
+            if is_unlinked:
+                item.setForeground(QBrush(QColor('#888888')))
 
             self.table.setItem(row, col, item)
 
@@ -319,6 +333,49 @@ class AgentTableWidget(QWidget):
         if tags:
             return ', '.join([tag['name'] for tag in tags])
         return ''
+
+    def _format_ip_with_link(self, agent):
+        """Format IP address with optional 'via parent' indicator for linked agents.
+
+        For linked agents, the server sets extIP to 'via:<parent_guid>' since they
+        don't have a direct external IP. We format this nicely with the parent's
+        display name and show the agent's internal IP.
+        """
+        ip = agent.get('ip', 'N/A')
+        int_ip = agent.get('int_ip', '')  # Internal IP stored separately
+        parent_client_id = agent.get('parent_client_id', '')
+        link_type = agent.get('link_type', '')
+
+        # Check if IP is already in "via:xxx" format from server (linked agent)
+        if ip and ip.startswith('via:'):
+            # Server sent "via:<parent_guid_prefix>" - format it nicely
+            if parent_client_id and self.agent_tree_widget:
+                parent_alias = self.agent_tree_widget.agent_aliases.get(parent_client_id, '')
+                if parent_alias:
+                    parent_name = parent_alias
+                else:
+                    parent_name = f"{parent_client_id[:8]}..."
+
+                # Use the stored internal IP directly
+                if int_ip and int_ip != 'N/A':
+                    return f"{int_ip} → {parent_name}"
+                else:
+                    return f"via → {parent_name}"
+            else:
+                # No parent info, just clean up the format
+                return ip.replace('via:', 'via: ')
+
+        # Regular agent with actual IP - add via indicator if linked
+        if parent_client_id and link_type and self.agent_tree_widget:
+            parent_alias = self.agent_tree_widget.agent_aliases.get(parent_client_id, '')
+            if parent_alias:
+                parent_name = parent_alias
+            else:
+                parent_name = f"{parent_client_id[:8]}..."
+
+            return f"{ip} → {parent_name}"
+
+        return ip
 
     def update_last_seen(self):
         """Update last seen column for all agents"""

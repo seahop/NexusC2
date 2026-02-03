@@ -157,10 +157,7 @@ class WebSocketClient:
                         self.terminal_widget.log_message(
                             f"Chunk {chunk_num + 1}/{total} sent for {filename}"
                         )
-                    else:
-                        self.terminal_widget.log_message(f"Command sent successfully")
-                else:
-                    self.terminal_widget.log_message(f"Message sent successfully")
+                    # Don't log individual command sends - too noisy
             except:
                 pass
         self.retry_delay = 1  # Reset retry delay after successful send
@@ -222,20 +219,16 @@ class WebSocketClient:
             # Cache metadata for later use
             self.message_metadata[message] = (msg_type, is_high_priority, is_chunked, chunk_info)
 
-            # Log based on cached metadata
+            # Only log chunk queuing for large transfers (not every message)
             if is_chunked and chunk_info:
                 if self.terminal_widget:
                     self.terminal_widget.log_message(
-                        f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued. Queue size: {len(self.message_queue)}"
+                        f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued for transfer"
                     )
-            else:
-                if self.terminal_widget:
-                    self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
+            # Don't log regular message queuing - too noisy
         except:
             # If parsing fails, cache minimal metadata
             self.message_metadata[message] = ('unknown', False, False, None)
-            if self.terminal_widget:
-                self.terminal_widget.log_message(f"Message queued. Queue size: {len(self.message_queue)}")
 
         logger.debug(f"Message queued. Queue size: {len(self.message_queue)}")
 
@@ -470,15 +463,9 @@ class WebSocketClient:
                         total_chunks = message_data.get('total_chunks')
                         file_name = message_data.get('file_name')
                         logger.debug(f"Received binary chunk {chunk_num}/{total_chunks} for {file_name}")
-                    else:
-                        # Log other message types
-                        if self.terminal_widget:
-                            # Don't log huge messages
-                            if len(message) < 10000:
-                                self.terminal_widget.log_message(f"Received: {message}")
-                            else:
-                                self.terminal_widget.log_message(f"Received large message: {message_type}")
-                    
+                    # Don't log every received message - too noisy
+                    # Important messages are handled by their specific handlers
+
                     # IMPORTANT: Just return the message data for WebSocketThread to handle
                     # INCLUDING command_queued messages
                     return message_data
@@ -720,23 +707,12 @@ class WebSocketClient:
                     message_data = json.loads(message)
                     message_type = message_data.get('type')
                     
-                    # Handle chunk-related messages
-                    if message_type in ['chunk_progress', 'chunk_received', 'command_assembled']:
-                        # These are handled in receive_messages
-                        pass
-                    elif message_type in ['command_output_chunk_start', 'command_output_chunk', 'command_output_chunk_complete']:
-                        # These are handled in receive_messages
-                        pass
-                    elif self.terminal_widget:
-                        # Log other messages
-                        if len(message) < 10000:
-                            self.terminal_widget.log_message(f"Received: {message}")
-                        else:
-                            self.terminal_widget.log_message(f"Received large {message_type} message")
-                            
+                    # Handle chunk-related messages silently
+                    # All other messages are processed by their specific handlers
+                    # Don't log every received message - too noisy
+
                 except json.JSONDecodeError:
-                    if self.terminal_widget:
-                        self.terminal_widget.log_message(f"Received non-JSON message")
+                    logger.debug("Received non-JSON message")
                         
             except websockets.exceptions.ConnectionClosed:
                 self.connected = False

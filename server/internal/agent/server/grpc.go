@@ -1126,16 +1126,16 @@ func (s *GRPCServer) BroadcastLinkUpdate(agentID string, parentClientID string, 
 	linkUpdateData := struct {
 		Type string `json:"type"`
 		Data struct {
-			AgentID        string `json:"ai"`
-			ParentClientID string `json:"pc"`
-			LinkType       string `json:"lt"`
+			AgentID        string `json:"agent_id"`
+			ParentClientID string `json:"parent_client_id"`
+			LinkType       string `json:"link_type"`
 		} `json:"data"`
 	}{
 		Type: "link_update",
 		Data: struct {
-			AgentID        string `json:"ai"`
-			ParentClientID string `json:"pc"`
-			LinkType       string `json:"lt"`
+			AgentID        string `json:"agent_id"`
+			ParentClientID string `json:"parent_client_id"`
+			LinkType       string `json:"link_type"`
 		}{
 			AgentID:        agentID,
 			ParentClientID: parentClientID,

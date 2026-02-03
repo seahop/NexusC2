@@ -51,6 +51,9 @@ class AgentNode(QGraphicsEllipseItem):
         os_name = self.agent_data.get('os', '').lower()
         protocol = self.agent_data.get('protocol', '').lower()
         link_type = self.agent_data.get('link_type', '')
+        previous_link_type = self.agent_data.get('previous_link_type', '')
+        parent_client_id = self.agent_data.get('parent_client_id', '')
+        is_unlinked = previous_link_type and not link_type and not parent_client_id
 
         # Determine color based on OS
         if 'windows' in os_name:
@@ -62,6 +65,10 @@ class AgentNode(QGraphicsEllipseItem):
         else:
             base_color = QColor('#9E9E9E')  # Gray
 
+        # Gray out unlinked agents
+        if is_unlinked:
+            base_color = QColor('#666666')  # Dark gray for unlinked
+
         # Create gradient fill
         gradient = QRadialGradient(0, 0, self.radius)
         gradient.setColorAt(0, base_color.lighter(150))
@@ -70,8 +77,10 @@ class AgentNode(QGraphicsEllipseItem):
 
         self.setBrush(QBrush(gradient))
 
-        # Border style - thicker for linked agents
-        if link_type:
+        # Border style - thicker for linked agents, dotted for unlinked
+        if is_unlinked:
+            pen = QPen(QColor('#FF0000'), 2, Qt.PenStyle.DotLine)  # Red dotted for unlinked
+        elif link_type:
             pen = QPen(QColor('#FFFFFF'), 2, Qt.PenStyle.DashLine)
         else:
             pen = QPen(base_color.darker(150), 2)
@@ -123,8 +132,15 @@ class AgentNode(QGraphicsEllipseItem):
             user_display = username if len(username) <= 14 else username[:12] + '..'
             lines.append(user_display)
 
-        # Line 4: Link type badge (if linked agent)
-        if link_type:
+        # Line 4: Link type badge (if linked agent) or unlinked status
+        link_type = self.agent_data.get('link_type', '')
+        previous_link_type = self.agent_data.get('previous_link_type', '')
+        parent_client_id = self.agent_data.get('parent_client_id', '')
+        is_unlinked = previous_link_type and not link_type and not parent_client_id
+
+        if is_unlinked:
+            lines.append("[UNLINKED]")
+        elif link_type:
             lines.append(f"[{link_type.upper()}]")
 
         label_text = '\n'.join(lines)
@@ -176,11 +192,16 @@ class AgentNode(QGraphicsEllipseItem):
         ]
 
         link_type = self.agent_data.get('link_type', '')
-        if link_type:
+        previous_link_type = self.agent_data.get('previous_link_type', '')
+        parent_client_id = self.agent_data.get('parent_client_id', '')
+        is_unlinked = previous_link_type and not link_type and not parent_client_id
+
+        if is_unlinked:
+            lines.append(f"<b style='color: #FF6666;'>Status: UNLINKED (was {previous_link_type.upper()})</b>")
+        elif link_type:
             lines.append(f"Link: {link_type.upper()}")
-            parent = self.agent_data.get('parent_client_id', '')
-            if parent:
-                lines.append(f"Parent: {parent[:16]}...")
+            if parent_client_id:
+                lines.append(f"Parent: {parent_client_id[:16]}...")
 
         return '<br>'.join(lines)
 

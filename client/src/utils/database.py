@@ -607,6 +607,25 @@ class StateDatabase:
                     conn.rollback()
                     return False
 
+    def update_agent_link(self, agent_guid, parent_client_id, link_type):
+        """Update the parent link for a specific agent (for linked agents)"""
+        with self._db_lock:
+            with self._get_connection() as conn:
+                try:
+                    conn.execute("""
+                        UPDATE connections
+                        SET parent_client_id = ?, link_type = ?
+                        WHERE newclient_id = ?
+                    """, (parent_client_id if parent_client_id else None,
+                          link_type if link_type else None,
+                          agent_guid))
+                    conn.commit()
+                    print(f"Updated link for agent {agent_guid[:8]}: parent={parent_client_id[:8] if parent_client_id else 'None'}, type={link_type}")
+                    return True
+                except Exception as e:
+                    print(f"Error updating agent link: {e}")
+                    return False
+
     def verify_database_state(self):
         """Verify and print current database state"""
         with self._db_lock:
