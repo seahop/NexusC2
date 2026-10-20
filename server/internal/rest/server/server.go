@@ -138,9 +138,9 @@ func (s *Server) setupRouter() {
 	// Health check (no auth required)
 	router.GET("/health", s.handleHealth)
 
-	// Internal routes (service-to-service, no auth required)
-	// These endpoints are only accessible within the docker network
+	// Internal routes (service-to-service, JWT auth required)
 	internal := router.Group("/internal")
+	internal.Use(AuthMiddleware(s.jwtManager))
 	{
 		if s.profileHandler != nil {
 			internal.POST("/profiles/sync", s.profileHandler.SyncProfiles)
@@ -297,8 +297,7 @@ func (s *Server) HandleGRPCMessage(msg *pb.StreamMessage) {
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	tlsConfig := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		PreferServerCipherSuites: true,
+		MinVersion: tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,

@@ -147,13 +147,33 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	})
 }
 
-// CertLogin authenticates using TLS connection (no password required)
-// If user can establish TLS connection, they are authorized
+// CertLogin authenticates using a verified TLS client certificate.
+// The handler validates that a real client certificate was presented and
+// that its CN or first SAN matches the requested username.
 // POST /api/v1/auth/cert-login
 func (h *AuthHandler) CertLogin(c *gin.Context) {
+	// Validate that a TLS client certificate was actually presented
+	if c.Request.TLS == nil || len(c.Request.TLS.PeerCertificates) == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "client certificate required"})
+		return
+	}
+
 	var req CertLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	// Extract identity from the presented client certificate
+	cert := c.Request.TLS.PeerCertificates[0]
+	certIdentity := cert.Subject.CommonName
+	if certIdentity == "" && len(cert.DNSNames) > 0 {
+		certIdentity = cert.DNSNames[0]
+	}
+
+	// Verify the certificate identity matches the requested username
+	if certIdentity != req.Username {
+		c.JSON(http.StatusForbidden, gin.H{"error": "certificate identity does not match requested username"})
 		return
 	}
 

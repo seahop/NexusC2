@@ -70,7 +70,7 @@ class C2ClientGUI(QMainWindow):
                         if key not in saved:
                             saved[key] = value
                     return saved
-            except:
+            except Exception:
                 pass
         return defaults
 
@@ -509,7 +509,7 @@ class C2ClientGUI(QMainWindow):
         mode_combo.addItems(["both", "direct", "bof"])
         
         if hasattr(current_widget, 'command_handler') and hasattr(current_widget.command_handler, 'cna_interpreter'):
-            mode_combo.setCurrentText(interpreter.registration_mode)
+            mode_combo.setCurrentText(current_widget.command_handler.cna_interpreter.registration_mode)
             mode_combo.currentTextChanged.connect(
                 lambda mode: self._set_cna_registration_mode(mode)
             )
@@ -1382,7 +1382,7 @@ class C2ClientGUI(QMainWindow):
             try:
                 from PyQt6.QtCore import Qt
                 self.setAttribute(Qt.WidgetAttribute.WA_MacNormalSize)
-            except:
+            except Exception:
                 pass
         
         elif system == "Linux":
@@ -2284,7 +2284,7 @@ class C2ClientGUI(QMainWindow):
                     settings = json.load(f)
                     theme = settings.get('theme', 'Dark')
                     self.apply_theme(theme)  # This now calls update_terminal_themes too
-            except:
+            except Exception:
                 self.set_dark_theme()
                 self.update_terminal_themes("dark")
         else:

@@ -8,6 +8,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"time"
 )
@@ -82,7 +83,7 @@ func writeLinkMessage(conn net.Conn, data []byte) error {
 // readLinkMessage reads a length-prefixed message from the connection
 func readLinkMessage(conn net.Conn) ([]byte, error) {
 	header := make([]byte, 4)
-	if _, err := conn.Read(header); err != nil {
+	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
 	}
 

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -205,14 +206,22 @@ func main() {
 		if err := grpcServer.Start(grpcBindAddress); err != nil {
 			log.Fatalf("Failed to start gRPC server: %v", err)
 		}
+		grpcReady <- true
 	}()
 
-	// Wait for gRPC server to start
-	time.Sleep(5 * time.Second)
+	// Wait for gRPC server to be ready
+	<-grpcReady
+
+	// Parse port from bind address for client connection
+	_, grpcPort, err := net.SplitHostPort(grpcBindAddress)
+	if err != nil {
+		grpcPort = "50051"
+	}
+	grpcClientAddr := "localhost:" + grpcPort
 
 	// Initialize gRPC client
 	log.Println("Initializing gRPC client...")
-	grpcClient, err := agent.NewClient("localhost:50051", "agent_service")
+	grpcClient, err := agent.NewClient(grpcClientAddr, "agent_service")
 
 	// Declare enhancedClient variable outside the if block for later use
 	var enhancedClient *agent.CircuitBreaker
@@ -248,9 +257,7 @@ func main() {
 		}(listenerConfig)
 	}
 
-	// Signal that gRPC server is ready
-	grpcReady <- true
-	log.Printf("gRPC server ready at localhost:50051")
+	log.Printf("gRPC server ready at %s", grpcClientAddr)
 
 	// Log optimization status
 	log.Println("\n===========================================")

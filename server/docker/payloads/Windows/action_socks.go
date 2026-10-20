@@ -35,7 +35,7 @@ const (
 
 type SocksCommand struct {
 	wsConn          *websocket.Conn
-	sshClient       *ssh.Client
+	sshConn         ssh.Conn
 	running         bool
 	mu              sync.RWMutex
 	activeTunnels   map[string]*TunnelInfo
@@ -203,9 +203,10 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 		// log.Printf("[SOCKS] SSH tunnel established successfully")
 
-		// Store connections before creating client
+		// Store connections
 		c.mu.Lock()
 		c.wsConn = wsConn
+		c.sshConn = sshConn
 		c.running = true
 		c.activeTunnels = make(map[string]*TunnelInfo)
 		c.maxConnections = 50 // Configurable limit
@@ -238,8 +239,8 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		if c.cleanupShutdown != nil {
 			close(c.cleanupShutdown)
 		}
-		if c.sshClient != nil {
-			c.sshClient.Close()
+		if c.sshConn != nil {
+			c.sshConn.Close()
 		}
 		if c.wsConn != nil {
 			c.wsConn.Close()

@@ -3,6 +3,7 @@ package main
 
 import (
 	"c2/internal/common/config"
+	"c2/internal/common/utils"
 	"c2/internal/database/postgres"
 	"c2/internal/logging"
 	"c2/internal/rest/server"
@@ -15,40 +16,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
 )
-
-func configureRuntime() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	debug.SetGCPercent(100)
-	log.Printf("Runtime configured: GOMAXPROCS=%d", runtime.GOMAXPROCS(0))
-}
-
-func retryWithExponentialBackoff(operation func() error) error {
-	maxRetries := 30
-	baseDelay := 1 * time.Second
-	maxDelay := 30 * time.Second
-	var lastErr error
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := operation()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		delay := baseDelay * time.Duration(1<<uint(attempt))
-		if delay > maxDelay {
-			delay = maxDelay
-		}
-		log.Printf("Attempt %d failed: %v. Retrying in %v...", attempt+1, err, delay)
-		time.Sleep(delay)
-	}
-	return lastErr
-}
 
 func main() {
 	// Initialize persistent file logging
@@ -62,7 +33,7 @@ func main() {
 	log.Println("Starting NexusC2 REST API Service...")
 
 	// Configure runtime
-	configureRuntime()
+	utils.ConfigureRuntime()
 
 	// Load configuration
 	log.Println("Loading REST API configuration...")
@@ -88,22 +59,16 @@ func main() {
 	// Connect to database
 	log.Println("Connecting to database...")
 	var db *sql.DB
-	err = retryWithExponentialBackoff(func() error {
+	poolCfg := &postgres.PoolConfig{
+		MaxOpenConns:    50,
+		MaxIdleConns:    25,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
+	}
+	err = utils.RetryWithExponentialBackoff(func() error {
 		var connErr error
-		db, connErr = postgres.NewConnection(cfg.Database)
-		if connErr != nil {
-			return connErr
-		}
-
-		// Configure connection pool
-		db.SetMaxOpenConns(50)
-		db.SetMaxIdleConns(25)
-		db.SetConnMaxLifetime(5 * time.Minute)
-		db.SetConnMaxIdleTime(10 * time.Minute)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return db.PingContext(ctx)
+		db, connErr = postgres.NewConnection(cfg.Database, poolCfg)
+		return connErr
 	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -153,7 +118,7 @@ func main() {
 		return client, nil
 	}
 
-	err = retryWithExponentialBackoff(func() error {
+	err = utils.RetryWithExponentialBackoff(func() error {
 		var connErr error
 		agentClient, connErr = connectToAgent()
 		return connErr
@@ -191,9 +156,8 @@ func main() {
 
 					agentClientMu.Lock()
 					agentClient = newClient
-					agentClientMu.Unlock()
-
 					srv.SetAgentClient(newClient)
+					agentClientMu.Unlock()
 					log.Println("gRPC connection restored")
 				}
 			}

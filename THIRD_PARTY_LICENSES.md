@@ -1,6 +1,7 @@
 # Third Party Licenses
 
-This file contains the licenses for third-party code used in this project.
+NexusC2 is licensed under the MIT License (see LICENSE.txt).
+This file lists the licenses for third-party dependencies used in this project.
 
 ---
 

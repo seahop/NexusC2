@@ -546,7 +546,7 @@ class TerminalWidget(QWidget):
         # Since we don't have DB ID yet, use command_id as placeholder (will be negative to distinguish)
         try:
             placeholder_id = -abs(hash(command_id)) % (2**31)  # Use hash to create unique negative ID
-        except:
+        except Exception:
             placeholder_id = -1
 
         new_command = (placeholder_id, username, agent_id, command, timestamp)

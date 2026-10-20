@@ -633,6 +633,12 @@ func (h *PayloadHandler) runDockerBuild(ctx context.Context, envVars []string) e
 		hostPayloadsPath = "/app/payloads"
 	}
 
+	// Get host shared path — must match the host directory mounted as /shared in this container
+	hostSharedPath := os.Getenv("HOST_SHARED_PATH")
+	if hostSharedPath == "" {
+		hostSharedPath = "/shared"
+	}
+
 	// Create container config
 	config := &container.Config{
 		Image: "docker_builder:latest",
@@ -643,7 +649,7 @@ func (h *PayloadHandler) runDockerBuild(ctx context.Context, envVars []string) e
 	hostConfig := &container.HostConfig{
 		NetworkMode: "host",
 		Binds: []string{
-			"/shared:/shared",
+			fmt.Sprintf("%s:/shared", hostSharedPath),
 			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),

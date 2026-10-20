@@ -50,9 +50,9 @@ class CommandBuffer:
                         'message': output_text,
                         'timestamp': output_data.get('timestamp', datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
                     }
-            except:
+            except Exception:
                 pass
-        
+
         # Always add to output buffer for display
         self.received_outputs.append(output_data)
     

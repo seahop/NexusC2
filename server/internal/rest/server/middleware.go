@@ -139,9 +139,9 @@ func (rl *RateLimiter) Allow(key string) bool {
 		rl.lastRefill[key] = now
 	}
 
-	// Refill tokens based on time elapsed
+	// Refill tokens based on time elapsed (continuous, not just on minute boundaries)
 	elapsed := now.Sub(rl.lastRefill[key])
-	tokensToAdd := int(elapsed.Minutes()) * rl.refillRate
+	tokensToAdd := int(elapsed.Seconds() * float64(rl.refillRate) / 60.0)
 	if tokensToAdd > 0 {
 		rl.tokens[key] = min(rl.tokens[key]+tokensToAdd, rl.maxTokens)
 		rl.lastRefill[key] = now

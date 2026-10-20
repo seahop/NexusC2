@@ -111,6 +111,20 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 	// Store chunk in memory and update last activity time
 	uploadInfo.Chunks[cmd.CurrentChunk] = chunkData
 	uploadInfo.LastUpdate = now
+
+	// Check total accumulated size to prevent memory exhaustion (max 500MB)
+	const maxUploadSize = 500 * 1024 * 1024
+	var totalSize int
+	for _, chunk := range uploadInfo.Chunks {
+		totalSize += len(chunk)
+	}
+	if totalSize > maxUploadSize {
+		uploadInfo.Chunks = nil
+		delete(commandQueue.activeUploads, cmd.Filename)
+		commandQueue.mu.Unlock()
+		return nil, fmt.Errorf(Err(E24))
+	}
+
 	commandQueue.mu.Unlock()
 
 	// Check if this was the last chunk

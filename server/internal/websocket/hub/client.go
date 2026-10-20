@@ -217,23 +217,11 @@ func (c *Client) WritePump() {
 			binaryTransferActive = true
 			binaryTransferTimeout = time.After(5 * time.Second) // Reset timeout
 
-			// Use goroutine for non-blocking write
-			writeDone := make(chan error, 1)
-			go func() {
-				c.Conn.SetWriteDeadline(time.Now().Add(writeWait * 3)) // More time for chunks
-				writeDone <- c.Conn.WriteMessage(websocket.TextMessage, message)
-			}()
-
-			// Non-blocking wait for write completion
-			select {
-			case err := <-writeDone:
-				if err != nil {
-					log.Printf("Error sending high priority message to %s: %v", c.Username, err)
-					return
-				}
-			case <-time.After(writeWait * 2):
-				log.Printf("Write timeout for high priority message to %s, continuing", c.Username)
-				// Don't return, just log and continue to prevent blocking other messages
+			// Write inline to serialize all writes within the WritePump select loop
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait * 3)) // More time for chunks
+			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				log.Printf("Error sending high priority message to %s: %v", c.Username, err)
+				return
 			}
 
 		// Check for binary transfer timeout
@@ -253,15 +241,13 @@ func (c *Client) WritePump() {
 
 			// If binary transfer is active, defer regular messages
 			if binaryTransferActive && len(c.SendHigh) > 0 {
-				// Put message back and continue to prioritize binary chunks
-				go func() {
-					time.Sleep(100 * time.Millisecond)
-					select {
-					case c.Send <- message:
-					case <-time.After(1 * time.Second):
-						log.Printf("Failed to requeue regular message for %s", c.Username)
-					}
-				}()
+				// Try to re-queue without spawning a goroutine; drop if channel is full
+				select {
+				case c.Send <- message:
+					// Re-queued successfully
+				default:
+					log.Printf("Dropped regular message for %s during binary transfer (channel full)", c.Username)
+				}
 				continue
 			}
 
@@ -341,6 +327,17 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		log.Printf("Failed to unmarshal listener message: %v", err)
 		return err
 	}
+	// Set default profile names if not provided
+	if msg.Data.GetProfile == "" {
+		msg.Data.GetProfile = "default-get"
+	}
+	if msg.Data.PostProfile == "" {
+		msg.Data.PostProfile = "default-post"
+	}
+	if msg.Data.ServerResponseProfile == "" {
+		msg.Data.ServerResponseProfile = "default-response"
+	}
+
 	log.Printf("Unmarshaled message: name=%s, protocol=%s, port=%d, host=%s, pipe_name=%s, profiles: GET=%s POST=%s Response=%s SMB=%s TCP=%s",
 		msg.Data.Name, msg.Data.Protocol, msg.Data.Port, msg.Data.Host, msg.Data.PipeName,
 		msg.Data.GetProfile, msg.Data.PostProfile, msg.Data.ServerResponseProfile, msg.Data.SMBProfile, msg.Data.TCPProfile)

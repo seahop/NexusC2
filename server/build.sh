@@ -39,6 +39,10 @@ echo "Building Agent-Handler Service..."
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o docker/bin/agent-handler-service ./cmd/agent-handler
 echo "Agent-Handler Service built successfully."
 
+echo "Building REST API Service..."
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o docker/bin/rest-api-service ./cmd/rest-api
+echo "REST API Service built successfully."
+
 echo "Building Log Analyzer..."
 CGO_ENABLED=0 go build -o bin/logviewer cmd/logviewer/main.go
 echo "Log Analyzer built successfully"
@@ -55,8 +59,8 @@ cp config.toml docker/bin
 echo "Configuration file copied successfully."
 
 # Copy docker-compose.yml and Dockerfile.builder to docker/bin for the websocket container
-echo "Copying docker-compose.yml to docker directory..."
-cp docker/docker-compose.yml docker/
-echo "Copying Dockerfile.builder to docker directory..."
-cp docker/Dockerfile.builder docker/
+echo "Copying docker-compose.yml to docker/bin..."
+cp docker/docker-compose.yml docker/bin/
+echo "Copying Dockerfile.builder to docker/bin..."
+cp docker/Dockerfile.builder docker/bin/
 echo "Docker build files copied successfully."

@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Build Environment - Compiles Go binaries and generates protobuf files
 # ==============================================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -40,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /agent-handler-service ./c
 # ==============================================================================
 # Stage 2: Runtime Image
 # ==============================================================================
-FROM alpine:3.20
+FROM alpine:3.24
 
 # Metadata
 LABEL maintainer="NexusC2"
@@ -85,11 +85,6 @@ RUN apk add --no-cache libcap && \
 
 # Switch to non-root user
 USER nexus
-
-# Health check for gRPC service (nc = netcat)
-# Note: netcat is not available in non-root Alpine by default
-# Alternative: Use gRPC health check or TCP probe externally
-# For now, rely on docker-compose health check with nc installed separately or use external probe
 
 # Expose gRPC port (documentation only)
 EXPOSE 50051

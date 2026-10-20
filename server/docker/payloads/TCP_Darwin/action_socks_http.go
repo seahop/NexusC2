@@ -68,6 +68,7 @@ type SocksHTTPCommand struct {
 
 // TargetSession represents a TCP connection to a target host
 type TargetSession struct {
+	mu           sync.RWMutex
 	ID           string
 	TargetConn   net.Conn
 	State        int // 0=connecting, 1=connected, 2=closed
@@ -77,6 +78,7 @@ type TargetSession struct {
 
 // UDPTargetSession represents a UDP relay session
 type UDPTargetSession struct {
+	mu           sync.RWMutex
 	ID           string
 	UDPConn      *net.UDPConn
 	State        int // 0=connecting, 1=connected, 2=closed
@@ -287,7 +289,9 @@ func (c *SocksHTTPCommand) handleData(sessionID, data string) CommandResult {
 	}
 
 	// Update activity
+	session.mu.Lock()
 	session.LastActivity = time.Now()
+	session.mu.Unlock()
 
 	// Write to target
 	_, err = session.TargetConn.Write(decoded)
@@ -432,7 +436,9 @@ func (c *SocksHTTPCommand) handleUDPData(sessionID, destAddr string, destPort ui
 	}
 
 	// Update activity
+	session.mu.Lock()
 	session.LastActivity = time.Now()
+	session.mu.Unlock()
 
 	// Send UDP packet
 	_, err = session.UDPConn.WriteToUDP(decoded, udpAddr)
@@ -486,7 +492,10 @@ func (c *SocksHTTPCommand) readFromUDPTarget(session *UDPTargetSession) {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
-			if session.State == 1 {
+			session.mu.RLock()
+			state := session.State
+			session.mu.RUnlock()
+			if state == 1 {
 				c.queueResponse(&SocksHTTPResponse{
 					SessionID: session.ID,
 					Status:    c.getTpl(idxSocksHTTPStatusUDPClosed),
@@ -496,7 +505,9 @@ func (c *SocksHTTPCommand) readFromUDPTarget(session *UDPTargetSession) {
 		}
 
 		if n > 0 {
+			session.mu.Lock()
 			session.LastActivity = time.Now()
+			session.mu.Unlock()
 
 			// Determine address type
 			var addrType byte = addrTypeIPv4
@@ -523,7 +534,9 @@ func (c *SocksHTTPCommand) closeUDPSession(sessionID string) {
 	c.sessionsMu.Lock()
 	session, exists := c.udpSessions[sessionID]
 	if exists {
+		session.mu.Lock()
 		session.State = 2 // closed
+		session.mu.Unlock()
 		close(session.stopCh)
 		if session.UDPConn != nil {
 			session.UDPConn.Close()
@@ -546,9 +559,15 @@ func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
 
 		n, err := session.TargetConn.Read(buf)
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue // retry on timeout, don't close
+			}
 			if err != io.EOF {
 				// Only queue error if not a normal close
-				if session.State == 1 {
+				session.mu.RLock()
+				state := session.State
+				session.mu.RUnlock()
+				if state == 1 {
 					c.queueResponse(&SocksHTTPResponse{
 						SessionID: session.ID,
 						Status:    c.getTpl(idxSocksHTTPStatusClosed),
@@ -564,7 +583,9 @@ func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
 		}
 
 		if n > 0 {
+			session.mu.Lock()
 			session.LastActivity = time.Now()
+			session.mu.Unlock()
 
 			// Queue data response
 			c.queueResponse(&SocksHTTPResponse{
@@ -580,7 +601,9 @@ func (c *SocksHTTPCommand) closeSession(sessionID string) {
 	c.sessionsMu.Lock()
 	session, exists := c.sessions[sessionID]
 	if exists {
+		session.mu.Lock()
 		session.State = 2 // closed
+		session.mu.Unlock()
 		if session.TargetConn != nil {
 			session.TargetConn.Close()
 		}
@@ -621,13 +644,19 @@ func (c *SocksHTTPCommand) cleanupStaleSessions() {
 		c.sessionsMu.RLock()
 		var staleTCPIDs []string
 		for id, session := range c.sessions {
-			if now.Sub(session.LastActivity) > staleTimeout {
+			session.mu.RLock()
+			lastActivity := session.LastActivity
+			session.mu.RUnlock()
+			if now.Sub(lastActivity) > staleTimeout {
 				staleTCPIDs = append(staleTCPIDs, id)
 			}
 		}
 		var staleUDPIDs []string
 		for id, session := range c.udpSessions {
-			if now.Sub(session.LastActivity) > staleTimeout {
+			session.mu.RLock()
+			lastActivity := session.LastActivity
+			session.mu.RUnlock()
+			if now.Sub(lastActivity) > staleTimeout {
 				staleUDPIDs = append(staleUDPIDs, id)
 			}
 		}

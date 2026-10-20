@@ -30,7 +30,7 @@ requests_per_minute = 100
 
 [rest_api.cors]
 # Allowed origins for CORS (use ["*"] to allow all)
-allowed_origins = ["*"]
+allowed_origins = ["https://localhost:3131", "https://127.0.0.1:3131"]
 
 # =============================================================================
 # URL CONFIGURATION

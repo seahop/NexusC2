@@ -733,7 +733,7 @@ func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
 func (c *CronPersistenceCommand) cleanAnacron() error {
 	anacronPath := c.getTpl(idxCronEtcAnacrontab)
 	if anacronPath == "" {
-		return fmt.Errorf("no anacron path")
+		return fmt.Errorf(Err(E4))
 	}
 
 	content, err := os.ReadFile(anacronPath)

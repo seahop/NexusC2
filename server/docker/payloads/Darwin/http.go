@@ -109,6 +109,8 @@ type SignedResponse struct {
 	SecretsInitialized bool   `json:"si"`
 	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
+	CommsTemplate      string `json:"ct,omitempty"`  // Base64-encoded comms template
+	ExecReqTemplate    string `json:"et,omitempty"`  // Base64-encoded exec requirements template
 }
 
 // parseCustomHeaders converts the JSON string of custom headers into a map
@@ -201,6 +203,30 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 
 	if signedResponse.NewClientID == "" {
 		return "", fmt.Errorf(Err(E18))
+	}
+
+	// Parse and store comms template if provided
+	if signedResponse.CommsTemplate != "" {
+		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.CommsTemplate); err == nil {
+			var ct CommsTemplate
+			if err := json.Unmarshal(tplData, &ct); err == nil {
+				// Zero old template before replacing
+				if globalCommsTpl != nil {
+					globalCommsTpl.Zero()
+				}
+				globalCommsTpl = NewSecureTemplateFromSlices(ct.Version, ct.Type, ct.Templates, ct.Params)
+			}
+		}
+	}
+
+	// Parse and store exec requirements template if provided
+	if signedResponse.ExecReqTemplate != "" {
+		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.ExecReqTemplate); err == nil {
+			var et ExecReqTemplate
+			if err := json.Unmarshal(tplData, &et); err == nil {
+				setExecReqTemplate(&et)
+			}
+		}
 	}
 
 	return signedResponse.NewClientID, nil

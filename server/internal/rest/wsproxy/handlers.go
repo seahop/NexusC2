@@ -57,6 +57,17 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 		req.IP = "0.0.0.0"
 	}
 
+	// Set default profile names if not provided
+	if req.GetProfile == "" {
+		req.GetProfile = "default-get"
+	}
+	if req.PostProfile == "" {
+		req.PostProfile = "default-post"
+	}
+	if req.ServerResponseProfile == "" {
+		req.ServerResponseProfile = "default-response"
+	}
+
 	// Build WebSocket message - note: WebSocket service uses "host" not "ip"
 	wsMsg := map[string]interface{}{
 		"type": "create_listener",

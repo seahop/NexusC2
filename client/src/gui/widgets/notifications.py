@@ -202,7 +202,7 @@ class NotificationManager(QObject):
                         if key not in saved:
                             saved[key] = value
                     return saved
-            except:
+            except Exception:
                 pass
         return defaults
 

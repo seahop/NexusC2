@@ -10,7 +10,8 @@ service AgentControl {
   rpc NotifyNewConnection (ConnectionNotification) returns (ConnectionResponse);
   rpc BiDiStream (stream StreamMessage) returns (stream StreamMessage); // Add bidirectional streaming RPC
   rpc NotifyAgentCheckin (AgentCheckinNotification) returns (AgentCheckinResponse);
-  rpc HandleUpload (HandleUploadRequest) returns (HandleUploadResponse) {}
+  rpc HandleUpload (HandleUploadRequest) returns (HandleUploadResponse);
+  rpc RemoveAgent (RemoveAgentRequest) returns (RemoveAgentResponse);
 }
 
 enum ListenerType {

@@ -74,7 +74,7 @@ class BOFArgumentParser:
                     buffer.extend(data)
             else:
                 # Plain string argument - pack as 'z' type for BOF
-                buffer.extend(BOFArgumentParser._pack_bof_string(arg))
+                buffer.extend(BOFArgumentParser._pack_string(arg))
         
         return bytes(buffer)
     
@@ -83,20 +83,6 @@ class BOFArgumentParser:
         """Pack a string in BOF format with length prefix"""
         # Format: length (4 bytes) + string data + null terminator
         # BeaconDataExtract expects length-prefixed data
-        data = s.encode('utf-8') + b'\x00'
-        length = len(data)
-        result = bytearray(4)
-        result[0] = length & 0xFF
-        result[1] = (length >> 8) & 0xFF
-        result[2] = (length >> 16) & 0xFF
-        result[3] = (length >> 24) & 0xFF
-        result.extend(data)
-        return bytes(result)
-    
-    @staticmethod
-    def _pack_bof_string(s: str) -> bytes:
-        """Pack a string in BOF format with length prefix"""
-        # Format: length (4 bytes) + string data + null terminator
         data = s.encode('utf-8') + b'\x00'
         length = len(data)
         result = bytearray(4)
@@ -585,7 +571,7 @@ class BOFHandler:
                         "output": ""
                     }
                     
-                    self.command_buffer.add_output({
+                    self.agent_terminal.command_buffer.add_output({
                         "timestamp": datetime.now().isoformat(),
                         "output": f"[+] Async BOF '{bof_name}' started with job ID: {job_id}"
                     })

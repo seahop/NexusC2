@@ -209,7 +209,7 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 
 	// Create the full report with metadata including JSON field mapping
 	metadata := map[string]string{
-		"startup_time": time.Now().UTC().Format(time.RFC3339),
+		protoMetaStartup: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Add JSON field mapping to metadata so server can decode responses
@@ -222,7 +222,7 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 	report := &SystemInfoReport{
 		AgentInfo: *info,
 		Metadata:  metadata,
-		Status:    "active",
+		Status:    protoMetaActive,
 	}
 
 	return report, nil

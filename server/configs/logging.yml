@@ -41,7 +41,7 @@ logging:
   
   # Redact sensitive information
   redaction:
-    enabled: false
+    enabled: true
     patterns:
       - "password"
       - "passwd"

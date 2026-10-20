@@ -168,6 +168,10 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 		initData.Protocol, nil, // deleted_at
 		fieldMappingJSON,
 	)
+	if err != nil {
+		log.Printf("[ERROR] Failed to insert connection: %v", err)
+		return fmt.Errorf("failed to insert connection: %v", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("[ERROR] Failed to commit transaction: %v", err)

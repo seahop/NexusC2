@@ -28,25 +28,6 @@ JWT_SECRET=$JWT_SECRET
 DOCKER_GID=$DOCKER_GID
 EOL
 
-if ! grep -q "POSTGRES_PASSWORD" ~/.bashrc; then
-    echo "export POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> ~/.bashrc
-    echo "POSTGRES_PASSWORD added to .bashrc"
-fi
-
-if ! grep -q "DB_PASSWORD" ~/.bashrc; then
-    echo "export DB_PASSWORD=$DB_PASSWORD" >> ~/.bashrc
-    echo "DB_PASSWORD added to .bashrc"
-else
-    echo "DB_PASSWORD already in .bashrc"
-fi
-
-if ! grep -q "API_PASSWORD" ~/.bashrc; then
-    echo "export API_PASSWORD=$API_PASSWORD" >> ~/.bashrc
-    echo "API_PASSWORD added to .bashrc"
-else
-    echo "API_PASSWORD already in .bashrc"
-fi
-
 echo "Environment variables set in $SECRETS_DIR/.env"
 echo "Database and API secrets generated"
 echo ""

@@ -37,6 +37,13 @@ const (
 	CmdPersist     = 101
 )
 
+// Link commands (230-232) - for multi-hop TCP agent chains
+const (
+	CmdLink   = 230
+	CmdUnlink = 231
+	CmdLinks  = 232
+)
+
 // Darwin only commands (300-399)
 const (
 	CmdKeychain = 300

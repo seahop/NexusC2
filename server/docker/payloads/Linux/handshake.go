@@ -29,7 +29,7 @@ func NewHandshakeManager() (*HandshakeManager, error) {
 
 	hm := &HandshakeManager{
 		decryptedValues: decrypted,
-		initialClientID: clientID,
+		initialClientID: getClientID(),
 	}
 
 	// Parse transform DataBlocks if configured
@@ -98,7 +98,7 @@ func (hm *HandshakeManager) PerformHandshake() error {
 
 	// Step 7: Update current client ID (but keep initial ID the same)
 	hm.currentClientID = newClientID
-	clientID = newClientID // Update global clientID
+	setClientID(newClientID) // Update global clientID
 
 	// Build new URLs with new client ID for subsequent communications
 	if hm.getClientIDDataBlock != nil {
@@ -161,7 +161,7 @@ func (hm *HandshakeManager) RefreshHandshake() error {
 	if err != nil {
 		// On error, ensure we restore old client ID
 		hm.currentClientID = oldClientID
-		clientID = oldClientID
+		setClientID(oldClientID)
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 

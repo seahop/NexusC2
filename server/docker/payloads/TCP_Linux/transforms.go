@@ -216,13 +216,16 @@ func smbEncodeGzip(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// maxDecompressSize limits gzip decompression to prevent decompression bombs (100MB)
+const maxDecompressSize = 100 * 1024 * 1024
+
 func smbDecodeGzip(data []byte) ([]byte, error) {
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
-	return io.ReadAll(r)
+	return io.ReadAll(io.LimitReader(r, maxDecompressSize))
 }
 
 // NetBIOS encoding: each byte becomes two characters (nibble encoding)

@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS user_sessions (
-    sesion_id UUID PRIMARY KEY,
+    session_id UUID PRIMARY KEY,
     username VARCHAR NOT NULL,
     login_time TIMESTAMP NOT NULL,
     logout_time TIMESTAMP
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS listeners (
     id UUID PRIMARY KEY,
     name VARCHAR NOT NULL,
     protocol VARCHAR NOT NULL,
-    port VARCHAR NOT NULL,
+    port INTEGER NOT NULL,
     ip VARCHAR NOT NULL,
     pipe_name VARCHAR DEFAULT '',
     get_profile VARCHAR(100) DEFAULT 'default-get',

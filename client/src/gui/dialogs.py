@@ -309,7 +309,7 @@ class WebSocketThread(QThread):
             if self.ws_client and self.ws_client.connected:
                 try:
                     self.loop.run_until_complete(self.ws_client.disconnect())
-                except:
+                except Exception:
                     pass
             self.cleanup()
             self.disconnected.emit()
@@ -336,7 +336,7 @@ class WebSocketThread(QThread):
                     )
                     # Wait briefly for disconnect to complete
                     future.result(timeout=2)
-                except:
+                except Exception:
                     pass  # Ignore errors during shutdown
         
         # Stop the event loop
@@ -463,40 +463,6 @@ class WebSocketThread(QThread):
                     print("WebSocketThread: Successfully stored initial state data")
                     self.db.verify_database_state()
                     self.state_received.emit()
-
-            elif message_type == 'agent_checkin':
-                agent_id = message_data['data'].get('agent_id')
-                last_seen = message_data['data'].get('last_seen')
-                print(f"WebSocketThread: Processing agent_checkin for agent {agent_id}")
-                
-                if hasattr(self.parent(), 'terminal_widget'):
-                    terminal_widget = self.parent().terminal_widget
-                    if terminal_widget.agent_tree:
-                        print("WebSocketThread: Current agents in tree:")
-                        for agent in terminal_widget.agent_tree.agent_data:
-                            print(f"  - {agent['guid']}")
-                        
-                        timestamp = QDateTime.fromSecsSinceEpoch(int(last_seen))
-                        print(f"WebSocketThread: Converted timestamp: {timestamp}")
-                        
-                        found = False
-                        for agent in terminal_widget.agent_tree.agent_data:
-                            if agent['guid'] == agent_id:
-                                print(f"WebSocketThread: Found matching agent {agent_id}")
-                                print(f"WebSocketThread: Old timestamp: {agent['last_seen_timestamp']}")
-                                agent['last_seen_timestamp'] = timestamp
-                                
-                                # If agent was marked as deleted, make it visible again
-                                if hasattr(agent, 'deleted') and agent['deleted']:
-                                    agent['deleted'] = False
-                                    if agent['name'] in terminal_widget.agent_tree.agent_items:
-                                        item = terminal_widget.agent_tree.agent_items[agent['name']]
-                                        if item.isHidden():
-                                            item.setHidden(False)
-                                
-                                print(f"WebSocketThread: Updated timestamp to: {timestamp}")
-                                found = True
-                                break
 
             elif message_type == 'command_validation':
                 #print(f"DEBUG: Command validation message received: {message_data}")
@@ -774,7 +740,7 @@ class ServerConnectDialog(QDialog):
             try:
                 with open(config_file, 'r') as f:
                     return json.load(f)
-            except:
+            except Exception:
                 pass
         return {}
 
@@ -1974,7 +1940,7 @@ class SettingsDialog(QDialog):
                         if key not in saved:
                             saved[key] = value
                     return saved
-            except:
+            except Exception:
                 pass
         return defaults
 

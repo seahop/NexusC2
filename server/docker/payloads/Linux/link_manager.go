@@ -171,8 +171,8 @@ func GetLinkManager() *LinkManager {
 			links:               make(map[string]*LinkedAgent),
 			pipeToRoute:         make(map[string]string),
 			addressToRoute:      make(map[string]string),
-			outboundData:        make(chan *LinkDataOut, 100),
-			handshakeData:       make(chan *LinkDataOut, 10),
+			outboundData:        make(chan *LinkDataOut, 1000),
+			handshakeData:       make(chan *LinkDataOut, 50),
 			responseChannels:    make(map[string]chan *LinkDataOut),
 			unlinkNotifications: make(chan string, 100),
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -170,8 +171,8 @@ func GetLinkManager() *LinkManager {
 			links:               make(map[string]*LinkedAgent),
 			pipeToRoute:         make(map[string]string),
 			addressToRoute:      make(map[string]string),
-			outboundData:        make(chan *LinkDataOut, 100),
-			handshakeData:       make(chan *LinkDataOut, 10),
+			outboundData:        make(chan *LinkDataOut, 1000),
+			handshakeData:       make(chan *LinkDataOut, 50),
 			responseChannels:    make(map[string]chan *LinkDataOut),
 			unlinkNotifications: make(chan string, 100),
 		}
@@ -311,9 +312,7 @@ func (lm *LinkManager) Unlink(routingID string) error {
 	// Queue unlink notification to be sent to server
 	select {
 	case lm.unlinkNotifications <- routingID:
-		// log.Printf("[LinkManager] Queued unlink notification for routing_id: %s", routingID)
 	default:
-		// log.Printf("[LinkManager] Warning: Unlink notification queue full, notification dropped for %s", routingID)
 	}
 
 	// Remove from maps based on link type
@@ -668,9 +667,7 @@ func (lm *LinkManager) deliverOutbound(link *LinkedAgent, outbound *LinkDataOut)
 func (lm *LinkManager) queueOutboundData(outbound *LinkDataOut) {
 	select {
 	case lm.outboundData <- outbound:
-		// log.Printf("[LinkManager] Successfully queued data from %s for server", outbound.RoutingID)
 	default:
-		// log.Printf("[LinkManager] Outbound queue full, dropping data from %s", outbound.RoutingID)
 	}
 }
 
@@ -788,7 +785,7 @@ func writeMessage(conn net.Conn, data []byte) error {
 func readMessage(conn net.Conn) ([]byte, error) {
 	// Read 4-byte length header
 	header := make([]byte, 4)
-	if _, err := conn.Read(header); err != nil {
+	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
 	}
 

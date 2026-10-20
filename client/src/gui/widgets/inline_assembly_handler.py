@@ -255,7 +255,7 @@ class InlineAssemblyHandler:
             
             characteristics = int.from_bytes(data[pe_offset+22:pe_offset+24], 'little')
             return (characteristics & 0x2000) != 0
-        except:
+        except Exception:
             return False
     
     def _send_inline_assembly_command(self, assembly_file: AssemblyFile, config: dict, async_mode: bool, full_args_string: str = ""):

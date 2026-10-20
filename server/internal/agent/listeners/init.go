@@ -37,40 +37,7 @@ func (m *Manager) StoreInitData(data *InitData) error {
 	defer m.mutex.Unlock()
 
 	m.initData[data.ClientID] = data
-	log.Printf("Stored init data for client %s", data.ClientID)
-
-	// Debug output showing all stored init data
-	log.Printf("Current InitData Map State (%d entries):", len(m.initData))
-	for clientID, initData := range m.initData {
-		log.Printf("----------------------------------------------")
-		log.Printf("ClientID: %s", clientID)
-		log.Printf("  ID: %s", initData.ID)
-		log.Printf("  Type: %s", initData.Type)
-		log.Printf("  Protocol: %s (determines SMB vs TCP)", initData.Protocol)
-		log.Printf("  OS: %s", initData.OS)
-		log.Printf("  Architecture: %s", initData.Arch)
-		log.Printf("  Secret Length: %d chars", len(initData.Secret))
-		log.Printf("  RSA Key Length: %d chars", len(initData.RSAKey))
-		if initData.SMBProfile != "" {
-			log.Printf("  SMB Profile: %s", initData.SMBProfile)
-		}
-		if initData.SMBXorKey != "" {
-			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
-		}
-		if initData.HTTPXorKey != "" {
-			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
-		}
-		if initData.TCPProfile != "" {
-			log.Printf("  TCP Profile: %s", initData.TCPProfile)
-		}
-		if initData.TCPXorKey != "" {
-			log.Printf("  TCP XOR Key: %s... (%d chars)", initData.TCPXorKey[:min(4, len(initData.TCPXorKey))], len(initData.TCPXorKey))
-		}
-		if initData.TCPPort != "" {
-			log.Printf("  TCP Port: %s", initData.TCPPort)
-		}
-	}
-	log.Printf("----------------------------------------------")
+	log.Printf("Stored init data for client %s (total entries: %d)", data.ClientID, len(m.initData))
 
 	return nil
 }
@@ -144,37 +111,7 @@ func (m *Manager) loadInitDataFromDB() error {
 		return fmt.Errorf("error iterating init rows: %v", err)
 	}
 
-	// Debug output showing loaded data
-	log.Printf("Loaded InitData from Database (%d entries):", count)
-	for clientID, initData := range m.initData {
-		log.Printf("----------------------------------------------")
-		log.Printf("ClientID: %s", clientID)
-		log.Printf("  ID: %s", initData.ID)
-		log.Printf("  Type: %s", initData.Type)
-		log.Printf("  Protocol: %s", initData.Protocol)
-		log.Printf("  OS: %s", initData.OS)
-		log.Printf("  Architecture: %s", initData.Arch)
-		log.Printf("  Secret Length: %d chars", len(initData.Secret))
-		log.Printf("  RSA Key Length: %d chars", len(initData.RSAKey))
-		if initData.SMBProfile != "" {
-			log.Printf("  SMB Profile: %s", initData.SMBProfile)
-		}
-		if initData.SMBXorKey != "" {
-			log.Printf("  SMB XOR Key: %s... (%d chars)", initData.SMBXorKey[:min(4, len(initData.SMBXorKey))], len(initData.SMBXorKey))
-		}
-		if initData.HTTPXorKey != "" {
-			log.Printf("  HTTP XOR Key: %s... (%d chars)", initData.HTTPXorKey[:min(4, len(initData.HTTPXorKey))], len(initData.HTTPXorKey))
-		}
-		if initData.TCPProfile != "" {
-			log.Printf("  TCP Profile: %s", initData.TCPProfile)
-		}
-		if initData.TCPXorKey != "" {
-			log.Printf("  TCP XOR Key: %s... (%d chars)", initData.TCPXorKey[:min(4, len(initData.TCPXorKey))], len(initData.TCPXorKey))
-		}
-	}
-	if count > 0 {
-		log.Printf("----------------------------------------------")
-	}
+	log.Printf("Loaded %d init data entries from database", count)
 
 	return nil
 }

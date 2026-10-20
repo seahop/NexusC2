@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -160,8 +161,8 @@ func GetLinkManager() *LinkManager {
 		smbLinkManager = &LinkManager{
 			links:               make(map[string]*LinkedAgent),
 			pipeToRoute:         make(map[string]string),
-			outboundData:        make(chan *LinkDataOut, 100),
-			handshakeData:       make(chan *LinkDataOut, 10),
+			outboundData:        make(chan *LinkDataOut, 1000),
+			handshakeData:       make(chan *LinkDataOut, 50),
 			responseChannels:    make(map[string]chan *LinkDataOut),
 			unlinkNotifications: make(chan string, 100),
 		}
@@ -521,7 +522,6 @@ func (lm *LinkManager) queueOutboundData(outbound *LinkDataOut) {
 	select {
 	case lm.outboundData <- outbound:
 	default:
-		// Channel full, data dropped
 	}
 }
 
@@ -643,7 +643,7 @@ func readMessage(conn net.Conn) ([]byte, error) {
 
 	// Read 4-byte length header
 	header := make([]byte, 4)
-	if _, err := conn.Read(header); err != nil {
+	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
 	}
 

@@ -1,4 +1,4 @@
-// server/docker/payloads/TCP_Linux/cmd_ids.go
+// server/docker/payloads/TCP_Darwin/cmd_ids.go
 
 //go:build darwin
 // +build darwin

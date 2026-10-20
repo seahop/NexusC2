@@ -96,6 +96,11 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdSudoSession, wrapCommand(&SudoSessionCommand{}))
 	queue.RegisterHandler(CmdPersist, wrapCommand(&PersistenceCommand{}))
 
+	// Link commands (230-232) - for TCP child agent connections
+	queue.RegisterHandler(CmdLink, wrapCommand(&LinkCommand{}))
+	queue.RegisterHandler(CmdUnlink, wrapCommand(&UnlinkCommand{}))
+	queue.RegisterHandler(CmdLinks, wrapCommand(&LinksCommand{}))
+
 	// Darwin only commands (300)
 	queue.RegisterHandler(CmdKeychain, wrapCommand(&KeychainCommand{}))
 

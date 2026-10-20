@@ -3,7 +3,7 @@ import os
 import threading
 
 class StateDatabase:
-    _db_lock = threading.Lock()  # Class-level lock for database operations
+    _db_lock = threading.RLock()  # Class-level reentrant lock for database operations
     _connections = threading.local()  # Thread-local storage for connections
 
     def __init__(self, db_path="state.db"):
@@ -177,17 +177,11 @@ class StateDatabase:
                 # Schema migrations - add missing columns to existing tables
                 self._run_migrations(conn)
 
-                # Debug: Print current table contents after initialization
-                print("\nDEBUG: Checking database tables after initialization:")
+                # Verify tables were created successfully
                 for table in ['connections', 'commands', 'command_outputs', 'listeners', 'agent_tags']:
                     cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
                     count = cursor.fetchone()[0]
                     print(f"Table {table}: {count} rows")
-                    if table == 'connections':
-                        print("\nConnections table contents:")
-                        cursor = conn.execute("SELECT * FROM connections")
-                        for row in cursor.fetchall():
-                            print(row)
 
 
     def store_state(self, state_data, is_initial_state=False):
@@ -435,7 +429,7 @@ class StateDatabase:
 
                 # Set permissions
                 if os.path.exists(self.db_path):
-                    os.chmod(self.db_path, 0o666)
+                    os.chmod(self.db_path, 0o600)
                     print(f"StateDatabase: Set writable permissions for {self.db_path}")
                 
                 return True

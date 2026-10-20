@@ -109,7 +109,7 @@ class TagManagerDialog(QDialog):
             # Calculate perceived brightness
             brightness = (color.red() * 299 + color.green() * 587 + color.blue() * 114) / 1000
             return brightness < 128
-        except:
+        except Exception:
             return False
 
     def choose_color(self):

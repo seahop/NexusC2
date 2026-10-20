@@ -553,32 +553,32 @@ func initCOFFDLLs() error {
 	var err error
 	coffKernel32, err = syscall.LoadDLL(coffDllKernel32)
 	if err != nil {
-		return fmt.Errorf("failed to load %s: %w", coffDllKernel32, err)
+		return fmt.Errorf(ErrCtx(E45, coffDllKernel32))
 	}
 
 	coffNtdll, err = syscall.LoadDLL(coffDllNtdll)
 	if err != nil {
-		return fmt.Errorf("failed to load %s: %w", coffDllNtdll, err)
+		return fmt.Errorf(ErrCtx(E45, coffDllNtdll))
 	}
 
 	procVirtualAlloc, err = coffKernel32.FindProc(coffApiVirtualAlloc)
 	if err != nil {
-		return fmt.Errorf("failed to find %s: %w", coffApiVirtualAlloc, err)
+		return fmt.Errorf(ErrCtx(E45, coffApiVirtualAlloc))
 	}
 
 	procVirtualProtect, err = coffKernel32.FindProc(coffApiVirtualProtect)
 	if err != nil {
-		return fmt.Errorf("failed to find %s: %w", coffApiVirtualProtect, err)
+		return fmt.Errorf(ErrCtx(E45, coffApiVirtualProtect))
 	}
 
 	procVirtualFree, err = coffKernel32.FindProc(coffApiVirtualFree)
 	if err != nil {
-		return fmt.Errorf("failed to find %s: %w", coffApiVirtualFree, err)
+		return fmt.Errorf(ErrCtx(E45, coffApiVirtualFree))
 	}
 
 	procRtlCopyMemory, err = coffNtdll.FindProc(coffApiRtlCopyMemory)
 	if err != nil {
-		return fmt.Errorf("failed to find %s: %w", coffApiRtlCopyMemory, err)
+		return fmt.Errorf(ErrCtx(E45, coffApiRtlCopyMemory))
 	}
 
 	coffDLLsInitialized = true
@@ -1443,7 +1443,7 @@ func LoadWithMethod(coffBytes []byte, argBytes []byte, method string) (string, e
 func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, timeout time.Duration) (string, error) {
 	// Ensure DLLs are initialized (requires SetCOFFTemplate to be called first)
 	if err := initCOFFDLLs(); err != nil {
-		return "", fmt.Errorf("failed to initialize COFF DLLs: %w", err)
+		return "", fmt.Errorf(Err(E51))
 	}
 
 	output := make(chan interface{}, 100)

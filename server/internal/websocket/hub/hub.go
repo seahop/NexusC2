@@ -453,7 +453,7 @@ func (h *Hub) initPreparedStatements() error {
 
 	// Prepare session recording statement
 	h.preparedStmts.recordSession, err = h.db.Prepare(`
-        INSERT INTO user_sessions (sesion_id, username, login_time) 
+        INSERT INTO user_sessions (session_id, username, login_time)
         VALUES ($1, $2, $3)
     `)
 	if err != nil {
@@ -464,7 +464,7 @@ func (h *Hub) initPreparedStatements() error {
 	h.preparedStmts.recordLogout, err = h.db.Prepare(`
         UPDATE user_sessions 
         SET logout_time = $1 
-        WHERE sesion_id = $2
+        WHERE session_id = $2
     `)
 	if err != nil {
 		return fmt.Errorf("failed to prepare recordLogout statement: %v", err)
@@ -478,7 +478,7 @@ func (h *Hub) recordSession(client *Client) error {
 	if h.preparedStmts.recordSession == nil {
 		// Fallback to direct query if prepared statement isn't available
 		log.Printf("Warning: Using direct query for session recording (prepared statement not available)")
-		query := `INSERT INTO user_sessions (sesion_id, username, login_time) VALUES ($1, $2, $3)`
+		query := `INSERT INTO user_sessions (session_id, username, login_time) VALUES ($1, $2, $3)`
 		_, err := h.db.Exec(query, client.SessionID, client.Username, time.Now())
 		if err != nil {
 			return fmt.Errorf("failed to record session (direct): %v", err)
@@ -512,7 +512,7 @@ func (h *Hub) recordLogout(client *Client) error {
 	if h.preparedStmts.recordLogout == nil {
 		// Fallback to direct query if prepared statement isn't available
 		log.Printf("Warning: Using direct query for logout recording (prepared statement not available)")
-		query := `UPDATE user_sessions SET logout_time = $1 WHERE sesion_id = $2`
+		query := `UPDATE user_sessions SET logout_time = $1 WHERE session_id = $2`
 		_, err := h.db.Exec(query, time.Now(), client.SessionID)
 		if err != nil {
 			return fmt.Errorf("failed to record logout (direct): %v", err)

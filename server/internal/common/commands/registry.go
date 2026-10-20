@@ -86,6 +86,7 @@ var NameToID = map[string]int{
 	"upload":     CmdUpload,
 	"shell":      CmdShell,
 	"socks-ws":   CmdSocks,
+	"socks":      CmdSocks,
 	"jobkill":    CmdJobkill,
 	"exit":       CmdExit,
 	"sleep":      CmdSleep,

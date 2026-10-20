@@ -270,7 +270,8 @@ generate_certificates() {
         CERTS_DIR="$SCRIPT_DIR/certs"
         if [ -d "$CERTS_DIR" ]; then
             chown -R $ACTUAL_USER:$ACTUAL_USER "$CERTS_DIR"
-            chmod -R 644 "$CERTS_DIR"/*.key "$CERTS_DIR"/*.crt 2>/dev/null || true
+            chmod 644 "$CERTS_DIR"/*.crt 2>/dev/null || true
+            chmod 600 "$CERTS_DIR"/*.key 2>/dev/null || true
             print_status "Fixed certificate permissions"
         fi
 
@@ -280,7 +281,8 @@ generate_certificates() {
             cp "$CERTS_DIR"/*.crt "$SERVER_CERTS_DIR/" 2>/dev/null || true
             cp "$CERTS_DIR"/*.key "$SERVER_CERTS_DIR/" 2>/dev/null || true
             chown -R $ACTUAL_USER:$ACTUAL_USER "$SERVER_CERTS_DIR"
-            chmod -R 644 "$SERVER_CERTS_DIR"/*.key "$SERVER_CERTS_DIR"/*.crt 2>/dev/null || true
+            chmod 644 "$SERVER_CERTS_DIR"/*.crt 2>/dev/null || true
+            chmod 600 "$SERVER_CERTS_DIR"/*.key 2>/dev/null || true
             print_status "Certificates copied to server/certs"
         fi
 
@@ -389,8 +391,28 @@ setup_firewall_rules() {
         print_info "iptables rule for port 3131 already exists"
     fi
 
+    # Open REST API port (8443) for external client connections
+    print_status "Opening REST API port 8443 for external client connections..."
+
+    if command -v ufw &> /dev/null; then
+        UFW_STATUS=$(ufw status 2>/dev/null | head -1)
+        if [[ "$UFW_STATUS" == *"active"* ]]; then
+            ufw allow 8443/tcp comment 'NexusC2 REST API'
+            print_status "UFW rule added for port 8443"
+        fi
+    fi
+
+    if ! iptables -C INPUT -p tcp --dport 8443 -j ACCEPT &>/dev/null 2>&1; then
+        print_status "Adding iptables rule to allow port 8443..."
+        iptables -I INPUT -p tcp --dport 8443 -j ACCEPT
+        print_status "iptables rule added for port 8443"
+    else
+        print_info "iptables rule for port 8443 already exists"
+    fi
+
     print_status "Firewall configuration complete!"
     print_info "  - Port 3131 (WebSocket): Open for external client connections"
+    print_info "  - Port 8443 (REST API): Open for external client connections"
     print_info "  - Port 50051 (gRPC): Restricted to localhost and Docker"
     return 0
 }

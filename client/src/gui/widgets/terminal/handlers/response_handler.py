@@ -6,7 +6,9 @@ from utils.error_codes import translate_code
 
 class ResponseHandler:
     """Handles various response types from the server"""
-    
+
+    BOF_CHUNK_TTL_SECONDS = 300  # 5 minutes timeout for stale BOF chunks
+
     def __init__(self, terminal):
         self.terminal = terminal
         self.agent_guid = terminal.agent_guid
@@ -295,12 +297,40 @@ class ResponseHandler:
         pattern = r'\[BOF Chunk \d+/\d+\]'
         return re.search(pattern, output) is not None
     
+    def _cleanup_stale_bof_chunks(self):
+        """Remove BOF chunk entries older than the TTL to prevent memory leaks"""
+        if not self.bof_chunks:
+            return
+        now = datetime.now()
+        stale_keys = []
+        for key, data in self.bof_chunks.items():
+            chunk_ts = data.get('timestamp', '')
+            try:
+                if isinstance(chunk_ts, str):
+                    chunk_time = datetime.fromisoformat(chunk_ts.replace('Z', '+00:00'))
+                    # Compare as naive datetimes
+                    chunk_time = chunk_time.replace(tzinfo=None)
+                else:
+                    chunk_time = chunk_ts
+                age = (now - chunk_time).total_seconds()
+                if age > self.BOF_CHUNK_TTL_SECONDS:
+                    stale_keys.append(key)
+            except Exception:
+                # If we can't parse the timestamp, mark as stale
+                stale_keys.append(key)
+        for key in stale_keys:
+            print(f"BOF: Cleaning up stale chunk entry {key} (exceeded {self.BOF_CHUNK_TTL_SECONDS}s TTL)")
+            del self.bof_chunks[key]
+
     def _handle_bof_chunk(self, output, command_id, timestamp):
         """Handle BOF chunk and return complete output when all chunks are received"""
         import base64
         import gzip
         import io
-        
+
+        # Clean up stale chunks before processing new ones
+        self._cleanup_stale_bof_chunks()
+
         # Parse chunk info
         match = re.search(r'\[BOF Chunk (\d+)/(\d+)\]', output)
         if not match:

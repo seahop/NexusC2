@@ -88,7 +88,7 @@ class AgentTreeWidget(QWidget):
                 with open(config_file, 'r') as f:
                     settings = json.load(f)
                     return settings.get('guid_display_length', 16)
-            except:
+            except Exception:
                 pass
         return 16
 
@@ -1073,7 +1073,7 @@ class AgentTreeWidget(QWidget):
                                 # Check if it's a timestamp that's not the zero value
                                 elif isinstance(deleted_at, str):
                                     is_deleted = deleted_at != '0001-01-01T00:00:00Z' and deleted_at != 'NULL'
-                            except:
+                            except Exception:
                                 is_deleted = False
 
                         print(f"DEBUG: deleted_at value: {deleted_at}, type: {type(deleted_at)}, is_deleted: {is_deleted}")

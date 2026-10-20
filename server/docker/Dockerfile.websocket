@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Build Environment - Compiles Go binaries and generates protobuf files
 # ==============================================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -40,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /websocket-service ./cmd/w
 # ==============================================================================
 # Stage 2: Docker/Docker-Compose Installer
 # ==============================================================================
-FROM alpine:3.20 AS docker-installer
+FROM alpine:3.24 AS docker-installer
 
 # Install only what's needed to download Docker Compose
 RUN apk add --no-cache curl ca-certificates
@@ -58,7 +58,7 @@ RUN mkdir -p /tmp/docker-cli-plugins && \
 # ==============================================================================
 # Stage 3: Runtime Image
 # ==============================================================================
-FROM alpine:3.20
+FROM alpine:3.24
 
 # Metadata
 LABEL maintainer="NexusC2"
@@ -70,12 +70,13 @@ WORKDIR /app
 # - docker-cli: For Docker SDK operations
 # - curl: For health checks only
 # - ca-certificates: For TLS validation
+ARG DOCKER_GID=984
 RUN apk add --no-cache \
     docker-cli \
     curl \
     ca-certificates && \
-    # Create docker group with GID 124 (matches host docker group)
-    addgroup -g 124 docker && \
+    # Create docker group with GID matching host docker group
+    addgroup -g ${DOCKER_GID} docker && \
     # Create non-root user for security (UID 1001 matches agent-handler for shared volumes)
     addgroup -g 1001 nexus && \
     adduser -D -u 1001 -G nexus nexus && \

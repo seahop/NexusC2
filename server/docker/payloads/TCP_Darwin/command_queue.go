@@ -1,4 +1,4 @@
-// server/docker/payloads/TCP_Linux/command_queue.go
+// server/docker/payloads/TCP_Darwin/command_queue.go
 
 //go:build darwin
 // +build darwin

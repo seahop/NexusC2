@@ -254,7 +254,11 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			logMessage(LOG_NORMAL, "Failed to marshal state message: %v", err)
 		} else {
 			logMessage(LOG_MINIMAL, "Sending initial state to client %s", client.Username)
-			client.Send <- stateJSON
+			select {
+			case client.Send <- stateJSON:
+			default:
+				logMessage(LOG_NORMAL, "Client %s send buffer full or closed, skipping initial state", client.Username)
+			}
 		}
 	}
 
@@ -278,7 +282,10 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if statusJSON, err := json.Marshal(statusMsg); err == nil {
-			client.Send <- statusJSON
+			select {
+			case client.Send <- statusJSON:
+			default:
+			}
 		}
 	}
 }

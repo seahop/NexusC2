@@ -91,18 +91,15 @@ func EncryptJSON(jsonStr string, secret string) (string, error) {
 }
 
 func generateInitialSecrets(secret, seed string) (string, string) {
-	log.Printf("[Secrets] Initial secret: %s", secret)
-	log.Printf("[Secrets] Seed: %s", seed)
-
 	h1 := hmac.New(sha256.New, []byte(seed))
 	h1.Write([]byte(secret))
 	secret2 := fmt.Sprintf("%x", h1.Sum(nil))
-	log.Printf("[Secrets] Generated secret2: %s", secret2)
 
 	h2 := hmac.New(sha256.New, []byte(seed))
 	h2.Write([]byte(secret2))
 	secret1 := fmt.Sprintf("%x", h2.Sum(nil))
-	log.Printf("[Secrets] Generated secret1: %s", secret1)
+
+	log.Printf("[Secrets] Secrets generated successfully")
 
 	return secret1, secret2
 }

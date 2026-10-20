@@ -24,13 +24,13 @@ type AuthConfig struct {
 }
 
 func LoadDatabaseConfig() (*DatabaseConfig, error) {
-	// Try POSTGRES_PASSWORD first (used in Docker), fall back to DB_PASSWORD
-	dbPassword := os.Getenv("POSTGRES_PASSWORD")
+	// DB_PASSWORD is the operator user password; POSTGRES_PASSWORD is the superuser
+	dbPassword := os.Getenv("DB_PASSWORD")
 	if dbPassword == "" {
-		dbPassword = os.Getenv("DB_PASSWORD")
+		dbPassword = os.Getenv("POSTGRES_PASSWORD")
 	}
 	if dbPassword == "" {
-		log.Printf("Warning: Neither POSTGRES_PASSWORD nor DB_PASSWORD environment variable is set")
+		log.Printf("Warning: Neither DB_PASSWORD nor POSTGRES_PASSWORD environment variable is set")
 	}
 
 	// Get database host from environment, default to "database" for Docker

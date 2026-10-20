@@ -6,6 +6,7 @@ import (
 	"c2/internal/agent/socks"
 	"c2/internal/agent/socks_http"
 	"c2/internal/common/commands"
+	"c2/internal/templates"
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
 	"c2/internal/common/logging" // ADD THIS IMPORT
@@ -128,9 +129,24 @@ func NewGRPCServer(manager *listeners.Manager, cmdBuffer map[string][]Command, d
 	return s
 }
 
-// ADD: Simple HTTP endpoint to view logs
+// RegisterLogEndpoint adds an authenticated HTTP endpoint to view logs.
+// Requires a valid Bearer token in the Authorization header.
 func (s *GRPCServer) RegisterLogEndpoint(mux *http.ServeMux) {
 	mux.HandleFunc("/logs/recent", func(w http.ResponseWriter, r *http.Request) {
+		// Require Bearer token authentication
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || len(authHeader) < 8 || authHeader[:7] != "Bearer " {
+			http.Error(w, "Unauthorized: Bearer token required", http.StatusUnauthorized)
+			return
+		}
+
+		token := authHeader[7:]
+		expectedToken := os.Getenv("API_PASSWORD")
+		if expectedToken == "" || token != expectedToken {
+			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+			return
+		}
+
 		// Read today's log file
 		logFile := fmt.Sprintf("/app/logs/commands/commands_%s.log", time.Now().Format("2006-01-02"))
 		data, err := os.ReadFile(logFile)
@@ -986,8 +1002,6 @@ func (s *GRPCServer) BiDiStream(stream pb.AgentControl_BiDiStreamServer) error {
 				log.Printf("[BiDiStream] Received pong from %s", clientID)
 				continue
 			}
-
-			//log.Printf("[BiDiStream] Received message from client %s: Type=%s", clientID, msg.Type)
 
 			// Handle received message (can be expanded based on message type)
 			go s.processReceivedMessage(msg)
@@ -1877,8 +1891,25 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 				s.stopSocksServer(socksData)
 			}
 
-			// Convert to JSON for the Data field
-			socksJSON, err := json.Marshal(socksData)
+			// Convert to agent-format JSON with short field names and merged template
+			agentSocksData := map[string]interface{}{
+				"at":   socksData["action"],
+				"sp":   socksData["socks_port"],
+				"wp":   socksData["wss_port"],
+				"wh":   socksData["wss_host"],
+				"path": socksData["path"],
+				"cr": map[string]interface{}{
+					"un": "",
+					"pw": "",
+					"sk": "",
+				},
+			}
+			if tpl := templates.GetSocksTemplate(); tpl != nil {
+				agentSocksData["tpl"] = tpl.Templates
+				agentSocksData["v"] = tpl.Version
+				agentSocksData["t"] = tpl.Type
+			}
+			socksJSON, err := json.Marshal(agentSocksData)
 			if err != nil {
 				log.Printf("[ProcessMessage] Failed to marshal SOCKS data: %v", err)
 				return

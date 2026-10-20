@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -169,7 +170,9 @@ func (m *JWTManager) RefreshTokens(refreshToken string) (*RefreshResult, error) 
 	// Check if expired
 	if time.Now().After(expiresAt) {
 		// Delete expired token
-		m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID)
+		if _, err := m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID); err != nil {
+			log.Printf("Failed to delete expired token %s: %v", tokenID, err)
+		}
 		return nil, ErrTokenExpired
 	}
 
@@ -193,7 +196,9 @@ func (m *JWTManager) RefreshTokens(refreshToken string) (*RefreshResult, error) 
 	}
 
 	// Delete the old refresh token
-	m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID)
+	if _, err := m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID); err != nil {
+		log.Printf("Failed to delete old refresh token %s: %v", tokenID, err)
+	}
 
 	// Generate new token pair
 	tokenPair, err := m.GenerateTokenPair(&user)
@@ -245,7 +250,9 @@ func (m *JWTManager) Authenticate(username, password string) (*TokenPair, error)
 	}
 
 	// Update last login
-	m.db.Exec("UPDATE api_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1", user.ID)
+	if _, err := m.db.Exec("UPDATE api_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1", user.ID); err != nil {
+		log.Printf("Failed to update last login for user %s: %v", user.ID, err)
+	}
 
 	return m.GenerateTokenPair(&user)
 }
@@ -302,7 +309,9 @@ func (m *JWTManager) AuthenticateByUsername(username string) (*TokenPair, error)
 	}
 
 	// Update last login
-	m.db.Exec("UPDATE api_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1", user.ID)
+	if _, err := m.db.Exec("UPDATE api_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1", user.ID); err != nil {
+		log.Printf("Failed to update last login for user %s: %v", user.ID, err)
+	}
 
 	return m.GenerateTokenPair(&user)
 }

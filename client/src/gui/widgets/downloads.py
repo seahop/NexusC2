@@ -23,8 +23,15 @@ class FileAssemblyWorker(QThread):
     def run(self):
         """Assemble file in background thread with streaming base64 decode."""
         try:
+            # Sanitize filename to prevent path traversal
+            safe_filename = os.path.basename(self.filename)
+            if not safe_filename or '..' in safe_filename:
+                self.finished.emit(self.filename, False,
+                                 f"Invalid filename: {self.filename}")
+                return
+
             sorted_chunks = sorted(self.chunks, key=lambda x: x[0])
-            filepath = os.path.join(self.folder, self.filename)
+            filepath = os.path.join(self.folder, safe_filename)
 
             # Stream decode and write chunks to avoid memory spike
             with open(filepath, 'wb') as f:
@@ -221,6 +228,17 @@ class DownloadsWidget(QWidget):
 
     def set_ws_thread(self, ws_thread):
         """Update websocket thread reference"""
+        # Disconnect old signals to prevent accumulation
+        if self.ws_thread:
+            try:
+                self.ws_thread.downloads_update.disconnect(self.update_downloads)
+            except TypeError:
+                pass
+            try:
+                self.ws_thread.download_chunk.disconnect(self.handle_download_chunk)
+            except TypeError:
+                pass
+
         self.ws_thread = ws_thread
         if self.ws_thread:
             self.ws_thread.downloads_update.connect(self.update_downloads)

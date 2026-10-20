@@ -442,21 +442,15 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 }
 
 func (c *Client) SendToStream(msgType string, payload map[string]interface{}) error {
-	//log.Printf("[SendToStream] Starting send for type: %s", msgType)
-	//log.Printf("[SendToStream] Stream state: %v", c.stream != nil)
 	if c.stream == nil {
-		log.Printf("[SendToStream] Stream is nil, attempting to recreate")
-		// Maybe we need to recreate the stream here?
 		ctx := context.Background()
 		stream, err := c.client.BiDiStream(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to recreate stream: %v", err)
 		}
 		c.stream = stream
-		log.Printf("[SendToStream] Successfully recreated stream")
 	}
 
-	// Marshal the entire payload into JSON
 	contentBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %v", err)
@@ -469,14 +463,11 @@ func (c *Client) SendToStream(msgType string, payload map[string]interface{}) er
 		Timestamp: time.Now().Unix(),
 	}
 
-	//log.Printf("[SendToStream] Attempting to send message of type: %s", msgType)
 	err = c.stream.Send(msg)
 	if err != nil {
-		log.Printf("[SendToStream] Failed to send message: %v", err)
 		return fmt.Errorf("failed to send message: %v", err)
 	}
 
-	//log.Printf("[SendToStream] Successfully sent message")
 	return nil
 }
 

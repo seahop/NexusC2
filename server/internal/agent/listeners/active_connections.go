@@ -62,7 +62,7 @@ func newActiveConnectionManager(db *sql.DB) *ActiveConnectionManager {
 
 func (acm *ActiveConnectionManager) loadConnectionsFromDB(ctx context.Context) error {
 	query := `
-        SELECT clientID, protocol, secret1, secret2, field_mapping
+        SELECT newclientID, protocol, secret1, secret2, field_mapping
         FROM connections
         WHERE deleted_at IS NULL
         AND lastSEEN > $1

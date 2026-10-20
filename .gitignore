@@ -104,3 +104,4 @@ website/.hugo_build.lock
 website/docker-hosting/
 website/nginx.conf.example
 website/scripts/
+server/docker/shared/

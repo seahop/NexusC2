@@ -12,7 +12,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func NewConnection(cfg *config.DatabaseConfig) (*sql.DB, error) {
+// NewConnection creates a new database connection with the given pool settings.
+// If pool is nil, default pool settings are used.
+func NewConnection(cfg *config.DatabaseConfig, pool *PoolConfig) (*sql.DB, error) {
 	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host,
 		cfg.Port,
@@ -27,11 +29,19 @@ func NewConnection(cfg *config.DatabaseConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Configure connection pool settings
-	db.SetMaxIdleConns(10)
-	db.SetMaxOpenConns(25) // Reduced from 100 to prevent overwhelming the database
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(3 * time.Minute)
+	// Apply pool settings from the provided config, or use defaults
+	if pool != nil {
+		db.SetMaxOpenConns(pool.MaxOpenConns)
+		db.SetMaxIdleConns(pool.MaxIdleConns)
+		db.SetConnMaxLifetime(pool.ConnMaxLifetime)
+		db.SetConnMaxIdleTime(pool.ConnMaxIdleTime)
+	} else {
+		defaults := DefaultOptimizedPoolConfig()
+		db.SetMaxOpenConns(defaults.MaxOpenConns)
+		db.SetMaxIdleConns(defaults.MaxIdleConns)
+		db.SetConnMaxLifetime(defaults.ConnMaxLifetime)
+		db.SetConnMaxIdleTime(defaults.ConnMaxIdleTime)
+	}
 
 	// Test the connection with context timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -43,8 +53,9 @@ func NewConnection(cfg *config.DatabaseConfig) (*sql.DB, error) {
 	}
 
 	// Log successful configuration
-	log.Printf("Database connected and configured successfully (Max Open: %d, Max Idle: %d)",
-		25, 10)
+	stats := db.Stats()
+	log.Printf("Database connected and configured successfully (Max Open: %d)",
+		stats.MaxOpenConnections)
 
 	return db, nil
 }

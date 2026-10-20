@@ -121,7 +121,7 @@ class CommandValidator:
               f"compatible_with={compatibility}")
         
         # Check compatibility - normalize compatibility list items too
-        compatible_os_list = [os.lower() for os in compatibility]
+        compatible_os_list = [os_name.lower() for os_name in compatibility]
         return agent_os_standard in compatible_os_list
     
     def validate_command_for_os(self, command_str: str, agent_os: str) -> Tuple[bool, Optional[str]]:

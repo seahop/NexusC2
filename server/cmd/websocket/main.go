@@ -3,6 +3,7 @@ package main
 
 import (
 	"c2/internal/common/config"
+	"c2/internal/common/utils"
 	"c2/internal/database/postgres"
 	"c2/internal/logging"
 	"c2/internal/websocket/agent"
@@ -18,42 +19,10 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"runtime/debug"
 	"syscall"
 	"time"
 )
 
-// retryWithExponentialBackoff attempts an operation with exponential backoff
-func retryWithExponentialBackoff(operation func() error) error {
-	maxRetries := 30 // 30 retries = ~5 minutes total with exponential backoff
-	baseDelay := 1 * time.Second
-	maxDelay := 30 * time.Second
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := operation()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		delay := baseDelay * time.Duration(1<<uint(attempt))
-		if delay > maxDelay {
-			delay = maxDelay
-		}
-		log.Printf("Attempt %d failed: %v. Retrying in %v...", attempt+1, err, delay)
-		time.Sleep(delay)
-	}
-	return lastErr
-}
-
-func configureRuntime() {
-	// Set GOMAXPROCS to use all available CPUs
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	// Configure GC for lower latency
-	debug.SetGCPercent(100)
-
-	log.Printf("Runtime configured: GOMAXPROCS=%d", runtime.GOMAXPROCS(0))
-}
 
 func monitorServerHealth(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
@@ -125,7 +94,7 @@ func main() {
 	}
 
 	// Optimize runtime settings
-	configureRuntime()
+	utils.ConfigureRuntime()
 
 	// Initialize configuration
 	log.Println("Loading WebSocket configuration...")
@@ -151,27 +120,16 @@ func main() {
 	// Initialize database with connection pooling
 	log.Println("Connecting to the database...")
 	var db *sql.DB
-	err = retryWithExponentialBackoff(func() error {
+	poolCfg := &postgres.PoolConfig{
+		MaxOpenConns:    50,
+		MaxIdleConns:    25,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
+	}
+	err = utils.RetryWithExponentialBackoff(func() error {
 		var connErr error
-		db, connErr = postgres.NewConnection(cfg.Database)
-		if connErr != nil {
-			return connErr
-		}
-
-		// Configure connection pool
-		// Increased from 25 to 50 to prevent connection exhaustion under load
-		// With agent-handler using 50-100 connections, total is 100-150
-		// Ensure PostgreSQL max_connections >= 200
-		db.SetMaxOpenConns(50)
-		db.SetMaxIdleConns(25)
-		db.SetConnMaxLifetime(5 * time.Minute)
-		db.SetConnMaxIdleTime(10 * time.Minute)
-
-		// Test the connection with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		return db.PingContext(ctx)
+		db, connErr = postgres.NewConnection(cfg.Database, poolCfg)
+		return connErr
 	})
 	if err != nil {
 		log.Fatalf("Failed to establish database connection after retries: %v", err)
@@ -221,7 +179,7 @@ func main() {
 	// Try to establish initial connection with old method for compatibility
 	// This provides backward compatibility while the stream manager handles reconnection
 	var agentClient *agent.Client
-	err = retryWithExponentialBackoff(func() error {
+	err = utils.RetryWithExponentialBackoff(func() error {
 		var connErr error
 		agentClient, connErr = agent.NewClient(grpcAddress, clientID)
 		if connErr != nil {
@@ -248,8 +206,7 @@ func main() {
 	// Configure TLS for WebSocket server with better settings
 	log.Println("Configuring TLS for WebSocket server...")
 	tlsConfig := &tls.Config{
-		MinVersion:               tls.VersionTLS12,
-		PreferServerCipherSuites: true,
+		MinVersion: tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
@@ -266,9 +223,10 @@ func main() {
 	// Register the health check endpoint
 	mux.HandleFunc("/health", handleHealthCheck(streamManager))
 
-	// For backward compatibility, also handle all other paths as WebSocket
-	// This ensures that direct connections to wss://localhost:3131 still work
-	mux.HandleFunc("/", wsHandler.HandleWebSocket)
+	// Return 404 for any path that is not /ws or /health
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
 
 	// Setup HTTP server with TLS and timeouts
 	server := &http.Server{
@@ -306,6 +264,10 @@ func main() {
 					// Update the handler with the new client
 					if client, err := streamManager.GetClient(); err == nil {
 						wsHandler.SetAgentClient(client)
+						// Start any existing listeners that failed during initial startup
+						if err := wsHandler.StartExistingListeners(); err != nil {
+							log.Printf("Failed to start existing listeners after reconnect: %v", err)
+						}
 					}
 				} else if !isConnected && wasConnected {
 					log.Println("gRPC stream connection lost")

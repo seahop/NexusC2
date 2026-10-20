@@ -1,19 +1,19 @@
 networks:
   c2_internal:
     driver: bridge
-    internal: false
+    internal: true
     ipam:
       driver: default
       config:
         - subnet: 172.28.0.0/16
+  c2_external:
+    driver: bridge
 
 services:
   database:
     build:
       context: ..
       dockerfile: docker/Dockerfile.db
-      args:
-        DB_PASSWORD: ${DB_PASSWORD}
     container_name: database
     networks:
       c2_internal:
@@ -51,14 +51,16 @@ services:
     networks:
       c2_internal:
         ipv4_address: 172.28.0.3
+      c2_external: {}
     depends_on:
       database:
         condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allow accessing host network
+      - "host.docker.internal:172.28.0.1"  # c2_internal gateway reaches host network
     environment:
       CONFIG_FILE: /app/config.toml
-      HOST_PAYLOADS_PATH: ${PWD}/payloads
+      HOST_PAYLOADS_PATH: ${COMPOSE_DIR}/payloads
+      HOST_SHARED_PATH: ${COMPOSE_DIR}/shared
       GRPC_ADDRESS: host.docker.internal:50051  # Connect to agent-handler on host network
     env_file:
       - db/.secrets/.env
@@ -66,14 +68,14 @@ services:
     group_add:
       - ${DOCKER_GID:-984}
     volumes:
-      - /shared:/shared
-      - ./downloads:/app/downloads
-      - ./uploads:/app/uploads
-      - ./temp:/app/temp
-      - ./logs:/app/logs
+      - ./shared:/shared
+      - agent_downloads:/app/downloads
+      - agent_uploads:/app/uploads
+      - agent_temp:/app/temp
+      - agent_logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ./payloads:/app/payloads:ro
-      - ${PWD}/payloads:${PWD}/payloads:ro
+      - ${COMPOSE_DIR}/payloads:${COMPOSE_DIR}/payloads:ro
     ports:
       - "3131:3131"  # Expose WebSocket for clients
     restart: unless-stopped
@@ -81,7 +83,8 @@ services:
       test: ["CMD", "curl", "-k", "-f", "https://localhost:3131/health"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
@@ -97,18 +100,18 @@ services:
       database:
         condition: service_healthy
     environment:
-      CONFIG_FILE: /app/configs/agent.yaml
+      CONFIG_FILE: /app/config.toml
       # Connect to database via host's docker bridge IP
       DB_HOST: 172.28.0.2
       GRPC_BIND_ADDRESS: 0.0.0.0:50051  # Bind to all interfaces, firewall handles security
     env_file:
       - db/.secrets/.env
     volumes:
-      - /shared:/shared
-      - ./temp:/app/temp
-      - ./downloads:/app/downloads
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
+      - ./shared:/shared
+      - agent_temp:/app/temp
+      - agent_downloads:/app/downloads
+      - agent_uploads:/app/uploads
+      - agent_logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "50051"]
@@ -129,16 +132,18 @@ services:
     networks:
       c2_internal:
         ipv4_address: 172.28.0.6
+      c2_external: {}
     depends_on:
       database:
         condition: service_healthy
       websocket:
         condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allow accessing host network
+      - "host.docker.internal:172.28.0.1"  # c2_internal gateway reaches host network
     environment:
       CONFIG_FILE: /app/config.toml
-      HOST_PAYLOADS_PATH: ${PWD}/payloads
+      HOST_PAYLOADS_PATH: ${COMPOSE_DIR}/payloads
+      HOST_SHARED_PATH: ${COMPOSE_DIR}/shared
       GRPC_ADDRESS: host.docker.internal:50051  # Connect to agent-handler on host network
       # WebSocket proxy URL - REST API proxies operations through WebSocket service
       # This ensures all events are broadcast to GUI clients and reuses existing logic
@@ -149,14 +154,14 @@ services:
     group_add:
       - ${DOCKER_GID:-984}
     volumes:
-      - /shared:/shared
-      - ./downloads:/app/downloads
-      - ./uploads:/app/uploads
-      - ./temp:/app/temp
-      - ./logs:/app/logs
+      - ./shared:/shared
+      - agent_downloads:/app/downloads
+      - agent_uploads:/app/uploads
+      - agent_temp:/app/temp
+      - agent_logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ./payloads:/app/payloads:ro
-      - ${PWD}/payloads:${PWD}/payloads:ro
+      - ${COMPOSE_DIR}/payloads:${COMPOSE_DIR}/payloads:ro
     ports:
       - "8443:8443"  # Expose REST API for external clients
     restart: unless-stopped
@@ -183,7 +188,7 @@ services:
     hostname: builder
     container_name: builder
     volumes:
-      - /shared:/shared
+      - ./shared:/shared
       - ./payloads/Darwin:/build/Darwin:ro
       - ./payloads/Linux:/build/Linux:ro
       - ./payloads/Windows:/build/Windows:ro
@@ -222,16 +227,17 @@ services:
       - TOGGLE_CHECK_LOADED_LIBRARIES=false
       - TOGGLE_CHECK_DOCKER_CONTAINER=false
       - TOGGLE_CHECK_PROCESS_LIST=false
-    privileged: true
     restart: "no"
 
 volumes:
-  shared:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /shared
   postgres_data:
     name: ops_db_data
+    driver: local
+  agent_temp:
+    driver: local
+  agent_downloads:
+    driver: local
+  agent_uploads:
+    driver: local
+  agent_logs:
     driver: local

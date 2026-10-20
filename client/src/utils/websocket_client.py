@@ -1,18 +1,18 @@
 # websocket_client.py
 import asyncio
 import ssl
+import threading
 import websockets
 import os
 import pathlib
 import json
 from datetime import datetime
-from collections import deque
+from collections import deque, OrderedDict
 from .database import StateDatabase
 from gui.widgets import AgentTreeWidget
 from .logger import get_logger
 from .constants import (
-    WEBSOCKET_MAX_SIZE, WEBSOCKET_READ_LIMIT, WEBSOCKET_WRITE_LIMIT,
-    WEBSOCKET_MAX_QUEUE, WEBSOCKET_SEND_TIMEOUT, WEBSOCKET_DISCONNECT_TIMEOUT,
+    WEBSOCKET_MAX_SIZE, WEBSOCKET_SEND_TIMEOUT, WEBSOCKET_DISCONNECT_TIMEOUT,
     MESSAGE_QUEUE_MAX_SIZE, MESSAGE_BATCH_SIZE, MESSAGE_BATCH_TIMEOUT,
     MESSAGE_QUEUE_BACKOFF_DELAY, MAX_RETRIES, INITIAL_RETRY_DELAY,
     MAX_RETRY_DELAY, HIGH_PRIORITY_MESSAGE_TYPES
@@ -52,7 +52,9 @@ class WebSocketClient:
 
         # Message metadata cache to avoid double-parsing
         # Maps message string -> (msg_type, is_high_priority, is_chunked, chunk_info)
-        self.message_metadata = {}
+        self.message_metadata = OrderedDict()
+        self._metadata_lock = threading.Lock()
+        self._metadata_max_size = 1000
 
         # Chunk cleanup configuration
         self.chunk_ttl = 300  # 5 minutes TTL for stale chunks
@@ -60,20 +62,18 @@ class WebSocketClient:
 
     async def connect(self, username, host, port):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
         ssl_context.load_verify_locations(self.cert_path)
-        ssl_context.check_hostname = False
 
-        uri = f"wss://{host}:{port}"
+        uri = f"wss://{host}:{port}/ws"
         try:
             logger.info(f"Attempting to connect to {uri}")
             self.websocket = await websockets.connect(
                 uri,
                 ssl=ssl_context,
-                extra_headers={'Username': username},
+                additional_headers={'Username': username},
                 max_size=WEBSOCKET_MAX_SIZE,
-                read_limit=WEBSOCKET_READ_LIMIT,
-                write_limit=WEBSOCKET_WRITE_LIMIT,
-                max_queue=WEBSOCKET_MAX_QUEUE
             )
             self.connected = True
             self.running = True
@@ -135,8 +135,9 @@ class WebSocketClient:
             self.chunk_buffers.clear()
             self.output_chunks.clear()
 
-        # Clear message metadata cache
-        self.message_metadata.clear()
+        # Clear message metadata cache (thread-safe)
+        with self._metadata_lock:
+            self.message_metadata.clear()
 
         self.websocket = None
 
@@ -158,7 +159,7 @@ class WebSocketClient:
                             f"Chunk {chunk_num + 1}/{total} sent for {filename}"
                         )
                     # Don't log individual command sends - too noisy
-            except:
+            except Exception:
                 pass
         self.retry_delay = 1  # Reset retry delay after successful send
         
@@ -216,8 +217,14 @@ class WebSocketClient:
                         'filename': data.get('filename', 'unknown')
                     }
 
-            # Cache metadata for later use
-            self.message_metadata[message] = (msg_type, is_high_priority, is_chunked, chunk_info)
+            # Cache metadata for later use (thread-safe with size limit)
+            with self._metadata_lock:
+                self.message_metadata[message] = (msg_type, is_high_priority, is_chunked, chunk_info)
+                # Evict oldest half when exceeding max size
+                if len(self.message_metadata) > self._metadata_max_size:
+                    to_remove = len(self.message_metadata) // 2
+                    for _ in range(to_remove):
+                        self.message_metadata.popitem(last=False)
 
             # Only log chunk queuing for large transfers (not every message)
             if is_chunked and chunk_info:
@@ -226,7 +233,7 @@ class WebSocketClient:
                         f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued for transfer"
                     )
             # Don't log regular message queuing - too noisy
-        except:
+        except Exception:
             # If parsing fails, cache minimal metadata
             self.message_metadata[message] = ('unknown', False, False, None)
 
@@ -255,7 +262,7 @@ class WebSocketClient:
                                     # Put high-priority back at front
                                     self.message_queue.appendleft(dropped_msg)
                                     break
-                            except:
+                            except Exception:
                                 dropped_count += 1
 
                     if dropped_count > 0 and self.terminal_widget:
@@ -271,8 +278,9 @@ class WebSocketClient:
                 if len(self.message_queue) > 0:
                     message = self.message_queue.popleft()
 
-                    # Use cached metadata instead of re-parsing
-                    metadata = self.message_metadata.get(message, ('unknown', False, False, None))
+                    # Use cached metadata instead of re-parsing (thread-safe)
+                    with self._metadata_lock:
+                        metadata = self.message_metadata.get(message, ('unknown', False, False, None))
                     msg_type, is_high_priority, is_chunked, chunk_info = metadata
 
                     if is_high_priority:
@@ -285,8 +293,9 @@ class WebSocketClient:
                                         timeout=self.SEND_TIMEOUT
                                     )
                                     await self._handle_message_sent(message)
-                                    # Clean up metadata cache after successful send
-                                    self.message_metadata.pop(message, None)
+                                    # Clean up metadata cache after successful send (thread-safe)
+                                    with self._metadata_lock:
+                                        self.message_metadata.pop(message, None)
                                     last_send_time = asyncio.get_event_loop().time()
                                 except asyncio.TimeoutError:
                                     self.message_queue.appendleft(message)
@@ -337,8 +346,9 @@ class WebSocketClient:
                             timeout=self.SEND_TIMEOUT
                         )
                         await self._handle_message_sent(message)
-                        # Clean up metadata cache after successful send
-                        self.message_metadata.pop(message, None)
+                        # Clean up metadata cache after successful send (thread-safe)
+                        with self._metadata_lock:
+                            self.message_metadata.pop(message, None)
                     except asyncio.TimeoutError:
                         self.message_queue.appendleft(message)
                         await self._handle_send_timeout()

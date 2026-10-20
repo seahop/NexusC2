@@ -24,10 +24,17 @@ iptables -F NEXUSC2_GRPC
 echo "Allowing localhost connections to port $GRPC_PORT..."
 iptables -A NEXUSC2_GRPC -s 127.0.0.1 -p tcp --dport $GRPC_PORT -j ACCEPT
 
-# Try to add IPv6 localhost rule if ip6tables is available
+# Try to add IPv6 rules if ip6tables is available
 if command -v ip6tables &> /dev/null; then
+    echo "Setting up IPv6 firewall rules..."
+    ip6tables -N NEXUSC2_GRPC 2>/dev/null || ip6tables -F NEXUSC2_GRPC
+    ip6tables -C INPUT -p tcp --dport $GRPC_PORT -j NEXUSC2_GRPC 2>/dev/null || ip6tables -I INPUT -p tcp --dport $GRPC_PORT -j NEXUSC2_GRPC
+
     echo "Adding IPv6 localhost rule..."
     ip6tables -A NEXUSC2_GRPC -s ::1 -p tcp --dport $GRPC_PORT -j ACCEPT 2>/dev/null || echo "  (IPv6 rule skipped - not available)"
+
+    echo "Blocking external IPv6 connections to port $GRPC_PORT..."
+    ip6tables -A NEXUSC2_GRPC -p tcp --dport $GRPC_PORT -j DROP 2>/dev/null || echo "  (IPv6 DROP rule skipped - not available)"
 fi
 
 # Allow connections from Docker bridge network (containers)

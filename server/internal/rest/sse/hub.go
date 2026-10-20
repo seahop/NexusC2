@@ -31,6 +31,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan Event
+	done       chan struct{}
 	mu         sync.RWMutex
 	closed     bool
 }
@@ -42,6 +43,7 @@ func NewHub() *Hub {
 		register:   make(chan *Client, 10),
 		unregister: make(chan *Client, 10),
 		broadcast:  make(chan Event, 100),
+		done:       make(chan struct{}),
 	}
 	go hub.run()
 	return hub
@@ -50,6 +52,8 @@ func NewHub() *Hub {
 func (h *Hub) run() {
 	for {
 		select {
+		case <-h.done:
+			return
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
@@ -129,6 +133,9 @@ func (h *Hub) Close() {
 		return
 	}
 	h.closed = true
+
+	// Signal the run() goroutine to exit
+	close(h.done)
 
 	for client := range h.clients {
 		close(client.Done)

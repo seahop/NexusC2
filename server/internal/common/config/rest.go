@@ -2,6 +2,8 @@
 package config
 
 import (
+	crypto_rand "crypto/rand"
+	"encoding/base64"
 	"log"
 	"os"
 	"time"
@@ -86,7 +88,7 @@ func LoadRESTConfig() (*RESTConfig, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		// Generate a random secret if not provided (not recommended for production)
-		jwtSecret = generateRandomSecret(32)
+		jwtSecret = generateRandomSecret()
 	}
 
 	// Get shared API password from environment
@@ -100,7 +102,7 @@ func LoadRESTConfig() (*RESTConfig, error) {
 		conf.RestAPI.RateLimit.RequestsPerMinute = 100
 	}
 	if len(conf.RestAPI.CORS.AllowedOrigins) == 0 {
-		conf.RestAPI.CORS.AllowedOrigins = []string{"*"}
+		conf.RestAPI.CORS.AllowedOrigins = []string{"https://localhost:3131", "https://127.0.0.1:3131"}
 	}
 	if conf.RestAPI.Port == "" {
 		conf.RestAPI.Port = "8443"
@@ -145,12 +147,10 @@ func LoadRESTConfig() (*RESTConfig, error) {
 	}, nil
 }
 
-func generateRandomSecret(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[int(time.Now().UnixNano())%len(charset)]
-		time.Sleep(time.Nanosecond) // Add some variation
+func generateRandomSecret() string {
+	bytes := make([]byte, 32)
+	if _, err := crypto_rand.Read(bytes); err != nil {
+		panic("failed to generate random secret: " + err.Error())
 	}
-	return string(b)
+	return base64.URLEncoding.EncodeToString(bytes)
 }

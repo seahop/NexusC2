@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -34,6 +35,43 @@ type PipeConnection struct {
 	mu     sync.Mutex
 }
 
+// createPipeSecurityAttributes creates a SECURITY_ATTRIBUTES struct with a DACL
+// that restricts pipe access to SYSTEM (S-1-5-18) and the current user only.
+func createPipeSecurityAttributes() (*windows.SecurityAttributes, error) {
+	// Get the current process token to retrieve the user's SID
+	token, err := windows.OpenCurrentProcessToken()
+	if err != nil {
+		return nil, err
+	}
+	defer token.Close()
+
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert user SID to string form
+	sidStr := user.User.Sid.String()
+
+	// Build SDDL security descriptor:
+	// D:           = DACL
+	// (A;;GA;;;SY) = Allow SYSTEM (S-1-5-18) Generic All access
+	// (A;;GA;;;xx) = Allow current user Generic All access
+	sddl := "D:(A;;GA;;;SY)(A;;GA;;;" + sidStr + ")"
+
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return nil, err
+	}
+
+	sa := &windows.SecurityAttributes{
+		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
+		SecurityDescriptor: sd,
+	}
+
+	return sa, nil
+}
+
 // NewPipeListener creates a new named pipe listener
 func NewPipeListener(pipeName string) (*PipeListener, error) {
 	// Build full pipe path
@@ -41,6 +79,13 @@ func NewPipeListener(pipeName string) (*PipeListener, error) {
 
 	// Convert to UTF16
 	pipePathPtr, err := windows.UTF16PtrFromString(pipePath)
+	if err != nil {
+		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+	}
+
+	// Create restricted security descriptor for the pipe
+	// Only SYSTEM and current user can access the pipe
+	sa, err := createPipeSecurityAttributes()
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
@@ -56,7 +101,7 @@ func NewPipeListener(pipeName string) (*PipeListener, error) {
 		pipeBufferSize,
 		pipeBufferSize,
 		0,
-		nil, // Default security attributes
+		sa, // Restricted to SYSTEM and current user
 	)
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
@@ -105,6 +150,8 @@ func (pl *PipeListener) Accept() (*PipeConnection, error) {
 	pl.mu.Lock()
 	if !pl.closed {
 		pipePathPtr, _ := windows.UTF16PtrFromString(pl.pipePath)
+		// Reuse the same restricted security descriptor for new pipe instances
+		newSa, _ := createPipeSecurityAttributes()
 		newHandle, err := windows.CreateNamedPipe(
 			pipePathPtr,
 			windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED,
@@ -113,7 +160,7 @@ func (pl *PipeListener) Accept() (*PipeConnection, error) {
 			pipeBufferSize,
 			pipeBufferSize,
 			0,
-			nil,
+			newSa, // Restricted to SYSTEM and current user (nil falls back to default if SA creation fails)
 		)
 		if err == nil {
 			pl.handle = newHandle

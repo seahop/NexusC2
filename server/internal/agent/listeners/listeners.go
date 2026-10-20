@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -837,8 +838,8 @@ func (m *Manager) LoadActiveConnections() error {
 	log.Println("Loading active connections from database...")
 
 	query := `
-		SELECT newclientID, protocol, secret1, secret2 
-		FROM connections 
+		SELECT newclientID, protocol, secret1, secret2, field_mapping
+		FROM connections
 		WHERE deleted_at IS NULL
 	`
 
@@ -851,10 +852,17 @@ func (m *Manager) LoadActiveConnections() error {
 	count := 0
 	for rows.Next() {
 		var conn ActiveConnection
-		err := rows.Scan(&conn.ClientID, &conn.Protocol, &conn.Secret1, &conn.Secret2)
+		var fieldMappingJSON sql.NullString
+		err := rows.Scan(&conn.ClientID, &conn.Protocol, &conn.Secret1, &conn.Secret2, &fieldMappingJSON)
 		if err != nil {
 			log.Printf("Failed to scan connection row: %v", err)
 			continue
+		}
+
+		if fieldMappingJSON.Valid && fieldMappingJSON.String != "" {
+			if err := json.Unmarshal([]byte(fieldMappingJSON.String), &conn.FieldMapping); err != nil {
+				log.Printf("Warning: Failed to parse field mapping for %s: %v", conn.ClientID, err)
+			}
 		}
 
 		// Store in activeConnections map using the mutex

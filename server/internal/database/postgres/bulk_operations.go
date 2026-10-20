@@ -137,7 +137,7 @@ func (bo *BulkOperator) insertSingleResult(ctx context.Context, result ResultDat
 	return err
 }
 
-// BulkUpdateAgentStatus performs bulk update of agent statuses
+// BulkUpdateAgentStatus performs bulk update of agent statuses using parameterized queries
 func (bo *BulkOperator) BulkUpdateAgentStatus(ctx context.Context, updates []AgentStatusUpdate) error {
 	if len(updates) == 0 {
 		return nil
@@ -153,46 +153,60 @@ func (bo *BulkOperator) BulkUpdateAgentStatus(ctx context.Context, updates []Age
 	}
 	defer tx.Rollback()
 
-	// Use CASE statements for bulk update
-	agentIDs := make([]string, 0, len(updates))
-	whenClauses := make([]string, 0, len(updates))
-	statusClauses := make([]string, 0, len(updates))
-	metadataClauses := make([]string, 0, len(updates))
+	// Build parameterized CASE statements
+	args := make([]interface{}, 0, len(updates)*4)
+	paramIdx := 1
+
+	agentIDPlaceholders := make([]string, 0, len(updates))
+	whenLastSeenClauses := make([]string, 0, len(updates))
+	whenStatusClauses := make([]string, 0, len(updates))
+	whenMetadataClauses := make([]string, 0, len(updates))
+	hasMetadata := false
 
 	for _, update := range updates {
-		agentIDs = append(agentIDs, fmt.Sprintf("'%s'", update.AgentID))
-		whenClauses = append(whenClauses,
-			fmt.Sprintf("WHEN newclientID = '%s' THEN '%s'::timestamp",
-				update.AgentID, update.LastSeen.Format(time.RFC3339)))
-		statusClauses = append(statusClauses,
-			fmt.Sprintf("WHEN newclientID = '%s' THEN '%s'",
-				update.AgentID, update.Status))
+		agentIDPlaceholders = append(agentIDPlaceholders, fmt.Sprintf("$%d", paramIdx))
+		args = append(args, update.AgentID)
+		agentIDParam := paramIdx
+		paramIdx++
+
+		whenLastSeenClauses = append(whenLastSeenClauses,
+			fmt.Sprintf("WHEN newclientID = $%d THEN $%d::timestamp", agentIDParam, paramIdx))
+		args = append(args, update.LastSeen.Format(time.RFC3339))
+		paramIdx++
+
+		whenStatusClauses = append(whenStatusClauses,
+			fmt.Sprintf("WHEN newclientID = $%d THEN $%d", agentIDParam, paramIdx))
+		args = append(args, update.Status)
+		paramIdx++
+
 		if update.Metadata != "" {
-			metadataClauses = append(metadataClauses,
-				fmt.Sprintf("WHEN newclientID = '%s' THEN metadata || '%s'::jsonb",
-					update.AgentID, update.Metadata))
+			hasMetadata = true
+			whenMetadataClauses = append(whenMetadataClauses,
+				fmt.Sprintf("WHEN newclientID = $%d THEN metadata || $%d::jsonb", agentIDParam, paramIdx))
+			args = append(args, update.Metadata)
+			paramIdx++
 		}
 	}
 
+	metadataClause := ""
+	if hasMetadata && len(whenMetadataClauses) > 0 {
+		metadataClause = fmt.Sprintf(", metadata = CASE %s ELSE metadata END",
+			strings.Join(whenMetadataClauses, " "))
+	}
+
 	query := fmt.Sprintf(`
-		UPDATE connections 
-		SET 
+		UPDATE connections
+		SET
 			lastSEEN = CASE %s END,
 			status = CASE %s END
 			%s
 		WHERE newclientID IN (%s)`,
-		strings.Join(whenClauses, " "),
-		strings.Join(statusClauses, " "),
-		func() string {
-			if len(metadataClauses) > 0 {
-				return fmt.Sprintf(", metadata = CASE %s ELSE metadata END",
-					strings.Join(metadataClauses, " "))
-			}
-			return ""
-		}(),
-		strings.Join(agentIDs, ","))
+		strings.Join(whenLastSeenClauses, " "),
+		strings.Join(whenStatusClauses, " "),
+		metadataClause,
+		strings.Join(agentIDPlaceholders, ","))
 
-	if _, err := tx.ExecContext(ctx, query); err != nil {
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("bulk update failed: %w", err)
 	}
 

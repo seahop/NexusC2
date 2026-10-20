@@ -1356,6 +1356,24 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		"POST_CLIENTID_TRANSFORMS": postClientIDTransforms,
 		"POST_DATA_TRANSFORMS":     postDataTransforms,
 		"RESPONSE_DATA_TRANSFORMS": responseDataTransforms,
+		// TCP/SMB protocol envelope strings (XOR encrypted to remove from binary)
+		"PROTO_TYPE_HANDSHAKE":   "handshake",
+		"PROTO_TYPE_HS_RESP":     "handshake_response",
+		"PROTO_TYPE_PING":        "ping",
+		"PROTO_TYPE_PONG":        "pong",
+		"PROTO_TYPE_DATA":        "data",
+		"PROTO_TYPE_DISCONNECT":  "disconnect",
+		"PROTO_TYPE_LINK_HS":     "link_handshake_response",
+		"PROTO_KEY_TYPE":         "type",
+		"PROTO_KEY_PAYLOAD":      "payload",
+		"PROTO_KEY_AGENT_ID":     "agent_id",
+		"PROTO_KEY_RESULTS":      "results",
+		"PROTO_KEY_COMMANDS":     "commands",
+		"PROTO_KEY_SR":           "sr",
+		"PROTO_AUTH_PREFIX":      "AUTH:",
+		"PROTO_AUTH_OK":          "OK",
+		"PROTO_META_STARTUP":     "startup_time",
+		"PROTO_META_ACTIVE":      "active",
 		// HTTP protocol strings (pre-connection, must be XOR encrypted)
 		"GE_METHOD_GET":        "GET",
 		"GE_METHOD_POST":       "POST",
@@ -1547,18 +1565,25 @@ func (b *Builder) buildPayloadBinary(ctx context.Context, binaryName string, env
 	}
 
 	// Get the host payloads path from environment variable
-	// This is set by docker-compose using ${PWD}/payloads
+	// This is set by docker-compose using ${COMPOSE_DIR}/payloads
 	hostPayloadsPath := os.Getenv("HOST_PAYLOADS_PATH")
 	if hostPayloadsPath == "" {
 		return "", fmt.Errorf("HOST_PAYLOADS_PATH environment variable not set - check docker-compose.yml")
 	}
 
+	// Get host shared path — must match the host directory mounted as /shared in this container
+	hostSharedPath := os.Getenv("HOST_SHARED_PATH")
+	if hostSharedPath == "" {
+		hostSharedPath = "/shared"
+	}
+
 	log.Printf("[Builder] Using host payloads path: %s", hostPayloadsPath)
+	log.Printf("[Builder] Using host shared path: %s", hostSharedPath)
 
 	hostConfig := &container.HostConfig{
 		NetworkMode: "host",
 		Binds: []string{
-			"/shared:/shared",
+			fmt.Sprintf("%s:/shared", hostSharedPath),
 			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),

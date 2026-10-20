@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"net/http"
 	"sync"
 	"time"
@@ -509,7 +510,7 @@ func (s *Server) parseSocksRequest(conn net.Conn) (string, error) {
 	}
 	port := (uint16(buf[0]) << 8) | uint16(buf[1])
 
-	target := fmt.Sprintf("%s:%d", addr, port)
+	target := net.JoinHostPort(addr, strconv.Itoa(int(port)))
 	return target, nil
 }
 
