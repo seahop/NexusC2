@@ -42,7 +42,8 @@ class WebSocketThread(QThread):
     download_chunk = pyqtSignal(dict)
     upload_response = pyqtSignal(dict)
     link_update = pyqtSignal(dict)
-    profiles_updated = pyqtSignal(dict)  # Signal for profile uploads/updates 
+    profiles_updated = pyqtSignal(dict)  # Signal for profile uploads/updates
+    agent_checkin_received = pyqtSignal(dict)  # Thread-safe agent checkin signal
 
     def __init__(self, username, host, port, parent=None):
         super().__init__(parent)
@@ -416,45 +417,10 @@ class WebSocketThread(QThread):
                 pass
 
             elif message_type == 'agent_checkin':
-                agent_id = message_data['data'].get('agent_id')
-                last_seen = message_data['data'].get('last_seen')
-                print(f"WebSocketThread: Processing agent_checkin for agent {agent_id}")
-                
-                if hasattr(self.parent(), 'terminal_widget'):
-                    terminal_widget = self.parent().terminal_widget
-                    if terminal_widget.agent_tree:
-                        print("WebSocketThread: Current agents in tree:")
-                        for agent in terminal_widget.agent_tree.agent_data:
-                            print(f"  - {agent['guid']}")
-                        
-                        timestamp = QDateTime.fromSecsSinceEpoch(int(last_seen))
-                        print(f"WebSocketThread: Converted timestamp: {timestamp}")
-                        
-                        for agent in terminal_widget.agent_tree.agent_data:
-                            if agent['guid'] == agent_id:
-                                print(f"WebSocketThread: Found matching agent {agent_id}")
-                                print(f"WebSocketThread: Old timestamp: {agent['last_seen_timestamp']}")
-                                agent['last_seen_timestamp'] = timestamp
-                                # If agent was marked as deleted, reactivate it
-                                if agent.get('deleted', False):
-                                    agent['deleted'] = False
-                                    # Emit signal to update UI in main thread
-                                    self.connection_update.emit({
-                                        'new_client_id': agent['guid'],
-                                        'hostname': agent['details'][0].split(': ')[1],
-                                        'int_ip': agent['details'][1].split(': ')[1],
-                                        'ext_ip': agent['details'][2].split(': ')[1],
-                                        'username': agent['details'][3].split(': ')[1],
-                                        'protocol': agent['details'][4].split(': ')[1],
-                                        'process': agent['details'][5].split(': ')[1],
-                                        'pid': agent['details'][6].split(': ')[1],
-                                        'arch': agent['details'][7].split(': ')[1],
-                                        'os': agent['details'][8].split(': ')[1],
-                                        'client_id': agent['details'][9].split(': ')[1],
-                                        'last_seen': timestamp.toString(Qt.DateFormat.ISODate)
-                                    })
-                                print(f"WebSocketThread: Updated timestamp to: {timestamp}")
-                                break
+                # Emit via signal for thread-safe handling on the main thread
+                checkin_data = message_data.get('data', {})
+                print(f"WebSocketThread: Emitting agent_checkin_received for agent {checkin_data.get('agent_id')}")
+                self.agent_checkin_received.emit(checkin_data)
 
             elif message_type == 'initial_state':
                 print("WebSocketThread: Processing initial state")
@@ -543,8 +509,12 @@ class WebSocketThread(QThread):
                 self.profiles_updated.emit(profile_data)
 
             elif message_type == 'connection_update':
-                if message_data['data']['event'] == 'connected':
-                    conn_data = message_data['data']['connection']
+                # Note: 'agent_connection' already handles new connections via
+                # connection_update signal. Only handle non-'connected' events here
+                # to avoid double dispatch of the same connection data.
+                event = message_data['data'].get('event')
+                if event and event != 'connected':
+                    conn_data = message_data['data'].get('connection', message_data['data'])
                     if 'new_client_id' in conn_data and 'guid' not in conn_data:
                         conn_data['guid'] = conn_data['new_client_id']
                     self.connection_update.emit(conn_data)

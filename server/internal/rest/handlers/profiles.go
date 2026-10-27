@@ -133,11 +133,15 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 	// Check if it's a file upload or raw content
 	contentType := c.GetHeader("Content-Type")
 
+	// Limit request body to 10MB to prevent resource exhaustion
+	const maxBodySize = 10 << 20 // 10MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodySize)
+
 	if contentType == "application/toml" || contentType == "text/plain" {
 		// Raw TOML content in body
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body (max 10MB)"})
 			return
 		}
 		tomlContent = string(body)

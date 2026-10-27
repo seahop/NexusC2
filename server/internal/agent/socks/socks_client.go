@@ -12,6 +12,7 @@ import (
 type Client struct {
 	conn        *ssh.Client
 	credentials *Credentials
+	done        chan struct{} // signals keepalive goroutine to stop
 }
 
 func NewClient(addr string, path string, creds *Credentials) (*Client, error) {
@@ -39,17 +40,23 @@ func NewClient(addr string, path string, creds *Credentials) (*Client, error) {
 		return nil, err
 	}
 
-	// Add SSH keepalive
+	done := make(chan struct{})
+
+	// Add SSH keepalive with shutdown signal
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			_, _, err := sshConn.SendRequest("keepalive@golang.org", true, nil)
-			if err != nil {
-				log.Printf("[ERROR] Failed to send SSH keepalive: %v", err)
+		for {
+			select {
+			case <-done:
 				return
+			case <-ticker.C:
+				_, _, err := sshConn.SendRequest("keepalive@golang.org", true, nil)
+				if err != nil {
+					log.Printf("[ERROR] Failed to send SSH keepalive: %v", err)
+					return
+				}
 			}
-			log.Printf("[DEBUG] Sent SSH keepalive")
 		}
 	}()
 
@@ -57,6 +64,7 @@ func NewClient(addr string, path string, creds *Credentials) (*Client, error) {
 	return &Client{
 		conn:        client,
 		credentials: creds,
+		done:        done,
 	}, nil
 }
 
@@ -69,5 +77,9 @@ func (c *Client) Dial(network, addr string) (net.Conn, error) {
 }
 
 func (c *Client) Close() error {
+	// Signal keepalive goroutine to stop
+	if c.done != nil {
+		close(c.done)
+	}
 	return c.conn.Close()
 }

@@ -141,8 +141,8 @@ type messageJob struct {
 
 // WebSocket upgrader configuration
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024 * 1024 * 4, // 4MB read buffer
-	WriteBufferSize: 1024 * 1024 * 4, // 4MB write buffer
+	ReadBufferSize:  1024 * 1024 * 11, // 11MB read buffer to match max chunk size + overhead
+	WriteBufferSize: 1024 * 1024 * 11, // 11MB write buffer to match max chunk size + overhead
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},

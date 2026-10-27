@@ -11,12 +11,22 @@ import (
 	pb "c2/proto"
 )
 
-// messageWorker processes messages from the work queue
+// messageWorker processes messages from the work queue.
+// It exits when the resultWorkers channel is closed or when signalled via workerExit.
 func (h *WSHandler) messageWorker() {
 	defer h.workerWg.Done()
 
-	for job := range h.resultWorkers {
-		h.processMessageJob(job)
+	for {
+		select {
+		case job, ok := <-h.resultWorkers:
+			if !ok {
+				return // channel closed
+			}
+			h.processMessageJob(job)
+		case <-h.workerExit:
+			// This worker was selected for scale-down
+			return
+		}
 	}
 }
 

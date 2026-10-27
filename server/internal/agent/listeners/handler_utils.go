@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -74,17 +75,17 @@ func getRemoteIP(r *http.Request) string {
 	// Check X-Forwarded-For header
 	forwarded := r.Header.Get("X-Forwarded-For")
 	if forwarded != "" {
-		// Return first IP in the list
-		return strings.Split(forwarded, ",")[0]
+		// Return first IP in the list (trimmed)
+		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
 	}
 
-	// Get direct IP
-	remoteIP := r.RemoteAddr
-	// Strip port if present
-	if strings.Contains(remoteIP, ":") {
-		remoteIP = strings.Split(remoteIP, ":")[0]
+	// Use net.SplitHostPort to correctly handle both IPv4 and IPv6 addresses
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// If SplitHostPort fails, return the address as-is (may not have a port)
+		return r.RemoteAddr
 	}
-	return remoteIP
+	return host
 }
 
 // createReactivationNotification creates a notification for agent reactivation

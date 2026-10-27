@@ -232,12 +232,12 @@ class DownloadsWidget(QWidget):
         if self.ws_thread:
             try:
                 self.ws_thread.downloads_update.disconnect(self.update_downloads)
-            except TypeError:
-                pass
+            except (TypeError, RuntimeError):
+                pass  # Signal may not be connected
             try:
                 self.ws_thread.download_chunk.disconnect(self.handle_download_chunk)
-            except TypeError:
-                pass
+            except (TypeError, RuntimeError):
+                pass  # Signal may not be connected
 
         self.ws_thread = ws_thread
         if self.ws_thread:

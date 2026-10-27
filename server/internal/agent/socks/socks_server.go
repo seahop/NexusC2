@@ -539,8 +539,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SOCKS] SSH connection established with user: %s", sshConn.User())
 
-	// Store SSH connection
+	// Store SSH connection, closing any previous one to avoid resource leaks
 	s.sshConnMu.Lock()
+	if s.sshConn != nil {
+		log.Printf("[SOCKS] Closing previous SSH connection before accepting new one")
+		s.sshConn.Close()
+	}
 	s.sshConn = sshConn
 	s.sshChannels = chans
 	s.sshRequests = reqs

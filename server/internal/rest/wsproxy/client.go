@@ -59,6 +59,7 @@ type Client struct {
 	username string
 	conn     *websocket.Conn
 	mu       sync.RWMutex
+	writeMu  sync.Mutex // Serializes all WebSocket writes (gorilla requires single writer)
 
 	// Response handlers keyed by message type
 	handlers   map[string]*ResponseHandler
@@ -68,25 +69,27 @@ type Client struct {
 	transfers   map[string]*BinaryTransfer
 	transfersMu sync.RWMutex
 
-	// Global message channel for broadcasting
-	messageCh chan Message
+	// Per-subscriber message channels
+	subscribers   map[chan Message]struct{}
+	subscribersMu sync.Mutex
 
 	// Connection state
 	connected bool
 	done      chan struct{}
+	closeOnce sync.Once // Ensures done channel is closed exactly once
 	reconnect bool
 }
 
 // NewClient creates a new WebSocket proxy client
 func NewClient(wsURL, username string) *Client {
 	return &Client{
-		wsURL:     wsURL,
-		username:  username,
-		handlers:  make(map[string]*ResponseHandler),
-		transfers: make(map[string]*BinaryTransfer),
-		messageCh: make(chan Message, 100),
-		done:      make(chan struct{}),
-		reconnect: true,
+		wsURL:       wsURL,
+		username:    username,
+		handlers:    make(map[string]*ResponseHandler),
+		transfers:   make(map[string]*BinaryTransfer),
+		subscribers: make(map[chan Message]struct{}),
+		done:        make(chan struct{}),
+		reconnect:   true,
 	}
 }
 
@@ -137,7 +140,8 @@ func (c *Client) Close() error {
 	defer c.mu.Unlock()
 
 	c.reconnect = false
-	close(c.done)
+	// Use sync.Once to prevent double-close panic on the done channel
+	c.closeOnce.Do(func() { close(c.done) })
 
 	if c.conn != nil {
 		err := c.conn.Close()
@@ -155,6 +159,15 @@ func (c *Client) IsConnected() bool {
 	return c.connected
 }
 
+// safeWriteMessage acquires the write mutex and writes a message to the WebSocket.
+// Gorilla websocket requires that only one goroutine writes at a time.
+func (c *Client) safeWriteMessage(messageType int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return c.conn.WriteMessage(messageType, data)
+}
+
 // Send sends a message to the WebSocket service
 func (c *Client) Send(ctx context.Context, msg interface{}) error {
 	c.mu.RLock()
@@ -169,8 +182,7 @@ func (c *Client) Send(ctx context.Context, msg interface{}) error {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
-	c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	if err := c.safeWriteMessage(websocket.TextMessage, data); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -312,9 +324,22 @@ func (c *Client) WaitForBinaryTransfer(ctx context.Context, transfer *BinaryTran
 	}
 }
 
-// Subscribe returns a channel that receives all incoming messages
-func (c *Client) Subscribe() <-chan Message {
-	return c.messageCh
+// Subscribe creates and returns a dedicated channel for this caller.
+// Each subscriber gets its own channel to prevent cross-handler message stealing.
+// The caller must call Unsubscribe when done to avoid goroutine leaks.
+func (c *Client) Subscribe() chan Message {
+	ch := make(chan Message, 100)
+	c.subscribersMu.Lock()
+	c.subscribers[ch] = struct{}{}
+	c.subscribersMu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel created by Subscribe
+func (c *Client) Unsubscribe(ch chan Message) {
+	c.subscribersMu.Lock()
+	delete(c.subscribers, ch)
+	c.subscribersMu.Unlock()
 }
 
 // readPump reads messages from the WebSocket connection
@@ -406,12 +431,16 @@ func (c *Client) handleMessage(msg Message) {
 		c.handleBinaryTransferComplete(msg)
 	}
 
-	// Broadcast to general subscribers
-	select {
-	case c.messageCh <- msg:
-	default:
-		// Channel full, drop message
+	// Broadcast to all per-subscriber channels
+	c.subscribersMu.Lock()
+	for ch := range c.subscribers {
+		select {
+		case ch <- msg:
+		default:
+			// Subscriber channel full, drop message for this subscriber
+		}
 	}
+	c.subscribersMu.Unlock()
 }
 
 // handleBinaryTransferStart handles the start of a binary transfer
@@ -550,8 +579,7 @@ func (c *Client) pingPump() {
 				return
 			}
 
-			conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := c.safeWriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Printf("[WSProxy] Ping failed: %v", err)
 				return
 			}

@@ -195,15 +195,16 @@ func (m *JWTManager) RefreshTokens(refreshToken string) (*RefreshResult, error) 
 		return nil, ErrUserInactive
 	}
 
-	// Delete the old refresh token
-	if _, err := m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID); err != nil {
-		log.Printf("Failed to delete old refresh token %s: %v", tokenID, err)
-	}
-
-	// Generate new token pair
+	// Generate new token pair BEFORE deleting old one,
+	// so the user is never left without a valid token
 	tokenPair, err := m.GenerateTokenPair(&user)
 	if err != nil {
 		return nil, err
+	}
+
+	// Delete the old refresh token after new one is confirmed
+	if _, err := m.db.Exec("DELETE FROM api_tokens WHERE id = $1", tokenID); err != nil {
+		log.Printf("Failed to delete old refresh token %s: %v", tokenID, err)
 	}
 
 	return &RefreshResult{

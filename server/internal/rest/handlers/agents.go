@@ -4,8 +4,10 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -107,6 +109,7 @@ func (h *AgentHandler) ListAgents(c *gin.Context) {
 	defer rows.Close()
 
 	agents := make([]Agent, 0)
+	agentIDs := make([]string, 0)
 	for rows.Next() {
 		var a Agent
 		err := rows.Scan(
@@ -120,10 +123,19 @@ func (h *AgentHandler) ListAgents(c *gin.Context) {
 
 		// Set ID to NewClientID for standard REST convention
 		a.ID = a.NewClientID
-
-		// Load tags for this agent
-		a.Tags = h.getAgentTags(ctx, a.NewClientID)
+		a.Tags = []AgentTag{} // Initialize empty, will be filled by batch query
 		agents = append(agents, a)
+		agentIDs = append(agentIDs, a.NewClientID)
+	}
+
+	// Batch-load tags for all agents in a single query instead of N+1
+	if len(agentIDs) > 0 {
+		tagsByAgent := h.getAgentTagsBatch(ctx, agentIDs)
+		for i := range agents {
+			if tags, ok := tagsByAgent[agents[i].NewClientID]; ok {
+				agents[i].Tags = tags
+			}
+		}
 	}
 
 	// Get total count
@@ -291,6 +303,44 @@ func (h *AgentHandler) RemoveTag(c *gin.Context) {
 		"message": "tag removed successfully",
 		"tags":    tags,
 	})
+}
+
+// getAgentTagsBatch fetches tags for multiple agents in a single query
+func (h *AgentHandler) getAgentTagsBatch(ctx context.Context, agentIDs []string) map[string][]AgentTag {
+	result := make(map[string][]AgentTag)
+	if len(agentIDs) == 0 {
+		return result
+	}
+
+	// Build parameterized IN clause
+	placeholders := make([]string, len(agentIDs))
+	args := make([]interface{}, len(agentIDs))
+	for i, id := range agentIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT agent_guid, tag_name, tag_color
+		FROM agent_tags
+		WHERE agent_guid IN (%s)
+		ORDER BY agent_guid, tag_name
+	`, strings.Join(placeholders, ", "))
+
+	rows, err := h.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var agentID string
+		var t AgentTag
+		if err := rows.Scan(&agentID, &t.Name, &t.Color); err == nil {
+			result[agentID] = append(result[agentID], t)
+		}
+	}
+	return result
 }
 
 func (h *AgentHandler) getAgentTags(ctx context.Context, agentID string) []AgentTag {

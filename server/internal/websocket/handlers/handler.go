@@ -39,6 +39,8 @@ type WSHandler struct {
 	maxWorkers    int
 	currentWorkers int
 	workerMu      sync.Mutex
+	workerDone    chan struct{} // signals scaleWorkerPool to stop
+	workerExit    chan struct{} // signals excess workers to exit
 }
 
 // NewWSHandler creates a new WebSocket handler
@@ -59,6 +61,8 @@ func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *c
 		minWorkers:     minWorkers,
 		maxWorkers:     maxWorkers,
 		currentWorkers: minWorkers,
+		workerDone:     make(chan struct{}),
+		workerExit:     make(chan struct{}, maxWorkers), // buffered so scale-down signals don't block
 	}
 
 	// Start minimum worker pool for processing large messages
@@ -131,37 +135,47 @@ func (h *WSHandler) SetAgentClient(client *agent.Client) {
 	h.agentClient = client
 }
 
-// scaleWorkerPool dynamically adjusts worker pool size based on queue depth
+// scaleWorkerPool dynamically adjusts worker pool size based on queue depth.
+// It exits when workerDone is closed.
 func (h *WSHandler) scaleWorkerPool() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		queueDepth := len(h.resultWorkers)
-		queueCapacity := cap(h.resultWorkers)
-		utilization := float64(queueDepth) / float64(queueCapacity)
+	for {
+		select {
+		case <-h.workerDone:
+			return
+		case <-ticker.C:
+			queueDepth := len(h.resultWorkers)
+			queueCapacity := cap(h.resultWorkers)
+			utilization := float64(queueDepth) / float64(queueCapacity)
 
-		h.workerMu.Lock()
-		current := h.currentWorkers
+			h.workerMu.Lock()
+			current := h.currentWorkers
 
-		// Scale up if queue is >70% full and we're below max
-		if utilization > 0.7 && current < h.maxWorkers {
-			h.currentWorkers++
-			h.workerWg.Add(1)
-			go h.messageWorker()
-			log.Printf("Scaled up worker pool: %d -> %d (utilization: %.1f%%)",
-				current, h.currentWorkers, utilization*100)
+			// Scale up if queue is >70% full and we're below max
+			if utilization > 0.7 && current < h.maxWorkers {
+				h.currentWorkers++
+				h.workerWg.Add(1)
+				go h.messageWorker()
+				log.Printf("Scaled up worker pool: %d -> %d (utilization: %.1f%%)",
+					current, h.currentWorkers, utilization*100)
+			}
+
+			// Scale down if queue is <20% full and we're above min
+			if utilization < 0.2 && current > h.minWorkers {
+				h.currentWorkers--
+				// Signal one excess worker to exit
+				select {
+				case h.workerExit <- struct{}{}:
+				default:
+				}
+				log.Printf("Scaled down worker pool: %d -> %d (utilization: %.1f%%)",
+					current, h.currentWorkers, utilization*100)
+			}
+
+			h.workerMu.Unlock()
 		}
-
-		// Scale down if queue is <20% full and we're above min
-		if utilization < 0.2 && current > h.minWorkers {
-			// Worker will exit naturally when it sees currentWorkers decreased
-			h.currentWorkers--
-			log.Printf("Scaled down worker pool: %d -> %d (utilization: %.1f%%)",
-				current, h.currentWorkers, utilization*100)
-		}
-
-		h.workerMu.Unlock()
 	}
 }
 
@@ -188,8 +202,9 @@ func (h *WSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set message size limits on the connection
-	conn.SetReadLimit(1024 * 1024 * 4)
+	// Set message size limits on the connection (must match or exceed maxMessageSize
+	// in hub/client.go to avoid read limit conflicts with large chunk transfers)
+	conn.SetReadLimit(11 * 1024 * 1024) // 11MB to accommodate 10MB chunks + overhead
 
 	client := &hub.Client{
 		ID:       generateID(),
@@ -555,6 +570,11 @@ func (h *WSHandler) HandleGRPCMessage(msg *pb.StreamMessage) {
 
 // Close closes the handler and cleans up resources
 func (h *WSHandler) Close() {
+	// Signal scaleWorkerPool to stop
+	if h.workerDone != nil {
+		close(h.workerDone)
+	}
+
 	// Close the worker channel
 	if h.resultWorkers != nil {
 		close(h.resultWorkers)

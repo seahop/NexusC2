@@ -25,8 +25,8 @@ const (
 	// Send pings to peer with this period
 	pingPeriod = (pongWait * 9) / 10
 
-	// Maximum message size allowed from peer
-	maxMessageSize = 10 * 1024 * 1024 // 10MB for large chunks
+	// Maximum message size allowed from peer (must accommodate 10MB chunks + overhead)
+	maxMessageSize = 11 * 1024 * 1024 // 11MB for large chunks + overhead
 )
 
 type Client struct {
@@ -244,7 +244,8 @@ func (c *Client) WritePump() {
 				// Try to re-queue without spawning a goroutine; drop if channel is full
 				select {
 				case c.Send <- message:
-					// Re-queued successfully
+					// Re-queued successfully; sleep briefly to avoid busy-loop
+					time.Sleep(10 * time.Millisecond)
 				default:
 					log.Printf("Dropped regular message for %s during binary transfer (channel full)", c.Username)
 				}

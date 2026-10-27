@@ -762,6 +762,10 @@ class C2ClientGUI(QMainWindow):
             self.ws_thread.connection_update.connect(self.agent_display.handle_new_connection)
             self.ws_thread.connection_update.connect(self.onConnectionUpdate)
             self.ws_thread.link_update.connect(self.agent_display.handle_link_update)
+
+            # Connect agent checkin signal for thread-safe timestamp updates
+            if hasattr(self.ws_thread, 'agent_checkin_received'):
+                self.ws_thread.agent_checkin_received.connect(self.agent_display.handle_agent_checkin)
             
             # The connection is already established at this point, so directly set status to connected
             self.status_indicator.set_connected()
@@ -1230,6 +1234,7 @@ class C2ClientGUI(QMainWindow):
                 if not self.pending_payload['file_name']:
                     self.pending_payload['file_name'] = file_name
                     self.pending_payload['expected_chunks'] = total_chunks
+                    os.makedirs(self.pending_payload['output_path'], exist_ok=True)
                     temp_path = os.path.join(self.pending_payload['output_path'], f"{file_name}.temp")
                     self.pending_payload['temp_file'] = temp_path
                     open(temp_path, 'wb').close()  # Create empty file

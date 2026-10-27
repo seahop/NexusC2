@@ -32,6 +32,8 @@ type Client struct {
 	client          pb.AgentControlClient
 	conn            *grpc.ClientConn
 	stream          pb.AgentControl_BiDiStreamClient
+	streamMu        sync.RWMutex
+	streamCancel    context.CancelFunc // cancel function for the current stream's receiver goroutine
 	clientID        string
 	messageHandlers map[string]func(*pb.StreamMessage) error
 	Hub             HubInterface
@@ -51,6 +53,7 @@ type CircuitBreaker struct {
 
 	mu      sync.RWMutex
 	metrics *CircuitMetrics
+	done    chan struct{} // signals monitorCircuit to stop
 }
 
 // CircuitMetrics tracks circuit breaker metrics
@@ -144,6 +147,7 @@ func EnhanceClientWithCircuitBreaker(client *Client) *CircuitBreaker {
 		resetTimeout:    30 * time.Second, // Hardcoded reset timeout
 		halfOpenTimeout: 10 * time.Second, // Hardcoded half-open timeout
 		metrics:         &CircuitMetrics{},
+		done:            make(chan struct{}),
 	}
 
 	cb.state.Store(int32(StateClosed))
@@ -169,12 +173,20 @@ func (cb *CircuitBreaker) ExecuteWithBreaker(ctx context.Context, operation stri
 	cb.metrics.TotalRequests.Add(1)
 
 	// Execute with timeout
+	// NOTE: If fn() does not respect context cancellation, the goroutine will
+	// leak until fn() returns on its own. Callers should ensure fn() is bounded.
 	execCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- fn()
+		err := fn()
+		// Non-blocking send: if the receiver has already timed out and moved on,
+		// we don't want to block this goroutine indefinitely on the channel.
+		select {
+		case done <- err:
+		default:
+		}
 	}()
 
 	select {
@@ -270,21 +282,38 @@ func (cb *CircuitBreaker) transitionTo(newState CircuitState) {
 	}
 }
 
-// monitorCircuit monitors and resets the circuit periodically
+// monitorCircuit monitors and resets the circuit periodically.
+// It exits when the done channel is closed (via StopMonitor).
 func (cb *CircuitBreaker) monitorCircuit() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		state := CircuitState(cb.state.Load())
+	for {
+		select {
+		case <-cb.done:
+			log.Printf("[CircuitBreaker] Monitor goroutine stopping")
+			return
+		case <-ticker.C:
+			state := CircuitState(cb.state.Load())
 
-		if state == StateOpen {
-			lastFailure, ok := cb.lastFailureTime.Load().(time.Time)
-			if ok && time.Since(lastFailure) > cb.resetTimeout {
-				cb.transitionTo(StateHalfOpen)
-				log.Printf("[CircuitBreaker] Attempting recovery, transitioning to HALF_OPEN")
+			if state == StateOpen {
+				lastFailure, ok := cb.lastFailureTime.Load().(time.Time)
+				if ok && time.Since(lastFailure) > cb.resetTimeout {
+					cb.transitionTo(StateHalfOpen)
+					log.Printf("[CircuitBreaker] Attempting recovery, transitioning to HALF_OPEN")
+				}
 			}
 		}
+	}
+}
+
+// StopMonitor stops the monitorCircuit goroutine
+func (cb *CircuitBreaker) StopMonitor() {
+	select {
+	case <-cb.done:
+		// Already closed
+	default:
+		close(cb.done)
 	}
 }
 
@@ -415,11 +444,23 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 		c.SetHub(hub)
 	}
 
+	// Cancel any existing stream's receiver goroutine before creating a new one
+	c.streamMu.Lock()
+	if c.streamCancel != nil {
+		c.streamCancel()
+	}
+
 	stream, err := c.client.BiDiStream(ctx)
 	if err != nil {
+		c.streamMu.Unlock()
 		return fmt.Errorf("failed to establish BiDiStream: %v", err)
 	}
+
+	// Create a cancellable context for the receiver goroutine
+	recvCtx, recvCancel := context.WithCancel(ctx)
 	c.stream = stream
+	c.streamCancel = recvCancel
+	c.streamMu.Unlock()
 
 	err = c.SendToStream("client_connected", map[string]interface{}{
 		"message": "Client has connected to the stream",
@@ -430,6 +471,13 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 
 	go func() {
 		for {
+			select {
+			case <-recvCtx.Done():
+				log.Println("gRPC stream receiver context cancelled")
+				return
+			default:
+			}
+
 			msg, err := stream.Recv()
 			if err == io.EOF {
 				log.Println("gRPC stream closed by server")
@@ -457,14 +505,22 @@ func (c *Client) StartBiDiStream(ctx context.Context, hub HubInterface) error {
 }
 
 func (c *Client) SendToStream(msgType string, payload map[string]interface{}) error {
+	c.streamMu.Lock()
 	if c.stream == nil {
+		// Cancel any previous stream's receiver goroutine
+		if c.streamCancel != nil {
+			c.streamCancel()
+		}
 		ctx := context.Background()
 		stream, err := c.client.BiDiStream(ctx)
 		if err != nil {
+			c.streamMu.Unlock()
 			return fmt.Errorf("failed to recreate stream: %v", err)
 		}
 		c.stream = stream
 	}
+	stream := c.stream
+	c.streamMu.Unlock()
 
 	contentBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -478,7 +534,7 @@ func (c *Client) SendToStream(msgType string, payload map[string]interface{}) er
 		Timestamp: time.Now().Unix(),
 	}
 
-	err = c.stream.Send(msg)
+	err = stream.Send(msg)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %v", err)
 	}
@@ -638,35 +694,21 @@ func (c *Client) handleCommandResult(msg *pb.StreamMessage) error {
 }
 
 func (c *Client) handleAgentCheckin(msg *pb.StreamMessage) error {
-	log.Printf("[AgentCheckin] Received agent checkin message: %s", msg.Content)
+	log.Printf("[AgentCheckin] Received agent checkin message")
 
-	// First unmarshal the complete message
-	var fullMessage struct {
-		Type string `json:"type"`
-		Data struct {
-			AgentID  string `json:"agent_id"`
-			LastSeen int64  `json:"last_seen"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal([]byte(msg.Content), &fullMessage); err != nil {
-		return fmt.Errorf("failed to unmarshal agent checkin data: %v", err)
-	}
-
-	// Reuse the same structure for broadcasting
-	broadcastJSON, err := json.Marshal(fullMessage)
-	if err != nil {
-		return fmt.Errorf("failed to marshal broadcast message: %v", err)
+	// Validate JSON without full unmarshal; forward the original raw bytes
+	// to avoid redundant unmarshal/re-marshal of unchanged data
+	if !json.Valid([]byte(msg.Content)) {
+		return fmt.Errorf("invalid JSON in agent checkin message")
 	}
 
 	// Create a context with timeout for broadcasting
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Broadcast to all connected websocket clients
+	// Broadcast the original content directly to all connected websocket clients
 	if c.Hub != nil {
-		err = c.Hub.BroadcastToAll(ctx, broadcastJSON)
-		if err != nil {
+		if err := c.Hub.BroadcastToAll(ctx, []byte(msg.Content)); err != nil {
 			return fmt.Errorf("failed to broadcast agent checkin: %v", err)
 		}
 		log.Printf("[AgentCheckin] Successfully broadcast agent checkin to all clients")

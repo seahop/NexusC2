@@ -88,8 +88,9 @@ func (p *ProxyHandlers) CreateListener(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	// Subscribe to messages before sending
+	// Subscribe to messages before sending; each handler gets its own channel
 	msgCh := p.client.Subscribe()
+	defer p.client.Unsubscribe(msgCh)
 
 	// Send the create_listener message
 	if err := p.client.Send(ctx, wsMsg); err != nil {
@@ -226,17 +227,55 @@ func (p *ProxyHandlers) DeleteListener(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	// Send message (delete might not have a direct response)
+	// Subscribe to messages to catch potential error responses
+	msgCh := p.client.Subscribe()
+	defer p.client.Unsubscribe(msgCh)
+
+	// Send message
 	if err := p.client.Send(ctx, wsMsg); err != nil {
 		log.Printf("[WSProxy] DeleteListener error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete listener: " + err.Error()})
 		return
 	}
 
-	// Wait briefly for any error response
-	time.Sleep(500 * time.Millisecond)
-
-	c.JSON(http.StatusOK, gin.H{"message": "listener deleted successfully"})
+	// Wait for acknowledgment or error with timeout, instead of fixed sleep
+	ackTimeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-msgCh:
+			// Check for listener_update with deleted event
+			if msg.Type == "listener_update" {
+				var updateData struct {
+					Event string `json:"event"`
+					Name  string `json:"name"`
+				}
+				if err := json.Unmarshal(msg.Data, &updateData); err == nil {
+					if updateData.Event == "deleted" && updateData.Name == name {
+						c.JSON(http.StatusOK, gin.H{"message": "listener deleted successfully"})
+						return
+					}
+				}
+			}
+			// Check for error responses
+			if msg.Type == "error" || msg.Type == "" {
+				var errResp struct {
+					Status  string `json:"status"`
+					Message string `json:"message"`
+				}
+				if err := json.Unmarshal(msg.Data, &errResp); err == nil && errResp.Status == "error" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": errResp.Message})
+					return
+				}
+			}
+		case <-ackTimeout:
+			// No error received within timeout, assume success
+			c.JSON(http.StatusOK, gin.H{"message": "listener deleted successfully"})
+			return
+		case <-ctx.Done():
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "request cancelled"})
+			return
+		}
+	}
 }
 
 // PayloadRequest matches the WebSocket service's expected format
@@ -428,8 +467,9 @@ func (p *ProxyHandlers) SendAgentCommand(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	// Subscribe to messages before sending
+	// Subscribe to messages before sending; each handler gets its own channel
 	msgCh := p.client.Subscribe()
+	defer p.client.Unsubscribe(msgCh)
 
 	// Send command
 	if err := p.client.Send(ctx, wsMsg); err != nil {
@@ -666,6 +706,10 @@ func (p *ProxyHandlers) RefreshState(c *gin.Context) {
 func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 	var tomlContent string
 
+	// Limit request body to 10MB to prevent resource exhaustion
+	const maxBodySize = 10 << 20 // 10MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodySize)
+
 	// Check if it's a file upload or raw content
 	contentType := c.GetHeader("Content-Type")
 
@@ -673,7 +717,7 @@ func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 		// Raw TOML content in body
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body (max 10MB)"})
 			return
 		}
 		tomlContent = string(body)
@@ -714,8 +758,9 @@ func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	// Subscribe to messages before sending
+	// Subscribe to messages before sending; each handler gets its own channel
 	msgCh := p.client.Subscribe()
+	defer p.client.Unsubscribe(msgCh)
 
 	// Send the upload_profiles message
 	if err := p.client.Send(ctx, wsMsg); err != nil {

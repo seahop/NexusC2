@@ -1,5 +1,6 @@
 # websocket_client.py
 import asyncio
+import hashlib
 import ssl
 import threading
 import websockets
@@ -21,10 +22,11 @@ from .constants import (
 logger = get_logger('websocket')
 
 class WebSocketClient:
-    def __init__(self):
+    def __init__(self, ca_cert_path=None):
         self.websocket = None
         self.connected = False
         self.cert_path = os.path.join(pathlib.Path(__file__).parents[2], 'certs', 'ws_server.crt')
+        self.ca_cert_path = ca_cert_path  # Optional custom CA certificate for verification
         self.message_queue = deque()
         self.send_lock = asyncio.Lock()
         self.running = True
@@ -60,11 +62,30 @@ class WebSocketClient:
         self.chunk_ttl = 300  # 5 minutes TTL for stale chunks
         self.cleanup_task = None
 
+    @staticmethod
+    def _msg_key(message):
+        """Compute a fixed-size hash key for message metadata deduplication."""
+        return hashlib.sha256(message.encode()).hexdigest()
+
     async def connect(self, username, host, port):
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.check_hostname = True
-        ssl_context.verify_mode = ssl.CERT_REQUIRED
-        ssl_context.load_verify_locations(self.cert_path)
+
+        if self.ca_cert_path and os.path.exists(self.ca_cert_path):
+            # Use custom CA certificate for verification
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            ssl_context.load_verify_locations(self.ca_cert_path)
+            logger.info(f"Using custom CA certificate: {self.ca_cert_path}")
+        else:
+            # Use bundled self-signed certificate
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            ssl_context.load_verify_locations(self.cert_path)
+            if not self.ca_cert_path:
+                logger.warning(
+                    "No custom CA certificate provided; using bundled self-signed certificate. "
+                    "Pass ca_cert_path to WebSocketClient for CA-pinned verification."
+                )
 
         uri = f"wss://{host}:{port}/ws"
         try:
@@ -218,8 +239,10 @@ class WebSocketClient:
                     }
 
             # Cache metadata for later use (thread-safe with size limit)
+            # Use hash key instead of full JSON string to reduce memory
+            msg_key = self._msg_key(message)
             with self._metadata_lock:
-                self.message_metadata[message] = (msg_type, is_high_priority, is_chunked, chunk_info)
+                self.message_metadata[msg_key] = (msg_type, is_high_priority, is_chunked, chunk_info)
                 # Evict oldest half when exceeding max size
                 if len(self.message_metadata) > self._metadata_max_size:
                     to_remove = len(self.message_metadata) // 2
@@ -235,7 +258,7 @@ class WebSocketClient:
             # Don't log regular message queuing - too noisy
         except Exception:
             # If parsing fails, cache minimal metadata
-            self.message_metadata[message] = ('unknown', False, False, None)
+            self.message_metadata[self._msg_key(message)] = ('unknown', False, False, None)
 
         logger.debug(f"Message queued. Queue size: {len(self.message_queue)}")
 
@@ -243,13 +266,18 @@ class WebSocketClient:
         """Process queued messages with batching and prioritization."""
         batch = []
         last_send_time = asyncio.get_event_loop().time()
+        backpressure_retries = 0
+        max_backpressure_retries = 100  # ~50 seconds at 0.5s backoff delay
 
         while self.running and self.connected:
             try:
                 # Add backpressure handling with message dropping
                 if len(self.message_queue) > self.MAX_QUEUE_SIZE:
+                    backpressure_retries += 1
+
                     # Drop oldest low-priority messages to prevent memory exhaustion
                     dropped_count = 0
+                    force_drop = backpressure_retries > max_backpressure_retries
                     while len(self.message_queue) > self.MAX_QUEUE_SIZE:
                         if self.message_queue:
                             dropped_msg = self.message_queue.popleft()
@@ -258,6 +286,10 @@ class WebSocketClient:
                                 msg_data = json.loads(dropped_msg)
                                 if msg_data.get('type') not in self.high_priority_types:
                                     dropped_count += 1
+                                elif force_drop:
+                                    # After max retries, drop even high-priority messages
+                                    dropped_count += 1
+                                    logger.warning("Force-dropping high-priority message due to persistent queue overflow")
                                 else:
                                     # Put high-priority back at front
                                     self.message_queue.appendleft(dropped_msg)
@@ -269,8 +301,12 @@ class WebSocketClient:
                         self.terminal_widget.log_message(
                             f"Warning: Dropped {dropped_count} messages due to queue overflow"
                         )
+                    if force_drop:
+                        backpressure_retries = 0  # Reset after force-drop
                     await asyncio.sleep(MESSAGE_QUEUE_BACKOFF_DELAY)  # Back off when queue is full
                     continue
+                else:
+                    backpressure_retries = 0  # Reset when queue is healthy
 
                 current_time = asyncio.get_event_loop().time()
                 time_since_last_send = current_time - last_send_time
@@ -279,8 +315,9 @@ class WebSocketClient:
                     message = self.message_queue.popleft()
 
                     # Use cached metadata instead of re-parsing (thread-safe)
+                    msg_key = self._msg_key(message)
                     with self._metadata_lock:
-                        metadata = self.message_metadata.get(message, ('unknown', False, False, None))
+                        metadata = self.message_metadata.get(msg_key, ('unknown', False, False, None))
                     msg_type, is_high_priority, is_chunked, chunk_info = metadata
 
                     if is_high_priority:
@@ -295,7 +332,7 @@ class WebSocketClient:
                                     await self._handle_message_sent(message)
                                     # Clean up metadata cache after successful send (thread-safe)
                                     with self._metadata_lock:
-                                        self.message_metadata.pop(message, None)
+                                        self.message_metadata.pop(msg_key, None)
                                     last_send_time = asyncio.get_event_loop().time()
                                 except asyncio.TimeoutError:
                                     self.message_queue.appendleft(message)
@@ -348,7 +385,7 @@ class WebSocketClient:
                         await self._handle_message_sent(message)
                         # Clean up metadata cache after successful send (thread-safe)
                         with self._metadata_lock:
-                            self.message_metadata.pop(message, None)
+                            self.message_metadata.pop(self._msg_key(message), None)
                     except asyncio.TimeoutError:
                         self.message_queue.appendleft(message)
                         await self._handle_send_timeout()
@@ -430,17 +467,17 @@ class WebSocketClient:
                     
                     # Handle different message types
                     if message_type == 'chunk_progress':
-                        self._handle_chunk_progress(message_data)
+                        await self._handle_chunk_progress(message_data)
                     elif message_type == 'chunk_received':
                         self._handle_chunk_received(message_data)
                     elif message_type == 'command_assembled':
-                        self._handle_command_assembled(message_data)
+                        await self._handle_command_assembled(message_data)
                     # NEW: Handle command output chunks
                     elif message_type == 'command_output_chunk_start':
-                        self._handle_command_output_chunk_start(message_data)
+                        await self._handle_command_output_chunk_start(message_data)
                         return None  # Don't return yet, still assembling
                     elif message_type == 'command_output_chunk':
-                        self._handle_command_output_chunk(message_data)
+                        await self._handle_command_output_chunk(message_data)
                         return None  # Don't return yet, still assembling
                     elif message_type == "agent_renamed":
                         print("WebSocketClient: Handling agent rename broadcast.")
@@ -466,7 +503,7 @@ class WebSocketClient:
                             print("WebSocketClient: No agent_tree_widget linked.")
 
                     elif message_type == 'command_output_chunk_complete':
-                        return self._handle_command_output_chunk_complete(message_data)
+                        return await self._handle_command_output_chunk_complete(message_data)
                     elif message_type == 'binary_chunk':
                         # Handle binary chunks silently
                         chunk_num = message_data.get('chunk_num')
@@ -745,125 +782,6 @@ class WebSocketClient:
                     self.terminal_widget.log_message(f"Error receiving message: {e}")
                 break
     
-    async def handle_messages(self):
-        """Main message handler with chunk support"""
-        while self.running and self.connected:
-            try:
-                message = await self.websocket.recv()
-                message_data = json.loads(message)
-
-                # Log the received message (except for chunks)
-                message_type = message_data.get("type")
-                
-                # Skip logging for chunk-related messages
-                if message_type not in ['chunk_progress', 'chunk_received', 'binary_chunk', 
-                                       'command_output_chunk_start', 'command_output_chunk', 
-                                       'command_output_chunk_complete', 'command_queued']:
-                    logger.debug(f"Received message: {json.dumps(message_data, indent=4)[:500]}...")
-
-                if message_type == 'initial_state':
-                    logger.debug("Processing initial state")
-                    state_data = message_data.get("data", {})
-                    
-                    # DEBUG: Log what we received
-                    logger.debug(f"Initial state has {len(state_data.get('connections', []))} connections")
-                    logger.debug(f"Initial state has {len(state_data.get('listeners', []))} listeners")
-                    
-                    # DEBUG: Check for aliases in connections
-                    for conn in state_data.get('connections', []):
-                        logger.debug(f"Connection {conn.get('newclient_id')[:8]}... has alias: {conn.get('alias', 'NONE')}")
-                    
-                    if self.db.store_state(state_data):
-                        logger.debug("Successfully stored initial state data")
-                        self.db.verify_database_state()
-                        self.state_received.emit()
-
-                elif message_type == "agent_renamed":
-                    print("WebSocketClient: Handling agent rename broadcast.")
-                    rename_data = message_data.get("data", {})
-
-                    if self.agent_tree_widget:
-                        self.agent_tree_widget.handle_agent_renamed(rename_data)
-                    else:
-                        print("WebSocketClient: No agent_tree_widget linked.")
-
-                    if self.terminal_widget:
-                        self.terminal_widget.handle_agent_renamed(rename_data)
-
-                elif message_type == "agent_tags_updated":
-                    print("WebSocketClient: Handling agent tags update broadcast.")
-                    tags_data = message_data.get("data", {})
-
-                    if self.agent_tree_widget:
-                        self.agent_tree_widget.handle_agent_tags_updated(tags_data)
-                    else:
-                        print("WebSocketClient: No agent_tree_widget linked.")
-
-                elif message_type == "new_connection":
-                    print("WebSocketClient: Handling new connection.")
-                    if self.agent_tree_widget:
-                        connection_data = message_data.get("content")
-                        # Check if alias is included
-                        if connection_data and 'alias' in connection_data:
-                            logger.debug(f"New connection includes alias: {connection_data['alias']}")
-                        self.agent_tree_widget.handle_new_connection(connection_data)
-                    else:
-                        print("WebSocketClient: No agent_tree_widget linked.")
-
-                elif message_type == "connection_update":
-                    print("WebSocketClient: Handling connection update.")
-                    if self.agent_tree_widget:
-                        connection_data = message_data.get("data")
-                        self.agent_tree_widget.update_existing_connection(connection_data)
-                    else:
-                        print("WebSocketClient: No agent_tree_widget linked.")
-                
-                elif message_type in ['chunk_progress', 'chunk_received', 'command_assembled']:
-                    # These are handled by specific methods in receive_messages
-                    pass
-                
-                elif message_type == 'command_output_chunk_start':
-                    self._handle_command_output_chunk_start(message_data)
-                
-                elif message_type == 'command_output_chunk':
-                    self._handle_command_output_chunk(message_data)
-                
-                elif message_type == 'command_output_chunk_complete':
-                    # Reassemble and process the complete output
-                    complete_message = self._handle_command_output_chunk_complete(message_data)
-                    if complete_message and self.terminal_widget:
-                        # Process as a normal command_result
-                        self.terminal_widget.display_command_result(complete_message['data'])
-                        
-                elif message_type == 'command_result':
-                    # Handle regular non-chunked command results
-                    if self.terminal_widget:
-                        self.terminal_widget.display_command_result(message_data.get('data'))
-                        
-                else:
-                    if message_type not in ['binary_chunk', 'command_queued']:
-                        logger.debug(f"Unhandled message type: {message_type}")
-
-            except json.JSONDecodeError as e:
-                logger.debug(f"Failed to decode JSON: {e}")
-            except websockets.exceptions.ConnectionClosed:
-                self.connected = False
-                # Clear chunking state on connection close (thread-safe)
-                async with self.chunks_lock:
-                    self.active_chunks.clear()
-                    self.chunk_buffers.clear()
-                    self.output_chunks.clear()
-                logger.debug("Connection closed by server.")
-                break
-            except Exception as e:
-                # Clear chunking state on error (thread-safe)
-                async with self.chunks_lock:
-                    self.active_chunks.clear()
-                    self.chunk_buffers.clear()
-                    self.output_chunks.clear()
-                logger.debug(f"Error in handle_messages: {e}")
-                break
-
     def process_connection_update(self, connection_data, update=False):
         """Process new or updated connection data."""
         action = "Updating" if update else "Adding"

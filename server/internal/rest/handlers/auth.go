@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"c2/internal/rest/auth"
@@ -56,7 +57,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var err error
 
 	// First, try shared API password if configured
-	if h.apiPassword != "" && req.Password == h.apiPassword {
+	// Use constant-time comparison to prevent timing side-channel attacks
+	if h.apiPassword != "" && subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.apiPassword)) == 1 {
 		// Use cert-style auth (auto-provisions user if needed)
 		tokenPair, err = h.jwtManager.AuthenticateByUsername(req.Username)
 	} else {

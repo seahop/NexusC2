@@ -162,7 +162,8 @@ func main() {
 	// Use agent-handler service name in Docker, localhost for local development
 	grpcAddress := os.Getenv("GRPC_ADDRESS")
 	if grpcAddress == "" {
-		grpcAddress = "agent-handler:50051" // Default to Docker service name
+		grpcAddress = "agent-handler:50051"
+		log.Printf("WARNING: GRPC_ADDRESS not set, using default %s", grpcAddress)
 	}
 	log.Printf("Creating stream manager for gRPC connection to %s", grpcAddress)
 	streamManager := reconnect.NewStreamManager(grpcAddress, clientID, h)

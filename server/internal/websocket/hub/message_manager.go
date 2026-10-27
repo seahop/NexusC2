@@ -133,6 +133,8 @@ func (mm *MessageManager) broadcast(data []byte) error {
 	mm.mu.RUnlock()
 
 	// Now broadcast without holding the lock
+	// Use recover to guard against sending to a closed channel if a client
+	// disconnects between the snapshot and the send.
 	var failed int
 	for _, client := range clientSnapshot {
 		if client.Send == nil {
@@ -141,12 +143,20 @@ func (mm *MessageManager) broadcast(data []byte) error {
 			continue
 		}
 
-		select {
-		case client.Send <- data:
-			// Sent successfully
-		default:
-			failed++
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[WARN] broadcast: recovered from send on closed channel for client %s", client.Username)
+					failed++
+				}
+			}()
+			select {
+			case client.Send <- data:
+				// Sent successfully
+			default:
+				failed++
+			}
+		}()
 	}
 
 	if failed > 0 {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // handleFileDownload handles file download requests
@@ -24,8 +25,21 @@ func (h *WSHandler) handleFileDownload(client *hub.Client, message []byte) error
 		return fmt.Errorf("failed to parse file download request: %v", err)
 	}
 
+	// Sanitize filename to prevent path traversal
+	sanitized := filepath.Base(req.Data.Filename)
+	if sanitized == "" || sanitized == "." || sanitized == ".." {
+		return fmt.Errorf("invalid filename: %q", req.Data.Filename)
+	}
+
 	// Path to downloads directory
-	filePath := filepath.Join("/app/downloads", req.Data.Filename)
+	downloadsDir := "/app/downloads"
+	filePath := filepath.Join(downloadsDir, sanitized)
+
+	// Verify resolved path is still within the downloads directory
+	resolvedPath, err := filepath.Abs(filePath)
+	if err != nil || !strings.HasPrefix(resolvedPath, downloadsDir) {
+		return fmt.Errorf("invalid file path: path traversal detected")
+	}
 
 	// Open file but don't close it yet - move the close into the goroutine
 	file, err := os.Open(filePath)
@@ -77,7 +91,7 @@ func (h *WSHandler) handleFileDownload(client *hub.Client, message []byte) error
 					TotalChunks int64  `json:"total_chunks"`
 					Data        string `json:"data"`
 				}{
-					Filename:    req.Data.Filename,
+					Filename:    sanitized,
 					ChunkNum:    chunkNum,
 					TotalChunks: totalChunks,
 					Data:        base64.StdEncoding.EncodeToString(chunk),
@@ -92,13 +106,13 @@ func (h *WSHandler) handleFileDownload(client *hub.Client, message []byte) error
 
 			select {
 			case client.Send <- chunkJSON:
-				logMessage(LOG_VERBOSE, "Sent chunk %d/%d for file %s", chunkNum+1, totalChunks, req.Data.Filename)
+				logMessage(LOG_VERBOSE, "Sent chunk %d/%d for file %s", chunkNum+1, totalChunks, sanitized)
 			default:
 				logMessage(LOG_NORMAL, "Warning: Client send buffer full, chunk %d/%d dropped", chunkNum+1, totalChunks)
 			}
 		}
 
-		logMessage(LOG_MINIMAL, "Finished sending all chunks for file %s", req.Data.Filename)
+		logMessage(LOG_MINIMAL, "Finished sending all chunks for file %s", sanitized)
 	}()
 
 	return nil

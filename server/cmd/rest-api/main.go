@@ -95,6 +95,7 @@ func main() {
 	grpcAddress := os.Getenv("GRPC_ADDRESS")
 	if grpcAddress == "" {
 		grpcAddress = "host.docker.internal:50051"
+		log.Printf("WARNING: GRPC_ADDRESS not set, using default %s", grpcAddress)
 	}
 
 	log.Printf("Connecting to gRPC agent service at %s", grpcAddress)

@@ -28,7 +28,7 @@ class FloatingStatusIndicator(QWidget):
             self.reposition()
         
         # Timer for pulsing animation when connecting
-        self.pulse_timer = QTimer()
+        self.pulse_timer = QTimer(self)
         self.pulse_timer.timeout.connect(self.update_pulse)
         self.pulse_opacity = 1.0
         self.pulse_direction = -0.05

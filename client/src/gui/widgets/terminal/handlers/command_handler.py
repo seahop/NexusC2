@@ -370,7 +370,22 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
                 "Help": ['help']
             }
 
+            os_category_filter = {
+                "Linux Persistence": "linux",
+                "Linux Exploitation": "linux",
+                "macOS Persistence": "darwin",
+                "macOS Exploitation": "darwin",
+                "Windows Token": "windows",
+                "Process Execution": "windows",
+                "BOF Operations": "windows",
+                "Assembly Jobs": "windows",
+            }
+
             for category, cmds in categories.items():
+                if self.agent_os and category in os_category_filter:
+                    if os_category_filter[category] != self.agent_os:
+                        continue
+
                 category_has_commands = False
                 category_text = f"\n{category}:\n"
 

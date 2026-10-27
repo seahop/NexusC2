@@ -468,6 +468,8 @@ class TerminalWidget(QWidget):
         self.command_history = {"commands": [], "outputs": []}
         self.outputs_by_command = {}
         self.pending_outputs = {}  # Store outputs for agents without open tabs: {agent_id: [(output, timestamp), ...]}
+        self._pending_max_per_agent = 500  # Max pending outputs per agent
+        self._pending_max_agents = 50  # Max agents in pending_outputs
         self.agent_tree = None
         self.agent_aliases = {}  # Track agent renames (agent_guid -> display_name)
 
@@ -516,6 +518,7 @@ class TerminalWidget(QWidget):
         self.setLayout(layout)
         
         self.agent_terminals = {}
+        self._agent_terminals_max = 100  # Max cached agent terminals
         self.log_message("C2 Client started")
     
     def store_command_history(self, commands, outputs_by_command):
@@ -603,6 +606,10 @@ class TerminalWidget(QWidget):
                                 break
 
                     print(f"TerminalWidget: Agent OS detected as: {agent_os}")
+
+            # Evict oldest closed terminals if at capacity
+            if len(self.agent_terminals) >= self._agent_terminals_max:
+                self._evict_closed_terminals()
 
             # Pass OS to AgentTerminal
             agent_terminal = AgentTerminal(agent_name, agent_guid, self.ws_thread, agent_os)
@@ -722,7 +729,22 @@ class TerminalWidget(QWidget):
         else:
             # Handle other closeable tabs
             self.tabs.removeTab(index)
-    
+
+    def _evict_closed_terminals(self):
+        """Remove oldest closed (not in any tab) agent terminals to free memory."""
+        # Find terminals that are NOT currently in any tab
+        open_widgets = {self.tabs.widget(i) for i in range(self.tabs.count())}
+        closed_guids = [
+            guid for guid, terminal in self.agent_terminals.items()
+            if terminal not in open_widgets
+        ]
+        # Remove up to half the closed terminals (oldest first by insertion order)
+        to_remove = max(1, len(closed_guids) // 2)
+        for guid in closed_guids[:to_remove]:
+            terminal = self.agent_terminals.pop(guid)
+            terminal.deleteLater()
+            self.log_message(f"Evicted cached terminal for agent {guid[:8]} (capacity limit)")
+
     def log_message(self, message):
         """Add a message to the logs"""
         self.logs.add_log(message)
@@ -830,12 +852,19 @@ class TerminalWidget(QWidget):
             # via the command_queued_data signal to avoid duplication.
             if agent_id and output and status != 'queued':
                 if agent_id not in self.pending_outputs:
+                    # Evict oldest agent entry if at capacity
+                    if len(self.pending_outputs) >= self._pending_max_agents:
+                        oldest_key = next(iter(self.pending_outputs))
+                        del self.pending_outputs[oldest_key]
                     self.pending_outputs[agent_id] = []
                 self.pending_outputs[agent_id].append({
                     'output': output,
                     'timestamp': timestamp,
                     'status': status
                 })
+                # Cap per-agent entries to prevent unbounded growth
+                if len(self.pending_outputs[agent_id]) > self._pending_max_per_agent:
+                    self.pending_outputs[agent_id] = self.pending_outputs[agent_id][-self._pending_max_per_agent:]
                 print(f"TerminalWidget: Stored pending output for agent {agent_id[:8] if agent_id else 'N/A'}")
 
             print(f"TerminalWidget: No terminal found for agent {agent_id}. Logging to general terminal.")

@@ -1420,9 +1420,34 @@ class AgentTreeWidget(QWidget):
                     item.setHidden(True)
             self.terminal_widget.log_message(f"Agent {agent['name']} removed")
 
-    def handle_agent_checkin(self, agent_id, timestamp):
-        agent = next((a for a in self.agent_data if a['guid'] == agent_id), None)
-        if agent and agent.get('deleted'):
+    def handle_agent_checkin(self, data):
+        """Handle agent checkin data (dict with agent_id and last_seen).
+
+        Updates the agent's last_seen_timestamp and reactivates deleted agents.
+        This runs on the main/GUI thread via signal connection.
+        """
+        if isinstance(data, dict):
+            agent_id = data.get('agent_id')
+            last_seen = data.get('last_seen')
+        else:
+            # Legacy call: positional (agent_id, timestamp)
+            agent_id = data
+            last_seen = None
+
+        agent = self.agent_by_guid.get(agent_id)
+        if not agent:
+            return
+
+        # Update last_seen_timestamp
+        if last_seen is not None:
+            try:
+                timestamp = QDateTime.fromSecsSinceEpoch(int(last_seen))
+                agent['last_seen_timestamp'] = timestamp
+            except (ValueError, TypeError):
+                pass
+
+        # Reactivate if deleted
+        if agent.get('deleted'):
             agent['deleted'] = False
             if self.current_view == 'agents':
                 if agent['name'] not in self.agent_items:

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
 type ListenerMessage struct {
@@ -448,6 +449,42 @@ func (h *Hub) GetClientCount() int {
 	return len(h.clients)
 }
 
+// ReconcileClientState checks for stale entries where the underlying WebSocket
+// connection is closed but the client was never properly unregistered.
+// Call this periodically to prevent gauge/counter drift.
+func (h *Hub) ReconcileClientState() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	var stale []*Client
+	for client := range h.clients {
+		if client.Conn == nil {
+			stale = append(stale, client)
+			continue
+		}
+		// Attempt a no-op write to detect dead connections
+		if err := client.Conn.WriteControl(
+			websocket.PingMessage, nil,
+			time.Now().Add(2*time.Second),
+		); err != nil {
+			stale = append(stale, client)
+		}
+	}
+
+	for _, client := range stale {
+		log.Printf("[Reconcile] Removing stale client %s (%s)", client.Username, client.ID)
+		delete(h.clients, client)
+		h.removeFromUserMap(client)
+		delete(h.activeUsers, client.Username)
+		h.messageManager.UnregisterClient(client)
+	}
+
+	if len(stale) > 0 {
+		log.Printf("[Reconcile] Cleaned up %d stale client(s), active: %d",
+			len(stale), len(h.clients))
+	}
+}
+
 func (h *Hub) initPreparedStatements() error {
 	var err error
 
@@ -566,18 +603,25 @@ func (h *Hub) BroadcastToUserHighPriority(ctx context.Context, username string, 
 	}
 
 	for _, client := range clients {
-		select {
-		case client.SendHigh <- message:
-			// Successfully queued
-		default:
-			// Channel full, try regular channel as fallback
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[WARN] BroadcastToUserHighPriority: recovered from send on closed channel for %s", username)
+				}
+			}()
 			select {
-			case client.Send <- message:
-				log.Printf("High priority channel full, used regular channel for %s", username)
+			case client.SendHigh <- message:
+				// Successfully queued
 			default:
-				log.Printf("Both channels full for client %s, dropping message", username)
+				// Channel full, try regular channel as fallback
+				select {
+				case client.Send <- message:
+					log.Printf("High priority channel full, used regular channel for %s", username)
+				default:
+					log.Printf("Both channels full for client %s, dropping message", username)
+				}
 			}
-		}
+		}()
 	}
 	return nil
 }

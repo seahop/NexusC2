@@ -1632,6 +1632,17 @@ func (b *Builder) runBuilderContainer(ctx context.Context, config *container.Con
 		return fmt.Errorf("container creation failed: %v", err)
 	}
 
+	// Always remove the container after build completes or fails.
+	// Use context.Background() with timeout so cleanup succeeds even if the
+	// parent context is cancelled (e.g., client disconnect).
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := b.dockerClient.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true}); err != nil {
+			log.Printf("[Builder] Warning: failed to remove container %s: %v", resp.ID, err)
+		}
+	}()
+
 	waiter, err := b.dockerClient.ContainerAttach(ctx, resp.ID, container.AttachOptions{
 		Stream: true,
 		Stdout: true,

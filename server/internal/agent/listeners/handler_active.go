@@ -88,7 +88,7 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 	}
 
 	log.Printf("[Active Connection] Received data for client %s", conn.ClientID)
-	log.Printf("[Active Connection] Current secret1: %s", conn.Secret1)
+	log.Printf("[Active Connection] Secrets loaded for client %s", conn.ClientID)
 
 	// Convert secret to key
 	secretHash := sha256.Sum256([]byte(conn.Secret1))
@@ -133,7 +133,7 @@ func (m *Manager) handleActiveConnection(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	log.Printf("[Active Connection] Successfully decrypted data: %s", string(plaintext))
+	log.Printf("[Active Connection] Successfully decrypted data (%d bytes)", len(plaintext))
 
 	// Parse the decrypted data - now includes optional link data fields
 	var decryptedData map[string]interface{}

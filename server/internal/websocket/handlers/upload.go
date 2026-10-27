@@ -97,14 +97,32 @@ func (h *WSHandler) getOrCreateUploadTracker(data struct {
 	FileSize    int64  `json:"file_size"`
 	Timestamp   string `json:"timestamp"`
 }) (*UploadTracker, error) {
+	// Sanitize upload ID to prevent path traversal
+	sanitizedID := filepath.Base(data.UploadID)
+	if sanitizedID == "" || sanitizedID == "." || sanitizedID == ".." ||
+		strings.ContainsAny(sanitizedID, "/\\") {
+		return nil, fmt.Errorf("invalid upload ID: %q", data.UploadID)
+	}
+
+	// Sanitize filename to prevent path traversal
+	sanitizedName := filepath.Base(data.FileName)
+	if sanitizedName == "" || sanitizedName == "." || sanitizedName == ".." {
+		return nil, fmt.Errorf("invalid filename: %q", data.FileName)
+	}
+
 	// Try to get existing tracker
-	if trackerIface, ok := h.activeUploads.Load(data.UploadID); ok {
-		log.Printf("DEBUG: Retrieved existing tracker for upload %s", data.UploadID)
+	if trackerIface, ok := h.activeUploads.Load(sanitizedID); ok {
+		log.Printf("DEBUG: Retrieved existing tracker for upload %s", sanitizedID)
 		return trackerIface.(*UploadTracker), nil
 	}
 
-	// Create temp directory path
-	chunksDir := filepath.Join("/app/temp", data.UploadID)
+	// Create temp directory path and validate it stays within /app/temp
+	tempDir := "/app/temp"
+	chunksDir := filepath.Join(tempDir, sanitizedID)
+	resolvedDir, err := filepath.Abs(chunksDir)
+	if err != nil || !strings.HasPrefix(resolvedDir, tempDir) {
+		return nil, fmt.Errorf("invalid upload path: path traversal detected")
+	}
 	log.Printf("DEBUG: Creating chunks directory: %s", chunksDir)
 
 	// Create temp directory
@@ -113,19 +131,19 @@ func (h *WSHandler) getOrCreateUploadTracker(data struct {
 		return nil, fmt.Errorf("failed to create chunks directory: %v", err)
 	}
 
-	// Create new tracker
+	// Create new tracker with sanitized values
 	tracker := &UploadTracker{
-		UploadID:       data.UploadID,
-		AgentID:        data.AgentID, // Store the AgentID
-		FileName:       data.FileName,
+		UploadID:       sanitizedID,
+		AgentID:        data.AgentID,
+		FileName:       sanitizedName,
 		RemotePath:     data.RemotePath,
 		ChunksDir:      chunksDir,
 		TotalChunks:    data.TotalChunks,
 		ReceivedChunks: make(map[int]bool),
 	}
 
-	h.activeUploads.Store(data.UploadID, tracker)
-	log.Printf("DEBUG: Created new tracker for upload %s", data.UploadID)
+	h.activeUploads.Store(sanitizedID, tracker)
+	log.Printf("DEBUG: Created new tracker for upload %s", sanitizedID)
 	return tracker, nil
 }
 
@@ -170,14 +188,19 @@ func (h *WSHandler) finalizeUpload(tracker *UploadTracker) error {
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
-	// Generate timestamped filename
+	// Generate timestamped filename (tracker.FileName is already sanitized via filepath.Base)
 	ext := filepath.Ext(tracker.FileName)
 	baseFilename := strings.TrimSuffix(tracker.FileName, ext)
 	timestamp := time.Now().Format("20060102_150405")
 	newFilename := fmt.Sprintf("%s_%s%s", baseFilename, timestamp, ext)
 
-	// Create the final file
-	uploadPath := filepath.Join("/app/uploads", newFilename)
+	// Create the final file and validate path stays within uploads directory
+	uploadsDir := "/app/uploads"
+	uploadPath := filepath.Join(uploadsDir, newFilename)
+	resolvedUpload, err := filepath.Abs(uploadPath)
+	if err != nil || !strings.HasPrefix(resolvedUpload, uploadsDir) {
+		return fmt.Errorf("invalid upload path: path traversal detected")
+	}
 	finalFile, err := os.Create(uploadPath)
 	if err != nil {
 		return fmt.Errorf("failed to create final file: %v", err)

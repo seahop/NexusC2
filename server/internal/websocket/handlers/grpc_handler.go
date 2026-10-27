@@ -5,6 +5,7 @@ import (
 	"c2/internal/websocket/agent"
 	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
@@ -16,9 +17,15 @@ func (h *WSHandler) ensureGRPCConnection() error {
 
 	clientID := "websocket_service"
 
+	// Read gRPC address from environment, fall back to localhost for local dev
+	grpcAddr := os.Getenv("GRPC_ADDRESS")
+	if grpcAddr == "" {
+		grpcAddr = "localhost:50051"
+	}
+
 	for {
-		logMessage(LOG_NORMAL, "Attempting gRPC connection to agent service (attempt %d)...", retries+1)
-		client, err := agent.NewClient("localhost:50051", clientID) // Provide clientID
+		logMessage(LOG_NORMAL, "Attempting gRPC connection to agent service at %s (attempt %d)...", grpcAddr, retries+1)
+		client, err := agent.NewClient(grpcAddr, clientID)
 		if err == nil {
 			h.agentClient = client
 			log.Println("gRPC connection to agent service successful")
