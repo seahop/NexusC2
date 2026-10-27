@@ -37,4 +37,8 @@ echo "(Save this password - you'll need it to authenticate with the REST API)"
 # Copy .env to parent docker directory for docker-compose build args
 DOCKER_DIR="$(dirname "$SCRIPT_DIR")"
 cp "$SECRETS_DIR/.env" "$DOCKER_DIR/.env"
+
+# Add COMPOSE_DIR so builder container mounts resolve to the correct host paths
+echo "COMPOSE_DIR=$DOCKER_DIR" >> "$DOCKER_DIR/.env"
+
 echo "Copied .env to $DOCKER_DIR/.env for docker-compose build args"

@@ -585,6 +585,20 @@ class WebSocketThread(QThread):
                     self.current_dialog = None
                 # 'in_progress' status is informational, no action needed
 
+            elif message_type in ('socks_http_started', 'socks_http_stopped', 'socks_http_error',
+                                    'socks_started', 'socks_stopped', 'socks_error'):
+                data = message_data.get('data', message_data)
+                agent_id = data.get('agent_id', '')
+                msg = data.get('message', '') or data.get('error', '')
+                result_data = {
+                    'agent_id': agent_id,
+                    'output': msg,
+                    'status': 'error' if 'error' in message_type else 'completed',
+                    'command_id': data.get('command_id', ''),
+                    'timestamp': data.get('timestamp', ''),
+                }
+                self.command_result.emit(result_data)
+
             elif message_data.get('status') in ['success', 'error']:
                 if self.current_dialog:
                     if message_data['status'] == 'error':

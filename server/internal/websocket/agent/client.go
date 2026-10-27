@@ -345,12 +345,27 @@ func (c *Client) registerMessageHandlers() {
 	c.messageHandlers["link_update"] = c.handleLinkUpdate
 	c.messageHandlers["command_ack"] = c.handleCommandAck
 	c.messageHandlers["pong"] = c.handlePong // Silent keepalive response
+	c.messageHandlers["socks_http_started"] = c.handleGenericBroadcast
+	c.messageHandlers["socks_http_stopped"] = c.handleGenericBroadcast
+	c.messageHandlers["socks_http_error"] = c.handleGenericBroadcast
+	c.messageHandlers["socks_started"] = c.handleGenericBroadcast
+	c.messageHandlers["socks_stopped"] = c.handleGenericBroadcast
+	c.messageHandlers["socks_error"] = c.handleGenericBroadcast
 }
 
 // handlePong silently handles pong keepalive responses
 func (c *Client) handlePong(msg *pb.StreamMessage) error {
-	// Pong is just a keepalive acknowledgment - no action needed
 	return nil
+}
+
+// handleGenericBroadcast forwards a gRPC message directly to all WebSocket clients
+func (c *Client) handleGenericBroadcast(msg *pb.StreamMessage) error {
+	if c.Hub == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.Hub.BroadcastToAll(ctx, []byte(msg.Content))
 }
 
 func (c *Client) StartListener(ctx context.Context, name string, port int32, listenerType pb.ListenerType, secure bool, getProfile, postProfile, serverResponseProfile string) (*pb.ListenerResponse, error) {
