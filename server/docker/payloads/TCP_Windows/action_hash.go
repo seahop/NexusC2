@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-// HashTemplate receives string templates from server
-type HashTemplate struct {
+// DigestCfg receives string templates from server
+type DigestCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -42,52 +42,52 @@ const (
 	idxHashNameMd5    = 266 // md5
 )
 
-// HashCommand implements the CommandInterface for file hashing
-type HashCommand struct {
-	tpl *HashTemplate
+// DigestMsg implements the OpIface for file hashing
+type DigestMsg struct {
+	tpl *DigestCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (h *HashCommand) getTpl(idx int) string {
+func (h *DigestMsg) getTpl(idx int) string {
 	if h.tpl != nil && h.tpl.Templates != nil && idx < len(h.tpl.Templates) {
 		return h.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (h *DigestMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	h.tpl = &HashTemplate{}
+	h.tpl = &DigestCfg{}
 	if err := json.Unmarshal(decoded, h.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -121,29 +121,29 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	fileInfo, err := os.Stat(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E4, targetPath),
 				Error:       err,
-				ErrorString: Err(E4),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E4),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E10, targetPath),
 			Error:       err,
-			ErrorString: Err(E10),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E10),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E6, targetPath),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -152,35 +152,35 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	case algoMd5:
 		hash, err := calculateMD5(targetPath)
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E10, targetPath),
 				Error:       err,
-				ErrorString: Err(E10),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E10),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
-		return CommandResult{
+		return OpResult{
 			Output:      fmt.Sprintf("%s%s:%s", prefixMd5, filepath.Base(targetPath), hash),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 
 	case algoSha256:
 		hash, err := calculateSHA256(targetPath)
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E10, targetPath),
 				Error:       err,
-				ErrorString: Err(E10),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E10),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
-		return CommandResult{
+		return OpResult{
 			Output:      fmt.Sprintf("%s%s:%s", prefixSha256, filepath.Base(targetPath), hash),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 
 	case algoAll:
@@ -208,17 +208,17 @@ func (h *HashCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 			exitCode = 1
 		}
 
-		return CommandResult{
+		return OpResult{
 			Output:      output.String(),
-			ExitCode:    exitCode,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    exitCode,
+			Done: time.Now().Format(time.RFC3339),
 		}
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E21, algorithm),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
@@ -255,52 +255,52 @@ func calculateSHA256(filePath string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// HashDirCommand implements CommandInterface for directory hashing
-type HashDirCommand struct {
-	tpl *HashTemplate
+// DigestDirMsg implements OpIface for directory hashing
+type DigestDirMsg struct {
+	tpl *DigestCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (h *HashDirCommand) getTpl(idx int) string {
+func (h *DigestDirMsg) getTpl(idx int) string {
 	if h.tpl != nil && h.tpl.Templates != nil && idx < len(h.tpl.Templates) {
 		return h.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (h *DigestDirMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	h.tpl = &HashTemplate{}
+	h.tpl = &DigestCfg{}
 	if err := json.Unmarshal(decoded, h.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -386,12 +386,12 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	if err != nil {
 		output.WriteString(fmt.Sprintf("\n%s\n", ErrCtx(E10, targetDir)))
-		return CommandResult{
+		return OpResult{
 			Output:      output.String(),
 			Error:       err,
-			ErrorString: Err(E10),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E10),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -402,9 +402,9 @@ func (h *HashDirCommand) Execute(ctx *CommandContext, args []string) CommandResu
 		exitCode = 1
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    exitCode,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    exitCode,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

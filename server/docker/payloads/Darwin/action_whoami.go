@@ -14,7 +14,7 @@ import (
 
 type WhoamiCommand struct{}
 
-func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *WhoamiCommand) execute(ctx *OpCtx, args []string) OpResult {
 	var output strings.Builder
 
 	// Default behavior for non-impersonated context
@@ -51,10 +51,10 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 

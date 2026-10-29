@@ -54,6 +54,8 @@ name = "my-custom-post"                   # Unique profile name (required)
 path = "/api/v1/submit"                   # URL path for submissions (required)
 method = "POST"                           # HTTP method (default: POST)
 content_type = "application/json"         # Content-Type header (default: application/json)
+# pad_pre_header = "X-Cache-Seq"          # Padding prepend length header (default: X-Cache-Seq)
+# pad_app_header = "X-Cache-Idx"          # Padding append length header (default: X-Cache-Idx)
 
 # Headers to include in agent requests (optional)
 [[http_profiles.post.headers]]
@@ -81,11 +83,31 @@ status_field = "status"                   # JSON field for status (default: stat
 data_field = "data"                       # JSON field for data (default: data)
 command_id_field = "id"                   # JSON field for command ID (default: id)
 rekey_value = "refresh"                   # Value indicating rekey needed (default: rekey)
+# pad_pre_header = "X-Cache-Seq"          # Padding prepend length header (default: X-Cache-Seq)
+# pad_app_header = "X-Cache-Idx"          # Padding append length header (default: X-Cache-Idx)
 
 # Headers to include in server responses (optional)
 [[http_profiles.server_response.headers]]
 name = "Cache-Control"
 value = "no-store"
+
+# -----------------------------------------------------------------------------
+# PROFILE VARIANTS - Named combinations of GET/POST/Response profiles
+# -----------------------------------------------------------------------------
+# Variants let operators group profiles into named sets and select one at
+# build time.  The server handles agents built with any registered variant.
+#
+# [[http_profiles.variants]]
+# name = "corporate-windows"
+# get_profile = "my-custom-get"
+# post_profile = "my-custom-post"
+# server_response_profile = "my-custom-response"
+#
+# [[http_profiles.variants]]
+# name = "stealth-linux"
+# get_profile = "s3-get"
+# post_profile = "s3-post"
+# server_response_profile = "s3-response"
 
 # =============================================================================
 # EXAMPLES - Common profile patterns

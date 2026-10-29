@@ -13,16 +13,16 @@ import (
 	"time"
 )
 
-type UploadCommand struct{}
+type SendMsg struct{}
 
-// Execute function from action_upload.go
-func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+// execute function from action_upload.go
+func (c *SendMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -72,15 +72,15 @@ func (c *UploadCommand) Execute(ctx *CommandContext, args []string) CommandResul
 
 	// Simply return the parsed remote path - actual directory creation
 	// and file writing will happen when chunks are processed
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S4, remotePath),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // HandleUploadChunk function from action_upload.go
-func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error) {
+func HandleUploadChunk(cmd Msg, ctx *OpCtx) (*OpResult, error) {
 	if cmd.Data == "" {
 		return nil, fmt.Errorf(Err(E1))
 	}
@@ -96,7 +96,7 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 	uploadInfo, exists := commandQueue.activeUploads[cmd.Filename]
 	now := time.Now()
 	if !exists {
-		uploadInfo = &UploadInfo{
+		uploadInfo = &SI{
 			Chunks:      make(map[int][]byte),
 			TotalChunks: cmd.TotalChunks,
 			RemotePath:  cmd.RemotePath,
@@ -159,25 +159,25 @@ func HandleUploadChunk(cmd Command, ctx *CommandContext) (*CommandResult, error)
 		delete(commandQueue.activeUploads, cmd.Filename)
 		commandQueue.mu.Unlock()
 
-		return &CommandResult{
-			Command:     cmd,
+		return &OpResult{
+			Cmd:     cmd,
 			Output:      SuccCtx(S5, finalPath),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}, nil
 	}
 
 	// Return success for intermediate chunk
-	return &CommandResult{
-		Command:     cmd,
+	return &OpResult{
+		Cmd:     cmd,
 		Output:      Succ(S0),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}, nil
 }
 
 // assembleAndWriteFile function from action_upload.go
-func assembleAndWriteFile(info *UploadInfo, finalPath string) error {
+func assembleAndWriteFile(info *SI, finalPath string) error {
 
 	// Create final file
 	finalFile, err := NetworkAwareOpenFile(finalPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)

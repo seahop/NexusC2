@@ -92,12 +92,12 @@ func GetTokenUser(token syscall.Handle) (string, string) {
 }
 
 // GetImpersonatedUser gets the impersonated user from the token store
-func GetImpersonatedUser(ctx *CommandContext) (string, string, bool) {
+func GetImpersonatedUser(ctx *OpCtx) (string, string, bool) {
 	if ctx == nil || ctx.TokenStore == nil {
 		return "", "", false
 	}
 
-	store, ok := ctx.TokenStore.(*UnifiedTokenStore)
+	store, ok := ctx.TokenStore.(*CredStore)
 	if !ok {
 		return "", "", false
 	}

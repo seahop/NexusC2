@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-type EnvCommand struct{}
+type EnvMsg struct{}
 
-func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *EnvMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Apply any session environment variables first
 	ctx.mu.RLock()
 	for key, value := range ctx.SessionEnv {
@@ -30,11 +30,11 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Check for unset flags
 	if args[0] == "-u" {
 		if len(args) < 2 {
-			return CommandResult{
-				ErrorString: Err(E1),
+			return OpResult{
+				EStr: Err(E1),
 				Output:      Err(E1),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		return c.unsetEnvVar(ctx, args[1])
@@ -49,11 +49,11 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		if len(parts) == 2 {
 			return c.setEnvVar(ctx, parts[0], parts[1])
 		}
-		return CommandResult{
-			ErrorString: Err(E2),
+		return OpResult{
+			EStr: Err(E2),
 			Output:      Err(E2),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -61,7 +61,7 @@ func (c *EnvCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	return c.getEnvVar(arg)
 }
 
-func (c *EnvCommand) listAllEnvVars() CommandResult {
+func (c *EnvMsg) listAllEnvVars() OpResult {
 	envVars := os.Environ()
 
 	// Sort for consistent output
@@ -69,52 +69,52 @@ func (c *EnvCommand) listAllEnvVars() CommandResult {
 
 	output := strings.Join(envVars, "\n")
 
-	return CommandResult{
+	return OpResult{
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *EnvCommand) getEnvVar(name string) CommandResult {
+func (c *EnvMsg) getEnvVar(name string) OpResult {
 	value := os.Getenv(name)
 
 	if value == "" {
 		// Variable doesn't exist or is empty
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E4, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      fmt.Sprintf("%s=%s", name, value),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *EnvCommand) setEnvVar(ctx *CommandContext, name, value string) CommandResult {
+func (c *EnvMsg) setEnvVar(ctx *OpCtx, name, value string) OpResult {
 	// Validate variable name
 	if name == "" {
-		return CommandResult{
-			ErrorString: Err(E2),
+		return OpResult{
+			EStr: Err(E2),
 			Output:      Err(E2),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Set the environment variable in the OS environment
 	err := os.Setenv(name, value)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E11),
+			EStr: Err(E11),
 			Output:      ErrCtx(E11, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -126,21 +126,21 @@ func (c *EnvCommand) setEnvVar(ctx *CommandContext, name, value string) CommandR
 	ctx.SessionEnv[name] = value
 	ctx.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult {
+func (c *EnvMsg) unsetEnvVar(ctx *OpCtx, name string) OpResult {
 	// Validate variable name
 	if name == "" {
-		return CommandResult{
-			ErrorString: Err(E2),
+		return OpResult{
+			EStr: Err(E2),
 			Output:      Err(E2),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -152,10 +152,10 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 		ctx.mu.RUnlock()
 
 		if !inSession {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E4, name),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
@@ -163,12 +163,12 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 	// Unset the environment variable from OS
 	err := os.Unsetenv(name)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E11),
+			EStr: Err(E11),
 			Output:      ErrCtx(E11, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -179,9 +179,9 @@ func (c *EnvCommand) unsetEnvVar(ctx *CommandContext, name string) CommandResult
 	}
 	ctx.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

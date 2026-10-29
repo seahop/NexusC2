@@ -66,13 +66,13 @@ func ptyTpl(idx int) string {
 	return ""
 }
 
-// PTYHelper provides common PTY functionality for fallback
-type PTYHelper struct {
+// TermHelper provides common PTY functionality for fallback
+type TermHelper struct {
 	timeout time.Duration
 }
 
-// ExecuteWithSudo runs a command with sudo using PTY (stateless fallback)
-func (p *PTYHelper) ExecuteWithSudo(password, command, workingDir string) (string, int, error) {
+// executeWithSudo runs a command with sudo using PTY (stateless fallback)
+func (p *TermHelper) executeWithSudo(password, command, workingDir string) (string, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
@@ -163,8 +163,8 @@ func (p *PTYHelper) ExecuteWithSudo(password, command, workingDir string) (strin
 	return outputBuffer.String(), exitCode, err
 }
 
-// SudoSession represents a sudo session (can be stateful or stateless)
-type SudoSession struct {
+// ElevCtx represents a sudo session (can be stateful or stateless)
+type ElevCtx struct {
 	cmd          *exec.Cmd
 	pty          *os.File
 	isActive     bool
@@ -181,7 +181,7 @@ type SudoSession struct {
 }
 
 // StartSudoSessionAsUser creates a new sudo session
-func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSession, error) {
+func StartSudoSessionAsUser(password, targetUser, workingDir string) (*ElevCtx, error) {
 	var cmd *exec.Cmd
 	if targetUser == ptyTpl(idxPtyRoot) || targetUser == "" {
 		cmd = exec.Command(ptyTpl(idxPtySudo), ptyTpl(idxPtyFlagS), ptyTpl(idxPtySu), ptyTpl(idxPtyFlagDash))
@@ -199,7 +199,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
 	}
 
-	session := &SudoSession{
+	session := &ElevCtx{
 		cmd:          cmd,
 		pty:          ptmx,
 		isActive:     true,
@@ -271,13 +271,13 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 }
 
 // StartSudoSession creates a new sudo session (defaults to root)
-func StartSudoSession(password, workingDir string) (*SudoSession, error) {
+func StartSudoSession(password, workingDir string) (*ElevCtx, error) {
 	return StartSudoSessionAsUser(password, ptyTpl(idxPtyRoot), workingDir)
 }
 
-// EnableStatefulMode tries to set up the session for stateful execution
+// enableStatefulMode tries to set up the session for stateful execution
 // For now, we'll simulate stateful mode by tracking state ourselves
-func (s *SudoSession) EnableStatefulMode() error {
+func (s *ElevCtx) enableStatefulMode() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -290,8 +290,8 @@ func (s *SudoSession) EnableStatefulMode() error {
 	s.useStateful = true
 
 	// Get initial working directory
-	helper := &PTYHelper{timeout: 2 * time.Second}
-	output, _, err := helper.ExecuteWithSudo(s.password, "pwd", s.workingDir)
+	helper := &TermHelper{timeout: 2 * time.Second}
+	output, _, err := helper.executeWithSudo(s.password, "pwd", s.workingDir)
 	if err == nil && output != "" {
 		s.currentDir = strings.TrimSpace(output)
 	}
@@ -299,8 +299,8 @@ func (s *SudoSession) EnableStatefulMode() error {
 	return nil
 }
 
-// ExecuteCommand executes a command (with simulated state if enabled)
-func (s *SudoSession) ExecuteCommand(command string, timeout time.Duration) (string, int, error) {
+// executeCommand executes a command (with simulated state if enabled)
+func (s *ElevCtx) executeCommand(command string, timeout time.Duration) (string, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -314,8 +314,8 @@ func (s *SudoSession) ExecuteCommand(command string, timeout time.Duration) (str
 	}
 
 	// Stateless execution (default)
-	helper := &PTYHelper{timeout: timeout}
-	output, exitCode, err := helper.ExecuteWithSudo(s.password, command, s.workingDir)
+	helper := &TermHelper{timeout: timeout}
+	output, exitCode, err := helper.executeWithSudo(s.password, command, s.workingDir)
 
 	// Suppress PTY errors if we got output
 	if output != "" && err != nil && strings.Contains(err.Error(), "ptmx") {
@@ -326,7 +326,7 @@ func (s *SudoSession) ExecuteCommand(command string, timeout time.Duration) (str
 }
 
 // executeStatefulSimulated simulates stateful execution by tracking state
-func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Duration) (string, int, error) {
+func (s *ElevCtx) executeStatefulSimulated(command string, timeout time.Duration) (string, int, error) {
 	trimmedCmd := strings.TrimSpace(command)
 
 	// Handle cd commands specially
@@ -343,10 +343,10 @@ func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Dura
 			}
 		}
 
-		// Execute cd and verify it worked
-		helper := &PTYHelper{timeout: timeout}
+		// execute cd and verify it worked
+		helper := &TermHelper{timeout: timeout}
 		cdCmd := fmt.Sprintf("cd %s && pwd", newDir)
-		output, exitCode, err := helper.ExecuteWithSudo(s.password, cdCmd, s.workingDir)
+		output, exitCode, err := helper.executeWithSudo(s.password, cdCmd, s.workingDir)
 
 		if err == nil && exitCode == 0 && output != "" {
 			// Update current directory
@@ -386,9 +386,9 @@ func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Dura
 		fullCommand = fmt.Sprintf("cd %s && %s", s.currentDir, fullCommand)
 	}
 
-	// Execute with state applied
-	helper := &PTYHelper{timeout: timeout}
-	output, exitCode, err := helper.ExecuteWithSudo(s.password, fullCommand, s.workingDir)
+	// execute with state applied
+	helper := &TermHelper{timeout: timeout}
+	output, exitCode, err := helper.executeWithSudo(s.password, fullCommand, s.workingDir)
 
 	// Suppress PTY errors if we got output
 	if output != "" && err != nil && strings.Contains(err.Error(), "ptmx") {
@@ -398,8 +398,8 @@ func (s *SudoSession) executeStatefulSimulated(command string, timeout time.Dura
 	return output, exitCode, err
 }
 
-// SetStateful enables or disables stateful execution
-func (s *SudoSession) SetStateful(stateful bool) {
+// setStateful enables or disables stateful execution
+func (s *ElevCtx) setStateful(stateful bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.useStateful = stateful
@@ -412,7 +412,7 @@ func (s *SudoSession) SetStateful(stateful bool) {
 }
 
 // Close terminates the session
-func (s *SudoSession) Close() error {
+func (s *ElevCtx) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -441,8 +441,8 @@ func (s *SudoSession) Close() error {
 	return nil
 }
 
-// GetInfo returns session information
-func (s *SudoSession) GetInfo() string {
+// getInfo returns session information
+func (s *ElevCtx) getInfo() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

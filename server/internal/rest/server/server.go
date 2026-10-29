@@ -111,7 +111,7 @@ func NewServer(cfg *config.RESTConfig, agentCfg *config.AgentConfig, db *sql.DB)
 		s.profileHandler = handlers.NewProfileHandler(agentCfg)
 	}
 
-	payloadHandler, err := handlers.NewPayloadHandler(db, listenerManager, nil)
+	payloadHandler, err := handlers.NewPayloadHandler(db, listenerManager, nil, agentCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -138,9 +138,9 @@ func (s *Server) setupRouter() {
 	// Health check (no auth required)
 	router.GET("/health", s.handleHealth)
 
-	// Internal routes (service-to-service, JWT auth required)
+	// Internal routes (service-to-service, shared key auth)
 	internal := router.Group("/internal")
-	internal.Use(AuthMiddleware(s.jwtManager))
+	internal.Use(InternalServiceMiddleware(s.config.JWT.SecretKey))
 	{
 		if s.profileHandler != nil {
 			internal.POST("/profiles/sync", s.profileHandler.SyncProfiles)
@@ -238,6 +238,8 @@ func (s *Server) setupRouter() {
 					profiles.GET("/server-response", s.profileHandler.ListServerResponseProfiles)
 					profiles.GET("/server-response/:name", s.profileHandler.GetServerResponseProfile)
 					profiles.DELETE("/server-response/:name", s.profileHandler.DeleteServerResponseProfile)
+					profiles.GET("/variants", s.profileHandler.ListProfileVariants)
+					profiles.GET("/variants/:name", s.profileHandler.GetProfileVariant)
 				}
 			}
 

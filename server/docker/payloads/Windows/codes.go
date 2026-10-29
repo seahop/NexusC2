@@ -70,7 +70,7 @@ const (
 	E18 = "E18" // Decode/parse error
 	E19 = "E19" // Internal error
 
-	// Command-specific errors (E20-E39)
+	// Msg-specific errors (E20-E39)
 	E20 = "E20" // Flag requires argument
 	E21 = "E21" // Unknown flag
 	E22 = "E22" // Invalid value for flag

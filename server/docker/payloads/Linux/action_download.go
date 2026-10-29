@@ -25,18 +25,18 @@ var downloadBufferPool = sync.Pool{
 	},
 }
 
-type DownloadCommand struct{}
+type FM struct{}
 
-// Modified Execute function from action_download.go
-func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+// Modified execute function from action_download.go
+func (c *FM) execute(ctx *OpCtx, args []string) OpResult {
 	// With the improved parsing, we should receive exactly one argument (the full path)
 	// But let's still handle the case where it might have been split
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -101,12 +101,12 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	file, err := NetworkAwareOpenFile(targetPath, os.O_RDONLY, 0)
 
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: Err(E10),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E10),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer file.Close()
@@ -114,23 +114,23 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Get file information
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: Err(E10),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E10),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E6, displayPath),
 			Error:       fmt.Errorf(Err(E6)),
-			ErrorString: Err(E6),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E6),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -144,12 +144,12 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	chunk := *bufPtr
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E10, displayPath),
 			Error:       err,
-			ErrorString: Err(E10),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E10),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -160,12 +160,12 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Special case: single small file
 	if n < chunkSize && err == io.EOF {
 		encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
-		return CommandResult{
+		return OpResult{
 			Output:      contextInfo + SuccCtx(S5, baseFilename),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
-			Command: Command{
-				Command:      fmt.Sprintf("download %s", baseFilename),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
+			Cmd: Msg{
+				Cmd:      fmt.Sprintf("download %s", baseFilename),
 				Filename:     trackedFilename,
 				CurrentChunk: 1,
 				TotalChunks:  1,
@@ -183,15 +183,15 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 
 	// Register the new download with the command queue
-	commandQueue.AddOrUpdateDownload(trackedFilename, targetPath, int(totalChunks))
-	commandQueue.UpdateDownloadProgress(trackedFilename, 1)
+	commandQueue.addOrUpdateDownload(trackedFilename, targetPath, int(totalChunks))
+	commandQueue.updateDownloadProgress(trackedFilename, 1)
 
-	result := CommandResult{
+	result := OpResult{
 		Output:      contextInfo + SuccCtx(S4, fmt.Sprintf("1/%d", totalChunks)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
-		Command: Command{
-			Command:      fmt.Sprintf("download %s", baseFilename),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
+		Cmd: Msg{
+			Cmd:      fmt.Sprintf("download %s", baseFilename),
 			Filename:     trackedFilename,
 			CurrentChunk: 1,
 			TotalChunks:  int(totalChunks),
@@ -207,7 +207,7 @@ func (c *DownloadCommand) Execute(ctx *CommandContext, args []string) CommandRes
 // It handles network authentication automatically when accessing network shares.
 
 // GetNextFileChunk continues downloading a file from a specific chunk
-func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*CommandResult, error) {
+func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Msg) (*OpResult, error) {
 	// Use NetworkAwareOpenFile for network authentication support
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 
@@ -248,15 +248,15 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Command) (*C
 	encodedData := base64.StdEncoding.EncodeToString(chunk[:n])
 
 	// Create the result
-	result := &CommandResult{
+	result := &OpResult{
 		Output:      SuccCtx(S4, fmt.Sprintf("%d/%d", chunkNumber, originalCmd.TotalChunks)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
-		Command: Command{
-			CommandID:    originalCmd.CommandID,
-			CommandDBID:  originalCmd.CommandDBID,
-			AgentID:      originalCmd.AgentID,
-			Command:      originalCmd.Command,
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
+		Cmd: Msg{
+			CID:    originalCmd.CID,
+			DID:  originalCmd.DID,
+			AID:      originalCmd.AID,
+			Cmd:      originalCmd.Cmd,
 			Filename:     originalCmd.Filename,
 			CurrentChunk: chunkNumber,
 			TotalChunks:  originalCmd.TotalChunks,

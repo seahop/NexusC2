@@ -574,8 +574,10 @@ class WebSocketThread(QThread):
                         self.current_dialog.success_signal.emit()
                         self.current_dialog = None
 
+            elif message_type == "welcome":
+                self.log_message.emit("Nexus C2 // Link established. Standing by for tasking.")
+
             else:
-                # Only warn for truly unrecognized message types (not empty/None)
                 if message_type:
                     print(f"WebSocketThread: Unrecognized message type: {message_type}")
                     self.log_message.emit(f"Unrecognized message type received: {message_type}")
@@ -1441,7 +1443,13 @@ class CreatePayloadDialog(QDialog):
         self.safety_tab = QWidget()
         self.setup_safety_tab()
         self.tab_widget.addTab(self.safety_tab, "Safety Checks")
-        
+
+        # PE Version Info Tab (Windows only)
+        self.pe_tab = QWidget()
+        self.setup_pe_tab()
+        self.pe_tab_index = self.tab_widget.addTab(self.pe_tab, "PE Version Info")
+        self.tab_widget.setTabVisible(self.pe_tab_index, False)
+
         layout.addWidget(self.tab_widget)
         
         # Buttons
@@ -1483,12 +1491,19 @@ class CreatePayloadDialog(QDialog):
         # OS dropdown
         self.os = QComboBox()
         self.os.addItems(["Linux", "Darwin", "Windows"])
+        self.os.currentTextChanged.connect(self.on_os_changed)
         form_layout.addRow("Operating System:", self.os)
 
         # Architecture dropdown
         self.arch = QComboBox()
         self.arch.addItems(["amd64", "arm64"])
         form_layout.addRow("Architecture:", self.arch)
+
+        # Profile variant dropdown (optional)
+        self.profile_variant = QComboBox()
+        self.profile_variant.addItem("(default)")
+        self.populate_profile_variants()
+        form_layout.addRow("Profile Variant:", self.profile_variant)
 
         # Output path
         path_layout = QHBoxLayout()
@@ -1625,6 +1640,51 @@ class CreatePayloadDialog(QDialog):
         layout.addStretch()
         self.safety_tab.setLayout(layout)
 
+    def setup_pe_tab(self):
+        layout = QVBoxLayout()
+
+        description = QLabel("Optional PE version resource fields for Windows payloads.\n"
+                           "Leave all fields empty to produce a binary with no version info.")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line)
+
+        form_layout = QFormLayout()
+
+        self.pe_file_description = QLineEdit()
+        self.pe_file_description.setPlaceholderText("e.g., Host Process for Windows Tasks")
+        form_layout.addRow("File Description:", self.pe_file_description)
+
+        self.pe_company_name = QLineEdit()
+        self.pe_company_name.setPlaceholderText("e.g., Microsoft Corporation")
+        form_layout.addRow("Company Name:", self.pe_company_name)
+
+        self.pe_product_name = QLineEdit()
+        self.pe_product_name.setPlaceholderText("e.g., Microsoft Windows Operating System")
+        form_layout.addRow("Product Name:", self.pe_product_name)
+
+        self.pe_file_version = QLineEdit()
+        self.pe_file_version.setPlaceholderText("e.g., 10.0.0.0")
+        form_layout.addRow("File Version:", self.pe_file_version)
+
+        self.pe_product_version = QLineEdit()
+        self.pe_product_version.setPlaceholderText("e.g., 10.0.0.0")
+        form_layout.addRow("Product Version:", self.pe_product_version)
+
+        layout.addLayout(form_layout)
+        layout.addStretch()
+        self.pe_tab.setLayout(layout)
+
+    def on_os_changed(self, os_name):
+        if not hasattr(self, "pe_tab_index"):
+            return
+        is_windows = os_name.lower() == "windows"
+        self.tab_widget.setTabVisible(self.pe_tab_index, is_windows)
+
     def on_listener_changed(self, listener_name):
         """Handle listener selection changes.
 
@@ -1657,19 +1717,30 @@ class CreatePayloadDialog(QDialog):
                     break
 
         # Update OS options based on listener protocol
+        self.os.blockSignals(True)
         self.os.clear()
         if self.listener_protocol == "SMB":
-            # SMB only supports Windows
             self.os.addItem("Windows")
         else:
-            # HTTP/HTTPS and TCP support all platforms
             self.os.addItems(["Linux", "Darwin", "Windows"])
+        self.os.blockSignals(False)
+        self.on_os_changed(self.os.currentText())
 
     def populate_listeners(self):
         if self.agent_tree:
             listeners = self.agent_tree.get_listener_names()
             self.listener.clear()
             self.listener.addItems(listeners)
+
+    def populate_profile_variants(self):
+        if self.agent_tree and hasattr(self.agent_tree, 'db') and self.agent_tree.db:
+            try:
+                profiles = self.agent_tree.db.get_available_profiles()
+                for name in profiles.get("variants", []):
+                    if name:
+                        self.profile_variant.addItem(name)
+            except Exception as e:
+                print(f"CreatePayloadDialog: Failed to load profile variants: {e}")
 
     def browse_output_path(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
@@ -1726,6 +1797,24 @@ class CreatePayloadDialog(QDialog):
                 "safety_checks": safety_checks
             }
         }
+
+        # Include profile variant if one is selected
+        variant = self.profile_variant.currentText()
+        if variant and variant != "(default)":
+            payload_data["data"]["profile_variant"] = variant
+
+        # Include PE version info if any field is set (Windows only)
+        if self.os.currentText().lower() == "windows":
+            if self.pe_file_description.text():
+                payload_data["data"]["pe_file_description"] = self.pe_file_description.text()
+            if self.pe_company_name.text():
+                payload_data["data"]["pe_company_name"] = self.pe_company_name.text()
+            if self.pe_product_name.text():
+                payload_data["data"]["pe_product_name"] = self.pe_product_name.text()
+            if self.pe_file_version.text():
+                payload_data["data"]["pe_file_version"] = self.pe_file_version.text()
+            if self.pe_product_version.text():
+                payload_data["data"]["pe_product_version"] = self.pe_product_version.text()
 
         # Set connection_type based on listener protocol
         # HTTP/HTTPS listeners -> direct HTTPS agents

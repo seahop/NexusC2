@@ -53,6 +53,20 @@ func AuthMiddleware(jwtManager *auth.JWTManager) gin.HandlerFunc {
 	}
 }
 
+// InternalServiceMiddleware authenticates service-to-service calls using a shared key.
+// Services pass the key in the X-Service-Key header.
+func InternalServiceMiddleware(serviceKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.GetHeader("X-Service-Key")
+		if key == "" || key != serviceKey {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid service key"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // CORSMiddleware handles Cross-Origin Resource Sharing
 func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {

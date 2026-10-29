@@ -1085,7 +1085,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				allocatedMemory[ptr] = mem
 				allocMutex.Unlock()
 
-				// Zero the memory (Go already does this, but be explicit)
+				// zero the memory (Go already does this, but be explicit)
 				for i := uintptr(0); i < totalSize; i++ {
 					*(*byte)(unsafe.Pointer(ptr + i)) = 0
 				}
@@ -1685,7 +1685,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 		}
 	}
 
-	// Execute entry point
+	// execute entry point
 	go func() {
 		defer close(output)
 		defer func() {
@@ -2074,7 +2074,7 @@ func intAlloc(size int) uintptr {
 		allocatedMemory[ptr] = mem
 		allocMutex.Unlock()
 
-		// Zero the memory explicitly
+		// zero the memory explicitly
 		for i := 0; i < alignedSize; i++ {
 			mem[i] = 0
 		}
@@ -2085,7 +2085,7 @@ func intAlloc(size int) uintptr {
 	// Track the allocation
 	bofAllocations[addr] = nil // Mark as VirtualAlloc'd
 
-	// Zero the memory explicitly and verify
+	// zero the memory explicitly and verify
 	for i := 0; i < alignedSize; i++ {
 		*(*byte)(unsafe.Pointer(addr + uintptr(i))) = 0
 	}

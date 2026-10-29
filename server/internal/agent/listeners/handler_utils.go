@@ -222,7 +222,7 @@ func (m *Manager) extractClientIDFromDataBlock(r *http.Request, dataBlock *confi
 // extractDataFromDataBlock extracts and reverses transforms on request data
 // Returns raw data if dataBlock is nil (legacy mode)
 // xorKeyOverride: if provided, replaces XOR transform values for per-agent unique keys
-func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.DataBlock, basePath string, xorKeyOverride string) ([]byte, error) {
+func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.DataBlock, basePath string, xorKeyOverride string, padPreHeader string, padAppHeader string) ([]byte, error) {
 	// Legacy mode: read body directly
 	if dataBlock == nil {
 		return io.ReadAll(r.Body)
@@ -239,9 +239,15 @@ func (m *Manager) extractDataFromDataBlock(r *http.Request, dataBlock *config.Da
 		return rawData, nil
 	}
 
-	// Get padding lengths from headers
-	prependLen, _ := strconv.Atoi(r.Header.Get("X-Pad-Pre"))
-	appendLen, _ := strconv.Atoi(r.Header.Get("X-Pad-App"))
+	if padPreHeader == "" {
+		padPreHeader = "X-Cache-Seq"
+	}
+	if padAppHeader == "" {
+		padAppHeader = "X-Cache-Idx"
+	}
+
+	prependLen, _ := strconv.Atoi(r.Header.Get(padPreHeader))
+	appendLen, _ := strconv.Atoi(r.Header.Get(padAppHeader))
 
 	// Convert and reverse transforms
 	xforms := convertConfigTransforms(dataBlock.Transforms)

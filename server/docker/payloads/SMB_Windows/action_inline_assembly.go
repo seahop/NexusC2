@@ -317,7 +317,7 @@ func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, i
 		targetRuntime = iaClrV2()
 	}
 
-	// Execute assembly
+	// execute assembly
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// Restore handles IMMEDIATELY
@@ -363,7 +363,7 @@ func executeWithoutCapture(assemblyBytes []byte, arguments []string) (string, in
 	return "", int(retCode), execErr
 }
 
-func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, config struct {
+func (c *NativeRunMsg) executeWindowsAssembly(assemblyBytes []byte, config struct {
 	AssemblyB64 string   `json:"ab"`
 	Arguments   []string `json:"ar"`
 	AppDomain   string   `json:"ad"`
@@ -480,7 +480,7 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	// &] Executing assembly")
-	// Execute the assembly
+	// execute the assembly
 	retCode, execErr := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
 
 	// Close write pipe to signal EOF

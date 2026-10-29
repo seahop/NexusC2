@@ -15,7 +15,7 @@ import (
 // InlineAssemblyJobs template indices (must match server's common.go)
 // Uses shared template from action_inline_assembly.go via iaTpl()
 const (
-	// Command names
+	// Msg names
 	idxIACmdJobs   = 421
 	idxIACmdOutput = 422
 	idxIACmdKill   = 423
@@ -96,12 +96,12 @@ func iasStatsKillLbl() string { return iaTpl(idxIAStatsKillLbl) }
 
 func iasStatsTimeLbl() string { return iaTpl(idxIAStatsTimeLbl) }
 
-// AssemblyJob represents an async assembly execution job
-type AssemblyJob struct {
+// NativeJob represents an async assembly execution job
+type NativeJob struct {
 	ID              string
-	CommandID       string
-	CommandDBID     int
-	AgentID         string
+	CID       string
+	DID     int
+	AID         string
 	Name            string
 	Status          string // "running", "completed", "failed", "killed"
 	StartTime       time.Time
@@ -110,39 +110,39 @@ type AssemblyJob struct {
 	Error           error
 	CancelChan      chan bool
 	OutputMutex     sync.Mutex
-	Command         Command
+	Cmd         Msg
 	OutputTruncated bool
 	TotalBytesSent  int
 	Process         *os.Process
-	TokenContext    *AssemblyTokenContext
+	CredCtx    *NativeCredCtx
 }
 
-// AssemblyJobManager manages async assembly jobs
-type AssemblyJobManager struct {
-	jobs map[string]*AssemblyJob
+// NativeJobMgr manages async assembly jobs
+type NativeJobMgr struct {
+	jobs map[string]*NativeJob
 	mu   sync.RWMutex
 }
 
-var assemblyJobManager = &AssemblyJobManager{
-	jobs: make(map[string]*AssemblyJob),
+var assemblyJobManager = &NativeJobMgr{
+	jobs: make(map[string]*NativeJob),
 }
 
-// InlineAssemblyJobsCommand lists running assembly jobs
-type InlineAssemblyJobsCommand struct{}
+// NativeJobsMsg lists running assembly jobs
+type NativeJobsMsg struct{}
 
-func (c *InlineAssemblyJobsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *NativeJobsMsg) execute(ctx *OpCtx, args []string) OpResult {
 	return executeAssemblyJobsList()
 }
 
-// InlineAssemblyOutputCommand retrieves output from an assembly job
-type InlineAssemblyOutputCommand struct{}
+// NativeOutputMsg retrieves output from an assembly job
+type NativeOutputMsg struct{}
 
-func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *NativeOutputMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -152,7 +152,7 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 	job, exists := GetAssemblyJob(jobID)
 	if !exists {
 		// Try partial match
-		jobs := assemblyJobManager.ListJobs()
+		jobs := assemblyJobManager.listJobs()
 		for _, j := range jobs {
 			if strings.HasPrefix(j.ID, jobID) {
 				job = j
@@ -162,10 +162,10 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 		}
 
 		if !exists {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E26, jobID),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
@@ -207,21 +207,21 @@ func (c *InlineAssemblyOutputCommand) Execute(ctx *CommandContext, args []string
 		result.WriteString(output)
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      result.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-// InlineAssemblyKillCommand terminates an assembly job
-type InlineAssemblyKillCommand struct{}
+// NativeStopMsg terminates an assembly job
+type NativeStopMsg struct{}
 
-func (c *InlineAssemblyKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *NativeStopMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -230,13 +230,13 @@ func (c *InlineAssemblyKillCommand) Execute(ctx *CommandContext, args []string) 
 }
 
 // executeAssemblyJobsList lists all assembly jobs
-func executeAssemblyJobsList() CommandResult {
-	jobs := assemblyJobManager.ListJobs()
+func executeAssemblyJobsList() OpResult {
+	jobs := assemblyJobManager.listJobs()
 
 	if len(jobs) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   Succ(S0),
-			ExitCode: 0,
+			EC: 0,
 		}
 	}
 
@@ -266,18 +266,18 @@ func executeAssemblyJobsList() CommandResult {
 		job.OutputMutex.Unlock()
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   output.String(),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // executeAssemblyGetOutput retrieves output from a job
-func executeAssemblyGetOutput(jobID string) CommandResult {
-	job := assemblyJobManager.GetJob(jobID)
+func executeAssemblyGetOutput(jobID string) OpResult {
+	job := assemblyJobManager.getJob(jobID)
 	if job == nil {
 		// Try partial match
-		jobs := assemblyJobManager.ListJobs()
+		jobs := assemblyJobManager.listJobs()
 		for _, j := range jobs {
 			if strings.HasPrefix(j.ID, jobID) {
 				job = j
@@ -287,9 +287,9 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 	}
 
 	if job == nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E26, jobID),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -313,19 +313,19 @@ func executeAssemblyGetOutput(jobID string) CommandResult {
 		output = Succ(S5) + iasFmtPipe() + job.ID + iasFmtPipe() + status + iasFmtPipe() + truncatedFlag + iasFmtNewline() + output
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   output,
-		ExitCode: 0,
+		EC: 0,
 		JobID:    jobID,
 	}
 }
 
 // executeAssemblyKillJob terminates a running job
-func executeAssemblyKillJob(jobID string) CommandResult {
-	job := assemblyJobManager.GetJob(jobID)
+func executeAssemblyKillJob(jobID string) OpResult {
+	job := assemblyJobManager.getJob(jobID)
 	if job == nil {
 		// Try partial match
-		jobs := assemblyJobManager.ListJobs()
+		jobs := assemblyJobManager.listJobs()
 		for _, j := range jobs {
 			if strings.HasPrefix(j.ID, jobID) {
 				job = j
@@ -335,16 +335,16 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 	}
 
 	if job == nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E26, jobID),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if job.Status != iasStatusRunning() {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E27, job.ID),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -360,50 +360,50 @@ func executeAssemblyKillJob(jobID string) CommandResult {
 		job.EndTime = &endTime
 		assemblyJobManager.mu.Unlock()
 
-		return CommandResult{
+		return OpResult{
 			Output:   SuccCtx(S2, job.ID),
-			ExitCode: 0,
+			EC: 0,
 			JobID:    jobID,
 		}
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E47),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 }
 
-// Helper methods for AssemblyJobManager
-func (ajm *AssemblyJobManager) AddJob(job *AssemblyJob) {
+// Helper methods for NativeJobMgr
+func (ajm *NativeJobMgr) addJob(job *NativeJob) {
 	ajm.mu.Lock()
 	defer ajm.mu.Unlock()
 	ajm.jobs[job.ID] = job
 }
 
-func (ajm *AssemblyJobManager) GetJob(jobID string) *AssemblyJob {
+func (ajm *NativeJobMgr) getJob(jobID string) *NativeJob {
 	ajm.mu.RLock()
 	defer ajm.mu.RUnlock()
 	return ajm.jobs[jobID]
 }
 
-func (ajm *AssemblyJobManager) ListJobs() []*AssemblyJob {
+func (ajm *NativeJobMgr) listJobs() []*NativeJob {
 	ajm.mu.RLock()
 	defer ajm.mu.RUnlock()
 
-	jobs := make([]*AssemblyJob, 0, len(ajm.jobs))
+	jobs := make([]*NativeJob, 0, len(ajm.jobs))
 	for _, job := range ajm.jobs {
 		jobs = append(jobs, job)
 	}
 	return jobs
 }
 
-func (ajm *AssemblyJobManager) RemoveJob(jobID string) {
+func (ajm *NativeJobMgr) removeJob(jobID string) {
 	ajm.mu.Lock()
 	defer ajm.mu.Unlock()
 	delete(ajm.jobs, jobID)
 }
 
-func (ajm *AssemblyJobManager) CleanupOldJobs(maxAge time.Duration) {
+func (ajm *NativeJobMgr) cleanupOldJobs(maxAge time.Duration) {
 	ajm.mu.Lock()
 	defer ajm.mu.Unlock()
 
@@ -417,8 +417,8 @@ func (ajm *AssemblyJobManager) CleanupOldJobs(maxAge time.Duration) {
 	}
 }
 
-// CleanupCompletedJobs removes all completed jobs and returns count
-func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
+// cleanupCompletedJobs removes all completed jobs and returns count
+func (ajm *NativeJobMgr) cleanupCompletedJobs() int {
 	ajm.mu.Lock()
 	defer ajm.mu.Unlock()
 
@@ -433,10 +433,10 @@ func (ajm *AssemblyJobManager) CleanupCompletedJobs() int {
 	return cleaned
 }
 
-// InlineAssemblyJobsCleanCommand cleans up completed/killed assembly jobs
-type InlineAssemblyJobsCleanCommand struct{}
+// NativeCleanMsg cleans up completed/killed assembly jobs
+type NativeCleanMsg struct{}
 
-func (c *InlineAssemblyJobsCleanCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *NativeCleanMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) == 0 {
 		// Clean all non-running jobs
 		return executeAssemblyJobsCleanAll()
@@ -445,27 +445,27 @@ func (c *InlineAssemblyJobsCleanCommand) Execute(ctx *CommandContext, args []str
 	return executeAssemblyJobsCleanSpecific(args[0])
 }
 
-func executeAssemblyJobsCleanAll() CommandResult {
-	cleaned := assemblyJobManager.CleanupCompletedJobs()
+func executeAssemblyJobsCleanAll() OpResult {
+	cleaned := assemblyJobManager.cleanupCompletedJobs()
 
 	if cleaned == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   Succ(S0),
-			ExitCode: 0,
+			EC: 0,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S17, fmt.Sprintf("%d", cleaned)),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
-func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
-	job := assemblyJobManager.GetJob(jobID)
+func executeAssemblyJobsCleanSpecific(jobID string) OpResult {
+	job := assemblyJobManager.getJob(jobID)
 	if job == nil {
 		// Try partial match
-		jobs := assemblyJobManager.ListJobs()
+		jobs := assemblyJobManager.listJobs()
 		for _, j := range jobs {
 			if strings.HasPrefix(j.ID, jobID) {
 				job = j
@@ -475,41 +475,41 @@ func executeAssemblyJobsCleanSpecific(jobID string) CommandResult {
 	}
 
 	if job == nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E26, jobID),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if job.Status == iasStatusRunning() {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E27, job.ID),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	assemblyJobManager.RemoveJob(job.ID)
+	assemblyJobManager.removeJob(job.ID)
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S2, job.ID),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
-// InlineAssemblyJobsStatsCommand shows job statistics
-type InlineAssemblyJobsStatsCommand struct{}
+// NativeStatsMsg shows job statistics
+type NativeStatsMsg struct{}
 
-func (c *InlineAssemblyJobsStatsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *NativeStatsMsg) execute(ctx *OpCtx, args []string) OpResult {
 	return executeAssemblyJobsStats()
 }
 
-func executeAssemblyJobsStats() CommandResult {
-	jobs := assemblyJobManager.ListJobs()
+func executeAssemblyJobsStats() OpResult {
+	jobs := assemblyJobManager.listJobs()
 
 	if len(jobs) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   Succ(S0),
-			ExitCode: 0,
+			EC: 0,
 		}
 	}
 
@@ -548,14 +548,14 @@ func executeAssemblyJobsStats() CommandResult {
 	output.WriteString(iasStatsKillLbl() + fmt.Sprintf("%d", stats.Killed) + iasFmtNewline())
 	output.WriteString(iasStatsTimeLbl() + fmt.Sprintf("%d", stats.Timeout) + iasFmtNewline())
 
-	return CommandResult{
+	return OpResult{
 		Output:   output.String(),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // GetAssemblyJob is a helper function to get a job by ID
-func GetAssemblyJob(jobID string) (*AssemblyJob, bool) {
+func GetAssemblyJob(jobID string) (*NativeJob, bool) {
 	assemblyJobManager.mu.RLock()
 	defer assemblyJobManager.mu.RUnlock()
 
@@ -570,7 +570,7 @@ func init() {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			assemblyJobManager.CleanupOldJobs(24 * time.Hour)
+			assemblyJobManager.cleanupOldJobs(24 * time.Hour)
 		}
 	}()
 }

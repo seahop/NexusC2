@@ -48,7 +48,7 @@ const (
 	E18 = "E18" // Decode/parse error
 	E19 = "E19" // Internal error
 
-	// Command-specific errors (E20-E39)
+	// Msg-specific errors (E20-E39)
 	E20 = "E20" // Flag requires argument
 	E21 = "E21" // Unknown flag
 	E22 = "E22" // Invalid value for flag
@@ -61,6 +61,8 @@ const (
 	E29 = "E29" // Invalid jitter value
 	E30 = "E30" // Session not active
 	E31 = "E31" // Authentication failed
+	E32 = "E32" // Unsupported link protocol
+	E33 = "E33" // Link failed to connect
 	E37 = "E37" // Network token exec failed
 
 	// SOCKS-HTTP errors (E40-E49)

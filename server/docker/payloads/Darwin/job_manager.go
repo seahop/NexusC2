@@ -18,13 +18,13 @@ func jmTpl(idx int) string {
 	return commsTpl(idx)
 }
 
-// CreateJob creates a new job with specified type and filename
-func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
+// createJob creates a new job with specified type and filename
+func (cq *WorkQueue) createJob(jobType string, filename string) string {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
 	jobID := fmt.Sprintf("%s_%d", jobType, time.Now().UnixNano())
-	cq.activeJobs[jobID] = JobInfo{
+	cq.activeJobs[jobID] = WI{
 		ID:        jobID,
 		StartTime: time.Now(),
 		Filename:  filename,
@@ -35,8 +35,8 @@ func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
 	return jobID
 }
 
-// CompleteJob marks a job as completed
-func (cq *CommandQueue) CompleteJob(jobID string) {
+// completeJob marks a job as completed
+func (cq *WorkQueue) completeJob(jobID string) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -46,8 +46,8 @@ func (cq *CommandQueue) CompleteJob(jobID string) {
 	}
 }
 
-// KillJob terminates an active job
-func (cq *CommandQueue) KillJob(jobID string) error {
+// killJob terminates an active job
+func (cq *WorkQueue) killJob(jobID string) error {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -65,8 +65,8 @@ func (cq *CommandQueue) KillJob(jobID string) error {
 	return nil
 }
 
-// AddOrUpdateDownload adds or updates a download operation
-func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, totalChunks int) {
+// addOrUpdateDownload adds or updates a download operation
+func (cq *WorkQueue) addOrUpdateDownload(filename string, filepath string, totalChunks int) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -76,7 +76,7 @@ func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, to
 			downloadInfo.InProgress = true
 		}
 	} else {
-		cq.activeDownloads[filename] = &DownloadInfo{
+		cq.activeDownloads[filename] = &FI{
 			FilePath:    filepath,
 			TotalChunks: totalChunks,
 			NextChunk:   1,
@@ -86,8 +86,8 @@ func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, to
 	}
 }
 
-// UpdateDownloadProgress updates the progress of a download operation
-func (cq *CommandQueue) UpdateDownloadProgress(filename string, chunkNum int) {
+// updateDownloadProgress updates the progress of a download operation
+func (cq *WorkQueue) updateDownloadProgress(filename string, chunkNum int) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 

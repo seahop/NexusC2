@@ -139,6 +139,81 @@ func (m *Manager) UpdateProfiles(getProfiles []config.GetProfile, postProfiles [
 		len(getProfiles), len(postProfiles), len(serverResponseProfiles))
 }
 
+// UpdateVariants replaces the stored profile variants and re-registers
+// variant paths on all active shared-port listeners so that agents built
+// with any variant are routed correctly.
+func (m *Manager) UpdateVariants(variants []config.ProfileVariant) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.routes == nil {
+		return
+	}
+	m.routes.HTTPProfiles.Variants = variants
+
+	// Re-register variant paths for every active shared-port listener.
+	for listenerName, port := range m.listenerToPort {
+		sps, ok := m.sharedPorts[port]
+		if !ok {
+			continue
+		}
+		sps.mu.Lock()
+		handler, exists := sps.listenerHandlers[listenerName]
+		if !exists {
+			sps.mu.Unlock()
+			continue
+		}
+
+		// Remove old variant routes (keep default routes)
+		for _, gp := range handler.VariantGetProfiles {
+			delete(sps.pathRoutes, gp.Method+":"+gp.Path)
+		}
+		for _, pp := range handler.VariantPostProfiles {
+			delete(sps.pathRoutes, pp.Method+":"+pp.Path)
+		}
+		handler.VariantGetProfiles = nil
+		handler.VariantPostProfiles = nil
+		handler.VariantRespProfiles = nil
+
+		// Resolve and register new variant routes
+		for _, v := range variants {
+			gp, pp, rp, err := m.routes.ResolveVariant(v.Name)
+			if err != nil {
+				log.Printf("[Manager] Variant %q skip: %v", v.Name, err)
+				continue
+			}
+			handler.VariantGetProfiles = append(handler.VariantGetProfiles, gp)
+			handler.VariantPostProfiles = append(handler.VariantPostProfiles, pp)
+			handler.VariantRespProfiles = append(handler.VariantRespProfiles, rp)
+
+			key := gp.Method + ":" + gp.Path
+			if _, taken := sps.pathRoutes[key]; !taken {
+				sps.pathRoutes[key] = listenerName
+				log.Printf("[SharedPort:%d] Variant %q: registered %s -> '%s'",
+					port, v.Name, key, listenerName)
+			}
+			key = pp.Method + ":" + pp.Path
+			if _, taken := sps.pathRoutes[key]; !taken {
+				sps.pathRoutes[key] = listenerName
+				log.Printf("[SharedPort:%d] Variant %q: registered %s -> '%s'",
+					port, v.Name, key, listenerName)
+			}
+		}
+		sps.mu.Unlock()
+	}
+
+	log.Printf("[Manager] Profile variants updated: %d variants", len(variants))
+}
+
+// GetAllVariantNames returns the names of all defined profile variants
+func (m *Manager) GetAllVariantNames() []string {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.routes == nil {
+		return nil
+	}
+	return m.routes.GetProfileVariantNames()
+}
+
 func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 	// Look up bound profiles for this listener
 	var getProfile *config.GetProfile
@@ -178,6 +253,39 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 		}
 	}
 
+	// Build variant profile lists for this listener
+	var variantGetProfiles []*config.GetProfile
+	var variantPostProfiles []*config.PostProfile
+	var variantRespProfiles []*config.ServerResponseProfile
+	for _, vName := range cfg.Variants {
+		gp, pp, rp, err := m.routes.ResolveVariant(vName)
+		if err != nil {
+			log.Printf("[Listener %s] Warning: variant %q: %v", cfg.Name, vName, err)
+			continue
+		}
+		variantGetProfiles = append(variantGetProfiles, gp)
+		variantPostProfiles = append(variantPostProfiles, pp)
+		variantRespProfiles = append(variantRespProfiles, rp)
+	}
+
+	// Collect all GET/POST profiles into a single set for matching
+	allGetProfiles := make([]*config.GetProfile, 0, 1+len(variantGetProfiles))
+	allRespForGet := make([]*config.ServerResponseProfile, 0, 1+len(variantRespProfiles))
+	if getProfile != nil {
+		allGetProfiles = append(allGetProfiles, getProfile)
+		allRespForGet = append(allRespForGet, serverResponseProfile)
+	}
+	for i, gp := range variantGetProfiles {
+		allGetProfiles = append(allGetProfiles, gp)
+		allRespForGet = append(allRespForGet, variantRespProfiles[i])
+	}
+
+	allPostProfiles := make([]*config.PostProfile, 0, 1+len(variantPostProfiles))
+	if postProfile != nil {
+		allPostProfiles = append(allPostProfiles, postProfile)
+	}
+	allPostProfiles = append(allPostProfiles, variantPostProfiles...)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[%s] Received request to %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
@@ -195,56 +303,45 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 			w.Header().Set(k, v)
 		}
 
-		// If listener has a bound GET profile, use it
-		if getProfile != nil {
-			// Check for match - exact match OR prefix match if profile uses uri_append
-			pathMatches := getProfile.Path == r.URL.Path
-			if !pathMatches && getProfile.ClientID != nil && getProfile.ClientID.Output == "uri_append" {
-				// uri_append: request path should start with profile path
-				pathMatches = len(r.URL.Path) > len(getProfile.Path) &&
-					r.URL.Path[:len(getProfile.Path)] == getProfile.Path
+		// Try matching against all GET profiles (default + variants)
+		for i, gp := range allGetProfiles {
+			pathMatches := gp.Path == r.URL.Path
+			if !pathMatches && gp.ClientID != nil && gp.ClientID.Output == "uri_append" {
+				pathMatches = len(r.URL.Path) > len(gp.Path) &&
+					r.URL.Path[:len(gp.Path)] == gp.Path
 			}
 
-			if pathMatches && getProfile.Method == r.Method {
-				log.Printf("[%s] Matched GET profile %s for path %s", r.Method, getProfile.Name, r.URL.Path)
+			if pathMatches && gp.Method == r.Method {
+				log.Printf("[%s] Matched GET profile %s for path %s", r.Method, gp.Name, r.URL.Path)
 
 				var clientID string
 				var err error
 
-				// Check if profile uses DataBlock for clientID (malleable transforms)
-				if getProfile.ClientID != nil {
-					// Note: ClientID extraction uses static profile key (empty xorKeyOverride)
-					clientID, err = m.extractClientIDFromDataBlock(r, getProfile.ClientID, config.Handler{}, getProfile.Path, "")
+				if gp.ClientID != nil {
+					clientID, err = m.extractClientIDFromDataBlock(r, gp.ClientID, config.Handler{}, gp.Path, "")
 					if err != nil {
-						// DataBlock extraction failed - fall back to legacy extraction
 						log.Printf("[%s] GET DataBlock extraction from %s failed (%v), trying legacy params",
-							r.Method, getProfile.ClientID.Output, err)
+							r.Method, gp.ClientID.Output, err)
 
 						handler := config.Handler{
-							Path:    getProfile.Path,
-							Method:  getProfile.Method,
+							Path:    gp.Path,
+							Method:  gp.Method,
 							Enabled: true,
-							Params:  getProfile.Params,
+							Params:  gp.Params,
 						}
-						log.Printf("[%s] GET legacy handler has %d params", r.Method, len(handler.Params))
-
 						clientID, err = m.extractClientID(r, handler)
 						if err != nil {
 							log.Printf("[%s] GET legacy extraction also failed: %v (URL: %s)", r.Method, err, r.URL.String())
 							http.Error(w, err.Error(), http.StatusBadRequest)
 							return
 						}
-						log.Printf("[%s] Extracted client ID via GET legacy fallback: %s", r.Method, clientID)
-					} else {
-						log.Printf("[%s] Extracted client ID via GET DataBlock from %s: %s", r.Method, getProfile.ClientID.Output, clientID)
 					}
 				} else {
-					// Legacy: Extract clientID using profile's params
 					handler := config.Handler{
-						Path:    getProfile.Path,
-						Method:  getProfile.Method,
+						Path:    gp.Path,
+						Method:  gp.Method,
 						Enabled: true,
-						Params:  getProfile.Params,
+						Params:  gp.Params,
 					}
 					clientID, err = m.extractClientID(r, handler)
 					if err != nil {
@@ -253,27 +350,22 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 					}
 				}
 
-				// Use profile-aware GET request handler
-				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, serverResponseProfile)
+				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, allRespForGet[i])
 				return
 			}
 		}
 
-		// If listener has a bound POST profile, use it
-		if postProfile != nil {
-			// Check for match - exact match OR prefix match if profile uses uri_append
-			pathMatches := postProfile.Path == r.URL.Path
-			if !pathMatches && postProfile.ClientID != nil && postProfile.ClientID.Output == "uri_append" {
-				// uri_append: request path should start with profile path
-				pathMatches = len(r.URL.Path) > len(postProfile.Path) &&
-					r.URL.Path[:len(postProfile.Path)] == postProfile.Path
+		// Try matching against all POST profiles (default + variants)
+		for _, pp := range allPostProfiles {
+			pathMatches := pp.Path == r.URL.Path
+			if !pathMatches && pp.ClientID != nil && pp.ClientID.Output == "uri_append" {
+				pathMatches = len(r.URL.Path) > len(pp.Path) &&
+					r.URL.Path[:len(pp.Path)] == pp.Path
 			}
 
-			if pathMatches && postProfile.Method == r.Method {
-				log.Printf("[%s] Matched POST profile %s for path %s", r.Method, postProfile.Name, r.URL.Path)
-
-				// Use POST request handler with the bound profile
-				m.handlePostRequestWithProfile(w, r, postProfile)
+			if pathMatches && pp.Method == r.Method {
+				log.Printf("[%s] Matched POST profile %s for path %s", r.Method, pp.Name, r.URL.Path)
+				m.handlePostRequestWithProfile(w, r, pp)
 				return
 			}
 		}
@@ -281,13 +373,20 @@ func (m *Manager) createHTTPHandler(cfg config.ListenerConfig) http.Handler {
 		// No matching profile found
 		log.Printf("[%s] No matching handler found for path %s", r.Method, r.URL.Path)
 
-		// Check if this method is allowed based on bound profiles
 		allowed := false
-		if getProfile != nil && getProfile.Method == r.Method {
-			allowed = true
+		for _, gp := range allGetProfiles {
+			if gp.Method == r.Method {
+				allowed = true
+				break
+			}
 		}
-		if postProfile != nil && postProfile.Method == r.Method {
-			allowed = true
+		if !allowed {
+			for _, pp := range allPostProfiles {
+				if pp.Method == r.Method {
+					allowed = true
+					break
+				}
+			}
 		}
 
 		if !allowed && !methodAllowed(cfg.AllowedMethods, r.Method) {
@@ -308,7 +407,7 @@ func (m *Manager) createListenerHandler(cfg config.ListenerConfig) *ListenerHand
 		AllowedMethods: cfg.AllowedMethods,
 	}
 
-	// Look up bound profiles
+	// Look up bound profiles (default)
 	if cfg.GetProfile != "" {
 		handler.GetProfile = m.routes.GetGetProfile(cfg.GetProfile)
 		if handler.GetProfile != nil {
@@ -331,6 +430,20 @@ func (m *Manager) createListenerHandler(cfg config.ListenerConfig) *ListenerHand
 			log.Printf("[Listener %s] Handler using server response profile: %s",
 				cfg.Name, handler.ServerResponseProfile.Name)
 		}
+	}
+
+	// Resolve variant profiles (additional routes this listener handles)
+	for _, vName := range cfg.Variants {
+		gp, pp, rp, err := m.routes.ResolveVariant(vName)
+		if err != nil {
+			log.Printf("[Listener %s] Warning: variant %q: %v", cfg.Name, vName, err)
+			continue
+		}
+		handler.VariantGetProfiles = append(handler.VariantGetProfiles, gp)
+		handler.VariantPostProfiles = append(handler.VariantPostProfiles, pp)
+		handler.VariantRespProfiles = append(handler.VariantRespProfiles, rp)
+		log.Printf("[Listener %s] Variant %q: GET=%s POST=%s Response=%s",
+			cfg.Name, vName, gp.Name, pp.Name, rp.Name)
 	}
 
 	return handler
@@ -366,84 +479,94 @@ func (m *Manager) createSharedPortHandler(sps *SharedPortServer) http.Handler {
 				w.Header().Set(k, v)
 			}
 
-			// Route based on which profile matched
-			// Check for match - exact match OR prefix match if profile uses uri_append
-			getPathMatches := false
-			if handler.GetProfile != nil && handler.GetProfile.Method == r.Method {
-				getPathMatches = handler.GetProfile.Path == r.URL.Path
-				if !getPathMatches && handler.GetProfile.ClientID != nil && handler.GetProfile.ClientID.Output == "uri_append" {
-					getPathMatches = len(r.URL.Path) > len(handler.GetProfile.Path) &&
-						r.URL.Path[:len(handler.GetProfile.Path)] == handler.GetProfile.Path
-				}
+			// Build combined profile lists (default + variants) for this handler
+			spGetProfiles := make([]*config.GetProfile, 0, 1+len(handler.VariantGetProfiles))
+			spRespForGet := make([]*config.ServerResponseProfile, 0, 1+len(handler.VariantRespProfiles))
+			if handler.GetProfile != nil {
+				spGetProfiles = append(spGetProfiles, handler.GetProfile)
+				spRespForGet = append(spRespForGet, handler.ServerResponseProfile)
 			}
+			for i, gp := range handler.VariantGetProfiles {
+				spGetProfiles = append(spGetProfiles, gp)
+				spRespForGet = append(spRespForGet, handler.VariantRespProfiles[i])
+			}
+			spPostProfiles := make([]*config.PostProfile, 0, 1+len(handler.VariantPostProfiles))
+			if handler.PostProfile != nil {
+				spPostProfiles = append(spPostProfiles, handler.PostProfile)
+			}
+			spPostProfiles = append(spPostProfiles, handler.VariantPostProfiles...)
 
-			if getPathMatches {
-				// This is a GET-type request - retrieve commands
-				var clientID string
-				var err error
+			// Try matching GET profiles
+			for gi, gp := range spGetProfiles {
+				getPathMatches := false
+				if gp.Method == r.Method {
+					getPathMatches = gp.Path == r.URL.Path
+					if !getPathMatches && gp.ClientID != nil && gp.ClientID.Output == "uri_append" {
+						getPathMatches = len(r.URL.Path) > len(gp.Path) &&
+							r.URL.Path[:len(gp.Path)] == gp.Path
+					}
+				}
 
-				// Check if profile uses DataBlock for clientID (malleable transforms)
-				if handler.GetProfile.ClientID != nil {
-					// Note: ClientID extraction uses static profile key (empty xorKeyOverride)
-					clientID, err = m.extractClientIDFromDataBlock(r, handler.GetProfile.ClientID, config.Handler{}, handler.GetProfile.Path, "")
-					if err != nil {
-						// DataBlock extraction failed - fall back to legacy extraction
-						log.Printf("[SharedPort:%d] GET DataBlock extraction failed (%v), trying legacy", sps.Port, err)
+				if getPathMatches {
+					var clientID string
+					var err error
+
+					if gp.ClientID != nil {
+						clientID, err = m.extractClientIDFromDataBlock(r, gp.ClientID, config.Handler{}, gp.Path, "")
+						if err != nil {
+							log.Printf("[SharedPort:%d] GET DataBlock extraction failed (%v), trying legacy", sps.Port, err)
+							profileHandler := config.Handler{
+								Path:    gp.Path,
+								Method:  gp.Method,
+								Enabled: true,
+								Params:  gp.Params,
+							}
+							clientID, err = m.extractClientID(r, profileHandler)
+							if err != nil {
+								log.Printf("[SharedPort:%d] GET legacy extraction also failed: %v", sps.Port, err)
+								http.Error(w, err.Error(), http.StatusBadRequest)
+								return
+							}
+						}
+					} else {
 						profileHandler := config.Handler{
-							Path:    handler.GetProfile.Path,
-							Method:  handler.GetProfile.Method,
+							Path:    gp.Path,
+							Method:  gp.Method,
 							Enabled: true,
-							Params:  handler.GetProfile.Params,
+							Params:  gp.Params,
 						}
 						clientID, err = m.extractClientID(r, profileHandler)
 						if err != nil {
-							log.Printf("[SharedPort:%d] GET legacy extraction also failed: %v", sps.Port, err)
+							log.Printf("[SharedPort:%d] Failed to extract client ID: %v", sps.Port, err)
 							http.Error(w, err.Error(), http.StatusBadRequest)
 							return
 						}
-						log.Printf("[SharedPort:%d] Extracted client ID via GET legacy fallback", sps.Port)
-					} else {
-						log.Printf("[SharedPort:%d] Extracted client ID via GET DataBlock from %s", sps.Port, handler.GetProfile.ClientID.Output)
 					}
-				} else {
-					// Legacy: Extract clientID using profile's params
-					profileHandler := config.Handler{
-						Path:    handler.GetProfile.Path,
-						Method:  handler.GetProfile.Method,
-						Enabled: true,
-						Params:  handler.GetProfile.Params,
-					}
-					clientID, err = m.extractClientID(r, profileHandler)
-					if err != nil {
-						log.Printf("[SharedPort:%d] Failed to extract client ID: %v", sps.Port, err)
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					}
-				}
 
-				m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, handler.ServerResponseProfile)
-				return
-			}
-
-			// Check for POST profile match - exact match OR prefix match if profile uses uri_append
-			postPathMatches := false
-			if handler.PostProfile != nil && handler.PostProfile.Method == r.Method {
-				postPathMatches = handler.PostProfile.Path == r.URL.Path
-				if !postPathMatches && handler.PostProfile.ClientID != nil && handler.PostProfile.ClientID.Output == "uri_append" {
-					postPathMatches = len(r.URL.Path) > len(handler.PostProfile.Path) &&
-						r.URL.Path[:len(handler.PostProfile.Path)] == handler.PostProfile.Path
+					m.handleGetRequestWithProfile(w, clientID, m.commandBuffer, spRespForGet[gi])
+					return
 				}
 			}
 
-			if postPathMatches {
-				// This is a POST-type request - agent sending data
-				m.handlePostRequestWithProfile(w, r, handler.PostProfile)
-				return
+			// Try matching POST profiles
+			for _, pp := range spPostProfiles {
+				postPathMatches := false
+				if pp.Method == r.Method {
+					postPathMatches = pp.Path == r.URL.Path
+					if !postPathMatches && pp.ClientID != nil && pp.ClientID.Output == "uri_append" {
+						postPathMatches = len(r.URL.Path) > len(pp.Path) &&
+							r.URL.Path[:len(pp.Path)] == pp.Path
+					}
+				}
+
+				if postPathMatches {
+					m.handlePostRequestWithProfile(w, r, pp)
+					return
+				}
 			}
 
-			// Shouldn't reach here if LookupListener found a match, but handle it
 			log.Printf("[SharedPort:%d] Warning: Found listener but no profile match", sps.Port)
-			_ = cfg // Silence unused variable warning
+			_ = cfg
 		}
 
 		// No handler found

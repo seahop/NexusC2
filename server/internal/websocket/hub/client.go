@@ -374,6 +374,9 @@ func (h *Hub) CreateListener(client *Client, message []byte) error {
 		msg.Data.SMBProfile,
 		msg.Data.TCPProfile,
 	)
+	if err == nil && len(msg.Data.Variants) > 0 {
+		l.Variants = msg.Data.Variants
+	}
 	if err != nil {
 		log.Printf("Listener creation failed: %v", err)
 		response := ListenerResponse{

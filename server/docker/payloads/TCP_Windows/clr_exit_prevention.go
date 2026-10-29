@@ -88,51 +88,51 @@ func getMscorlib() *syscall.LazyDLL {
 	return mscorlib
 }
 
-// CLRExitPrevention handles patching of various exit methods
-type CLRExitPrevention struct {
+// RuntimeGuard handles patching of various exit methods
+type RuntimeGuard struct {
 	patchedMethods map[string]bool
 	originalBytes  map[string][]byte
 }
 
 // NewCLRExitPrevention creates a new exit prevention handler
-func NewCLRExitPrevention() *CLRExitPrevention {
-	return &CLRExitPrevention{
+func NewCLRExitPrevention() *RuntimeGuard {
+	return &RuntimeGuard{
 		patchedMethods: make(map[string]bool),
 		originalBytes:  make(map[string][]byte),
 	}
 }
 
-// PatchAllExitMethods patches all known exit methods
-func (c *CLRExitPrevention) PatchAllExitMethods() error {
+// patchAllExitMethods patches all known exit methods
+func (c *RuntimeGuard) patchAllExitMethods() error {
 	// removed debug log
 
 	// Patch Environment.Exit
-	if err := c.PatchEnvironmentExit(); err != nil {
+	if err := c.patchEnvironmentExit(); err != nil {
 	} else {
 		// removed debug log
 	}
 
 	// Patch Application.Exit (Windows Forms)
-	if err := c.PatchApplicationExit(); err != nil {
+	if err := c.patchApplicationExit(); err != nil {
 		// This might fail if Windows.Forms isn't loaded, which is fine
 	} else {
 		// removed debug log
 	}
 
 	// Patch Process.GetCurrentProcess().Kill()
-	if err := c.PatchProcessKill(); err != nil {
+	if err := c.patchProcessKill(); err != nil {
 	} else {
 		// removed debug log
 	}
 
 	// Patch ExitProcess directly in kernel32
-	if err := c.PatchExitProcess(); err != nil {
+	if err := c.patchExitProcess(); err != nil {
 	} else {
 		// removed debug log
 	}
 
 	// Patch TerminateProcess
-	if err := c.PatchTerminateProcess(); err != nil {
+	if err := c.patchTerminateProcess(); err != nil {
 	} else {
 		// removed debug log
 	}
@@ -140,8 +140,8 @@ func (c *CLRExitPrevention) PatchAllExitMethods() error {
 	return nil
 }
 
-// PatchEnvironmentExit patches the Environment.Exit method using MDSec's technique
-func (c *CLRExitPrevention) PatchEnvironmentExit() error {
+// patchEnvironmentExit patches the Environment.Exit method using MDSec's technique
+func (c *RuntimeGuard) patchEnvironmentExit() error {
 	// This is the core MDSec technique
 	// We need to find the Environment.Exit method in memory and patch it
 
@@ -204,7 +204,7 @@ func (c *CLRExitPrevention) PatchEnvironmentExit() error {
 }
 
 // patchManagedEnvironmentExit uses a managed approach to patch Environment.Exit
-func (c *CLRExitPrevention) patchManagedEnvironmentExit() error {
+func (c *RuntimeGuard) patchManagedEnvironmentExit() error {
 	// This is a fallback that works through managed code
 	// We'll implement this through the CLR hosting interface
 	// removed debug log
@@ -215,8 +215,8 @@ func (c *CLRExitPrevention) patchManagedEnvironmentExit() error {
 	return nil
 }
 
-// PatchApplicationExit patches Windows.Forms.Application.Exit
-func (c *CLRExitPrevention) PatchApplicationExit() error {
+// patchApplicationExit patches Windows.Forms.Application.Exit
+func (c *RuntimeGuard) patchApplicationExit() error {
 	kernel32 := syscall.NewLazyDLL(clrDllKernel32())
 	getModuleHandle := kernel32.NewProc(clrApiGetModuleHandle())
 
@@ -233,15 +233,15 @@ func (c *CLRExitPrevention) PatchApplicationExit() error {
 	return nil
 }
 
-// PatchProcessKill patches Process.Kill method
-func (c *CLRExitPrevention) PatchProcessKill() error {
+// patchProcessKill patches Process.Kill method
+func (c *RuntimeGuard) patchProcessKill() error {
 	// Process.Kill calls TerminateProcess, so we'll patch that instead
 	c.patchedMethods[clrKeyProcKill()] = true
 	return nil
 }
 
-// PatchExitProcess patches kernel32!ExitProcess directly
-func (c *CLRExitPrevention) PatchExitProcess() error {
+// patchExitProcess patches kernel32!ExitProcess directly
+func (c *RuntimeGuard) patchExitProcess() error {
 	kernel32 := syscall.NewLazyDLL(clrDllKernel32())
 	exitProcess := kernel32.NewProc(clrApiExitProcess())
 	virtualProtect := kernel32.NewProc(clrApiVirtualProtect())
@@ -277,8 +277,8 @@ func (c *CLRExitPrevention) PatchExitProcess() error {
 	return nil
 }
 
-// PatchTerminateProcess patches kernel32!TerminateProcess
-func (c *CLRExitPrevention) PatchTerminateProcess() error {
+// patchTerminateProcess patches kernel32!TerminateProcess
+func (c *RuntimeGuard) patchTerminateProcess() error {
 	kernel32 := syscall.NewLazyDLL(clrDllKernel32())
 	terminateProcess := kernel32.NewProc(clrApiTerminateProcess())
 	virtualProtect := kernel32.NewProc(clrApiVirtualProtect())
@@ -335,8 +335,8 @@ func (c *CLRExitPrevention) PatchTerminateProcess() error {
 	return nil
 }
 
-// RestoreMethod restores a patched method to its original state
-func (c *CLRExitPrevention) RestoreMethod(methodName string) error {
+// restoreMethod restores a patched method to its original state
+func (c *RuntimeGuard) restoreMethod(methodName string) error {
 	_, ok := c.originalBytes[methodName]
 	if !ok {
 		return fmt.Errorf(Err(E4))
@@ -349,13 +349,13 @@ func (c *CLRExitPrevention) RestoreMethod(methodName string) error {
 	return nil
 }
 
-// IsPatched checks if a specific method is patched
-func (c *CLRExitPrevention) IsPatched(methodName string) bool {
+// isPatched checks if a specific method is patched
+func (c *RuntimeGuard) isPatched(methodName string) bool {
 	return c.patchedMethods[methodName]
 }
 
-// GetPatchedMethods returns a list of all patched methods
-func (c *CLRExitPrevention) GetPatchedMethods() []string {
+// getPatchedMethods returns a list of all patched methods
+func (c *RuntimeGuard) getPatchedMethods() []string {
 	methods := make([]string, 0, len(c.patchedMethods))
 	for method := range c.patchedMethods {
 		methods = append(methods, method)
@@ -363,8 +363,8 @@ func (c *CLRExitPrevention) GetPatchedMethods() []string {
 	return methods
 }
 
-// RestoreAll restores all patched methods to their original state
-func (c *CLRExitPrevention) RestoreAll() error {
+// restoreAll restores all patched methods to their original state
+func (c *RuntimeGuard) restoreAll() error {
 	kernel32 := syscall.NewLazyDLL(clrDllKernel32())
 	virtualProtect := kernel32.NewProc(clrApiVirtualProtect())
 

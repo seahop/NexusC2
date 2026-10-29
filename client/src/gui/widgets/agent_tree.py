@@ -1042,23 +1042,19 @@ class AgentTreeWidget(QWidget):
                 
                 rows = cursor.fetchall()
                 if not rows:
-                    print("DEBUG: No agents found in database")
+                    pass
                 else:
                     total_agents = rows[0][-1]  # Get total from window function
-                    print(f"\nDEBUG: Processing {total_agents} agents")
-                    
+
                     for row in rows:
-                        print(f"\nDEBUG: Processing row: {row}")
                         agent_name = f"{row[0][:8]}"  # First 8 chars of newclient_id
                         
                         # Handle timestamp conversion
                         try:
                             last_seen = QDateTime.fromString(row[11], Qt.DateFormat.ISODate)
                             if not last_seen.isValid():
-                                print(f"DEBUG: Invalid timestamp format: {row[11]}")
-                                last_seen = QDateTime.currentDateTime()
+                                    last_seen = QDateTime.currentDateTime()
                         except Exception as e:
-                            print(f"DEBUG: Timestamp conversion error: {e}")
                             last_seen = QDateTime.currentDateTime()
 
                         # Check deleted status - handle both string timestamps and JSON dictionary format
@@ -1076,8 +1072,6 @@ class AgentTreeWidget(QWidget):
                             except Exception:
                                 is_deleted = False
 
-                        print(f"DEBUG: deleted_at value: {deleted_at}, type: {type(deleted_at)}, is_deleted: {is_deleted}")
-                        
                         details = [
                             f"Hostname: {row[1]}",      # hostname
                             f"Internal IP: {row[2]}",   # intIP
@@ -1114,13 +1108,8 @@ class AgentTreeWidget(QWidget):
                             self.agent_aliases[row[0]] = row[13]
                             agent['display_name'] = row[13]
                             
-                        print(f"DEBUG: Created agent data structure: {agent}")
                         self.agent_data.append(agent)
-                        # Index by GUID for O(1) lookup
                         self.agent_by_guid[agent['guid']] = agent
-                        print(f"AgentTreeWidget: Added agent {agent_name} (deleted: {is_deleted})")
-                        
-                    print(f"\nDEBUG: Successfully loaded {len(self.agent_data)} agents")
 
                 # Load agent tags
                 print("\nAgentTreeWidget: Loading agent tags from database")

@@ -14,32 +14,32 @@ import (
 	"time"
 )
 
-type CatCommand struct{}
+type ReadFileMsg struct{}
 
 type catOptions struct {
 	grepPattern     string
 	caseInsensitive bool
 }
 
-func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *ReadFileMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) == 0 {
-		return CommandResult{
-			ErrorString: Err(E1),
+		return OpResult{
+			EStr: Err(E1),
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Parse arguments
 	fileName, opts, err := c.parseArgs(args)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E2),
+			EStr: Err(E2),
 			Output:      Err(E2),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -82,23 +82,23 @@ func (c *CatCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Read and process the file
 	output, err := c.readFile(filePath, opts)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E10),
+			EStr: Err(E10),
 			Output:      ErrCtx(E10, filePath),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *CatCommand) parseArgs(args []string) (string, catOptions, error) {
+func (c *ReadFileMsg) parseArgs(args []string) (string, catOptions, error) {
 	opts := catOptions{}
 	fileName := args[0]
 
@@ -138,7 +138,7 @@ func (c *CatCommand) parseArgs(args []string) (string, catOptions, error) {
 }
 
 // Modified readFile function from action_cat.go
-func (c *CatCommand) readFile(filePath string, opts catOptions) (string, error) {
+func (c *ReadFileMsg) readFile(filePath string, opts catOptions) (string, error) {
 	// MODIFIED: Use NetworkAwareOpenFile instead of os.Open
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
@@ -206,7 +206,7 @@ func (c *CatCommand) readFile(filePath string, opts catOptions) (string, error) 
 	return output.String(), nil
 }
 
-func (c *CatCommand) grepFile(file *os.File, opts catOptions) (string, error) {
+func (c *ReadFileMsg) grepFile(file *os.File, opts catOptions) (string, error) {
 	scanner := bufio.NewScanner(file)
 	var matchedLines []string
 	lineNum := 0
@@ -267,7 +267,7 @@ func (c *CatCommand) grepFile(file *os.File, opts catOptions) (string, error) {
 }
 
 // wildcardContains checks if any substring of text matches the pattern
-func (c *CatCommand) wildcardContains(text, pattern string) bool {
+func (c *ReadFileMsg) wildcardContains(text, pattern string) bool {
 	// Special case: if pattern is just "*", it matches everything
 	if pattern == "*" {
 		return true

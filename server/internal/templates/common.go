@@ -784,8 +784,8 @@ const (
 	// HTTP headers (710-716)
 	IdxCommsUserAgent   = 710 // User-Agent
 	IdxCommsContentType = 711 // Content-Type
-	IdxCommsPadPre      = 712 // X-Pad-Pre
-	IdxCommsPadApp      = 713 // X-Pad-App
+	IdxCommsPadPre      = 712 // X-Cache-Seq
+	IdxCommsPadApp      = 713 // X-Cache-Idx
 	IdxCommsMetaId      = 714 // id
 	IdxCommsEncryption  = 715 // encryption
 	IdxCommsEncRsaAes   = 716 // rsa+aes

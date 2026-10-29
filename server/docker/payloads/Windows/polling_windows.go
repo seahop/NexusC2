@@ -9,7 +9,7 @@ import (
 )
 
 // startAsyncBOFChecker starts a simple cleanup routine for BOF jobs
-// All output sending is now handled through ResultManager in the main polling loop
+// All output sending is now handled through OutputManager in the main polling loop
 func startAsyncBOFChecker() {
 	// Just start the cleanup routine
 	go cleanupBOFJobs()

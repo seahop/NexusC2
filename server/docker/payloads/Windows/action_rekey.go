@@ -9,13 +9,12 @@ import (
 	"time"
 )
 
-type RekeyCommand struct{}
+type RotateMsg struct{}
 
-func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *RotateMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 	// Note: The actual rekey logic is now handled in polling.go
-	// when it receives the "rekey_required" status.
-	// This function is kept for compatibility but shouldn't be
+		// This function is kept for compatibility but shouldn't be
 	// called directly anymore since rekey needs special handling
 	// before decryption can occur.
 
@@ -23,22 +22,22 @@ func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// we still perform the rekey
 
 	// Stop existing polling first
-	StopPolling()
+	stopPolling()
 
 	// Perform handshake refresh
 	err := refreshHandshake()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E31),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E31),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      Succ(S5),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

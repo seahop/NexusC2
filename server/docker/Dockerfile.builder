@@ -1,11 +1,12 @@
-FROM golang:1.26-alpine
+FROM golang:1.27-alpine
 
 # Set up working directory
 WORKDIR /app
 
 # Install required tools and Garble for obfuscation
-RUN apk add --no-cache git zip && \
-    go install mvdan.cc/garble@v0.17.0
+RUN apk add --no-cache git zip binutils python3 && \
+    go install mvdan.cc/garble@v0.17.0 && \
+    go install github.com/tc-hib/go-winres@latest
 
 # Dynamically preload Go dependencies
 RUN mkdir -p /preload && cd /preload && \

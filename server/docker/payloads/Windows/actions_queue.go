@@ -10,18 +10,18 @@ import (
 
 const maxResultQueueSize = 1000 // Prevent unbounded memory growth during network outages
 
-type ResultManager struct {
+type OutputManager struct {
 	mu      sync.Mutex
-	results []*CommandResult
+	results []*OpResult
 }
 
-func NewResultManager() *ResultManager {
-	return &ResultManager{
-		results: make([]*CommandResult, 0, 100), // Pre-allocate reasonable capacity
+func NewResultManager() *OutputManager {
+	return &OutputManager{
+		results: make([]*OpResult, 0, 100), // Pre-allocate reasonable capacity
 	}
 }
 
-func (rm *ResultManager) AddResult(result *CommandResult) error {
+func (rm *OutputManager) addResult(result *OpResult) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
@@ -41,14 +41,14 @@ func (rm *ResultManager) AddResult(result *CommandResult) error {
 	return nil
 }
 
-func (rm *ResultManager) HasResults() bool {
+func (rm *OutputManager) hasResults() bool {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
 	return len(rm.results) > 0
 }
 
-func (rm *ResultManager) GetPendingResults() []CommandResponse {
+func (rm *OutputManager) getPendingResults() []OpResp {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
@@ -56,21 +56,21 @@ func (rm *ResultManager) GetPendingResults() []CommandResponse {
 		return nil
 	}
 
-	responses := make([]CommandResponse, len(rm.results))
+	responses := make([]OpResp, len(rm.results))
 	for i, result := range rm.results {
 
-		responses[i] = CommandResponse{
-			Command:      result.Command.Command,
-			CommandID:    result.Command.CommandID,
-			CommandDBID:  result.Command.CommandDBID,
-			AgentID:      result.Command.AgentID,
-			Filename:     result.Command.Filename,
-			CurrentChunk: result.Command.CurrentChunk,
-			TotalChunks:  result.Command.TotalChunks,
-			Data:         result.Command.Data,
+		responses[i] = OpResp{
+			Cmd:      result.Cmd.Cmd,
+			CID:    result.Cmd.CID,
+			DID:  result.Cmd.DID,
+			AID:      result.Cmd.AID,
+			Filename:     result.Cmd.Filename,
+			CurrentChunk: result.Cmd.CurrentChunk,
+			TotalChunks:  result.Cmd.TotalChunks,
+			Data:         result.Cmd.Data,
 			Output:       result.Output,
-			ExitCode:     result.ExitCode,
-			Timestamp:    result.CompletedAt,
+			EC:     result.EC,
+			Timestamp:    result.Done,
 		}
 		if result.Error != nil {
 			responses[i].Error = result.Error.Error()
@@ -78,7 +78,7 @@ func (rm *ResultManager) GetPendingResults() []CommandResponse {
 	}
 
 	// Clear the results after retrieving them
-	rm.results = make([]*CommandResult, 0)
+	rm.results = make([]*OpResult, 0)
 
 	return responses
 }

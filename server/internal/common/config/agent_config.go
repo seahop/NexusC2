@@ -18,9 +18,10 @@ type ListenerConfig struct {
 	BindIP                string
 	Timeout               int
 	EnableLogging         bool
-	GetProfile            string // Bound GET profile name
-	PostProfile           string // Bound POST profile name
-	ServerResponseProfile string // Bound server response profile name
+	GetProfile            string   // Bound GET profile name
+	PostProfile           string   // Bound POST profile name
+	ServerResponseProfile string   // Bound server response profile name
+	Variants              []string // Supported profile variant names
 }
 
 // ServerHeadersConfig holds global default headers for all listeners
@@ -141,6 +142,9 @@ type PostProfile struct {
 	// Data defines how the POST body data is transformed
 	// If not specified, data is sent as-is in the body
 	Data *DataBlock `toml:"data,omitempty" json:"data,omitempty"`
+
+	PadPreHeader string `toml:"pad_pre_header,omitempty" json:"pad_pre_header,omitempty"`
+	PadAppHeader string `toml:"pad_app_header,omitempty" json:"pad_app_header,omitempty"`
 }
 
 // ServerResponseProfile defines how the server responds to agents
@@ -156,6 +160,18 @@ type ServerResponseProfile struct {
 	// Data defines how response data is transformed before sending to agent
 	// If not specified, data is sent as-is
 	Data *DataBlock `toml:"data,omitempty" json:"data,omitempty"`
+
+	PadPreHeader string `toml:"pad_pre_header,omitempty" json:"pad_pre_header,omitempty"`
+	PadAppHeader string `toml:"pad_app_header,omitempty" json:"pad_app_header,omitempty"`
+}
+
+// ProfileVariant groups a GET, POST, and ServerResponse profile into a named set.
+// Operators select a variant at build time to control the agent's traffic shape.
+type ProfileVariant struct {
+	Name                  string `toml:"name" json:"name"`
+	GetProfile            string `toml:"get_profile" json:"get_profile"`
+	PostProfile           string `toml:"post_profile" json:"post_profile"`
+	ServerResponseProfile string `toml:"server_response_profile" json:"server_response_profile"`
 }
 
 // HTTPProfiles holds all named profiles for GET, POST, and server responses
@@ -163,6 +179,7 @@ type HTTPProfiles struct {
 	Get            []GetProfile            `toml:"get" json:"get_profiles"`
 	Post           []PostProfile           `toml:"post" json:"post_profiles"`
 	ServerResponse []ServerResponseProfile `toml:"server_response" json:"server_response_profiles"`
+	Variants       []ProfileVariant        `toml:"variants" json:"variants,omitempty"`
 }
 
 // LoadAgentConfig loads the configuration from a TOML file
@@ -188,7 +205,7 @@ func LoadAgentConfig() (*AgentConfig, error) {
 
 	// Set default server headers if not specified
 	if config.ServerHeaders.Server == "" {
-		config.ServerHeaders.Server = "nginx/1.18.0"
+		config.ServerHeaders.Server = "nginx"
 	}
 	if config.ServerHeaders.StrictTransportSecurity == "" {
 		config.ServerHeaders.StrictTransportSecurity = "max-age=31536000; includeSubDomains"
@@ -210,6 +227,12 @@ func LoadAgentConfig() (*AgentConfig, error) {
 		if config.HTTPProfiles.Post[i].Method == "" {
 			config.HTTPProfiles.Post[i].Method = "POST"
 		}
+		if config.HTTPProfiles.Post[i].PadPreHeader == "" {
+			config.HTTPProfiles.Post[i].PadPreHeader = "X-Cache-Seq"
+		}
+		if config.HTTPProfiles.Post[i].PadAppHeader == "" {
+			config.HTTPProfiles.Post[i].PadAppHeader = "X-Cache-Idx"
+		}
 	}
 
 	// Set default values for server response profiles
@@ -228,6 +251,12 @@ func LoadAgentConfig() (*AgentConfig, error) {
 		}
 		if config.HTTPProfiles.ServerResponse[i].RekeyValue == "" {
 			config.HTTPProfiles.ServerResponse[i].RekeyValue = "rekey"
+		}
+		if config.HTTPProfiles.ServerResponse[i].PadPreHeader == "" {
+			config.HTTPProfiles.ServerResponse[i].PadPreHeader = "X-Cache-Seq"
+		}
+		if config.HTTPProfiles.ServerResponse[i].PadAppHeader == "" {
+			config.HTTPProfiles.ServerResponse[i].PadAppHeader = "X-Cache-Idx"
 		}
 	}
 
@@ -301,6 +330,48 @@ func (cfg *AgentConfig) GetServerResponseProfileNames() []string {
 	return names
 }
 
+// GetProfileVariant returns a profile variant by name, or nil if not found
+func (cfg *AgentConfig) GetProfileVariant(name string) *ProfileVariant {
+	for i := range cfg.HTTPProfiles.Variants {
+		if cfg.HTTPProfiles.Variants[i].Name == name {
+			return &cfg.HTTPProfiles.Variants[i]
+		}
+	}
+	return nil
+}
+
+// GetProfileVariantNames returns a list of all variant names
+func (cfg *AgentConfig) GetProfileVariantNames() []string {
+	names := make([]string, len(cfg.HTTPProfiles.Variants))
+	for i, v := range cfg.HTTPProfiles.Variants {
+		names[i] = v.Name
+	}
+	return names
+}
+
+// ResolveVariant returns the constituent profiles for a variant name.
+// Returns the GET, POST, and ServerResponse profiles, or an error if
+// the variant or any referenced profile is missing.
+func (cfg *AgentConfig) ResolveVariant(name string) (*GetProfile, *PostProfile, *ServerResponseProfile, error) {
+	v := cfg.GetProfileVariant(name)
+	if v == nil {
+		return nil, nil, nil, fmt.Errorf("profile variant %q not found", name)
+	}
+	gp := cfg.GetGetProfile(v.GetProfile)
+	if gp == nil {
+		return nil, nil, nil, fmt.Errorf("variant %q: GET profile %q not found", name, v.GetProfile)
+	}
+	pp := cfg.GetPostProfile(v.PostProfile)
+	if pp == nil {
+		return nil, nil, nil, fmt.Errorf("variant %q: POST profile %q not found", name, v.PostProfile)
+	}
+	rp := cfg.GetServerResponseProfile(v.ServerResponseProfile)
+	if rp == nil {
+		return nil, nil, nil, fmt.Errorf("variant %q: server response profile %q not found", name, v.ServerResponseProfile)
+	}
+	return gp, pp, rp, nil
+}
+
 // ProfileUploadResult contains the results of a profile upload operation
 type ProfileUploadResult struct {
 	GetProfiles            []string `json:"get_profiles"`
@@ -308,6 +379,7 @@ type ProfileUploadResult struct {
 	ServerResponseProfiles []string `json:"server_response_profiles"`
 	SMBProfiles            []string `json:"smb_profiles"`
 	TCPProfiles            []string `json:"tcp_profiles"`
+	Variants               []string `json:"variants,omitempty"`
 	Errors                 []string `json:"errors,omitempty"`
 }
 
@@ -417,6 +489,24 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 		} else {
 			result.Errors = append(result.Errors, "TCP config not available for profile upload")
 		}
+	}
+
+	// Validate and add profile variants
+	for _, v := range uploaded.HTTPProfiles.Variants {
+		if v.Name == "" {
+			result.Errors = append(result.Errors, "variant: name is required")
+			continue
+		}
+		if cfg.GetProfileVariant(v.Name) != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': already exists", v.Name))
+			continue
+		}
+		if v.GetProfile == "" || v.PostProfile == "" || v.ServerResponseProfile == "" {
+			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': get_profile, post_profile, and server_response_profile are all required", v.Name))
+			continue
+		}
+		cfg.HTTPProfiles.Variants = append(cfg.HTTPProfiles.Variants, v)
+		result.Variants = append(result.Variants, v.Name)
 	}
 
 	return result, nil

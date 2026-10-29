@@ -12,7 +12,7 @@ import (
 	"unicode"
 )
 
-type SleepCommand struct{}
+type IntervalMsg struct{}
 
 // parseDuration parses duration strings like "1h2m3s", "5m30s", "60s"
 func parseDuration(input string) (int, error) {
@@ -68,35 +68,35 @@ func parseDuration(input string) (int, error) {
 	return totalSeconds, nil
 }
 
-func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Validate arguments
 	if len(args) == 0 || len(args) > 2 {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Parse the duration
 	seconds, err := parseDuration(args[0])
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(ErrCtx(E22, args[0])),
-			ErrorString: ErrCtx(E22, args[0]),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: ErrCtx(E22, args[0]),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Validate the sleep value
 	if seconds < 1 {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(ErrCtx(E22, args[0])),
-			ErrorString: ErrCtx(E22, args[0]),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: ErrCtx(E22, args[0]),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -105,19 +105,19 @@ func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		// Parse jitter percentage
 		jitterValue, err := strconv.ParseFloat(args[1], 64)
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Error:       fmt.Errorf(ErrCtx(E22, args[1])),
-				ErrorString: ErrCtx(E22, args[1]),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: ErrCtx(E22, args[1]),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		if jitterValue < 0 || jitterValue > 100 {
-			return CommandResult{
+			return OpResult{
 				Error:       fmt.Errorf(ErrCtx(E22, args[1])),
-				ErrorString: ErrCtx(E22, args[1]),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: ErrCtx(E22, args[1]),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 		jitter = fmt.Sprintf("%.1f", jitterValue)
@@ -126,9 +126,9 @@ func (c *SleepCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	// Update the global sleep value
 	sleep = strconv.Itoa(seconds)
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S3, strconv.Itoa(seconds)+"/"+jitter),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

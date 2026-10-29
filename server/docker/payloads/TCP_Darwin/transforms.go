@@ -41,22 +41,22 @@ func getTransStr(idx int) string {
 	return commsTpl(idx)
 }
 
-// SMBTransform represents a single transformation step
-type SMBTransform struct {
+// RelayTransform represents a single transformation step
+type RelayTransform struct {
 	Type    string `json:"T"`
 	Value   string `json:"V,omitempty"`
 	Length  int    `json:"L,omitempty"`
 	Charset string `json:"C,omitempty"`
 }
 
-// SMBDataBlock defines how data is transformed and placed
-type SMBDataBlock struct {
+// RelayDataBlock defines how data is transformed and placed
+type RelayDataBlock struct {
 	Output     string         `json:"o"`
-	Transforms []SMBTransform `json:"t,omitempty"`
+	Transforms []RelayTransform `json:"t,omitempty"`
 }
 
-// SMBTransformResult contains the result and metadata
-type SMBTransformResult struct {
+// RelayXformResult contains the result and metadata
+type RelayXformResult struct {
 	Data          []byte
 	PrependLength int
 	AppendLength  int
@@ -82,8 +82,8 @@ func getCharset(code string) string {
 // =============================================================================
 
 // applySMBTransforms applies a chain of transforms in order
-func applySMBTransforms(data []byte, transforms []SMBTransform) (*SMBTransformResult, error) {
-	result := &SMBTransformResult{Data: data}
+func applySMBTransforms(data []byte, transforms []RelayTransform) (*RelayXformResult, error) {
+	result := &RelayXformResult{Data: data}
 
 	for _, t := range transforms {
 		var err error
@@ -128,7 +128,7 @@ func applySMBTransforms(data []byte, transforms []SMBTransform) (*SMBTransformRe
 // =============================================================================
 
 // reverseSMBTransforms reverses transforms to extract original data
-func reverseSMBTransforms(data []byte, transforms []SMBTransform, prependLen, appendLen int) ([]byte, error) {
+func reverseSMBTransforms(data []byte, transforms []RelayTransform, prependLen, appendLen int) ([]byte, error) {
 	result := data
 
 	for i := len(transforms) - 1; i >= 0; i-- {
@@ -335,13 +335,13 @@ func parseSMBOutput(output string) (locationType, name string) {
 	return parts[0], parts[1]
 }
 
-// parseSMBDataBlock parses a JSON-encoded SMBDataBlock
-func parseSMBDataBlock(jsonData string) *SMBDataBlock {
+// parseSMBDataBlock parses a JSON-encoded RelayDataBlock
+func parseSMBDataBlock(jsonData string) *RelayDataBlock {
 	if jsonData == "" {
 		return nil
 	}
 
-	var db SMBDataBlock
+	var db RelayDataBlock
 	if err := json.Unmarshal([]byte(jsonData), &db); err != nil {
 		return nil
 	}

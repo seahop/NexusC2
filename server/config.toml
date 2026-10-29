@@ -46,7 +46,7 @@ url = "https://google.com"
 # Profile-specific headers (from http_profiles.server_response) are applied on top.
 
 [server_headers]
-server = "nginx/1.18.0"
+server = "nginx"
 strict_transport_security = "max-age=31536000; includeSubDomains"
 x_frame_options = "DENY"
 x_content_type_options = "nosniff"

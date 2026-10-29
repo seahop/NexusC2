@@ -17,23 +17,23 @@ import (
 	"sync"
 )
 
-// SecureComms handles encrypted communication with secret rotation
-type SecureComms struct {
+// SecChan handles encrypted communication with secret rotation
+type SecChan struct {
 	mu      sync.RWMutex
 	secret1 string // Current secret
 	secret2 string // Previous secret (for decryption fallback)
 }
 
-// NewSecureComms creates a new SecureComms instance
-func NewSecureComms(secret1, secret2 string) *SecureComms {
-	return &SecureComms{
+// NewSecureComms creates a new SecChan instance
+func NewSecureComms(secret1, secret2 string) *SecChan {
+	return &SecChan{
 		secret1: secret1,
 		secret2: secret2,
 	}
 }
 
-// EncryptMessage encrypts a message using AES-GCM with the current secret
-func (sc *SecureComms) EncryptMessage(plaintext string) (string, error) {
+// encryptMessage encrypts a message using AES-GCM with the current secret
+func (sc *SecChan) encryptMessage(plaintext string) (string, error) {
 	sc.mu.RLock()
 	secret := sc.secret1
 	sc.mu.RUnlock()
@@ -64,8 +64,8 @@ func (sc *SecureComms) EncryptMessage(plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// DecryptMessage decrypts a message, trying current secret first, then previous
-func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
+// decryptMessage decrypts a message, trying current secret first, then previous
+func (sc *SecChan) decryptMessage(encrypted string) (string, error) {
 	sc.mu.RLock()
 	secret1 := sc.secret1
 	secret2 := sc.secret2
@@ -90,7 +90,7 @@ func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
 	return "", fmt.Errorf(Err(E18))
 }
 
-func (sc *SecureComms) decryptWithSecret(ciphertext []byte, secret string) (string, error) {
+func (sc *SecChan) decryptWithSecret(ciphertext []byte, secret string) (string, error) {
 	// Derive key from secret
 	key := sha256.Sum256([]byte(secret))
 
@@ -121,9 +121,9 @@ func (sc *SecureComms) decryptWithSecret(ciphertext []byte, secret string) (stri
 	return string(plaintext), nil
 }
 
-// RotateSecret performs HMAC-based secret rotation
+// rotateSecret performs HMAC-based secret rotation
 // Must match the server's algorithm exactly
-func (sc *SecureComms) RotateSecret() {
+func (sc *SecChan) rotateSecret() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -138,8 +138,8 @@ func (sc *SecureComms) RotateSecret() {
 	sc.secret1 = newSecret
 }
 
-// GetCurrentSecret returns the current secret (for debugging)
-func (sc *SecureComms) GetCurrentSecret() string {
+// getCurrentSecret returns the current secret (for debugging)
+func (sc *SecChan) getCurrentSecret() string {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.secret1

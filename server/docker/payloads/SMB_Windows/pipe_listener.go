@@ -20,16 +20,16 @@ const (
 	maxInstances   = 10
 )
 
-// PipeListener manages a named pipe server
-type PipeListener struct {
+// NamedListener manages a named pipe server
+type NamedListener struct {
 	pipePath string
 	handle   windows.Handle
 	mu       sync.Mutex
 	closed   bool
 }
 
-// PipeConnection represents a client connection to the pipe
-type PipeConnection struct {
+// NamedConn represents a client connection to the pipe
+type NamedConn struct {
 	handle windows.Handle
 	closed bool
 	mu     sync.Mutex
@@ -73,7 +73,7 @@ func createPipeSecurityAttributes() (*windows.SecurityAttributes, error) {
 }
 
 // NewPipeListener creates a new named pipe listener
-func NewPipeListener(pipeName string) (*PipeListener, error) {
+func NewPipeListener(pipeName string) (*NamedListener, error) {
 	// Build full pipe path
 	pipePath := fmt.Sprintf(`\\.\pipe\%s`, pipeName)
 
@@ -107,14 +107,14 @@ func NewPipeListener(pipeName string) (*PipeListener, error) {
 		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
 	}
 
-	return &PipeListener{
+	return &NamedListener{
 		pipePath: pipePath,
 		handle:   handle,
 	}, nil
 }
 
 // Accept waits for and accepts a new pipe connection
-func (pl *PipeListener) Accept() (*PipeConnection, error) {
+func (pl *NamedListener) Accept() (*NamedConn, error) {
 	pl.mu.Lock()
 	if pl.closed {
 		pl.mu.Unlock()
@@ -142,7 +142,7 @@ func (pl *PipeListener) Accept() (*PipeConnection, error) {
 	}
 
 	// Create connection wrapper
-	conn := &PipeConnection{
+	conn := &NamedConn{
 		handle: handle,
 	}
 
@@ -171,13 +171,13 @@ func (pl *PipeListener) Accept() (*PipeConnection, error) {
 	return conn, nil
 }
 
-// GetPipePath returns the full pipe path
-func (pl *PipeListener) GetPipePath() string {
+// getPipePath returns the full pipe path
+func (pl *NamedListener) getPipePath() string {
 	return pl.pipePath
 }
 
 // Close closes the pipe listener
-func (pl *PipeListener) Close() error {
+func (pl *NamedListener) Close() error {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
@@ -190,7 +190,7 @@ func (pl *PipeListener) Close() error {
 }
 
 // ReadMessage reads a length-prefixed message from the pipe
-func (pc *PipeConnection) ReadMessage() ([]byte, error) {
+func (pc *NamedConn) ReadMessage() ([]byte, error) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
@@ -221,7 +221,7 @@ func (pc *PipeConnection) ReadMessage() ([]byte, error) {
 }
 
 // WriteMessage writes a length-prefixed message to the pipe
-func (pc *PipeConnection) WriteMessage(data []byte) error {
+func (pc *NamedConn) WriteMessage(data []byte) error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
@@ -252,7 +252,7 @@ func (pc *PipeConnection) WriteMessage(data []byte) error {
 }
 
 // Close closes the pipe connection
-func (pc *PipeConnection) Close() error {
+func (pc *NamedConn) Close() error {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
@@ -269,7 +269,7 @@ func (pc *PipeConnection) Close() error {
 }
 
 // readFull reads exactly len(buf) bytes
-func (pc *PipeConnection) readFull(buf []byte) error {
+func (pc *NamedConn) readFull(buf []byte) error {
 	overlapped := &windows.Overlapped{}
 	event, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
@@ -296,7 +296,7 @@ func (pc *PipeConnection) readFull(buf []byte) error {
 }
 
 // writeFull writes all bytes
-func (pc *PipeConnection) writeFull(buf []byte) error {
+func (pc *NamedConn) writeFull(buf []byte) error {
 	overlapped := &windows.Overlapped{}
 	event, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -59,7 +60,7 @@ func (h *WSHandler) handleUploadProfiles(client *hub.Client, message []byte) err
 	}
 
 	// Count successful additions
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles)
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles) + len(result.Variants)
 
 	// Build response
 	response := ProfileUploadResponse{
@@ -129,6 +130,7 @@ func (h *WSHandler) broadcastProfileUpdate() {
 			ServerResponseProfiles []string `json:"server_response_profiles"`
 			SMBProfiles            []string `json:"smb_profiles"`
 			TCPProfiles            []string `json:"tcp_profiles"`
+			Variants               []string `json:"variants"`
 		} `json:"data"`
 	}{
 		Type: "profiles_updated",
@@ -137,6 +139,7 @@ func (h *WSHandler) broadcastProfileUpdate() {
 	update.Data.GetProfiles = h.agentConfig.GetGetProfileNames()
 	update.Data.PostProfiles = h.agentConfig.GetPostProfileNames()
 	update.Data.ServerResponseProfiles = h.agentConfig.GetServerResponseProfileNames()
+	update.Data.Variants = h.agentConfig.GetProfileVariantNames()
 
 	// Get SMB profile names from SMB config
 	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {
@@ -173,6 +176,7 @@ func (h *WSHandler) syncProfilesToAgentHandler() {
 		"get_profiles":             h.agentConfig.HTTPProfiles.Get,
 		"post_profiles":            h.agentConfig.HTTPProfiles.Post,
 		"server_response_profiles": h.agentConfig.HTTPProfiles.ServerResponse,
+		"variants":                 h.agentConfig.HTTPProfiles.Variants,
 	}
 
 	if err := agentClient.SyncProfiles(profileData); err != nil {
@@ -193,11 +197,12 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 		return
 	}
 
-	// Serialize all profiles (HTTP, SMB, and TCP)
+	// Serialize all profiles (HTTP, SMB, TCP, and variants)
 	profileData := map[string]interface{}{
 		"get_profiles":             h.agentConfig.HTTPProfiles.Get,
 		"post_profiles":            h.agentConfig.HTTPProfiles.Post,
 		"server_response_profiles": h.agentConfig.HTTPProfiles.ServerResponse,
+		"variants":                 h.agentConfig.HTTPProfiles.Variants,
 	}
 
 	// Include SMB profiles if available
@@ -233,6 +238,9 @@ func (h *WSHandler) syncProfilesToRestAPI() {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if key := os.Getenv("JWT_SECRET"); key != "" {
+		req.Header.Set("X-Service-Key", key)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

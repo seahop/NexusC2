@@ -5,7 +5,7 @@
 
 package main
 
-// Command IDs - must match server/internal/common/commands/registry.go
+// Msg IDs - must match server/internal/common/commands/registry.go
 // These numeric IDs are used for command dispatch without string matching.
 
 // Cross-platform commands (1-99)
@@ -38,7 +38,7 @@ const (
 	CmdPersistCron = 102
 )
 
-// Link commands (230-232) - for multi-hop TCP agent chains
+// link commands (230-232) - for multi-hop TCP agent chains
 const (
 	CmdLink   = 230
 	CmdUnlink = 231

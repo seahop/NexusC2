@@ -35,8 +35,8 @@ type smbPipeConn struct {
 	closed   bool
 }
 
-// SMBCredentials holds credentials for SMB authentication
-type SMBCredentials struct {
+
+type RA struct {
 	Domain   string
 	User     string
 	Password string
@@ -45,7 +45,7 @@ type SMBCredentials struct {
 // dialPipe connects to a Windows named pipe via SMB2
 // pipePath format: \\server\pipe\pipename
 // creds can be nil for anonymous authentication
-func dialPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
+func dialPipe(pipePath string, creds *RA) (net.Conn, error) {
 	// Parse the pipe path to extract server and pipe name
 	// Expected format: \\server\pipe\pipename
 	server, pipeName, err := parsePipePath(pipePath)
@@ -269,7 +269,7 @@ func performLinkAuth(conn net.Conn) error {
 
 // connectToPipe wraps dialPipe with retry logic
 // creds can be nil for anonymous authentication
-func connectToPipe(pipePath string, creds *SMBCredentials) (net.Conn, error) {
+func connectToPipe(pipePath string, creds *RA) (net.Conn, error) {
 	timeout := 30 * time.Second
 	deadline := time.Now().Add(timeout)
 

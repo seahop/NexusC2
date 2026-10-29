@@ -5,7 +5,7 @@
 
 package main
 
-// Command IDs - must match server/internal/common/commands/registry.go
+// Msg IDs - must match server/internal/common/commands/registry.go
 // These numeric IDs are used for command dispatch without string matching.
 
 // Cross-platform commands (1-99)

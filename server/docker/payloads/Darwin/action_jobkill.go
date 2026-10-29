@@ -9,17 +9,17 @@ import (
 	"time"
 )
 
-type JobKillCommand struct{}
+type WorkStopMsg struct{}
 
-func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *WorkStopMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Parse command line into arguments
 	// Note: args is already split for us, we receive just the filename
 	if len(args) == 0 {
-		return CommandResult{
-			ErrorString: Err(E1),
+		return OpResult{
+			EStr: Err(E1),
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -55,17 +55,17 @@ func (c *JobKillCommand) Execute(ctx *CommandContext, args []string) CommandResu
 	}
 
 	if !foundJob {
-		return CommandResult{
-			ErrorString: Err(E26),
+		return OpResult{
+			EStr: Err(E26),
 			Output:      ErrCtx(E26, filename),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, filename),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

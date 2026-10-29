@@ -19,16 +19,17 @@ import (
 type ListenerMessage struct {
 	Type string `json:"type"`
 	Data struct {
-		Name                  string `json:"name"`
-		Protocol              string `json:"protocol"`
-		Port                  int    `json:"port"`
-		Host                  string `json:"host"`
-		PipeName              string `json:"pipe_name,omitempty"`              // For SMB listeners
-		GetProfile            string `json:"get_profile,omitempty"`            // Bound GET profile name
-		PostProfile           string `json:"post_profile,omitempty"`           // Bound POST profile name
-		ServerResponseProfile string `json:"server_response_profile,omitempty"` // Bound server response profile name
-		SMBProfile            string `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
-		TCPProfile            string `json:"tcp_profile,omitempty"`             // Bound TCP profile name for transforms
+		Name                  string   `json:"name"`
+		Protocol              string   `json:"protocol"`
+		Port                  int      `json:"port"`
+		Host                  string   `json:"host"`
+		PipeName              string   `json:"pipe_name,omitempty"`               // For SMB listeners
+		GetProfile            string   `json:"get_profile,omitempty"`             // Bound GET profile name
+		PostProfile           string   `json:"post_profile,omitempty"`            // Bound POST profile name
+		ServerResponseProfile string   `json:"server_response_profile,omitempty"` // Bound server response profile name
+		SMBProfile            string   `json:"smb_profile,omitempty"`             // Bound SMB profile name for transforms
+		TCPProfile            string   `json:"tcp_profile,omitempty"`             // Bound TCP profile name for transforms
+		Variants              []string `json:"variants,omitempty"`                // Supported profile variant names
 	} `json:"data"`
 }
 

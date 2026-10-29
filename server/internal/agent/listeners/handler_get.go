@@ -104,8 +104,8 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 	// Get malleable field names from response profile (with defaults)
 	statusField := "status"
 	dataField := "data"
-	noCommandsValue := "no_commands"
-	commandReadyValue := "command_ready"
+	noCommandsValue := "0"
+	commandReadyValue := "1"
 
 	if responseProfile != nil {
 		if responseProfile.StatusField != "" {
@@ -334,10 +334,10 @@ func (m *Manager) sendXOREncryptedResponse(w http.ResponseWriter, response map[s
 
 			// Add padding length headers if random transforms were used
 			if result.PrependLength > 0 {
-				w.Header().Set("X-Pad-Pre", strconv.Itoa(result.PrependLength))
+				w.Header().Set(responseProfile.PadPreHeader, strconv.Itoa(result.PrependLength))
 			}
 			if result.AppendLength > 0 {
-				w.Header().Set("X-Pad-App", strconv.Itoa(result.AppendLength))
+				w.Header().Set(responseProfile.PadAppHeader, strconv.Itoa(result.AppendLength))
 			}
 
 			// Check output location - if not body, place accordingly

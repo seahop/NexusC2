@@ -10,77 +10,77 @@ import (
 	"time"
 )
 
-// Command represents a single command from the C2 server
-type Command struct {
-	CommandType      int    `json:"ct"`       // Numeric command ID for dispatch
-	Command          string `json:"co"`            // Full command string with args
-	CommandID        string `json:"ci"`
-	CommandDBID      int    `json:"cb"`
-	AgentID          string `json:"ai"`
-	Filename         string `json:"fn"`
-	OriginalFilename string `json:"of"`
-	RemotePath       string `json:"rp"`
-	CurrentChunk     int    `json:"cc"`
-	TotalChunks      int    `json:"tc"`
-	Data             string `json:"da"`
-	Arguments        string `json:"ar"`
-	Timestamp        string `json:"ts"`
-	JobID            string `json:"ji"`
+// Msg represents a single command from the C2 server
+type Msg struct {
+	CT           int
+	Cmd          string
+	CID          string
+	DID          int
+	AID          string
+	Filename     string
+	OFN          string
+	RemotePath   string
+	CurrentChunk int
+	TotalChunks  int
+	Data         string
+	Arguments    string
+	Timestamp    string
+	JobID        string
 }
 
-// CommandResult represents the result of command execution
-type CommandResult struct {
-	Command     Command
+// OpResult represents the result of command execution
+type OpResult struct {
+	Cmd     Msg
 	Output      string
 	Error       error
-	ErrorString string
-	ExitCode    int
-	CompletedAt string
+	EStr string
+	EC    int
+	Done string
 	JobID       string // Add this field for async BOF tracking
 }
 
-// CommandResponse represents the response to send back to server
-type CommandResponse struct {
-	Command      string `json:"co"`
-	CommandID    string `json:"ci"`
-	CommandDBID  int    `json:"cb"`
-	AgentID      string `json:"ai"`
-	Filename     string `json:"fn"`
-	RemotePath   string `json:"rp"`
-	CurrentChunk int    `json:"cc"`
-	TotalChunks  int    `json:"tc"`
-	Data         string `json:"da"`
-	Output       string `json:"ou"`
-	Error        string `json:"er,omitempty"`
-	ExitCode     int    `json:"ec"`
-	Timestamp    string `json:"ts"`
-	JobID        string `json:"ji"` // Add this field
+// OpResp represents the response to send back to server
+type OpResp struct {
+	Cmd          string
+	CID          string
+	DID          int
+	AID          string
+	Filename     string
+	RemotePath   string
+	CurrentChunk int
+	TotalChunks  int
+	Data         string
+	Output       string
+	Error        string
+	EC           int
+	Timestamp    string
+	JobID        string
 }
 
-// CommandContext holds shared state and functionality for commands
-type CommandContext struct {
+// OpCtx holds shared state and functionality for commands
+type OpCtx struct {
 	mu             sync.RWMutex
 	WorkingDir     string
-	CurrentCommand *Command          // Add this field for BOF support
-	SudoSession    interface{}       // Add this field for storing sudo session
+	CurrentMsg *Msg          // Add this field for BOF support
+	ElevCtx    interface{}       // Add this field for storing sudo session
 	SessionEnv     map[string]string // Add this field for persistent environment variables
-	StolenToken    interface{}       // Keep for backward compatibility
+	AuthEntry    interface{}       // Keep for backward compatibility
 	TokenStore     interface{}       // Unified token store for both steal-token and make-token
 	MakeToken      interface{}       // Keep for backward compatibility
 }
 
-// CommandHandler is the function signature for command execution.
+// OpHandler is the function signature for command execution.
 // All commands are now plain functions instead of struct methods.
-type CommandHandler func(ctx *CommandContext, args []string) CommandResult
+type OpHandler func(ctx *OpCtx, args []string) OpResult
 
-// CommandInterface is deprecated - kept for backward compatibility during migration.
-// New commands should use CommandHandler functions instead.
-type CommandInterface interface {
-	Execute(ctx *CommandContext, args []string) CommandResult
+// OpIface is deprecated - kept for backward compatibility during migration.
+// New commands should use OpHandler functions instead.
+type OpIface interface {
+	execute(ctx *OpCtx, args []string) OpResult
 }
 
-// JobInfo represents information about an active job
-type JobInfo struct {
+
+type WI struct {
 	ID        string // Unique job identifier
 	StartTime time.Time
 	Filename  string
@@ -88,8 +88,8 @@ type JobInfo struct {
 	Type      string // "download", "upload", etc
 }
 
-// UploadInfo tracks active upload operations
-type UploadInfo struct {
+
+type SI struct {
 	Chunks      map[int][]byte
 	TotalChunks int
 	RemotePath  string
@@ -98,8 +98,8 @@ type UploadInfo struct {
 	StartTime   time.Time // Track when upload started
 }
 
-// DownloadInfo tracks active download operations
-type DownloadInfo struct {
+
+type FI struct {
 	FilePath    string
 	TotalChunks int
 	NextChunk   int

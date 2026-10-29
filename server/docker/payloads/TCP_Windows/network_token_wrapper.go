@@ -14,15 +14,15 @@ import (
 	"unsafe"
 )
 
-// NetworkTokenContext manages the application of network-only tokens to commands
-type NetworkTokenContext struct {
+// NetCredCtx manages the application of network-only tokens to commands
+type NetCredCtx struct {
 	UseNetOnlyToken bool
 	TokenHandle     syscall.Handle
 	TokenName       string
 }
 
 // GetNetworkTokenContext returns the current network-only token context if available
-func GetNetworkTokenContext() *NetworkTokenContext {
+func GetNetworkTokenContext() *NetCredCtx {
 	if globalTokenStore == nil {
 		return nil
 	}
@@ -34,7 +34,7 @@ func GetNetworkTokenContext() *NetworkTokenContext {
 		return nil
 	}
 
-	return &NetworkTokenContext{
+	return &NetCredCtx{
 		UseNetOnlyToken: true,
 		TokenHandle:     globalTokenStore.NetOnlyHandle,
 		TokenName:       globalTokenStore.NetOnlyToken,
@@ -119,7 +119,7 @@ func CreateProcessWithNetworkToken(
 }
 
 // WrapNetworkCommand wraps a command execution with network-only token context
-func WrapNetworkCommand(commandFunc func() CommandResult) CommandResult {
+func WrapNetworkCommand(commandFunc func() OpResult) OpResult {
 	netContext := GetNetworkTokenContext()
 
 	if netContext == nil || !netContext.UseNetOnlyToken {
@@ -142,14 +142,14 @@ func WrapNetworkCommand(commandFunc func() CommandResult) CommandResult {
 
 // ExecuteNetworkCommand is a helper for executing network-related commands
 // with proper token context
-func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) CommandResult {
+func ExecuteNetworkCommand(ctx *OpCtx, command string, args []string) OpResult {
 	netContext := GetNetworkTokenContext()
 
 	var output string
 	var exitCode int
 
 	if netContext != nil && netContext.UseNetOnlyToken {
-		// Execute with network-only token
+		// execute with network-only token
 		fmtExec := getNfStr(idxNfFmtExecNetToken)
 		if fmtExec != "" {
 			output = fmt.Sprintf(fmtExec, netContext.TokenName)
@@ -164,10 +164,10 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 		// Create process with token
 		handle, pid, err := CreateProcessWithNetworkToken(fullCmd, netContext.TokenHandle)
 		if err != nil {
-			return CommandResult{
+			return OpResult{
 				Output:      Err(E37),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 
@@ -187,7 +187,7 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 			output += fmt.Sprintf(fmtComplete, pid, exitCode)
 		}
 	} else {
-		// Execute normally
+		// execute normally
 		cmd := exec.Command(command, args...)
 		outputBytes, err := cmd.CombinedOutput()
 		output = string(outputBytes)
@@ -201,15 +201,15 @@ func ExecuteNetworkCommand(ctx *CommandContext, command string, args []string) C
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output,
-		ExitCode:    exitCode,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    exitCode,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // NetCommand wrapper - example of how to integrate with existing net commands
-func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResult {
+func ExecuteNetCommandWithToken(ctx *OpCtx, args []string) OpResult {
 	// Check if we should use network-only token
 	netContext := GetNetworkTokenContext()
 
@@ -227,7 +227,7 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 			output.WriteString(fmt.Sprintf(fmtUser, GetTokenUserString(netContext.TokenHandle)))
 		}
 
-		// Execute the actual net command with the token context
+		// execute the actual net command with the token context
 		netCmd := getNfStr(idxNfCmdNet)
 		cmdStr := netCmd + " " + strings.Join(args, " ")
 
@@ -250,10 +250,10 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 				}
 			}
 
-			return CommandResult{
+			return OpResult{
 				Output:      output.String(),
-				ExitCode:    exitCode,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    exitCode,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 
@@ -266,10 +266,10 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 			output.WriteString(msgComplete)
 		}
 
-		return CommandResult{
+		return OpResult{
 			Output:      output.String(),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -287,10 +287,10 @@ func ExecuteNetCommandWithToken(ctx *CommandContext, args []string) CommandResul
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      string(output),
-		ExitCode:    exitCode,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    exitCode,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 

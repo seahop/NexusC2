@@ -13,12 +13,13 @@ type Listener struct {
 	Protocol              string
 	Port                  int
 	IP                    string
-	PipeName              string // For SMB listeners - the named pipe to listen on
-	GetProfile            string // Bound GET profile name
-	PostProfile           string // Bound POST profile name
-	ServerResponseProfile string // Bound server response profile name
-	SMBProfile            string // Bound SMB profile name for transforms
-	TCPProfile            string // Bound TCP profile name for transforms
+	PipeName              string   // For SMB listeners - the named pipe to listen on
+	GetProfile            string   // Bound GET profile name (default)
+	PostProfile           string   // Bound POST profile name (default)
+	ServerResponseProfile string   // Bound server response profile name (default)
+	SMBProfile            string   // Bound SMB profile name for transforms
+	TCPProfile            string   // Bound TCP profile name for transforms
+	Variants              []string // Supported profile variant names
 	Active                bool
 	Created               time.Time
 }

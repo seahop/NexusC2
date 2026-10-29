@@ -24,36 +24,36 @@ const (
 	keepAlivePeriod  = 30 * time.Second
 )
 
-// TCPListener manages a TCP server
-type TCPListener struct {
+// StreamListener manages a TCP server
+type StreamListener struct {
 	address  string
 	listener net.Listener
 	mu       sync.Mutex
 	closed   bool
 }
 
-// TCPConnection represents a client connection
-type TCPConnection struct {
+// StreamConn represents a client connection
+type StreamConn struct {
 	conn   net.Conn
 	closed bool
 	mu     sync.Mutex
 }
 
 // NewTCPListener creates a new TCP listener on the specified address
-func NewTCPListener(address string) (*TCPListener, error) {
+func NewTCPListener(address string) (*StreamListener, error) {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
 	}
 
-	return &TCPListener{
+	return &StreamListener{
 		address:  address,
 		listener: listener,
 	}, nil
 }
 
 // Accept waits for and accepts a new TCP connection
-func (tl *TCPListener) Accept() (*TCPConnection, error) {
+func (tl *StreamListener) Accept() (*StreamConn, error) {
 	tl.mu.Lock()
 	if tl.closed {
 		tl.mu.Unlock()
@@ -73,18 +73,18 @@ func (tl *TCPListener) Accept() (*TCPConnection, error) {
 		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
 	}
 
-	return &TCPConnection{
+	return &StreamConn{
 		conn: conn,
 	}, nil
 }
 
-// GetAddress returns the listening address
-func (tl *TCPListener) GetAddress() string {
+// getAddress returns the listening address
+func (tl *StreamListener) getAddress() string {
 	return tl.address
 }
 
 // Close closes the TCP listener
-func (tl *TCPListener) Close() error {
+func (tl *StreamListener) Close() error {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (tl *TCPListener) Close() error {
 
 // ReadMessage reads a length-prefixed message from the connection
 // Protocol: 4-byte little-endian length + data
-func (tc *TCPConnection) ReadMessage() ([]byte, error) {
+func (tc *StreamConn) ReadMessage() ([]byte, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -133,7 +133,7 @@ func (tc *TCPConnection) ReadMessage() ([]byte, error) {
 
 // WriteMessage writes a length-prefixed message to the connection
 // Protocol: 4-byte little-endian length + data
-func (tc *TCPConnection) WriteMessage(data []byte) error {
+func (tc *StreamConn) WriteMessage(data []byte) error {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -162,7 +162,7 @@ func (tc *TCPConnection) WriteMessage(data []byte) error {
 }
 
 // Close closes the TCP connection
-func (tc *TCPConnection) Close() error {
+func (tc *StreamConn) Close() error {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -175,7 +175,7 @@ func (tc *TCPConnection) Close() error {
 }
 
 // RemoteAddr returns the remote address of the connection
-func (tc *TCPConnection) RemoteAddr() string {
+func (tc *StreamConn) RemoteAddr() string {
 	if tc.conn != nil {
 		return tc.conn.RemoteAddr().String()
 	}
@@ -183,7 +183,7 @@ func (tc *TCPConnection) RemoteAddr() string {
 }
 
 // LocalAddr returns the local address of the connection
-func (tc *TCPConnection) LocalAddr() string {
+func (tc *StreamConn) LocalAddr() string {
 	if tc.conn != nil {
 		return tc.conn.LocalAddr().String()
 	}

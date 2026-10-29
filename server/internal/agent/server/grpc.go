@@ -677,6 +677,7 @@ func (s *GRPCServer) StartListener(ctx context.Context, req *pb.ListenerRequest)
 		GetProfile:            req.GetGetProfile(),
 		PostProfile:           req.GetPostProfile(),
 		ServerResponseProfile: req.GetServerResponseProfile(),
+		Variants:              s.manager.GetAllVariantNames(),
 	}
 
 	err := s.manager.StartListener(listenerCfg)
@@ -1978,6 +1979,7 @@ func (s *GRPCServer) handleProfileSync(msg *pb.StreamMessage) {
 		GetProfiles            []config.GetProfile            `json:"get_profiles"`
 		PostProfiles           []config.PostProfile           `json:"post_profiles"`
 		ServerResponseProfiles []config.ServerResponseProfile `json:"server_response_profiles"`
+		Variants               []config.ProfileVariant        `json:"variants"`
 	}
 
 	if err := json.Unmarshal([]byte(msg.Content), &profileData); err != nil {
@@ -1985,17 +1987,20 @@ func (s *GRPCServer) handleProfileSync(msg *pb.StreamMessage) {
 		return
 	}
 
-	// Update the listener manager's profiles
 	if s.manager != nil {
 		s.manager.UpdateProfiles(
 			profileData.GetProfiles,
 			profileData.PostProfiles,
 			profileData.ServerResponseProfiles,
 		)
-		log.Printf("[ProfileSync] Updated profiles: %d GET, %d POST, %d Response",
+		if len(profileData.Variants) > 0 {
+			s.manager.UpdateVariants(profileData.Variants)
+		}
+		log.Printf("[ProfileSync] Updated profiles: %d GET, %d POST, %d Response, %d Variants",
 			len(profileData.GetProfiles),
 			len(profileData.PostProfiles),
-			len(profileData.ServerResponseProfiles))
+			len(profileData.ServerResponseProfiles),
+			len(profileData.Variants))
 	} else {
 		log.Printf("[ProfileSync] Warning: Manager is nil, cannot update profiles")
 	}

@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-type SecureComms struct {
+type SecChan struct {
 	mu            sync.RWMutex
 	secret1       string
 	secret2       string
@@ -20,8 +20,8 @@ type SecureComms struct {
 	seed          string
 }
 
-func NewSecureComms(initialSecret, seed string) *SecureComms {
-	sc := &SecureComms{
+func NewSecureComms(initialSecret, seed string) *SecChan {
+	sc := &SecChan{
 		initialSecret: initialSecret,
 		seed:          seed,
 	}
@@ -36,7 +36,7 @@ func NewSecureComms(initialSecret, seed string) *SecureComms {
 	return sc
 }
 
-func (sc *SecureComms) RotateSecret() {
+func (sc *SecChan) rotateSecret() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -50,16 +50,16 @@ func (sc *SecureComms) RotateSecret() {
 
 }
 
-func (sc *SecureComms) GetDecryptionSecret() string {
+func (sc *SecChan) getDecryptionSecret() string {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.secret1
 }
 
-// DecryptMessage decrypts a message using the current secret
-func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
+// decryptMessage decrypts a message using the current secret
+func (sc *SecChan) decryptMessage(encrypted string) (string, error) {
 	// Convert current secret to 32-byte key via SHA-256
-	secretHash := sha256.Sum256([]byte(sc.GetDecryptionSecret()))
+	secretHash := sha256.Sum256([]byte(sc.getDecryptionSecret()))
 
 	// Attempt decryption with current secret
 	decrypted, err := DecryptAES(encrypted, secretHash[:])
@@ -70,7 +70,7 @@ func (sc *SecureComms) DecryptMessage(encrypted string) (string, error) {
 	return decrypted, nil
 }
 
-func (sc *SecureComms) EncryptMessage(message string) (string, error) {
+func (sc *SecChan) encryptMessage(message string) (string, error) {
 	// Get current secret for encryption
 	sc.mu.RLock()
 	currentSecret := sc.secret1

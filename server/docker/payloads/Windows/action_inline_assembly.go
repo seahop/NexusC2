@@ -316,7 +316,7 @@ func executeCLRWithCapture(assemblyBytes []byte, arguments []string) (string, in
 	}
 }
 
-func (c *InlineAssemblyCommand) executeWindowsAssembly(assemblyBytes []byte, config struct {
+func (c *NativeRunMsg) executeWindowsAssembly(assemblyBytes []byte, config struct {
 	AssemblyB64 string   `json:"ab"`
 	Arguments   []string `json:"ar"`
 	AppDomain   string   `json:"ad"`

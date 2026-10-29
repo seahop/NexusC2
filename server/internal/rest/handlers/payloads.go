@@ -38,9 +38,10 @@ type PayloadHandler struct {
 	listenerManager *listeners.Manager
 	agentClient     *agent.Client
 	dockerClient    *client.Client
+	agentConfig     *config.AgentConfig
 }
 
-func NewPayloadHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client) (*PayloadHandler, error) {
+func NewPayloadHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client, agentCfg *config.AgentConfig) (*PayloadHandler, error) {
 	dockerCli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %v", err)
@@ -51,6 +52,7 @@ func NewPayloadHandler(db *sql.DB, listenerManager *listeners.Manager, agentClie
 		listenerManager: listenerManager,
 		agentClient:     agentClient,
 		dockerClient:    dockerCli,
+		agentConfig:     agentCfg,
 	}, nil
 }
 
@@ -61,13 +63,19 @@ func (h *PayloadHandler) SetAgentClient(client *agent.Client) {
 
 // Request/Response types
 type BuildPayloadRequest struct {
-	Listener     string       `json:"listener" binding:"required"`
-	OS           string       `json:"os" binding:"required"`
-	Arch         string       `json:"arch" binding:"required"`
-	Language     string       `json:"language"`
-	PayloadType  string       `json:"payload_type"`
-	PipeName     string       `json:"pipe_name"`
-	SafetyChecks SafetyChecks `json:"safety_checks"`
+	Listener       string       `json:"listener" binding:"required"`
+	OS             string       `json:"os" binding:"required"`
+	Arch           string       `json:"arch" binding:"required"`
+	Language       string       `json:"language"`
+	PayloadType    string       `json:"payload_type"`
+	PipeName       string       `json:"pipe_name"`
+	ProfileVariant    string       `json:"profile_variant"`
+	PEFileDescription string       `json:"pe_file_description,omitempty"`
+	PECompanyName     string       `json:"pe_company_name,omitempty"`
+	PEProductName     string       `json:"pe_product_name,omitempty"`
+	PEFileVersion     string       `json:"pe_file_version,omitempty"`
+	PEProductVersion  string       `json:"pe_product_version,omitempty"`
+	SafetyChecks      SafetyChecks `json:"safety_checks"`
 }
 
 type SafetyChecks struct {
@@ -136,6 +144,21 @@ func (h *PayloadHandler) BuildPayload(c *gin.Context) {
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
 		return
+	}
+
+	// If a profile variant is specified, override the listener's profile bindings
+	if req.ProfileVariant != "" && h.agentConfig != nil {
+		_, _, _, err := h.agentConfig.ResolveVariant(req.ProfileVariant)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "profile variant error: " + err.Error()})
+			return
+		}
+		v := h.agentConfig.GetProfileVariant(req.ProfileVariant)
+		listener.GetProfile = v.GetProfile
+		listener.PostProfile = v.PostProfile
+		listener.ServerResponseProfile = v.ServerResponseProfile
+		log.Printf("[REST API] Using profile variant %q: GET=%s POST=%s Response=%s",
+			req.ProfileVariant, v.GetProfile, v.PostProfile, v.ServerResponseProfile)
 	}
 
 	// SMB pipe_name validation - can use listener's pipe_name as fallback
@@ -611,6 +634,22 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		if req.SafetyChecks.WorkingHours.End != "" {
 			envVars = append(envVars, fmt.Sprintf("SAFETY_WORK_HOURS_END=%s", xorEncrypt(req.SafetyChecks.WorkingHours.End, xorKey)))
 		}
+	}
+
+	if req.PEFileDescription != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_FILE_DESCRIPTION=%s", req.PEFileDescription))
+	}
+	if req.PECompanyName != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_COMPANY_NAME=%s", req.PECompanyName))
+	}
+	if req.PEProductName != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_PRODUCT_NAME=%s", req.PEProductName))
+	}
+	if req.PEFileVersion != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_FILE_VERSION=%s", req.PEFileVersion))
+	}
+	if req.PEProductVersion != "" {
+		envVars = append(envVars, fmt.Sprintf("PE_PRODUCT_VERSION=%s", req.PEProductVersion))
 	}
 
 	return envVars

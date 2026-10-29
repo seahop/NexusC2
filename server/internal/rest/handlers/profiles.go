@@ -34,6 +34,7 @@ func (h *ProfileHandler) ListAllProfiles(c *gin.Context) {
 		"get_profiles":             h.config.HTTPProfiles.Get,
 		"post_profiles":            h.config.HTTPProfiles.Post,
 		"server_response_profiles": h.config.HTTPProfiles.ServerResponse,
+		"variants":                 h.config.HTTPProfiles.Variants,
 	}
 
 	// Include SMB profiles if available
@@ -110,6 +111,7 @@ func (h *ProfileHandler) GetProfileNames(c *gin.Context) {
 		"get_profiles":             h.config.GetGetProfileNames(),
 		"post_profiles":            h.config.GetPostProfileNames(),
 		"server_response_profiles": h.config.GetServerResponseProfileNames(),
+		"variants":                 h.config.GetProfileVariantNames(),
 	}
 
 	// Include SMB profile names if available
@@ -123,6 +125,24 @@ func (h *ProfileHandler) GetProfileNames(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// ListProfileVariants returns all profile variants
+// GET /api/v1/profiles/variants
+func (h *ProfileHandler) ListProfileVariants(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"variants": h.config.HTTPProfiles.Variants})
+}
+
+// GetProfileVariant returns a specific profile variant by name
+// GET /api/v1/profiles/variants/:name
+func (h *ProfileHandler) GetProfileVariant(c *gin.Context) {
+	name := c.Param("name")
+	v := h.config.GetProfileVariant(name)
+	if v == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "profile variant not found"})
+		return
+	}
+	c.JSON(http.StatusOK, v)
 }
 
 // UploadProfiles accepts a TOML file or raw TOML content and adds profiles to the config
@@ -179,7 +199,7 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 	}
 
 	// Determine response status - include SMB and TCP profiles in count
-	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles)
+	totalAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.SMBProfiles) + len(result.TCPProfiles) + len(result.Variants)
 	if totalAdded == 0 && len(result.Errors) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -195,12 +215,13 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 	}
 
 	// Sync HTTP profiles to agent-handler if client available
-	httpAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles)
+	httpAdded := len(result.GetProfiles) + len(result.PostProfiles) + len(result.ServerResponseProfiles) + len(result.Variants)
 	if h.agentClient != nil && httpAdded > 0 {
 		profileData := map[string]interface{}{
 			"get_profiles":             h.config.HTTPProfiles.Get,
 			"post_profiles":            h.config.HTTPProfiles.Post,
 			"server_response_profiles": h.config.HTTPProfiles.ServerResponse,
+			"variants":                 h.config.HTTPProfiles.Variants,
 		}
 		if err := h.agentClient.SyncProfiles(profileData); err != nil {
 			log.Printf("[REST] Warning: Failed to sync profiles to agent-handler: %v", err)
@@ -244,6 +265,7 @@ func (h *ProfileHandler) UploadProfiles(c *gin.Context) {
 		"server_response_added":    result.ServerResponseProfiles,
 		"smb_profiles_added":       result.SMBProfiles,
 		"tcp_profiles_added":       result.TCPProfiles,
+		"variants_added":           result.Variants,
 		"errors":                   result.Errors,
 	})
 }
@@ -306,6 +328,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 		ServerResponseProfiles []config.ServerResponseProfile `json:"server_response_profiles"`
 		SMBProfiles            []config.SMBProfile            `json:"smb_profiles"`
 		TCPProfiles            []config.TCPProfile            `json:"tcp_profiles"`
+		Variants               []config.ProfileVariant        `json:"variants"`
 	}
 
 	if err := c.ShouldBindJSON(&profileData); err != nil {
@@ -317,6 +340,7 @@ func (h *ProfileHandler) SyncProfiles(c *gin.Context) {
 	h.config.HTTPProfiles.Get = profileData.GetProfiles
 	h.config.HTTPProfiles.Post = profileData.PostProfiles
 	h.config.HTTPProfiles.ServerResponse = profileData.ServerResponseProfiles
+	h.config.HTTPProfiles.Variants = profileData.Variants
 
 	// Update SMB profiles in SMBLinkConfig singleton
 	smbCount := 0

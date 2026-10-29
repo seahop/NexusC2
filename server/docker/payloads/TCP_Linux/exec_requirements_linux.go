@@ -20,7 +20,7 @@ import (
 
 // Build-time variables that will be set via ldflags (XOR encrypted)
 var (
-	// Safety check variables - set at build time (XOR encrypted with xorKey)
+	// Safety check variables - set at build time (XOR encrypted with cfgKey)
 	safetyHostname       string = ""
 	safetyUsername       string = ""
 	safetyDomain         string = ""
@@ -43,7 +43,7 @@ func decryptSafetyValue(encrypted string) string {
 	}
 	result := make([]byte, len(decoded))
 	for i := 0; i < len(decoded); i++ {
-		result[i] = decoded[i] ^ xorKey[i%len(xorKey)]
+		result[i] = decoded[i] ^ cfgKey[i%len(cfgKey)]
 	}
 	return string(result)
 }
@@ -66,8 +66,8 @@ func clearString(s *string) {
 	*s = ""
 }
 
-// ExecReqTemplate stores exec requirements template strings received from server
-type ExecReqTemplate struct {
+// RunCfg stores exec requirements template strings received from server
+type RunCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -104,14 +104,14 @@ const (
 	idxExecReqSysInfoStatusActive = 323
 )
 
-// Global exec req template storage (uses SecureTemplate for memory zeroing)
-var globalExecReqTpl *SecureTemplate
+// Global exec req template storage (uses SafeTemplate for memory zeroing)
+var globalExecReqTpl *SafeTemplate
 
-// setExecReqTemplate stores the exec requirements template (converts to SecureTemplate)
-func setExecReqTemplate(tpl *ExecReqTemplate) {
-	// Zero old template before replacing
+// setExecReqTemplate stores the exec requirements template (converts to SafeTemplate)
+func setExecReqTemplate(tpl *RunCfg) {
+	// zero old template before replacing
 	if globalExecReqTpl != nil {
-		globalExecReqTpl.Zero()
+		globalExecReqTpl.zero()
 	}
 	globalExecReqTpl = NewSecureTemplateFromSlices(tpl.Version, tpl.Type, tpl.Templates, tpl.Params)
 }
@@ -126,9 +126,9 @@ func getErStr(idx int) string {
 	return erTpl(idx)
 }
 
-// PerformSafetyChecks runs all configured safety checks
+// performSafetyChecks runs all configured safety checks
 // Safety values are XOR encrypted - decrypt, compare, then clear from memory
-func PerformSafetyChecks() bool {
+func performSafetyChecks() bool {
 	if !hasSafetyChecks() {
 		return true
 	}

@@ -5,14 +5,14 @@
 
 package main
 
-type PwdCommand struct{}
+type GetDirMsg struct{}
 
-func (c *PwdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *GetDirMsg) execute(ctx *OpCtx, args []string) OpResult {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 
-	return CommandResult{
+	return OpResult{
 		Output:   ctx.WorkingDir,
-		ExitCode: 0,
+		EC: 0,
 	}
 }

@@ -496,7 +496,8 @@ class StateDatabase:
                     "post": [],
                     "server_response": [],
                     "smb": [],
-                    "tcp": []
+                    "tcp": [],
+                    "variants": []
                 }
 
                 for row in rows:
@@ -560,6 +561,14 @@ class StateDatabase:
                     # Store TCP profiles
                     for name in tcp_profiles:
                         profile_rows.append(("tcp", name))
+
+                    # Store profile variants
+                    variants = profile_data.get("variants", [])
+                    for v in variants:
+                        if isinstance(v, dict):
+                            profile_rows.append(("variant", v.get("name", "")))
+                        elif isinstance(v, str):
+                            profile_rows.append(("variant", v))
 
                     if profile_rows:
                         conn.executemany(

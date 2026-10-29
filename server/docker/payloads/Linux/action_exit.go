@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-type ExitCommand struct{}
+type QuitMsg struct{}
 
-func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+func (c *QuitMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Clean up active jobs
 	commandQueue.mu.Lock()
 	// Clean up downloads
@@ -32,10 +32,10 @@ func (c *ExitCommand) Execute(ctx *CommandContext, args []string) CommandResult 
 	commandQueue.mu.Unlock()
 
 	// Let the server know we're exiting
-	result := CommandResult{
+	result := OpResult{
 		Output:      Succ(S5),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 
 	// Schedule the actual exit after we return the result

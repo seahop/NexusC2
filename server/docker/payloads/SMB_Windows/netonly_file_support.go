@@ -13,8 +13,8 @@ import (
 	"unsafe"
 )
 
-// NetOnlyFileSupportTemplate stores netonly file support template strings received from server
-type NetOnlyFileSupportTemplate struct {
+// RemoteFileCfg stores netonly file support template strings received from server
+type RemoteFileCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -34,7 +34,7 @@ const (
 	idxNfFmtExecNetToken    = 856 // Executing with network-only token: %s\n
 	idxNfFmtProcComplete    = 857 // Process %d completed with exit code %d\n
 	idxNfFmtUser            = 858 //     User: %s\n\n
-	idxNfMsgCmdExecNetToken = 859 // Command executed with network-only token\n
+	idxNfMsgCmdExecNetToken = 859 // Msg executed with network-only token\n
 	idxNfCmdNet             = 860 // net
 	idxNfFmtCmdRedirect     = 861 // cmd.exe /c %s > "%s" 2>&1
 	idxNfFmtTempFile        = 862 // %s\netonly_output_%d.txt
@@ -42,10 +42,10 @@ const (
 )
 
 // Global netonly file support template storage
-var globalNetOnlyFileTpl *NetOnlyFileSupportTemplate
+var globalNetOnlyFileTpl *RemoteFileCfg
 
 // setNetOnlyFileSupportTemplate stores the netonly file support template
-func setNetOnlyFileSupportTemplate(tpl *NetOnlyFileSupportTemplate) {
+func setNetOnlyFileSupportTemplate(tpl *RemoteFileCfg) {
 	globalNetOnlyFileTpl = tpl
 }
 
@@ -161,7 +161,7 @@ func PrepareNetworkOperation(path string) string {
 func WrapNetworkFileOperation(path string, operation func() error) error {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	// Log if using network-only token
@@ -182,7 +182,7 @@ func WrapNetworkFileOperation(path string, operation func() error) error {
 				return operation()
 			}
 
-			// Execute the operation
+			// execute the operation
 			opErr := operation()
 
 			// IMPORTANT: Always revert impersonation after the operation
@@ -192,7 +192,7 @@ func WrapNetworkFileOperation(path string, operation func() error) error {
 		}
 	}
 
-	// Execute the operation without impersonation
+	// execute the operation without impersonation
 	return operation()
 }
 
@@ -200,7 +200,7 @@ func WrapNetworkFileOperation(path string, operation func() error) error {
 func NetworkAwareStatFile(path string) (os.FileInfo, error) {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	if IsNetworkPath(path) && globalTokenStore != nil {
@@ -233,7 +233,7 @@ func NetworkAwareStatFile(path string) (os.FileInfo, error) {
 func NetworkAwareReadDir(path string) ([]os.DirEntry, error) {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	if IsNetworkPath(path) && globalTokenStore != nil {
@@ -266,7 +266,7 @@ func NetworkAwareReadDir(path string) ([]os.DirEntry, error) {
 func NetworkAwareOpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	if IsNetworkPath(path) && globalTokenStore != nil {
@@ -320,7 +320,7 @@ func NetworkAwareMkdirAll(path string, perm os.FileMode) error {
 func NetworkAwareReadFile(path string) ([]byte, error) {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	if IsNetworkPath(path) && globalTokenStore != nil {
@@ -353,7 +353,7 @@ func NetworkAwareReadFile(path string) ([]byte, error) {
 func NetworkAwareWriteFile(path string, data []byte, perm os.FileMode) error {
 	// Track network resource for later cleanup
 	if IsNetworkPath(path) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(path)
+		networkResourceTracker.trackNetworkResource(path)
 	}
 
 	if IsNetworkPath(path) && globalTokenStore != nil {
@@ -386,10 +386,10 @@ func NetworkAwareWriteFile(path string, data []byte, perm os.FileMode) error {
 func NetworkAwareCopyFile(src, dst string) error {
 	// Track both source and destination if they're network paths
 	if IsNetworkPath(src) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(src)
+		networkResourceTracker.trackNetworkResource(src)
 	}
 	if IsNetworkPath(dst) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(dst)
+		networkResourceTracker.trackNetworkResource(dst)
 	}
 
 	// Apply token if either path is a network path
@@ -430,10 +430,10 @@ func NetworkAwareCopyFile(src, dst string) error {
 func NetworkAwareMoveFile(src, dst string) error {
 	// Track both source and destination if they're network paths
 	if IsNetworkPath(src) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(src)
+		networkResourceTracker.trackNetworkResource(src)
 	}
 	if IsNetworkPath(dst) && networkResourceTracker != nil {
-		networkResourceTracker.TrackNetworkResource(dst)
+		networkResourceTracker.trackNetworkResource(dst)
 	}
 
 	// Apply token if either path is a network path

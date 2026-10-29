@@ -11,19 +11,19 @@ import (
 	"time"
 )
 
-type CdCommand struct{}
+type ChDirMsg struct{}
 
-// Modified Execute function from action_cd.go
-func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+// Modified execute function from action_cd.go
+func (c *ChDirMsg) execute(ctx *OpCtx, args []string) OpResult {
 	ctx.mu.Lock()
 	defer ctx.mu.Unlock()
 
 	// If no args, stay in current directory
 	if len(args) == 0 {
-		return CommandResult{
+		return OpResult{
 			Output:      ctx.WorkingDir,
-			ExitCode:    0,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    0,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -46,22 +46,22 @@ func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// MODIFIED: Use NetworkAwareStatFile instead of os.Stat
 	info, err := NetworkAwareStatFile(newDir)
 	if err != nil {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E4, newDir),
 			Error:       err,
-			ErrorString: Err(E4),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E4),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
 	if !info.IsDir() {
-		return CommandResult{
+		return OpResult{
 			Output:      ErrCtx(E7, newDir),
 			Error:       fmt.Errorf(Err(E7)),
-			ErrorString: Err(E7),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E7),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 
@@ -71,9 +71,9 @@ func (c *CdCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 	// For output, convert back to forward slashes for consistency
 	displayPath := filepath.ToSlash(newDir)
 
-	return CommandResult{
+	return OpResult{
 		Output:      displayPath,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }

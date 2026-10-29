@@ -11,16 +11,16 @@ import (
 // Initialize the global token store for Windows
 func initializeWindowsTokenStore() interface{} {
 	if globalTokenStore == nil {
-		globalTokenStore = &UnifiedTokenStore{
+		globalTokenStore = &CredStore{
 			Tokens:   make(map[string]syscall.Handle),
-			Metadata: make(map[string]TokenMetadata),
+			Metadata: make(map[string]CredMeta),
 		}
 	}
 	return globalTokenStore
 }
 
-// IsTokenActiveWindows checks if there's an active token impersonation
-func (ctx *CommandContext) IsTokenActiveWindows() bool {
+// isTokenActiveWindows checks if there's an active token impersonation
+func (ctx *OpCtx) isTokenActiveWindows() bool {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 
@@ -28,7 +28,7 @@ func (ctx *CommandContext) IsTokenActiveWindows() bool {
 		return false
 	}
 
-	if store, ok := ctx.TokenStore.(*UnifiedTokenStore); ok {
+	if store, ok := ctx.TokenStore.(*CredStore); ok {
 		store.mu.RLock()
 		defer store.mu.RUnlock()
 		return store.IsImpersonating
@@ -37,8 +37,8 @@ func (ctx *CommandContext) IsTokenActiveWindows() bool {
 	return false
 }
 
-// GetActiveTokenWindows gets the active token handle and name
-func (ctx *CommandContext) GetActiveTokenWindows() (syscall.Handle, string, bool) {
+// getActiveTokenWindows gets the active token handle and name
+func (ctx *OpCtx) getActiveTokenWindows() (syscall.Handle, string, bool) {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 
@@ -46,7 +46,7 @@ func (ctx *CommandContext) GetActiveTokenWindows() (syscall.Handle, string, bool
 		return 0, "", false
 	}
 
-	if store, ok := ctx.TokenStore.(*UnifiedTokenStore); ok {
+	if store, ok := ctx.TokenStore.(*CredStore); ok {
 		store.mu.RLock()
 		defer store.mu.RUnlock()
 
@@ -62,8 +62,8 @@ func (ctx *CommandContext) GetActiveTokenWindows() (syscall.Handle, string, bool
 	return 0, "", false
 }
 
-// GetActiveTokenNameWindows returns the name of the currently active token
-func (ctx *CommandContext) GetActiveTokenNameWindows() string {
+// getActiveTokenNameWindows returns the name of the currently active token
+func (ctx *OpCtx) getActiveTokenNameWindows() string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 
@@ -71,7 +71,7 @@ func (ctx *CommandContext) GetActiveTokenNameWindows() string {
 		return ""
 	}
 
-	if store, ok := ctx.TokenStore.(*UnifiedTokenStore); ok {
+	if store, ok := ctx.TokenStore.(*CredStore); ok {
 		store.mu.RLock()
 		defer store.mu.RUnlock()
 
@@ -84,12 +84,12 @@ func (ctx *CommandContext) GetActiveTokenNameWindows() string {
 }
 
 // CheckTokenContext is a helper function for commands to check token state
-func CheckTokenContext(ctx *CommandContext) (bool, string) {
+func CheckTokenContext(ctx *OpCtx) (bool, string) {
 	if ctx == nil || ctx.TokenStore == nil {
 		return false, ""
 	}
 
-	if store, ok := ctx.TokenStore.(*UnifiedTokenStore); ok {
+	if store, ok := ctx.TokenStore.(*CredStore); ok {
 		store.mu.RLock()
 		defer store.mu.RUnlock()
 
@@ -103,12 +103,12 @@ func CheckTokenContext(ctx *CommandContext) (bool, string) {
 
 // GetTokenForExecution gets a token suitable for CreateProcessAsUser/CreateProcessWithTokenW
 // This duplicates the stored token each time to avoid handle reuse issues
-func GetTokenForExecution(ctx *CommandContext) (syscall.Token, bool) {
+func GetTokenForExecution(ctx *OpCtx) (syscall.Token, bool) {
 	if ctx == nil || ctx.TokenStore == nil {
 		return 0, false
 	}
 
-	store, ok := ctx.TokenStore.(*UnifiedTokenStore)
+	store, ok := ctx.TokenStore.(*CredStore)
 	if !ok {
 		return 0, false
 	}
@@ -165,7 +165,7 @@ func CleanupToken(token syscall.Token) {
 
 // UpdateTokenStore updates the token store reference in the context
 // This is useful when the token store is created after the context
-func UpdateTokenStore(ctx *CommandContext) {
+func UpdateTokenStore(ctx *OpCtx) {
 	if ctx == nil {
 		return
 	}

