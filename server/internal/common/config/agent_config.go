@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -116,6 +117,7 @@ type DataBlock struct {
 // GetProfile defines a named GET request profile
 type GetProfile struct {
 	Name    string   `toml:"name" json:"name"`
+	Base    string   `toml:"base,omitempty" json:"base,omitempty"`
 	Path    string   `toml:"path" json:"path"`
 	Method  string   `toml:"method" json:"method"`
 	Headers []Header `toml:"headers" json:"headers"`
@@ -129,6 +131,7 @@ type GetProfile struct {
 // PostProfile defines a named POST request profile
 type PostProfile struct {
 	Name        string   `toml:"name" json:"name"`
+	Base        string   `toml:"base,omitempty" json:"base,omitempty"`
 	Path        string   `toml:"path" json:"path"`
 	Method      string   `toml:"method" json:"method"`
 	ContentType string   `toml:"content_type" json:"content_type"`
@@ -150,6 +153,7 @@ type PostProfile struct {
 // ServerResponseProfile defines how the server responds to agents
 type ServerResponseProfile struct {
 	Name           string   `toml:"name" json:"name"`
+	Base           string   `toml:"base,omitempty" json:"base,omitempty"`
 	ContentType    string   `toml:"content_type" json:"content_type"`
 	StatusField    string   `toml:"status_field" json:"status_field"`
 	DataField      string   `toml:"data_field" json:"data_field"`
@@ -259,6 +263,8 @@ func LoadAgentConfig() (*AgentConfig, error) {
 			config.HTTPProfiles.ServerResponse[i].PadAppHeader = "X-Cache-Idx"
 		}
 	}
+
+	config.resolveInheritance()
 
 	return &config, nil
 }
@@ -370,6 +376,111 @@ func (cfg *AgentConfig) ResolveVariant(name string) (*GetProfile, *PostProfile, 
 		return nil, nil, nil, fmt.Errorf("variant %q: server response profile %q not found", name, v.ServerResponseProfile)
 	}
 	return gp, pp, rp, nil
+}
+
+// resolveInheritance fills empty fields in child profiles from their base parent
+func (cfg *AgentConfig) resolveInheritance() {
+	for i := range cfg.HTTPProfiles.Get {
+		p := &cfg.HTTPProfiles.Get[i]
+		if p.Base == "" {
+			continue
+		}
+		parent := cfg.GetGetProfile(p.Base)
+		if parent == nil {
+			continue
+		}
+		if p.Path == "" {
+			p.Path = parent.Path
+		}
+		if p.Method == "" {
+			p.Method = parent.Method
+		}
+		if len(p.Headers) == 0 {
+			p.Headers = parent.Headers
+		}
+		if len(p.Params) == 0 {
+			p.Params = parent.Params
+		}
+		if p.ClientID == nil {
+			p.ClientID = parent.ClientID
+		}
+	}
+
+	for i := range cfg.HTTPProfiles.Post {
+		p := &cfg.HTTPProfiles.Post[i]
+		if p.Base == "" {
+			continue
+		}
+		parent := cfg.GetPostProfile(p.Base)
+		if parent == nil {
+			continue
+		}
+		if p.Path == "" {
+			p.Path = parent.Path
+		}
+		if p.Method == "" {
+			p.Method = parent.Method
+		}
+		if p.ContentType == "" {
+			p.ContentType = parent.ContentType
+		}
+		if len(p.Headers) == 0 {
+			p.Headers = parent.Headers
+		}
+		if len(p.Params) == 0 {
+			p.Params = parent.Params
+		}
+		if p.ClientID == nil {
+			p.ClientID = parent.ClientID
+		}
+		if p.Data == nil {
+			p.Data = parent.Data
+		}
+		if p.PadPreHeader == "" {
+			p.PadPreHeader = parent.PadPreHeader
+		}
+		if p.PadAppHeader == "" {
+			p.PadAppHeader = parent.PadAppHeader
+		}
+	}
+
+	for i := range cfg.HTTPProfiles.ServerResponse {
+		p := &cfg.HTTPProfiles.ServerResponse[i]
+		if p.Base == "" {
+			continue
+		}
+		parent := cfg.GetServerResponseProfile(p.Base)
+		if parent == nil {
+			continue
+		}
+		if p.ContentType == "" {
+			p.ContentType = parent.ContentType
+		}
+		if p.StatusField == "" {
+			p.StatusField = parent.StatusField
+		}
+		if p.DataField == "" {
+			p.DataField = parent.DataField
+		}
+		if p.CommandIDField == "" {
+			p.CommandIDField = parent.CommandIDField
+		}
+		if p.RekeyValue == "" {
+			p.RekeyValue = parent.RekeyValue
+		}
+		if len(p.Headers) == 0 {
+			p.Headers = parent.Headers
+		}
+		if p.Data == nil {
+			p.Data = parent.Data
+		}
+		if p.PadPreHeader == "" {
+			p.PadPreHeader = parent.PadPreHeader
+		}
+		if p.PadAppHeader == "" {
+			p.PadAppHeader = parent.PadAppHeader
+		}
+	}
 }
 
 // ProfileUploadResult contains the results of a profile upload operation
@@ -491,6 +602,9 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 		}
 	}
 
+	// Resolve profile inheritance before variant validation
+	cfg.resolveInheritance()
+
 	// Validate and add profile variants
 	for _, v := range uploaded.HTTPProfiles.Variants {
 		if v.Name == "" {
@@ -505,6 +619,18 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': get_profile, post_profile, and server_response_profile are all required", v.Name))
 			continue
 		}
+		if cfg.GetGetProfile(v.GetProfile) == nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': get_profile %q not found", v.Name, v.GetProfile))
+			continue
+		}
+		if cfg.GetPostProfile(v.PostProfile) == nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': post_profile %q not found", v.Name, v.PostProfile))
+			continue
+		}
+		if cfg.GetServerResponseProfile(v.ServerResponseProfile) == nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("variant '%s': server_response_profile %q not found", v.Name, v.ServerResponseProfile))
+			continue
+		}
 		cfg.HTTPProfiles.Variants = append(cfg.HTTPProfiles.Variants, v)
 		result.Variants = append(result.Variants, v.Name)
 	}
@@ -512,19 +638,85 @@ func (cfg *AgentConfig) ValidateAndAddProfiles(tomlContent string) (*ProfileUplo
 	return result, nil
 }
 
+// validTransformTypes lists all recognized transform types
+var validTransformTypes = map[string]bool{
+	"base64": true, "base64url": true, "hex": true, "gzip": true,
+	"netbios": true, "xor": true, "prepend": true, "append": true,
+	"random_prepend": true, "random_append": true,
+}
+
+// validOutputLocations lists recognized output location prefixes
+var validOutputLocations = map[string]bool{
+	"body": true, "header": true, "cookie": true, "query": true, "uri_append": true,
+}
+
+// validCharsets lists recognized random charset values
+var validCharsets = map[string]bool{
+	"": true, "numeric": true, "alpha": true, "alphanumeric": true, "hex": true, "binary": true,
+}
+
+// validateTransform validates a single transform step
+func validateTransform(t Transform, idx int) error {
+	if !validTransformTypes[t.Type] {
+		return fmt.Errorf("transform[%d]: unknown type %q", idx, t.Type)
+	}
+	switch t.Type {
+	case "xor":
+		if t.Value == "" {
+			return fmt.Errorf("transform[%d]: xor requires a 'value' (key)", idx)
+		}
+	case "prepend", "append":
+		if t.Value == "" {
+			return fmt.Errorf("transform[%d]: %s requires a 'value'", idx, t.Type)
+		}
+	case "random_prepend", "random_append":
+		if t.Length <= 0 {
+			return fmt.Errorf("transform[%d]: %s requires a positive 'length'", idx, t.Type)
+		}
+		if !validCharsets[t.Charset] {
+			return fmt.Errorf("transform[%d]: invalid charset %q", idx, t.Charset)
+		}
+	}
+	return nil
+}
+
+// validateDataBlock validates a DataBlock's output location and transform chain
+func validateDataBlock(db *DataBlock, label string) error {
+	if db == nil {
+		return nil
+	}
+	if db.Output == "" {
+		return fmt.Errorf("%s: output is required", label)
+	}
+	parts := strings.SplitN(db.Output, ":", 2)
+	if !validOutputLocations[parts[0]] {
+		return fmt.Errorf("%s: invalid output %q (must be body, header:<name>, cookie:<name>, query:<name>, or uri_append)", label, db.Output)
+	}
+	if (parts[0] == "header" || parts[0] == "cookie" || parts[0] == "query") && (len(parts) < 2 || parts[1] == "") {
+		return fmt.Errorf("%s: %s output requires a name (e.g. %s:name)", label, parts[0], parts[0])
+	}
+	for i, t := range db.Transforms {
+		if err := validateTransform(t, i); err != nil {
+			return fmt.Errorf("%s: %v", label, err)
+		}
+	}
+	return nil
+}
+
 // validateGetProfile validates a GET profile
 func (cfg *AgentConfig) validateGetProfile(profile *GetProfile) error {
 	if profile.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if profile.Path == "" {
-		return fmt.Errorf("path is required")
-	}
-	// Check for duplicate name
 	if cfg.GetGetProfile(profile.Name) != nil {
 		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
 	}
-	// Validate params have required fields
+	if profile.Base != "" && cfg.GetGetProfile(profile.Base) == nil {
+		return fmt.Errorf("base profile %q not found", profile.Base)
+	}
+	if profile.Base == "" && profile.Path == "" {
+		return fmt.Errorf("path is required (or set base to inherit from a parent)")
+	}
 	for i, param := range profile.Params {
 		if param.Name == "" {
 			return fmt.Errorf("param[%d]: name is required", i)
@@ -532,6 +724,9 @@ func (cfg *AgentConfig) validateGetProfile(profile *GetProfile) error {
 		if param.Type == "" {
 			return fmt.Errorf("param[%d]: type is required", i)
 		}
+	}
+	if err := validateDataBlock(profile.ClientID, "client_id"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -541,14 +736,15 @@ func (cfg *AgentConfig) validatePostProfile(profile *PostProfile) error {
 	if profile.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if profile.Path == "" {
-		return fmt.Errorf("path is required")
-	}
-	// Check for duplicate name
 	if cfg.GetPostProfile(profile.Name) != nil {
 		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
 	}
-	// Validate params have required fields
+	if profile.Base != "" && cfg.GetPostProfile(profile.Base) == nil {
+		return fmt.Errorf("base profile %q not found", profile.Base)
+	}
+	if profile.Base == "" && profile.Path == "" {
+		return fmt.Errorf("path is required (or set base to inherit from a parent)")
+	}
 	for i, param := range profile.Params {
 		if param.Name == "" {
 			return fmt.Errorf("param[%d]: name is required", i)
@@ -556,6 +752,12 @@ func (cfg *AgentConfig) validatePostProfile(profile *PostProfile) error {
 		if param.Type == "" {
 			return fmt.Errorf("param[%d]: type is required", i)
 		}
+	}
+	if err := validateDataBlock(profile.ClientID, "client_id"); err != nil {
+		return err
+	}
+	if err := validateDataBlock(profile.Data, "data"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -565,9 +767,14 @@ func (cfg *AgentConfig) validateServerResponseProfile(profile *ServerResponsePro
 	if profile.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	// Check for duplicate name
 	if cfg.GetServerResponseProfile(profile.Name) != nil {
 		return fmt.Errorf("profile with name '%s' already exists", profile.Name)
+	}
+	if profile.Base != "" && cfg.GetServerResponseProfile(profile.Base) == nil {
+		return fmt.Errorf("base profile %q not found", profile.Base)
+	}
+	if err := validateDataBlock(profile.Data, "data"); err != nil {
+		return err
 	}
 	return nil
 }

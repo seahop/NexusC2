@@ -353,6 +353,10 @@ class StateDatabase:
                             for name in profiles.get("tcp", []):
                                 profile_rows.append(("tcp", name))
 
+                            # Store variants
+                            for name in profiles.get("variants", []):
+                                profile_rows.append(("variants", name))
+
                             if profile_rows:
                                 conn.executemany(
                                     """INSERT OR REPLACE INTO available_profiles (profile_type, profile_name)
@@ -566,9 +570,9 @@ class StateDatabase:
                     variants = profile_data.get("variants", [])
                     for v in variants:
                         if isinstance(v, dict):
-                            profile_rows.append(("variant", v.get("name", "")))
+                            profile_rows.append(("variants", v.get("name", "")))
                         elif isinstance(v, str):
-                            profile_rows.append(("variant", v))
+                            profile_rows.append(("variants", v))
 
                     if profile_rows:
                         conn.executemany(

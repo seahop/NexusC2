@@ -283,6 +283,7 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 			ServerResponseProfiles []string `json:"server_response_profiles"`
 			SMBProfiles            []string `json:"smb_profiles"`
 			TCPProfiles            []string `json:"tcp_profiles"`
+			Variants               []string `json:"variants"`
 		} `json:"data"`
 	}{
 		Type: "profiles_list",
@@ -291,6 +292,7 @@ func (h *WSHandler) handleGetProfiles(client *hub.Client, message []byte) error 
 	response.Data.GetProfiles = h.agentConfig.GetGetProfileNames()
 	response.Data.PostProfiles = h.agentConfig.GetPostProfileNames()
 	response.Data.ServerResponseProfiles = h.agentConfig.GetServerResponseProfileNames()
+	response.Data.Variants = h.agentConfig.GetProfileVariantNames()
 
 	// Get SMB profile names from SMB config
 	if smbConfig, err := config.GetSMBLinkConfig(); err == nil && smbConfig != nil {

@@ -1010,6 +1010,34 @@ output = "body"
 type = "base64"
 
 # =============================================================================
+# PROFILE VARIANTS - Named combinations of GET/POST/Response profiles
+# =============================================================================
+
+[[http_profiles.variants]]
+name = "default"
+get_profile = "default-get"
+post_profile = "default-post"
+server_response_profile = "default-response"
+
+[[http_profiles.variants]]
+name = "microsoft-graph"
+get_profile = "microsoft-graph-get"
+post_profile = "microsoft-graph-post"
+server_response_profile = "microsoft-graph-response"
+
+[[http_profiles.variants]]
+name = "aws-s3"
+get_profile = "aws-s3-get"
+post_profile = "aws-s3-post"
+server_response_profile = "aws-s3-response"
+
+[[http_profiles.variants]]
+name = "cdn-analytics"
+get_profile = "cdn-jquery-get"
+post_profile = "cdn-analytics-post"
+server_response_profile = "cdn-analytics-response"
+
+# =============================================================================
 # PAYLOAD CONFIGURATION
 # =============================================================================
 

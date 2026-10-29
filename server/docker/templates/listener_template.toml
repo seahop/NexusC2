@@ -1,143 +1,254 @@
 # =============================================================================
 # HTTP PROFILE TEMPLATE
 # =============================================================================
-# Fill out this template to create custom HTTP profiles for your listeners.
 # Upload via API: POST /api/v1/profiles/upload
 # Or use the client UI to upload this file.
 #
-# You can include any combination of profiles in a single file:
-# - GET profiles (how agents poll for commands)
-# - POST profiles (how agents send results)
-# - Server Response profiles (how server responds to agents)
-#
-# All fields with default values are optional - remove them to use defaults.
+# Supports: GET profiles, POST profiles, Server Response profiles,
+# DataBlock transforms, profile inheritance (base), and profile variants.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# GET PROFILE - Define how agents poll for commands
-# -----------------------------------------------------------------------------
-# Required fields: name, path
-# Optional fields: method (default: GET), headers, params
+# =============================================================================
+# SECTION 1: BASE PROFILES
+# =============================================================================
+# Define a "base" profile with shared defaults. Child profiles can inherit
+# from it by setting base = "<parent-name>" and only overriding what changes.
 
+# --- Base GET profile ---
 [[http_profiles.get]]
-name = "my-custom-get"                    # Unique profile name (required)
-path = "/api/v1/check"                    # URL path for polling (required)
-method = "GET"                            # HTTP method (default: GET)
+name = "base-get"
+path = "/api/v1/status"
+method = "GET"
 
-# Headers to include in agent requests (optional)
 [[http_profiles.get.headers]]
 name = "Accept"
 value = "application/json"
 
-[[http_profiles.get.headers]]
-name = "X-Custom-Header"
-value = "custom-value"
+[http_profiles.get.client_id]
+output = "query:id"
+[[http_profiles.get.client_id.transforms]]
+type = "base64"
 
-# Parameters for client ID extraction (required - at least one)
-# location: "query" | "header" | "cookie"
-# type: "clientID_param" for client identification
-# format: use %CLIENTID% as placeholder for the actual client ID
-[[http_profiles.get.params]]
-name = "client"                           # Parameter name
-location = "query"                        # Where to place/extract the param
-type = "clientID_param"                   # Parameter type
-format = "%CLIENTID%"                     # Format string
-
-# -----------------------------------------------------------------------------
-# POST PROFILE - Define how agents send results
-# -----------------------------------------------------------------------------
-# Required fields: name, path
-# Optional fields: method (default: POST), content_type, headers, params
-
+# --- Base POST profile ---
 [[http_profiles.post]]
-name = "my-custom-post"                   # Unique profile name (required)
-path = "/api/v1/submit"                   # URL path for submissions (required)
-method = "POST"                           # HTTP method (default: POST)
-content_type = "application/json"         # Content-Type header (default: application/json)
-# pad_pre_header = "X-Cache-Seq"          # Padding prepend length header (default: X-Cache-Seq)
-# pad_app_header = "X-Cache-Idx"          # Padding append length header (default: X-Cache-Idx)
+name = "base-post"
+path = "/api/v1/report"
+method = "POST"
+content_type = "application/json"
 
-# Headers to include in agent requests (optional)
 [[http_profiles.post.headers]]
 name = "Content-Type"
 value = "application/json"
 
-# Parameters for client ID extraction (required - at least one)
-[[http_profiles.post.params]]
-name = "client"
-location = "query"
-type = "clientID_param"
-format = "%CLIENTID%"
+[http_profiles.post.client_id]
+output = "header:X-Request-ID"
+[[http_profiles.post.client_id.transforms]]
+type = "base64"
 
-# -----------------------------------------------------------------------------
-# SERVER RESPONSE PROFILE - Define how server responds to agents
-# -----------------------------------------------------------------------------
-# Required fields: name
-# Optional fields: content_type, status_field, data_field, command_id_field,
-#                  rekey_value, headers
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+# --- Base Server Response profile ---
+[[http_profiles.server_response]]
+name = "base-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "data"
+command_id_field = "id"
+rekey_value = "rekey"
+
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
+
+# =============================================================================
+# SECTION 2: CHILD PROFILES (inherit from base, override specific fields)
+# =============================================================================
+# Set base = "<parent-name>" to inherit all unset fields from the parent.
+# Only specify the fields you want to change.
+
+# --- CDN-style child GET (inherits headers, client_id from base-get) ---
+[[http_profiles.get]]
+name = "cdn-get"
+base = "base-get"
+path = "/cdn/assets/check"
+
+# --- S3-style child GET (overrides path, adds custom header) ---
+[[http_profiles.get]]
+name = "s3-get"
+base = "base-get"
+path = "/bucket/objects"
+
+[[http_profiles.get.headers]]
+name = "x-amz-content-sha256"
+value = "UNSIGNED-PAYLOAD"
+
+[http_profiles.get.client_id]
+output = "query:continuation-token"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+# --- CDN-style child POST (inherits from base-post, only changes path) ---
+[[http_profiles.post]]
+name = "cdn-post"
+base = "base-post"
+path = "/cdn/assets/upload"
+
+# --- S3-style child POST (overrides path, content type, and data transforms) ---
+[[http_profiles.post]]
+name = "s3-post"
+base = "base-post"
+path = "/bucket/objects"
+content_type = "application/octet-stream"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64"
+
+# --- CDN-style response (inherits everything from base-response) ---
+[[http_profiles.server_response]]
+name = "cdn-response"
+base = "base-response"
+
+# --- S3-style response (overrides field names) ---
+[[http_profiles.server_response]]
+name = "s3-response"
+base = "base-response"
+status_field = "Code"
+data_field = "Body"
+command_id_field = "RequestId"
+
+# =============================================================================
+# SECTION 3: STANDALONE PROFILE (no inheritance)
+# =============================================================================
+# Profiles without base = "..." are fully self-contained.
+
+[[http_profiles.get]]
+name = "graph-get"
+path = "/v1.0/me/drive/root/children"
+method = "GET"
+
+[[http_profiles.get.headers]]
+name = "Authorization"
+value = "Bearer token"
+
+[http_profiles.get.client_id]
+output = "header:Authorization"
+[[http_profiles.get.client_id.transforms]]
+type = "prepend"
+value = "Bearer "
+[[http_profiles.get.client_id.transforms]]
+type = "base64"
+
+[[http_profiles.get.params]]
+name = "Authorization"
+location = "header"
+type = "clientID_param"
+format = "Bearer %CLIENTID%"
+
+[[http_profiles.post]]
+name = "graph-post"
+path = "/v1.0/me/drive/root/children"
+method = "POST"
+content_type = "application/json"
+
+[[http_profiles.post.headers]]
+name = "Authorization"
+value = "Bearer token"
+
+[http_profiles.post.client_id]
+output = "header:Authorization"
+[[http_profiles.post.client_id.transforms]]
+type = "prepend"
+value = "Bearer "
+[[http_profiles.post.client_id.transforms]]
+type = "base64"
+
+[http_profiles.post.data]
+output = "body"
+[[http_profiles.post.data.transforms]]
+type = "gzip"
+[[http_profiles.post.data.transforms]]
+type = "base64"
 
 [[http_profiles.server_response]]
-name = "my-custom-response"               # Unique profile name (required)
-content_type = "application/json"         # Response Content-Type (default: application/json)
-status_field = "status"                   # JSON field for status (default: status)
-data_field = "data"                       # JSON field for data (default: data)
-command_id_field = "id"                   # JSON field for command ID (default: id)
-rekey_value = "refresh"                   # Value indicating rekey needed (default: rekey)
-# pad_pre_header = "X-Cache-Seq"          # Padding prepend length header (default: X-Cache-Seq)
-# pad_app_header = "X-Cache-Idx"          # Padding append length header (default: X-Cache-Idx)
+name = "graph-response"
+content_type = "application/json"
+status_field = "status"
+data_field = "value"
+command_id_field = "@odata.context"
+rekey_value = "rekey"
 
-# Headers to include in server responses (optional)
-[[http_profiles.server_response.headers]]
-name = "Cache-Control"
-value = "no-store"
-
-# -----------------------------------------------------------------------------
-# PROFILE VARIANTS - Named combinations of GET/POST/Response profiles
-# -----------------------------------------------------------------------------
-# Variants let operators group profiles into named sets and select one at
-# build time.  The server handles agents built with any registered variant.
-#
-# [[http_profiles.variants]]
-# name = "corporate-windows"
-# get_profile = "my-custom-get"
-# post_profile = "my-custom-post"
-# server_response_profile = "my-custom-response"
-#
-# [[http_profiles.variants]]
-# name = "stealth-linux"
-# get_profile = "s3-get"
-# post_profile = "s3-post"
-# server_response_profile = "s3-response"
+[http_profiles.server_response.data]
+output = "body"
+[[http_profiles.server_response.data.transforms]]
+type = "base64"
 
 # =============================================================================
-# EXAMPLES - Common profile patterns
+# SECTION 4: PROFILE VARIANTS
 # =============================================================================
+# Variants group a GET + POST + Server Response into a named set.
+# Operators select a variant at build time to shape the agent's traffic.
+# All referenced profiles must exist (validated on upload).
+
+[[http_profiles.variants]]
+name = "cdn-variant"
+get_profile = "cdn-get"
+post_profile = "cdn-post"
+server_response_profile = "cdn-response"
+
+[[http_profiles.variants]]
+name = "s3-variant"
+get_profile = "s3-get"
+post_profile = "s3-post"
+server_response_profile = "s3-response"
+
+[[http_profiles.variants]]
+name = "graph-variant"
+get_profile = "graph-get"
+post_profile = "graph-post"
+server_response_profile = "graph-response"
+
+# =============================================================================
+# TRANSFORM REFERENCE
+# =============================================================================
+# Available transform types for DataBlock transforms:
+#   base64        - Base64 encode/decode
+#   base64url     - URL-safe base64 encode/decode
+#   hex           - Hex encode/decode
+#   gzip          - Gzip compress/decompress
+#   netbios       - NetBIOS encode/decode
+#   xor           - XOR with a key (requires value = "<key>")
+#   prepend       - Prepend a static string (requires value = "<string>")
+#   append        - Append a static string (requires value = "<string>")
+#   random_prepend - Prepend random bytes (requires length = N)
+#   random_append  - Append random bytes (requires length = N)
 #
-# AWS S3-style profile:
-# [[http_profiles.get]]
-# name = "s3-get"
-# path = "/bucket/objects"
-# method = "GET"
-# [[http_profiles.get.headers]]
-# name = "x-amz-content-sha256"
-# value = "UNSIGNED-PAYLOAD"
-# [[http_profiles.get.params]]
-# name = "continuation-token"
-# location = "query"
-# type = "clientID_param"
-# format = "%CLIENTID%"
+# Random transform charsets: numeric, alpha, alphanumeric, hex, binary
 #
-# Microsoft Graph-style profile:
-# [[http_profiles.get]]
-# name = "graph-get"
-# path = "/v1.0/me/drive/root/children"
-# method = "GET"
-# [[http_profiles.get.headers]]
-# name = "Authorization"
-# value = "Bearer %CLIENTID%"
-# [[http_profiles.get.params]]
-# name = "Authorization"
-# location = "header"
-# type = "clientID_param"
-# format = "Bearer %CLIENTID%"
+# DataBlock output locations:
+#   body            - HTTP body
+#   header:<name>   - In a named header (e.g. header:X-Data)
+#   cookie:<name>   - In a named cookie (e.g. cookie:session)
+#   query:<name>    - As a query parameter (e.g. query:token)
+#   uri_append      - Appended to the URI path
+#
+# Example: XOR + base64 + append to cookie
+#   [http_profiles.post.data]
+#   output = "cookie:session"
+#   [[http_profiles.post.data.transforms]]
+#   type = "xor"
+#   value = "secretkey"
+#   [[http_profiles.post.data.transforms]]
+#   type = "base64"
+#   [[http_profiles.post.data.transforms]]
+#   type = "random_append"
+#   length = 16
+#   charset = "alphanumeric"
 # =============================================================================

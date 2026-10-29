@@ -222,6 +222,7 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			ServerResponse: make([]string, 0),
 			SMB:            make([]string, 0),
 			TCP:            make([]string, 0),
+			Variants:       make([]string, 0),
 		}
 
 		// Extract GET profile names
@@ -249,9 +250,14 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 			profiles.TCP = tcpConfig.GetTCPProfileNames()
 		}
 
+		// Extract variant names
+		for _, v := range h.agentConfig.HTTPProfiles.Variants {
+			profiles.Variants = append(profiles.Variants, v.Name)
+		}
+
 		export.AvailableProfiles = profiles
-		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d, SMB=%d, TCP=%d",
-			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse), len(profiles.SMB), len(profiles.TCP))
+		logMessage(LOG_VERBOSE, "Exported available profiles: GET=%d, POST=%d, ServerResponse=%d, SMB=%d, TCP=%d, Variants=%d",
+			len(profiles.Get), len(profiles.Post), len(profiles.ServerResponse), len(profiles.SMB), len(profiles.TCP), len(profiles.Variants))
 	}
 
 	// Log summary of exported data
@@ -262,8 +268,8 @@ func (h *WSHandler) exportState(ctx context.Context) (*StateExport, error) {
 	logMessage(LOG_NORMAL, "- Command Outputs: %d", len(export.CommandOutputs))
 	logMessage(LOG_NORMAL, "- Agent Tags: %d agents with tags", len(export.AgentTags))
 	if export.AvailableProfiles != nil {
-		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d, SMB=%d, TCP=%d",
-			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse), len(export.AvailableProfiles.SMB), len(export.AvailableProfiles.TCP))
+		logMessage(LOG_NORMAL, "- Available Profiles: GET=%d, POST=%d, Response=%d, SMB=%d, TCP=%d, Variants=%d",
+			len(export.AvailableProfiles.Get), len(export.AvailableProfiles.Post), len(export.AvailableProfiles.ServerResponse), len(export.AvailableProfiles.SMB), len(export.AvailableProfiles.TCP), len(export.AvailableProfiles.Variants))
 	}
 
 	// Commit the transaction

@@ -542,7 +542,7 @@ class WebSocketThread(QThread):
                 self.log_message.emit(f"Error received: {error_message}")
                 self.ws_client.connected = False
 
-            elif message_type in ['payload_status', 'listener_delete']:
+            elif message_type in ['payload_status', 'listener_delete', 'listener_status']:
                 # Status messages from server operations - handle based on status field
                 status = message_data.get('status')
                 if status == 'error' and self.current_dialog:
@@ -1733,14 +1733,15 @@ class CreatePayloadDialog(QDialog):
             self.listener.addItems(listeners)
 
     def populate_profile_variants(self):
-        if self.agent_tree and hasattr(self.agent_tree, 'db') and self.agent_tree.db:
-            try:
-                profiles = self.agent_tree.db.get_available_profiles()
-                for name in profiles.get("variants", []):
-                    if name:
-                        self.profile_variant.addItem(name)
-            except Exception as e:
-                print(f"CreatePayloadDialog: Failed to load profile variants: {e}")
+        try:
+            from utils.database import StateDatabase
+            db = StateDatabase()
+            profiles = db.get_available_profiles()
+            for name in profiles.get("variants", []):
+                if name:
+                    self.profile_variant.addItem(name)
+        except Exception as e:
+            print(f"CreatePayloadDialog: Failed to load profile variants: {e}")
 
     def browse_output_path(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")

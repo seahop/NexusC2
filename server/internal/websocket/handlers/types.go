@@ -66,6 +66,7 @@ type AvailableProfiles struct {
 	ServerResponse []string `json:"server_response"`
 	SMB            []string `json:"smb"`
 	TCP            []string `json:"tcp"`
+	Variants       []string `json:"variants"`
 }
 
 // StateExport represents the complete state export
