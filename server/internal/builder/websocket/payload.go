@@ -1449,9 +1449,9 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		// 1. Decrypt the secret using xorKey (from encryptedValues)
 		// 2. Use the decrypted secret to decrypt this config
 		smbConfig := map[string]string{
-			"Pipe Name":  data.pipeName,
-			"Secret":     data.secret,
-			"Public Key": data.keyPair.PublicKeyPEM,
+			"pn": data.pipeName,
+			"sk": data.secret,
+			"pk": data.keyPair.PublicKeyPEM,
 		}
 		configJSON, err := json.Marshal(smbConfig)
 		if err != nil {
@@ -1503,9 +1503,9 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		// The config is XOR encrypted with the PLAIN secret
 		// Key names must match what the TCP agent expects in main.go
 		tcpConfig := map[string]string{
-			"TCP Port":   data.tcpPort,
-			"Secret":     data.secret,
-			"Public Key": data.keyPair.PublicKeyPEM,
+			"tp": data.tcpPort,
+			"sk": data.secret,
+			"pk": data.keyPair.PublicKeyPEM,
 		}
 		configJSON, err := json.Marshal(tcpConfig)
 		if err != nil {

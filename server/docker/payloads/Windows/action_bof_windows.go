@@ -282,6 +282,7 @@ func (cq *CommandQueue) processBOF(cmd Command) CommandResult {
 		// Successfully parsed JSON - extract template, BOF data, and arguments
 		if bofWrapper.Templates != nil {
 			SetBOFTemplate(bofWrapper.Templates)
+			SetCOFFTemplate(bofWrapper.Templates)
 		}
 		// Use bof_data if present, otherwise chunk_data
 		if bofWrapper.BOFData != "" {

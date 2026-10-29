@@ -147,7 +147,7 @@ func main() {
 	// Create the TCP listener using the global tcpPort variable
 	// (set via ldflags during build, defaults to "4444")
 	activePort := tcpPort
-	if configPort, ok := config["TCP Port"]; ok && configPort != "" {
+	if configPort, ok := config["tp"]; ok && configPort != "" {
 		activePort = configPort // Override with config if present
 	}
 

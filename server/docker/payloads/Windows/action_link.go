@@ -186,7 +186,6 @@ func (c *LinkCommand) linkTCP(address string) CommandResult {
 // performImmediateHandshake handles the full handshake round-trip immediately
 // instead of waiting for the next poll cycle
 func (c *LinkCommand) performImmediateHandshake(lm *LinkManager, routingID string) string {
-	// log.Printf("[LinkCommand] Starting immediate handshake for routing_id %s", routingID)
 
 	// Wait briefly for the SMB/TCP agent's handshake to arrive in the handshake queue
 	// The handleIncomingData goroutine should receive it shortly after connection

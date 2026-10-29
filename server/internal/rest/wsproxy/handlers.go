@@ -565,7 +565,7 @@ func (p *ProxyHandlers) RemoveAgent(c *gin.Context) {
 	wsMsg := map[string]interface{}{
 		"type": "remove_agent",
 		"data": map[string]interface{}{
-			"guid": agentID,
+			"agent_id": agentID,
 		},
 	}
 

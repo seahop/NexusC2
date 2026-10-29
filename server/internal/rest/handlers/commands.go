@@ -144,7 +144,7 @@ func (h *CommandHandler) GetCommandHistory(c *gin.Context) {
 
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT c.id, c.username, c.guid, c.command, c.timestamp,
-		       (SELECT output FROM command_outputs WHERE command_id = c.id ORDER BY timestamp DESC LIMIT 1)
+		       (SELECT output FROM command_outputs WHERE command_id = c.id ORDER BY id DESC LIMIT 1)
 		FROM commands c
 		WHERE c.guid = $1
 		ORDER BY c.timestamp DESC

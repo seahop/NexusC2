@@ -159,7 +159,6 @@ func sendInitialPost(url string, encryptedData string, decrypted *DecryptedConfi
 	}
 
 	// Debugging headers
-	//fmt.Println("Request headers set:")
 
 	// Custom HTTP client
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}

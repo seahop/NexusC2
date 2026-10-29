@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -60,6 +61,12 @@ func (m *Manager) handleInitialHandshake(w http.ResponseWriter, r *http.Request,
 	if err := json.Unmarshal([]byte(decrypted), &sysInfo); err != nil {
 		log.Printf("[ERROR] Failed to parse system info: %v", err)
 		return fmt.Errorf("failed to parse system info: %v", err)
+	}
+
+	if parsedIP := net.ParseIP(externalIP); parsedIP != nil && parsedIP.IsLoopback() {
+		if sysInfo.AgentInfo.InternalIP != "" {
+			externalIP = sysInfo.AgentInfo.InternalIP
+		}
 	}
 
 	// Create context with timeout

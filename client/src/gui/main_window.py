@@ -759,13 +759,24 @@ class C2ClientGUI(QMainWindow):
             self.ws_thread.state_received.connect(self.loadInitialState)
             
             # Connect signals - use agent_display for proper delegation to all views
-            self.ws_thread.connection_update.connect(self.agent_display.handle_new_connection)
-            self.ws_thread.connection_update.connect(self.onConnectionUpdate)
+            # Force QueuedConnection to guarantee cross-thread safety
+            self.ws_thread.connection_update.connect(
+                self.agent_display.handle_new_connection,
+                Qt.ConnectionType.QueuedConnection
+            )
+            self.ws_thread.connection_update.connect(
+                self.onConnectionUpdate,
+                Qt.ConnectionType.QueuedConnection
+            )
             self.ws_thread.link_update.connect(self.agent_display.handle_link_update)
 
             # Connect agent checkin signal for thread-safe timestamp updates
             if hasattr(self.ws_thread, 'agent_checkin_received'):
                 self.ws_thread.agent_checkin_received.connect(self.agent_display.handle_agent_checkin)
+            if hasattr(self.ws_thread, 'agent_renamed_received'):
+                self.ws_thread.agent_renamed_received.connect(self.agent_display.handle_agent_renamed)
+            if hasattr(self.ws_thread, 'agent_tags_updated_received'):
+                self.ws_thread.agent_tags_updated_received.connect(self.agent_display.handle_agent_tags_updated)
             
             # The connection is already established at this point, so directly set status to connected
             self.status_indicator.set_connected()
@@ -1172,17 +1183,15 @@ class C2ClientGUI(QMainWindow):
         self.state_loaded.emit()
 
     def onConnectionUpdate(self, conn_data):
-        """Handle new connection updates from the server"""
-        print(f"MainWindow: Received connection update: {conn_data}")
-        try:
-            print("MainWindow: Passing connection data to AgentDisplayWidget")
-            self.agent_display.handle_new_connection(conn_data)
-            print("MainWindow: Successfully handled new connection")
+        """Handle notifications for new connections.
 
-            # Send notification for new agent
+        agent_display.handle_new_connection is connected directly to the
+        connection_update signal — do NOT call it again here or the tree
+        widget processes every connection twice, risking heap corruption.
+        """
+        try:
             if hasattr(self, 'notification_manager'):
                 self.notification_manager.notify_new_agent(conn_data)
-
         except Exception as e:
             print(f"ERROR in onConnectionUpdate: {e}")
             import traceback

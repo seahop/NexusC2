@@ -58,6 +58,17 @@ func GetBOFTemplate() *CommandTemplate {
 	// IPC path for network operations (388)
 	tpl[IdxBofIPCPath] = "\\IPC$"
 
+	// Merge COFF loader strings into the same template so the agent can
+	// initialize both SetBOFTemplate and SetCOFFTemplate from one delivery.
+	coffTpl := GetCOFFLoaderTemplate()
+	if coffTpl != nil {
+		for i, v := range coffTpl.Templates {
+			if v != "" {
+				tpl[i] = v
+			}
+		}
+	}
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeBof,

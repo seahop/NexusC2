@@ -38,7 +38,7 @@ const (
 )
 
 // MaxTemplateSize ensures all indices have values across all command types
-const MaxTemplateSize = 1120
+const MaxTemplateSize = 1200
 
 // ============================================================================
 // SHELL TEMPLATE INDICES (100-119)
@@ -769,6 +769,11 @@ const (
 	IdxPtyExit      = 702 // exit
 	IdxPtyRoot      = 703 // root
 
+	IdxPtyMarkerFmt     = 704 // prompt marker format (e.g. "_%d_")
+	IdxPtyModeStateless = 705 // stateless (reliable)
+	IdxPtyModeStateful  = 706 // stateful (simulated, pwd: %s)
+	IdxPtySessionInfo   = 707 // Active session for user '%s' (PID: %d, Mode: %s, Uptime: %v)
+
 	_ptyHelperEnd = 709
 )
 
@@ -890,6 +895,7 @@ const (
 	IdxIAFmtExecDone     = 841 // \n[+] Execution completed (exit code: %d)\n
 	IdxIAFmtAsyncStarted = 842 // Async inline assembly execution started (Job ID: %s)\n
 	IdxIAFmtOutputHint   = 843 // Use 'inline-assembly-output %s' to retrieve output
+	IdxIAMethodSigNoArgs = 844 // Void Main()
 
 	_iaCoreStringsEnd = 849
 )
@@ -1277,6 +1283,22 @@ const (
 
 	_coffLoaderExtendedEnd = 1017
 )
+
+// ============================================================================
+// WINDOWS SHELL STRINGS (1020-1029)
+// ============================================================================
+const (
+	IdxWinShellCmdExe       = 1020 // cmd.exe
+	IdxWinShellCmdSlashC    = 1021 // /c
+	IdxWinShellCmdFmt       = 1022 // cmd.exe /c %s
+	IdxWinShellPrivImperson = 1023 // SeImpersonatePrivilege
+	IdxWinShellPrivAssign   = 1024 // SeAssignPrimaryTokenPrivilege
+	IdxWinShellPrivQuota    = 1025 // SeIncreaseQuotaPrivilege
+	IdxWinShellCmdDir       = 1026 // dir
+
+	_winShellEnd = 1029
+)
+
 
 // ToJSON serializes the template to JSON bytes
 func (t *CommandTemplate) ToJSON() ([]byte, error) {

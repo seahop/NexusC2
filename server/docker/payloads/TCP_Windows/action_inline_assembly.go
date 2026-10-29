@@ -538,7 +538,6 @@ func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, i
 	}
 
 	result := output.String()
-	// fmt.Printf("[DEBUG] Total output captured: %d bytes\n", len(result))
 
 	return result, int(retCode), execErr
 }

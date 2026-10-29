@@ -117,7 +117,6 @@ func NewCommandQueue() *CommandQueue {
 	queue.RegisterHandler(CmdLinks, wrapCommand(&LinksCommand{}))
 
 	// Print all registered commands
-	// fmt.Println()
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()
@@ -234,7 +233,6 @@ func calculateTransferTimeout(isDownload bool) time.Duration {
 
 // AddCommands parses and adds commands to the queue
 func (cq *CommandQueue) AddCommands(jsonData string) error {
-	//fmt.Printf("DEBUG: AddCommands received JSON: %s\n", jsonData)
 
 	var commands []Command
 	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
@@ -245,7 +243,6 @@ func (cq *CommandQueue) AddCommands(jsonData string) error {
 	defer cq.mu.Unlock()
 
 	cq.commands = append(cq.commands, commands...)
-	//fmt.Printf("Added %d commands to queue\n", len(commands))
 
 	/*
 		// Debug: print details of each command

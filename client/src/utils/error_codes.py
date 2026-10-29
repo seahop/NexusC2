@@ -102,6 +102,7 @@ ERROR_CODES = {
     "E50": "Privilege not held",
     "E51": "BOF execution failed",
     "E52": "Assembly execution failed",
+    "E53": "CLR already used in this process - restart agent for another execution",
 }
 
 # Windows logon error codes (for E40 context translation)

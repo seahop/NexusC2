@@ -73,17 +73,14 @@ func CopyMemory(dst uintptr, src uintptr, size uint32) {
 // Beacon output functions
 func GetCoffOutputForChannel(channel chan<- interface{}) func(int, uintptr, int) uintptr {
 	return func(beaconType int, data uintptr, length int) uintptr {
-		// fmt.Printf("[DEBUG BeaconOutput] Called with type=%d, length=%d\n", beaconType, length)
 
 		if length <= 0 {
-			// fmt.Printf("[DEBUG BeaconOutput] Length is zero or negative\n")
 			return 0
 		}
 
 		out := ReadBytesFromPtr(data, uint32(length))
 		outStr := string(out)
 
-		// fmt.Printf("[DEBUG BeaconOutput] Output: %s\n", outStr)
 
 		// CRITICAL: Add to global buffer for async BOF monitoring
 		bofOutputMutex.Lock()
@@ -94,9 +91,7 @@ func GetCoffOutputForChannel(channel chan<- interface{}) func(int, uintptr, int)
 		if channel != nil {
 			select {
 			case channel <- outStr:
-				// fmt.Printf("[DEBUG BeaconOutput] Also sent to channel\n")
 			default:
-				// fmt.Printf("[DEBUG BeaconOutput] Channel full, skipped channel send\n")
 			}
 		}
 
@@ -318,7 +313,6 @@ func GetCoffPrintfForChannel(channel chan<- interface{}) func(int, uintptr, uint
 			}
 		}
 
-		// fmt.Printf("[DEBUG BeaconPrintf] Formatted output: %s\n", fString)
 
 		// CRITICAL: Add to global buffer for async BOF monitoring
 		outputBytes := []byte(fString)
@@ -596,7 +590,6 @@ func PackShort(i uint16) ([]byte, error) {
 	binary.LittleEndian.PutUint16(buff[:2], 2) // Length of short is 2
 	binary.LittleEndian.PutUint16(buff[2:], i)
 
-	// fmt.Printf("[DEBUG PackShort] Value: %d, Output: %x\n", i, buff)
 	return buff, nil
 }
 
@@ -626,7 +619,6 @@ func PackString(data string) ([]byte, error) {
 	binary.LittleEndian.PutUint16(result[:2], uint16(len(stringBytes)))
 	copy(result[2:], stringBytes)
 
-	// fmt.Printf("[DEBUG PackString] Output: %d bytes, hex: %x\n", len(result), result)
 	return result, nil
 }
 

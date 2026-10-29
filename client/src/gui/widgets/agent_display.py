@@ -5,7 +5,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
                               QPushButton, QButtonGroup, QLabel, QLineEdit,
                               QFrame, QSizePolicy, QMenu, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from PyQt6.QtGui import QIcon
 from pathlib import Path
 import json
@@ -409,6 +409,7 @@ class AgentDisplayWidget(QWidget):
     def show_listeners(self):
         self.tree_widget.show_listeners()
 
+    @pyqtSlot(dict)
     def handle_new_connection(self, conn_data):
         self.tree_widget.handle_new_connection(conn_data)
         # Refresh active view

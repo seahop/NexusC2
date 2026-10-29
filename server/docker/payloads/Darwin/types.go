@@ -23,6 +23,7 @@ type Command struct {
 	CurrentChunk     int    `json:"cc"`
 	TotalChunks      int    `json:"tc"`
 	Data             string `json:"da"`
+	Arguments        string `json:"ar"`
 	Timestamp        string `json:"ts"`
 	JobID            string `json:"ji"`
 }

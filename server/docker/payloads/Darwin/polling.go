@@ -600,7 +600,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Check for shutdown signal at the start of each iteration
 			select {
 			case <-pollingShutdown:
-				//fmt.Println("Polling shutdown signal received, exiting polling loop")
 				return
 			default:
 				// Continue with polling
@@ -689,7 +688,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			// Check for shutdown before sleep
 			select {
 			case <-pollingShutdown:
-				//fmt.Println("Polling shutdown requested before sleep, exiting...")
 				return
 			case <-time.After(nextInterval):
 				// Continue with next poll
@@ -699,7 +697,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 			if err := doPoll(secureComms, customHeaders); err != nil {
 				// Check if this is a rekey in progress - if so, exit the entire goroutine
 				if err.Error() == E19 {
-					//fmt.Println("Rekey initiated, exiting current polling loop")
 					break pollingLoop // Break out of the outer for loop
 				}
 				// Check for decryption failures
@@ -718,7 +715,6 @@ func startPolling(config PollConfig, sysInfo *SystemInfoReport) error {
 
 // StopPolling signals the current polling routine to stop and waits for it to finish
 func StopPolling() {
-	//fmt.Println("Stopping current polling routine...")
 
 	pollingMutex.Lock()
 	if pollingShutdown != nil {
@@ -736,9 +732,7 @@ func StopPolling() {
 
 	select {
 	case <-done:
-		//fmt.Println("Polling routine stopped successfully")
 	case <-time.After(10 * time.Second):
-		//fmt.Println("Warning: Polling routine stop timed out after 10 seconds")
 	}
 
 	// Reset only the WaitGroup, NOT the channel

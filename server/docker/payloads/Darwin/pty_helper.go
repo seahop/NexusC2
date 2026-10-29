@@ -35,7 +35,11 @@ const (
 	idxPtyTryAgain  = 700
 	idxPtyIncorrect = 701
 	idxPtyExit      = 702
-	idxPtyRoot      = 703
+	idxPtyRoot          = 703
+	idxPtyMarkerFmt     = 704
+	idxPtyModeStateless = 705
+	idxPtyModeStateful  = 706
+	idxPtySessionInfo   = 707
 )
 
 // ptyTemplate stores the template received from the server (via shell command)
@@ -226,7 +230,6 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*SudoSessi
 		}
 
 		output := string(buf[:n])
-		// fmt.Printf("[DEBUG] Initial output: %s\n", output)
 
 		// Send password if prompted
 		if strings.Contains(output, ptyTpl(idxPtyPassword)) || strings.Contains(output, ptyTpl(idxPtyPasswordL)) {
@@ -458,11 +461,11 @@ func (s *SudoSession) GetInfo() string {
 		pid = s.cmd.Process.Pid
 	}
 
-	mode := "stateless (reliable)"
+	mode := ptyTpl(idxPtyModeStateless)
 	if s.useStateful {
-		mode = fmt.Sprintf("stateful (simulated, pwd: %s)", s.currentDir)
+		mode = fmt.Sprintf(ptyTpl(idxPtyModeStateful), s.currentDir)
 	}
 
-	return fmt.Sprintf("Active session for user '%s' (PID: %d, Mode: %s, Uptime: %v)",
+	return fmt.Sprintf(ptyTpl(idxPtySessionInfo),
 		user, pid, mode, uptime.Round(time.Second))
 }

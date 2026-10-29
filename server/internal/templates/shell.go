@@ -43,6 +43,19 @@ func GetShellTemplate() *CommandTemplate {
 	tpl[IdxPtyExit] = "exit"
 	tpl[IdxPtyRoot] = "root"
 
+	tpl[IdxPtyMarkerFmt] = "_%d_"
+	tpl[IdxPtyModeStateless] = "stateless (reliable)"
+	tpl[IdxPtyModeStateful] = "stateful (simulated, pwd: %s)"
+	tpl[IdxPtySessionInfo] = "Active session for user '%s' (PID: %d, Mode: %s, Uptime: %v)"
+
+	tpl[IdxWinShellCmdExe] = "cmd.exe"
+	tpl[IdxWinShellCmdSlashC] = "/c"
+	tpl[IdxWinShellCmdFmt] = "cmd.exe /c %s"
+	tpl[IdxWinShellPrivImperson] = "SeImpersonatePrivilege"
+	tpl[IdxWinShellPrivAssign] = "SeAssignPrimaryTokenPrivilege"
+	tpl[IdxWinShellPrivQuota] = "SeIncreaseQuotaPrivilege"
+	tpl[IdxWinShellCmdDir] = "dir"
+
 	return &CommandTemplate{
 		Version:   2,
 		Type:      TypeShell,

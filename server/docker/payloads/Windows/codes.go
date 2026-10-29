@@ -106,6 +106,7 @@ const (
 	E50 = "E50" // Privilege not held
 	E51 = "E51" // BOF execution failed
 	E52 = "E52" // Assembly execution failed
+	E53 = "E53" // CLR already used
 
 	// SOCKS-HTTP errors (E60-E69)
 	E60 = "E60" // Session not found

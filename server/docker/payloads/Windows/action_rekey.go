@@ -12,7 +12,6 @@ import (
 type RekeyCommand struct{}
 
 func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// log.Println("Executing rekey command from command queue...")
 
 	// Note: The actual rekey logic is now handled in polling.go
 	// when it receives the "rekey_required" status.
@@ -22,8 +21,6 @@ func (c *RekeyCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	// If this is somehow called directly (shouldn't happen with new logic),
 	// we still perform the rekey
-	// log.Println("Warning: Rekey command executed through normal command processing")
-	// log.Println("This should not happen - rekey should be handled via special status")
 
 	// Stop existing polling first
 	StopPolling()

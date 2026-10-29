@@ -68,8 +68,8 @@ func performHandshake(conn *PipeConnection, config map[string]string) error {
 	}
 
 	// Encrypt system info with RSA+AES (same as HTTPS agent handshake)
-	publicKey := config["Public Key"]
-	initSecret := config["Secret"]
+	publicKey := config["pk"]
+	initSecret := config["sk"]
 
 	encryptedPayload, err := encryptHandshakePayload(sysInfo, publicKey, initSecret)
 	if err != nil {

@@ -91,7 +91,6 @@ func (hm *HandshakeManager) PerformHandshake() error {
 		return fmt.Errorf(ErrCtx(E12, err.Error()))
 	}
 
-	//log.Printf("Handshake successful - New Client ID: %s", newClientID)
 
 	// Step 6: Store old client ID in case we need to revert
 	//oldClientID := hm.currentClientID
@@ -131,12 +130,6 @@ func (hm *HandshakeManager) PerformHandshake() error {
 		)
 	}
 
-	//log.Printf("Updated URLs with new client ID:")
-	//log.Printf("Initial Client ID: %s", hm.initialClientID)
-	//log.Printf("Previous Client ID: %s", oldClientID)
-	//log.Printf("New Client ID: %s", newClientID)
-	//log.Printf("New GET URL: %s", hm.getURL)
-	//log.Printf("New POST URL: %s", hm.postURL)
 
 	// Step 9: Initialize SecureComms with initial secret and new seed
 	hm.secureComms = NewSecureComms(
@@ -147,14 +140,12 @@ func (hm *HandshakeManager) PerformHandshake() error {
 	// Step 10: Initialize polling config with new parameters
 	// NOTE: We don't start polling here anymore - let the caller handle it
 
-	// REMOVED Step 11 - Don't start polling in the handshake function
 	// The caller (main.go or refreshHandshake) will start polling
 
 	return nil
 }
 
 func (hm *HandshakeManager) RefreshHandshake() error {
-	//log.Println("Starting refresh handshake...")
 	oldClientID := hm.currentClientID
 
 	err := hm.PerformHandshake()

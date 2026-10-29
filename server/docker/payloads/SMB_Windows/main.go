@@ -154,7 +154,7 @@ func main() {
 	// Create the named pipe listener using the global pipeName variable
 	// (set via ldflags during build, defaults to "spoolss")
 	activePipeName := pipeName
-	if configPipe, ok := config["Pipe Name"]; ok && configPipe != "" {
+	if configPipe, ok := config["pn"]; ok && configPipe != "" {
 		activePipeName = configPipe // Override with config if present
 	}
 

@@ -207,7 +207,7 @@ class WebSocketClient:
         
     def connect_sync(self, username, host, port):
         logger.debug("Starting synchronous connection attempt...")
-        self.loop = asyncio.get_event_loop()
+        self.loop = asyncio.get_running_loop()
         try:
             asyncio.run_coroutine_threadsafe(self.connect(username, host, port), self.loop).result()
             logger.debug("Completed synchronous connection attempt")
@@ -265,7 +265,7 @@ class WebSocketClient:
     async def process_message_queue(self):
         """Process queued messages with batching and prioritization."""
         batch = []
-        last_send_time = asyncio.get_event_loop().time()
+        last_send_time = asyncio.get_running_loop().time()
         backpressure_retries = 0
         max_backpressure_retries = 100  # ~50 seconds at 0.5s backoff delay
 
@@ -308,7 +308,7 @@ class WebSocketClient:
                 else:
                     backpressure_retries = 0  # Reset when queue is healthy
 
-                current_time = asyncio.get_event_loop().time()
+                current_time = asyncio.get_running_loop().time()
                 time_since_last_send = current_time - last_send_time
 
                 if len(self.message_queue) > 0:
@@ -333,7 +333,7 @@ class WebSocketClient:
                                     # Clean up metadata cache after successful send (thread-safe)
                                     with self._metadata_lock:
                                         self.message_metadata.pop(msg_key, None)
-                                    last_send_time = asyncio.get_event_loop().time()
+                                    last_send_time = asyncio.get_running_loop().time()
                                 except asyncio.TimeoutError:
                                     self.message_queue.appendleft(message)
                                     await self._handle_send_timeout()
@@ -353,13 +353,13 @@ class WebSocketClient:
                         if should_send and batch:
                             await self._send_batch(batch)
                             batch.clear()
-                            last_send_time = asyncio.get_event_loop().time()
+                            last_send_time = asyncio.get_running_loop().time()
 
                 # Send pending batch if timeout reached
                 elif batch and time_since_last_send >= self.batch_timeout:
                     await self._send_batch(batch)
                     batch.clear()
-                    last_send_time = asyncio.get_event_loop().time()
+                    last_send_time = asyncio.get_running_loop().time()
 
                 # Adaptive sleep
                 sleep_time = 0.01 if batch else min(0.1 * (1 + len(self.message_queue) / 100), 1.0)
@@ -480,27 +480,9 @@ class WebSocketClient:
                         await self._handle_command_output_chunk(message_data)
                         return None  # Don't return yet, still assembling
                     elif message_type == "agent_renamed":
-                        print("WebSocketClient: Handling agent rename broadcast.")
-                        rename_data = message_data.get("data", {})
-
-                        if self.agent_tree_widget:
-                            self.agent_tree_widget.handle_agent_renamed(rename_data)
-                        else:
-                            print("WebSocketClient: No agent_tree_widget linked.")
-
-                        if self.terminal_widget:
-                            self.terminal_widget.handle_agent_renamed(rename_data)
-                        else:
-                            print("WebSocketClient: No terminal_widget linked.")
-
+                        pass
                     elif message_type == "agent_tags_updated":
-                        print("WebSocketClient: Handling agent tags update broadcast.")
-                        tags_data = message_data.get("data", {})
-
-                        if self.agent_tree_widget:
-                            self.agent_tree_widget.handle_agent_tags_updated(tags_data)
-                        else:
-                            print("WebSocketClient: No agent_tree_widget linked.")
+                        pass
 
                     elif message_type == 'command_output_chunk_complete':
                         return await self._handle_command_output_chunk_complete(message_data)

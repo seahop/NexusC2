@@ -189,8 +189,12 @@ func (s *Server) setupRouter() {
 			protected.DELETE("/agents/:id/commands/queue", s.commandHandler.ClearQueue)
 			if s.useWSProxy {
 				protected.POST("/agents/:id/commands", s.wsProxyHandlers.SendAgentCommand)
+				protected.POST("/agents/:id/bof", s.wsProxyHandlers.ExecuteBOF)
+				protected.POST("/agents/:id/assembly", s.wsProxyHandlers.ExecuteAssembly)
 			} else {
 				protected.POST("/agents/:id/commands", s.commandHandler.SendCommand)
+				protected.POST("/agents/:id/bof", requireWSProxy)
+				protected.POST("/agents/:id/assembly", requireWSProxy)
 			}
 
 			// Listeners - read operations direct, create/delete via proxy if available
@@ -243,6 +247,12 @@ func (s *Server) setupRouter() {
 	}
 
 	s.router = router
+}
+
+func requireWSProxy(c *gin.Context) {
+	c.JSON(http.StatusServiceUnavailable, gin.H{
+		"error": "BOF and assembly execution require the WebSocket proxy (WS_PROXY_URL not configured)",
+	})
 }
 
 func (s *Server) handleHealth(c *gin.Context) {

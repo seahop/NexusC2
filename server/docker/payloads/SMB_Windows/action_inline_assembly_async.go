@@ -499,7 +499,6 @@ func (c *InlineAssemblyAsyncCommand) executeWithAsyncPipeCapture(assemblyBytes [
 		if outputLen == 0 && execErr == nil {
 			job.Output.WriteString(Succ(S18) + "\n")
 		}
-		// fmt.Printf("[DEBUG ASYNC] Final output buffer size: %d bytes\n", job.Output.Len())
 		job.OutputMutex.Unlock()
 
 		// Send result back

@@ -44,6 +44,8 @@ class WebSocketThread(QThread):
     link_update = pyqtSignal(dict)
     profiles_updated = pyqtSignal(dict)  # Signal for profile uploads/updates
     agent_checkin_received = pyqtSignal(dict)  # Thread-safe agent checkin signal
+    agent_renamed_received = pyqtSignal(dict)
+    agent_tags_updated_received = pyqtSignal(dict)
 
     def __init__(self, username, host, port, parent=None):
         super().__init__(parent)
@@ -296,7 +298,6 @@ class WebSocketThread(QThread):
         print("WebSocketThread: Starting run method")
         try:
             self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
             self.shutdown_event = asyncio.Event()  # Create shutdown event
             
             # Run the async implementation
@@ -397,15 +398,11 @@ class WebSocketThread(QThread):
                     'upload_id': message_data.get('upload_id')
                 })
             elif message_type == 'agent_renamed':
-                print(f"WebSocketThread: Processing agent_renamed message")
-                if hasattr(self.parent(), 'terminal_widget'):
-                    terminal_widget = self.parent().terminal_widget
-                    if terminal_widget and hasattr(terminal_widget, 'agent_tree'):
-                        rename_data = message_data.get('data', {})
-                        terminal_widget.agent_tree.handle_agent_renamed(rename_data)
-                        print(f"WebSocketThread: Forwarded rename to agent_tree")
-                else:
-                    print("WebSocketThread: No terminal_widget available")
+                rename_data = message_data.get('data', {})
+                self.agent_renamed_received.emit(rename_data)
+            elif message_type == 'agent_tags_updated':
+                tags_data = message_data.get('data', {})
+                self.agent_tags_updated_received.emit(tags_data)
 
             elif message_type == 'link_update':
                 print(f"WebSocketThread: Processing link_update message")
@@ -477,7 +474,7 @@ class WebSocketThread(QThread):
                     'link_type': agent_data.get('link_type', ''),  # Link type (e.g., "smb")
                 }
                 print("WebSocketThread: About to emit connection_update with data:", conn_data)
-                self.connection_update.emit(conn_data)
+                self.connection_update.emit(dict(conn_data))
                 #print("WebSocketThread: Emitted connection_update signal")
 
             elif message_type == 'listener_update':
@@ -517,7 +514,7 @@ class WebSocketThread(QThread):
                     conn_data = message_data['data'].get('connection', message_data['data'])
                     if 'new_client_id' in conn_data and 'guid' not in conn_data:
                         conn_data['guid'] = conn_data['new_client_id']
-                    self.connection_update.emit(conn_data)
+                    self.connection_update.emit(dict(conn_data))
 
             elif message_type == 'downloads_manifest':
                 downloads = message_data.get('data', [])

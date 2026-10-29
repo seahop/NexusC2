@@ -234,7 +234,6 @@ func (lm *LinkManager) Link(pipePath string) (string, error) {
 	// Start goroutine to handle incoming data from the SMB agent
 	go lm.handleIncomingData(link)
 
-	// log.Printf("[LinkManager] Successfully linked to %s (routing_id: %s)", pipePath, routingID)
 	return routingID, nil
 }
 
@@ -478,10 +477,8 @@ func (lm *LinkManager) ForwardToLinkedAgentRawAndWait(routingID string, payload 
 	// Wait for response with timeout
 	select {
 	case response := <-respChan:
-		// log.Printf("[LinkManager] Received synchronous response from %s", routingID)
 		return response, nil
 	case <-time.After(timeout):
-		// log.Printf("[LinkManager] Timeout waiting for response from %s (waited %v)", routingID, timeout)
 		return nil, nil // Timeout is not an error - response will come later via normal queue
 	}
 }
@@ -506,7 +503,6 @@ func (lm *LinkManager) WaitForLinkData(routingID string, timeout time.Duration) 
 	// Wait for response with timeout
 	select {
 	case response := <-respChan:
-		// log.Printf("[LinkManager] Received data for %s via wait channel", routingID)
 		return response, nil
 	case <-time.After(timeout):
 		return nil, fmt.Errorf(Err(E9))
@@ -547,11 +543,9 @@ func (lm *LinkManager) GetUnlinkNotifications() []string {
 	for {
 		select {
 		case routingID := <-lm.unlinkNotifications:
-			// log.Printf("[LinkManager] GetUnlinkNotifications: Drained routing_id %s from channel", routingID)
 			notifications = append(notifications, routingID)
 		default:
 			if len(notifications) > 0 {
-				// log.Printf("[LinkManager] GetUnlinkNotifications: Returning %d notifications", len(notifications))
 			}
 			return notifications
 		}

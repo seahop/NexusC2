@@ -58,9 +58,9 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 	if encrypted == "" {
 		// Return defaults for testing/development
 		return map[string]string{
-			"Pipe Name":  "spoolss",
-			"Secret":     decryptedSecret,
-			"Public Key": "",
+			"pn": "spoolss",
+			"sk": decryptedSecret,
+			"pk": "",
 		}, nil
 	}
 

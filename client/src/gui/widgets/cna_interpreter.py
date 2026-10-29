@@ -123,11 +123,22 @@ class CNAInterpreter:
         content = '\n'.join(cleaned_lines)
         
         # Parse beacon_command_register calls
-        register_pattern = r'beacon_command_register\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]*?)"\s*\)'
+        # Handles 3-arg form (name, desc, synopsis) and 4-arg form (name, desc, synopsis, category)
+        # Uses (?:[^"\\]|\\.)* to correctly handle escaped quotes inside strings
+        _qs = r'"((?:[^"\\]|\\.)*)"'  # quoted string capture group
+        _qnc = r'"(?:[^"\\]|\\.)*"'   # quoted string non-capturing
+        register_pattern = (
+            r'beacon_command_register\s*\(\s*'
+            + _qs + r'\s*,\s*'   # group 1: name
+            + _qs + r'\s*,\s*'   # group 2: description
+            + _qs                # group 3: synopsis
+            + r'(?:\s*,\s*' + _qnc + r')?\s*\)'  # optional 4th arg (category)
+        )
         for match in re.finditer(register_pattern, content, re.DOTALL):
-            name = match.group(1)
-            description = match.group(2)
+            name = match.group(1).replace('\\"', '"')
+            description = match.group(2).replace('\\"', '"')
             synopsis = match.group(3).replace('\n', ' ').replace('\t', ' ').strip()
+            synopsis = synopsis.replace('\\"', '"')
             
             # Clean up synopsis - remove extra whitespace
             synopsis = ' '.join(synopsis.split())

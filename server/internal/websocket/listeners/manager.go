@@ -508,11 +508,18 @@ func (m *Manager) DeleteByName(name string) error {
 	return nil
 }
 
-func (m *Manager) GetListener(name string) (*Listener, bool) {
+func (m *Manager) GetListener(nameOrID string) (*Listener, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	l, exists := m.ListenersByName[name]
-	return l, exists
+	if l, exists := m.ListenersByName[nameOrID]; exists {
+		return l, true
+	}
+	for _, l := range m.ListenersByName {
+		if l.ID.String() == nameOrID {
+			return l, true
+		}
+	}
+	return nil, false
 }
 
 func (lm *Manager) IsPortInUse(port int) bool {

@@ -27,7 +27,6 @@ func (cq *CommandQueue) ProcessNextCommand() (*CommandResult, error) {
 	cq.mu.Unlock()
 
 	// Add this diagnostic
-	//fmt.Fprintf(os.Stderr, "DIAGNOSTIC: Processing command type: %s\n", cmd.Command)
 	//if strings.Contains(fmt.Sprintf("%v", cmd), "command_id") {
 	//	fmt.Fprintf(os.Stderr, "WARNING: Command struct would print as: %v\n", cmd)
 	//}

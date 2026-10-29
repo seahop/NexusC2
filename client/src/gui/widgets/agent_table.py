@@ -9,6 +9,28 @@ from PyQt6.QtGui import QColor, QBrush, QFont
 from utils.constants import AGENT_TREE_UPDATE_INTERVAL
 
 
+class SortableTableWidgetItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts by parsing the time-ago display text to seconds"""
+
+    _TIME_MULTIPLIERS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+
+    @staticmethod
+    def _to_seconds(text):
+        if not text or text == 'N/A':
+            return 999999999
+        for suffix, mult in SortableTableWidgetItem._TIME_MULTIPLIERS.items():
+            idx = text.find(suffix)
+            if idx > 0:
+                try:
+                    return int(text[:idx]) * mult
+                except ValueError:
+                    pass
+        return 999999999
+
+    def __lt__(self, other):
+        return self._to_seconds(self.text()) < self._to_seconds(other.text())
+
+
 class AgentTableWidget(QWidget):
     """Table view for agents with sortable columns and multi-select support"""
 
@@ -251,7 +273,10 @@ class AgentTableWidget(QWidget):
         ]
 
         for col, data in enumerate(columns_data):
-            item = QTableWidgetItem(str(data))
+            if col == 8:  # Last Seen - use sortable item for time-aware sort
+                item = SortableTableWidgetItem(str(data))
+            else:
+                item = QTableWidgetItem(str(data))
             item.setData(Qt.ItemDataRole.UserRole, guid)  # Store GUID in each cell
 
             # Make cells non-editable
@@ -382,6 +407,7 @@ class AgentTableWidget(QWidget):
         if not self.agent_tree_widget:
             return
 
+        changed = False
         for row in range(self.table.rowCount()):
             name_item = self.table.item(row, 0)
             if not name_item:
@@ -395,6 +421,13 @@ class AgentTableWidget(QWidget):
                     new_text = self._format_last_seen(agent)
                     if last_seen_item.text() != new_text:
                         last_seen_item.setText(new_text)
+                        changed = True
+
+        if changed and self.is_sorted_manually:
+            header = self.table.horizontalHeader()
+            sort_col = header.sortIndicatorSection()
+            if sort_col == 8:
+                self.table.sortItems(sort_col, header.sortIndicatorOrder())
 
     def on_selection_changed(self):
         """Handle selection change - emit selected agent GUIDs"""

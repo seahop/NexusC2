@@ -88,6 +88,16 @@ const (
 	idxCronActionAdd    = 87
 	idxCronActionRemove = 88
 	idxCronActionList   = 89
+
+	idxSysUnitHeader  = 275
+	idxSysSvcHeader   = 276
+	idxSysInstHeader  = 277
+	idxSysSvcDesc     = 278
+	idxSysTimerDesc   = 279
+	idxSysTypeOneshot = 280
+	idxSysStdoutNull  = 281
+	idxSysStderrNull  = 282
+	idxSysWantedBy    = 283
 )
 
 
@@ -451,15 +461,14 @@ func (c *CronPersistenceCommand) addViaSystemdTimer(interval, command string) st
 		return ErrCtx(E5, timerFile)
 	}
 
-	serviceContent := fmt.Sprintf(`[Unit]
-Description=User Update Manager
-
-[Service]
-Type=oneshot
-ExecStart=%s
-StandardOutput=null
-StandardError=null
-`, command)
+	serviceContent := fmt.Sprintf("%s\n%s\n\n%s\n%s\nExecStart=%s\n%s\n%s\n",
+		c.getTpl(idxSysUnitHeader),
+		c.getTpl(idxSysSvcDesc),
+		c.getTpl(idxSysSvcHeader),
+		c.getTpl(idxSysTypeOneshot),
+		command,
+		c.getTpl(idxSysStdoutNull),
+		c.getTpl(idxSysStderrNull))
 
 	timerContent := c.generateTimerUnit(interval)
 
@@ -513,17 +522,12 @@ func (c *CronPersistenceCommand) generateTimerUnit(interval string) string {
 	timerPersistent := c.getTpl(idxTimerPersistent)
 	timerName := c.getTpl(idxTimerDefaultName)
 
-	return fmt.Sprintf(`[Unit]
-Description=User Update Manager Timer
-
-%s
-%s
-%s
-Unit=%s.service
-
-[Install]
-WantedBy=timers.target
-`, timerHeader, timerSpec, timerPersistent, timerName)
+	return fmt.Sprintf("%s\n%s\n\n%s\n%s\n%s\nUnit=%s.service\n\n%s\n%s\n",
+		c.getTpl(idxSysUnitHeader),
+		c.getTpl(idxSysTimerDesc),
+		timerHeader, timerSpec, timerPersistent, timerName,
+		c.getTpl(idxSysInstHeader),
+		c.getTpl(idxSysWantedBy))
 }
 
 // generateCronEntry creates a cron entry

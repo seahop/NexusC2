@@ -5,6 +5,7 @@ import (
 	"c2/internal/common/config"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -90,7 +91,15 @@ func (m *Manager) handlePostRequestWithProfile(w http.ResponseWriter, r *http.Re
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-			notification := m.createReactivationNotification(clientID, initData, r.RemoteAddr)
+			reactivateIP := getRemoteIP(r)
+			if parsedIP := net.ParseIP(reactivateIP); parsedIP != nil && parsedIP.IsLoopback() {
+				var storedIntIP sql.NullString
+				m.db.QueryRow(`SELECT intIP FROM connections WHERE newclientid = $1`, clientID).Scan(&storedIntIP)
+				if storedIntIP.Valid && storedIntIP.String != "" {
+					reactivateIP = storedIntIP.String
+				}
+			}
+			notification := m.createReactivationNotification(clientID, initData, reactivateIP)
 			if err := m.notifyWebsocketService(notification); err != nil {
 				log.Printf("Warning: Failed to notify about agent reactivation: %v", err)
 			}
