@@ -33,6 +33,26 @@ requests_per_minute = 100
 allowed_origins = ["https://localhost:3131", "https://127.0.0.1:3131"]
 
 # =============================================================================
+# BUILDER CONFIGURATION
+# =============================================================================
+# Controls how payloads are compiled. Default "local" uses the Docker builder
+# container on this host. Set to "remote" to offload builds to a dedicated
+# build server, keeping the primary host free for C2 operations.
+#
+# See docs/REMOTE-BUILDER.md for remote builder setup guide.
+
+[builder]
+mode = "local"    # "local" or "remote"
+
+# Remote builder settings (only used when mode = "remote")
+# [builder.remote]
+# address = "https://builder.example.com:9443"   # Remote builder endpoint
+# ca_cert = "/app/certs/builder_ca.crt"           # CA that signed the builder's TLS cert
+# client_cert = "/app/certs/builder_client.crt"   # mTLS client cert for this server
+# client_key = "/app/certs/builder_client.key"    # mTLS client key for this server
+# timeout = "10m"                                  # Build timeout (default: 10m)
+
+# =============================================================================
 # URL CONFIGURATION
 # =============================================================================
 

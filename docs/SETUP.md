@@ -33,7 +33,7 @@ sudo ./setup.sh --secrets     # Generate database secrets only
 sudo ./setup.sh --client      # Setup Python client venv only
 ```
 
-**Note:** All building happens inside Docker containers — no Go, protoc, or build tools are needed on the host.
+**Note:** All building happens inside Docker containers — no Go, protoc, or build tools are needed on the host. Payload builds can also be offloaded to a [remote builder](REMOTE-BUILDER.md) on a separate machine.
 
 ## Combining Flags
 

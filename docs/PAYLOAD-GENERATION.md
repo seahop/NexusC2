@@ -2,7 +2,7 @@
 
 ## Overview
 
-NexusC2 generates agent payloads using a Docker-based build system. Payloads are compiled Go binaries with configurable options for network communication, obfuscation, and anti-analysis features.
+NexusC2 generates agent payloads using a Docker-based build system that can run locally (default) or on a remote machine via mTLS. Payloads are compiled Go binaries with configurable options for network communication, obfuscation, and anti-analysis features.
 
 **Supported Platforms:**
 - Windows (x64, x86)
@@ -26,9 +26,14 @@ flowchart TB
     end
 
     subgraph Server["NexusC2 Server"]
-        WS1[WebSocket Service]
-        BUILD[Builder Container]
-        WS2[WebSocket Service]
+        WS1[WebSocket / REST API]
+        subgraph Local["Local Mode (default)"]
+            BUILD[Builder Container]
+        end
+        subgraph Remote["Remote Mode"]
+            RBUILD[Remote Builder<br/>mTLS :9443]
+        end
+        WS2[Return Binary]
     end
 
     subgraph Builder["Builder Process"]
@@ -39,8 +44,11 @@ flowchart TB
     end
 
     REQ -->|1. Configuration| WS1
-    WS1 -->|2. Create Container| BUILD
-    BUILD --> PARSE --> GEN --> COMPILE --> OUT
+    WS1 -->|2a. Docker API| BUILD
+    WS1 -.->|2b. mTLS POST| RBUILD
+    BUILD --> PARSE
+    RBUILD --> PARSE
+    PARSE --> GEN --> COMPILE --> OUT
     OUT -->|3. Chunk Transfer<br/>256KB chunks| WS2
     WS2 --> SAVE
     SAVE --> BINARY[Payload Binary]
@@ -49,6 +57,8 @@ flowchart TB
 ---
 
 ## Builder Container
+
+> **Remote mode:** When `mode = "remote"` is set in `config.toml`, no local container is spawned — build requests are sent to the remote builder over mTLS instead. See [Remote Builder](REMOTE-BUILDER.md) for setup.
 
 ### Environment
 
@@ -438,3 +448,6 @@ This data is used during agent registration to validate legitimate payloads.
 | macOS Templates | `server/docker/payloads/Darwin/` |
 | SMB Templates | `server/docker/payloads/SMB_Windows/` |
 | TCP Templates | `server/docker/payloads/TCP_Windows/`, `TCP_Linux/`, `TCP_Darwin/` |
+| Builder Interface | `server/internal/builder/` |
+| Remote Builder Service | `server/cmd/remote-builder/main.go` |
+| Remote Builder Guide | `docs/REMOTE-BUILDER.md` |

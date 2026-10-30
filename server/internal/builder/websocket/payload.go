@@ -2,6 +2,7 @@
 package builder
 
 import (
+	parentbuilder "c2/internal/builder"
 	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/hub"
@@ -20,14 +21,10 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-
 	"github.com/google/uuid"
 )
 
@@ -125,14 +122,14 @@ type KeyPair struct {
 }
 
 type Builder struct {
-	dockerClient    *client.Client
+	payloadBuilder  parentbuilder.Builder
 	listenerManager *listeners.Manager
 	hubClient       *hub.Hub
 	clientUsername  string
 	listener        *listeners.Listener
 	db              *sql.DB
 	agentClient     *agent.Client
-	agentConfig     *config.AgentConfig // For profile lookups
+	agentConfig     *config.AgentConfig
 }
 
 type PayloadConfigWrapper struct {
@@ -168,14 +165,7 @@ type buildData struct {
 	peProductVersion  string
 }
 
-func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*Builder, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create docker client: %v", err)
-	}
-
-	// Use provided agentConfig for profile lookups (shared with WebSocket handler)
-	// This allows dynamically uploaded profiles to be available to the builder
+func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig, pb parentbuilder.Builder) (*Builder, error) {
 	if agentCfg == nil {
 		log.Printf("[Builder] Warning: No agent config provided, loading from file (uploaded profiles may not be available)")
 		var err error
@@ -186,7 +176,7 @@ func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agen
 	}
 
 	return &Builder{
-		dockerClient:    cli,
+		payloadBuilder:  pb,
 		listenerManager: manager,
 		hubClient:       hubClient,
 		db:              db,
@@ -1618,122 +1608,16 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 }
 
 func (b *Builder) buildPayloadBinary(ctx context.Context, binaryName string, envVars []string) (string, error) {
-	config := &container.Config{
-		Image: "docker_builder:latest",
-		Env:   envVars,
-		Tty:   true,
-	}
-
-	// Get the host payloads path from environment variable
-	// This is set by docker-compose using ${COMPOSE_DIR}/payloads
-	hostPayloadsPath := os.Getenv("HOST_PAYLOADS_PATH")
-	if hostPayloadsPath == "" {
-		return "", fmt.Errorf("HOST_PAYLOADS_PATH environment variable not set - check docker-compose.yml")
-	}
-
-	// Get host shared path — must match the host directory mounted as /shared in this container
-	hostSharedPath := os.Getenv("HOST_SHARED_PATH")
-	if hostSharedPath == "" {
-		hostSharedPath = "/shared"
-	}
-
-	log.Printf("[Builder] Using host payloads path: %s", hostPayloadsPath)
-	log.Printf("[Builder] Using host shared path: %s", hostSharedPath)
-
-	hostConfig := &container.HostConfig{
-		NetworkMode: "host",
-		Binds: []string{
-			fmt.Sprintf("%s:/shared", hostSharedPath),
-			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/SMB_Windows:/build/SMB_Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Linux:/build/TCP_Linux:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Darwin:/build/TCP_Darwin:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Windows:/build/TCP_Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
-		},
-	}
-
-	if err := b.ensureBuilderImage(ctx); err != nil {
-		return "", err
-	}
-
-	filePath := fmt.Sprintf("/shared/%s", binaryName)
-	if err := b.runBuilderContainer(ctx, config, hostConfig); err != nil {
-		return "", err
-	}
-
-	return filePath, nil
-}
-
-func (b *Builder) ensureBuilderImage(ctx context.Context) error {
-	_, _, err := b.dockerClient.ImageInspectWithRaw(ctx, "docker_builder:latest")
-	if err != nil {
-		if client.IsErrNotFound(err) {
-			log.Printf("Builder image not found. Building image...")
-			buildCmd := exec.Command("docker", "compose", "build", "builder")
-			buildCmd.Stdout = log.Writer()
-			buildCmd.Stderr = log.Writer()
-			if err := buildCmd.Run(); err != nil {
-				return fmt.Errorf("failed to build builder image: %v", err)
-			}
-			log.Printf("Builder image built successfully")
-			return nil
-		}
-		return fmt.Errorf("error checking builder image: %v", err)
-	}
-	return nil
-}
-
-func (b *Builder) runBuilderContainer(ctx context.Context, config *container.Config, hostConfig *container.HostConfig) error {
-	resp, err := b.dockerClient.ContainerCreate(ctx, config, hostConfig, nil, nil, "")
-	if err != nil {
-		return fmt.Errorf("container creation failed: %v", err)
-	}
-
-	// Always remove the container after build completes or fails.
-	// Use context.Background() with timeout so cleanup succeeds even if the
-	// parent context is cancelled (e.g., client disconnect).
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := b.dockerClient.ContainerRemove(cleanupCtx, resp.ID, container.RemoveOptions{Force: true}); err != nil {
-			log.Printf("[Builder] Warning: failed to remove container %s: %v", resp.ID, err)
-		}
-	}()
-
-	waiter, err := b.dockerClient.ContainerAttach(ctx, resp.ID, container.AttachOptions{
-		Stream: true,
-		Stdout: true,
-		Stderr: true,
-		Logs:   true,
+	result, err := b.payloadBuilder.Build(ctx, &parentbuilder.BuildRequest{
+		EnvVars:    envVars,
+		BinaryName: binaryName,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to attach to container: %v", err)
+		return "", err
 	}
-	defer waiter.Close()
-
-	go func() {
-		io.Copy(log.Writer(), waiter.Reader)
-	}()
-
-	if err := b.dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("container start failed: %v", err)
-	}
-
-	statusCh, errCh := b.dockerClient.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
-		return fmt.Errorf("container wait failed: %v", err)
-	case status := <-statusCh:
-		if status.StatusCode != 0 {
-			return fmt.Errorf("build failed with status: %d", status.StatusCode)
-		}
-	}
-
-	return nil
+	return result.BinaryPath, nil
 }
+
 
 func (b *Builder) sendAndCleanup(ctx context.Context, binaryPath string) error {
 	if err := b.sendBinaryFile(ctx, binaryPath, b.clientUsername); err != nil {

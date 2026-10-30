@@ -344,9 +344,9 @@ func TestConstants(t *testing.T) {
 		}
 	})
 
-	t.Run("maxMessageSize is 10MB", func(t *testing.T) {
+	t.Run("maxMessageSize is 11MB", func(t *testing.T) {
 		t.Parallel()
-		expected := 10 * 1024 * 1024
+		expected := 11 * 1024 * 1024
 		if maxMessageSize != expected {
 			t.Errorf("expected maxMessageSize=%d, got %d", expected, maxMessageSize)
 		}

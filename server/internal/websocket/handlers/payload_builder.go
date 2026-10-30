@@ -31,7 +31,7 @@ func (h *WSHandler) handleCreatePayload(client *hub.Client, message []byte) erro
 
 	// Pass the Hub, listener manager, and shared agentConfig to the builder
 	// The shared agentConfig includes dynamically uploaded profiles
-	b, err := builder.NewBuilder(h.hub.ListenerManager, h.hub, h.db, h.agentClient, h.agentConfig)
+	b, err := builder.NewBuilder(h.hub.ListenerManager, h.hub, h.db, h.agentClient, h.agentConfig, h.payloadBuilder)
 	if err != nil {
 		logMessage(LOG_NORMAL, "Failed to create builder: %v", err)
 		return err

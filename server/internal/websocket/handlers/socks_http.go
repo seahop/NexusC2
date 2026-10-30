@@ -82,5 +82,5 @@ func (h *WSHandler) sendSocksHTTPError(client *hub.Client, message string) error
 	client.Send <- responseJSON
 
 	log.Printf("[SOCKS-HTTP] Error: %s", message)
-	return fmt.Errorf(message)
+	return fmt.Errorf("%s", message)
 }

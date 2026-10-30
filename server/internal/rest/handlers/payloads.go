@@ -16,19 +16,16 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"c2/internal/builder"
 	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/listeners"
 
 	"github.com/BurntSushi/toml"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -37,21 +34,16 @@ type PayloadHandler struct {
 	db              *sql.DB
 	listenerManager *listeners.Manager
 	agentClient     *agent.Client
-	dockerClient    *client.Client
+	builder         builder.Builder
 	agentConfig     *config.AgentConfig
 }
 
-func NewPayloadHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client, agentCfg *config.AgentConfig) (*PayloadHandler, error) {
-	dockerCli, err := client.NewClientWithOpts(client.FromEnv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create docker client: %v", err)
-	}
-
+func NewPayloadHandler(db *sql.DB, listenerManager *listeners.Manager, agentClient *agent.Client, agentCfg *config.AgentConfig, b builder.Builder) (*PayloadHandler, error) {
 	return &PayloadHandler{
 		db:              db,
 		listenerManager: listenerManager,
 		agentClient:     agentClient,
-		dockerClient:    dockerCli,
+		builder:         b,
 		agentConfig:     agentCfg,
 	}, nil
 }
@@ -335,12 +327,15 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	envVars := h.prepareEnvVars(req, listener, clientID, secret, xorKey, keyPair, binaryName, payloadConfig, httpRoutes, malleableConfig)
 
 	// Build the payload
-	if err := h.runDockerBuild(ctx, envVars); err != nil {
-		return "", "", fmt.Errorf("docker build failed: %v", err)
+	result, err := h.builder.Build(ctx, &builder.BuildRequest{
+		EnvVars:    envVars,
+		BinaryName: binaryName,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("build failed: %v", err)
 	}
 
-	binaryPath := filepath.Join("/shared", binaryName)
-	return binaryPath, binaryName, nil
+	return result.BinaryPath, binaryName, nil
 }
 
 func (h *PayloadHandler) storeInit(ctx context.Context, initID, clientID uuid.UUID, payloadType, secret, os, arch, rsaKey, smbProfile, smbXorKey, httpXorKey, tcpProfile, tcpXorKey, protocol string) error {
@@ -695,95 +690,6 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 	return envVars
 }
 
-func (h *PayloadHandler) runDockerBuild(ctx context.Context, envVars []string) error {
-	// Check if image exists
-	_, _, err := h.dockerClient.ImageInspectWithRaw(ctx, "docker_builder:latest")
-	if err != nil {
-		log.Println("Builder image not found, attempting to build...")
-		cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "/app/docker-compose.yml", "build", "builder")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to build image: %s", string(output))
-		}
-	}
-
-	// Get host payloads path
-	hostPayloadsPath := os.Getenv("HOST_PAYLOADS_PATH")
-	if hostPayloadsPath == "" {
-		hostPayloadsPath = "/app/payloads"
-	}
-
-	// Get host shared path — must match the host directory mounted as /shared in this container
-	hostSharedPath := os.Getenv("HOST_SHARED_PATH")
-	if hostSharedPath == "" {
-		hostSharedPath = "/shared"
-	}
-
-	// Create container config
-	config := &container.Config{
-		Image: "docker_builder:latest",
-		Env:   envVars,
-		Tty:   true,
-	}
-
-	hostConfig := &container.HostConfig{
-		NetworkMode: "host",
-		Binds: []string{
-			fmt.Sprintf("%s:/shared", hostSharedPath),
-			fmt.Sprintf("%s/Darwin:/build/Darwin:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/Linux:/build/Linux:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/Windows:/build/Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/SMB_Windows:/build/SMB_Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Linux:/build/TCP_Linux:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Darwin:/build/TCP_Darwin:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/TCP_Windows:/build/TCP_Windows:ro", hostPayloadsPath),
-			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
-		},
-	}
-
-	// Create container
-	resp, err := h.dockerClient.ContainerCreate(ctx, config, hostConfig, nil, nil, "")
-	if err != nil {
-		return fmt.Errorf("failed to create container: %v", err)
-	}
-
-	containerID := resp.ID
-	// Use context.Background() with timeout for cleanup so it succeeds even if
-	// the HTTP request context is cancelled (client disconnect)
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		h.dockerClient.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
-	}()
-
-	// Start container
-	if err := h.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start container: %v", err)
-	}
-
-	// Wait for container to finish
-	statusCh, errCh := h.dockerClient.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("container wait error: %v", err)
-		}
-	case status := <-statusCh:
-		if status.StatusCode != 0 {
-			// Get logs for debugging
-			logReader, _ := h.dockerClient.ContainerLogs(ctx, containerID, container.LogsOptions{ShowStdout: true, ShowStderr: true})
-			if logReader != nil {
-				logs, _ := io.ReadAll(logReader)
-				logReader.Close()
-				return fmt.Errorf("build failed with exit code %d: %s", status.StatusCode, string(logs))
-			}
-			return fmt.Errorf("build failed with exit code %d", status.StatusCode)
-		}
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	return nil
-}
 
 // Helper functions
 func generateRandomString(length int) string {

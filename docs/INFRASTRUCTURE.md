@@ -22,6 +22,10 @@ graph TB
         BUILD[Builder<br/>172.28.0.5<br/>on-demand]
     end
 
+    subgraph Remote["Remote (Optional)"]
+        RBUILD[Remote Builder<br/>:9443 mTLS]
+    end
+
     subgraph External["External Connections"]
         GUI[GUI Client]
         API[API Client]
@@ -39,6 +43,8 @@ graph TB
     REST --> DB
     AH --> DB
     WS -.->|Docker API| BUILD
+    WS -.->|mTLS :9443| RBUILD
+    REST -.->|mTLS :9443| RBUILD
 ```
 
 ---
@@ -189,6 +195,15 @@ REST API → wss://172.28.0.3:3131/ws → WebSocket Hub → All Clients
 - Project export for external compilation
 - Anti-sandbox toggle configuration
 
+**Build Modes:**
+
+The builder supports two modes, configured in `config.toml` under `[builder]`:
+
+- **Local** (default, `mode = "local"`): Spawns a `docker_builder:latest` container on the same host via the Docker API. No additional setup required.
+- **Remote** (`mode = "remote"`): Sends build requests over mTLS (TLS 1.3) to a standalone builder service running on a separate machine. This offloads CPU-intensive compilation from the primary C2 host.
+
+See [Remote Builder](REMOTE-BUILDER.md) for remote mode setup and deployment.
+
 **Volumes (Read-Only Templates):**
 ```yaml
 # docker-compose.yml (base volumes)
@@ -278,7 +293,7 @@ For complete table definitions and column details, see [Database Schema Referenc
 /var/run/docker.sock:/var/run/docker.sock
 ```
 
-Mounted in WebSocket, REST API, and Builder for Docker operations (payload building).
+Mounted in WebSocket, REST API, and Builder for Docker operations (payload building). When using `mode = "remote"` in `config.toml`, the Docker socket is not required on the C2 host for builds — all compilation is handled by the remote builder.
 
 ---
 
@@ -326,6 +341,7 @@ Agent Handler additionally has:
 | `.env` | Environment variables |
 | `db/.secrets/.env` | Database credentials |
 | `agent.yaml` | Agent handler config |
+| `docker-compose.remote-builder.yml` | Remote builder deployment |
 
 ### Malleable Profile (config.toml)
 
@@ -354,3 +370,6 @@ See [Malleable Profiles](MALLEABLE-PROFILES.md) for complete documentation.
 | REST API Entry | `server/cmd/rest-api/main.go` |
 | gRPC Definitions | `server/proto/service/agent.proto` |
 | Builder Dockerfile | `server/docker/Dockerfile.builder` |
+| Remote Builder Entry | `server/cmd/remote-builder/main.go` |
+| Remote Builder Dockerfile | `server/docker/Dockerfile.remote-builder` |
+| Remote Builder Compose | `server/docker/docker-compose.remote-builder.yml` |

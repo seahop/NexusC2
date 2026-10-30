@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	parentbuilder "c2/internal/builder"
 	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/hub"
@@ -25,8 +26,9 @@ import (
 type WSHandler struct {
 	hub           *hub.Hub
 	db            *sql.DB
-	agentClient   *agent.Client // Persistent gRPC client
-	agentConfig   *config.AgentConfig // Agent configuration for malleable profiles
+	agentClient   *agent.Client
+	agentConfig   *config.AgentConfig
+	payloadBuilder parentbuilder.Builder
 	mu            sync.Mutex
 	activeUploads sync.Map
 	// Worker pool for processing large messages
@@ -44,8 +46,7 @@ type WSHandler struct {
 }
 
 // NewWSHandler creates a new WebSocket handler
-func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig) (*WSHandler, error) {
-	// Dynamic worker pool configuration
+func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig, pb parentbuilder.Builder) (*WSHandler, error) {
 	minWorkers := 3
 	maxWorkers := runtime.NumCPU() * 2
 	if maxWorkers < 5 {
@@ -57,6 +58,7 @@ func NewWSHandler(h *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *c
 		db:             db,
 		agentClient:    agentClient,
 		agentConfig:    agentCfg,
+		payloadBuilder: pb,
 		resultWorkers:  make(chan messageJob, 100), // Buffer up to 100 jobs
 		minWorkers:     minWorkers,
 		maxWorkers:     maxWorkers,
@@ -482,7 +484,7 @@ func (h *WSHandler) sendListenerError(client *hub.Client, message string) error 
 	client.Send <- responseJSON
 
 	logMessage(LOG_NORMAL, "Listener error: %s", message)
-	return fmt.Errorf(message)
+	return fmt.Errorf("%s", message)
 }
 
 // handleRefreshState re-exports and sends the current state to the client

@@ -1,0 +1,76 @@
+# ==============================================================================
+# Stage 1: Build the remote-builder binary
+# ==============================================================================
+FROM golang:1.27-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go mod tidy
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /remote-builder ./cmd/remote-builder
+
+# ==============================================================================
+# Stage 2: Docker Compose installer (needed for builder image management)
+# ==============================================================================
+FROM alpine:3.24 AS docker-installer
+
+RUN apk add --no-cache curl ca-certificates
+
+ARG COMPOSE_VERSION=v2.32.4
+RUN mkdir -p /tmp/docker-cli-plugins && \
+    curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors \
+        "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+        -o /tmp/docker-cli-plugins/docker-compose && \
+    chmod +x /tmp/docker-cli-plugins/docker-compose && \
+    cp /tmp/docker-cli-plugins/docker-compose /tmp/docker-compose-standalone
+
+# ==============================================================================
+# Stage 3: Runtime
+# ==============================================================================
+FROM alpine:3.24
+
+LABEL maintainer="NexusC2"
+LABEL description="Remote Builder service for NexusC2 — offloads payload compilation via mTLS"
+
+WORKDIR /app
+
+ARG DOCKER_GID=984
+RUN apk add --no-cache \
+    docker-cli \
+    curl \
+    ca-certificates && \
+    addgroup -g ${DOCKER_GID} docker && \
+    addgroup -g 1001 nexus && \
+    adduser -D -u 1001 -G nexus nexus && \
+    adduser nexus docker && \
+    mkdir -p /app/certs /shared && \
+    chown -R nexus:nexus /app /shared && \
+    rm -rf /var/cache/apk/*
+
+# Docker Compose for builder image management
+COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+COPY --from=docker-installer --chown=nexus:nexus /tmp/docker-compose-standalone /usr/local/bin/docker-compose
+
+COPY --from=builder --chown=nexus:nexus /remote-builder /app/remote-builder
+
+# Copy builder Dockerfile and payload templates (needed to build docker_builder image)
+COPY --chown=nexus:nexus ./docker/docker-compose.yml /app/docker-compose.yml
+COPY --chown=nexus:nexus ./docker/Dockerfile.builder /app/Dockerfile.builder
+COPY --chown=nexus:nexus ./docker/payloads /app/payloads/
+
+RUN chmod +x /app/remote-builder
+
+USER nexus
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fk https://localhost:9443/health || exit 1
+
+EXPOSE 9443
+
+CMD ["/app/remote-builder"]

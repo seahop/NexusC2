@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"time"
 
+	"c2/internal/builder"
 	"c2/internal/common/config"
 	"c2/internal/rest/auth"
 	"c2/internal/rest/handlers"
@@ -111,7 +113,28 @@ func NewServer(cfg *config.RESTConfig, agentCfg *config.AgentConfig, db *sql.DB)
 		s.profileHandler = handlers.NewProfileHandler(agentCfg)
 	}
 
-	payloadHandler, err := handlers.NewPayloadHandler(db, listenerManager, nil, agentCfg)
+	// Initialize builder (local or remote based on config)
+	builderCfg, err := config.LoadBuilderConfig()
+	if err != nil {
+		log.Printf("Warning: failed to load builder config, defaulting to local: %v", err)
+		builderCfg = &config.BuilderConfig{Mode: "local"}
+	}
+	payloadBuilder, err := builder.NewBuilderFromConfig(&builder.BuilderConfig{
+		Mode: builderCfg.Mode,
+		Remote: builder.RemoteConfig{
+			Address:    builderCfg.Remote.Address,
+			CACert:     builderCfg.Remote.CACert,
+			ClientCert: builderCfg.Remote.ClientCert,
+			ClientKey:  builderCfg.Remote.ClientKey,
+			Timeout:    builderCfg.Remote.Timeout,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize builder: %v", err)
+	}
+	log.Printf("Builder initialized in %q mode", builderCfg.Mode)
+
+	payloadHandler, err := handlers.NewPayloadHandler(db, listenerManager, nil, agentCfg, payloadBuilder)
 	if err != nil {
 		return nil, err
 	}

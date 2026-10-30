@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: server
+          args: --timeout 5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Run tests
+        working-directory: server
+        run: go test -race -count=1 -timeout 5m ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - cmd/rest-api
+          - cmd/websocket
+          - cmd/remote-builder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build ${{ matrix.target }}
+        working-directory: server
+        run: CGO_ENABLED=0 go build ./${{ matrix.target }}
+
+  proto:
+    name: Protobuf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Install Go protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Check generated protobuf files are up to date
+        working-directory: server
+        run: |
+          protoc --go_out=. --go_opt=paths=source_relative \
+              --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+              proto/service/agent.proto
+          mv proto/service/agent.pb.go proto/
+          mv proto/service/agent_grpc.pb.go proto/
+          git diff --exit-code proto/ || (echo "Protobuf files are out of date. Run protoc and commit." && exit 1)

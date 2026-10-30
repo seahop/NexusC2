@@ -2,6 +2,7 @@
 package main
 
 import (
+	"c2/internal/builder"
 	"c2/internal/common/config"
 	"c2/internal/common/utils"
 	"c2/internal/database/postgres"
@@ -148,9 +149,30 @@ func main() {
 	h := hub.NewHub(db)
 	log.Println("WebSocket hub created successfully")
 
+	// Initialize builder (local or remote based on config)
+	builderCfg, err := config.LoadBuilderConfig()
+	if err != nil {
+		log.Printf("Warning: failed to load builder config, defaulting to local: %v", err)
+		builderCfg = &config.BuilderConfig{Mode: "local"}
+	}
+	payloadBuilder, err := builder.NewBuilderFromConfig(&builder.BuilderConfig{
+		Mode: builderCfg.Mode,
+		Remote: builder.RemoteConfig{
+			Address:    builderCfg.Remote.Address,
+			CACert:     builderCfg.Remote.CACert,
+			ClientCert: builderCfg.Remote.ClientCert,
+			ClientKey:  builderCfg.Remote.ClientKey,
+			Timeout:    builderCfg.Remote.Timeout,
+		},
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize builder: %v", err)
+	}
+	log.Printf("Builder initialized in %q mode", builderCfg.Mode)
+
 	// Create WebSocket handler first (with nil agent client)
 	log.Println("Creating WebSocket handler...")
-	wsHandler, err := handlers.NewWSHandler(h, db, nil, agentCfg)
+	wsHandler, err := handlers.NewWSHandler(h, db, nil, agentCfg, payloadBuilder)
 	if err != nil {
 		log.Fatalf("Failed to create WebSocket handler: %v", err)
 	}

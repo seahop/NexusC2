@@ -73,6 +73,12 @@ yarn-error.log*
 ehthumbs.db
 Thumbs.db
 
+# Compiled Go service binaries (built inside Docker)
+server/rest-api
+server/websocket
+server/remote-builder
+server/builder-test
+
 # Docker specific
 .docker/
 docker-compose.override.yml

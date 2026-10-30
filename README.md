@@ -22,7 +22,7 @@ This C2 framework provides a robust platform for managing remote agents through 
 - **Agent Handler** - Manages agent connections and HTTP/HTTPS listeners
 - **REST API Service** - Programmatic access to all C2 operations via HTTP/JSON
 - **PostgreSQL Database** - Persistent storage for all operational data
-- **Docker Builder** - On-demand payload generation for multiple platforms
+- **Docker Builder** - On-demand payload generation for multiple platforms (local or [remote](docs/REMOTE-BUILDER.md))
 - **Python GUI Client** - Feature-rich operator interface
 
 ### Communication Flow
@@ -62,9 +62,11 @@ graph TB
             Database["🗄️ PostgreSQL<br/>172.28.0.2:5432"]
             Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131"]
             RestAPI["🔌 REST API<br/>172.28.0.6:8443"]
-            Builder["🔨 Builder Service<br/>172.28.0.5"]
+            Builder["🔨 Builder Service<br/>172.28.0.5<br/>(Local/Remote)"]
         end
     end
+
+    RemoteBuilder["🔨 Remote Builder<br/>(Optional)<br/>mTLS :9443"]
 
     %% External Connections
     Agent <-->|"HTTPS/HTTP"| AgentHandler
@@ -79,6 +81,8 @@ graph TB
     AgentHandler -->|":5432"| Database
     Websocket -.->|"Docker API"| Builder
     RestAPI -.->|"Docker API"| Builder
+    Websocket -.->|"mTLS"| RemoteBuilder
+    RestAPI -.->|"mTLS"| RemoteBuilder
     FW_Allow -.->|"Protects"| AgentHandler
 
     %% Styling
@@ -91,7 +95,7 @@ graph TB
 
     class AgentHandler hostNet
     class Database,Websocket,RestAPI,Builder bridgeNet
-    class Agent,Client external
+    class Agent,Client,RemoteBuilder external
     class FW_Allow firewall
     class Spacer spacer
     class HostLabel,FW_Label,HN_Label,DB_Label label
@@ -105,12 +109,12 @@ graph TB
 5. Agent ↔ Agent Handler: HTTPS/HTTP callbacks on dynamic ports
 6. Agent Handler → Database: Agent state and results via 172.28.0.2:5432
 7. WebSocket/REST API → Database: Session management and task storage
-8. WebSocket/REST API → Builder: Docker API triggers for payload compilation
+8. WebSocket/REST API → Builder: Docker API (local) or mTLS (remote) for payload compilation
 
 **Network Architecture:**
 - **Host Network Mode**: Agent-handler runs with `network_mode: host` for dynamic port binding
 - **Firewall Protection**: iptables rules secure gRPC port 50051 from external access
-- **Bridge Network**: Database, WebSocket, REST API, and Builder on isolated Docker network (172.28.0.0/16)
+- **Bridge Network**: Database, WebSocket, REST API, and Builder on isolated Docker network (172.28.0.0/16); in remote mode, the builder runs on a separate machine via mTLS
 - **Dynamic Listeners**: Agent-handler can bind to any port (80, 443, 8080, etc.) without container restart
 
 **Network Ports:**

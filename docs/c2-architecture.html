@@ -137,6 +137,10 @@ graph TB
             Websocket["🌐 WebSocket Server<br/>172.28.0.3:3131<br/>(Public)"]
             Builder["🔨 Builder Service<br/>172.28.0.5<br/>(On-Demand)"]
         end
+
+        subgraph RemoteOpt["🟣 Remote Builder (Optional)"]
+            RemoteBuilder["🔨 Remote Builder<br/>mTLS :9443"]
+        end
     end
 
     %% External Connections - Separated paths
@@ -147,7 +151,8 @@ graph TB
     Websocket <-->|"gRPC :50051<br/>via host.docker.internal"| AgentHandler
     Websocket -->|"PostgreSQL :5432"| Database
     AgentHandler -->|"PostgreSQL :5432<br/>via 172.28.0.2"| Database
-    Websocket -.->|"Docker API<br/>Trigger Build"| Builder
+    Websocket -.->|"Docker API<br/>Local Build"| Builder
+    Websocket -.->|"mTLS :9443<br/>Remote Build"| RemoteBuilder
 
     %% Firewall Protection
     FW_Allow -.->|"Protects"| AgentHandler
@@ -160,7 +165,9 @@ graph TB
     classDef spacer fill:none,stroke:none,color:transparent
 
     class AgentHandler hostNet
+    classDef remoteNet fill:#8e44ad,stroke:#6c3483,stroke-width:2px,color:#fff
     class Database,Websocket,Builder bridgeNet
+    class RemoteBuilder remoteNet
     class Agent,Client external
     class FW_Allow firewall
     class Spacer spacer
@@ -212,13 +219,15 @@ graph TB
             </div>
 
             <div class="legend-item">
-                <strong>🔵 Builder Service (Bridge Network)</strong>
-                <span class="network-badge badge-bridge">BRIDGE</span>
+                <strong>🔵 Builder Service (Local or Remote)</strong>
+                <span class="network-badge badge-bridge">BRIDGE / mTLS</span>
                 <ul>
-                    <li>IP: <code>172.28.0.5</code> on bridge network</li>
+                    <li><strong>Local mode</strong> (default): <code>172.28.0.5</code> on bridge network, spawned via Docker API</li>
+                    <li><strong>Remote mode</strong>: standalone service on a separate machine, connected via mTLS on port 9443</li>
                     <li>On-demand payload compilation service</li>
                     <li>Supports: Windows, Linux, macOS payloads</li>
                     <li>Compiles with custom configurations (obfuscation, encryption)</li>
+                    <li>Mode configured in <code>config.toml [builder]</code> section</li>
                 </ul>
             </div>
 
@@ -285,11 +294,12 @@ graph TB
             <div class="legend-item">
                 <strong>4. Payload Building</strong>
                 <ol>
-                    <li>Operator requests payload via WebSocket</li>
-                    <li>WebSocket triggers builder service via Docker API</li>
+                    <li>Operator requests payload via WebSocket or REST API</li>
+                    <li><strong>Local mode:</strong> service triggers builder container via Docker API<br/>
+                        <strong>Remote mode:</strong> service sends build request to remote builder over mTLS</li>
                     <li>Builder compiles payload with custom config</li>
-                    <li>Compiled payload saved to shared volume</li>
-                    <li>Operator downloads via WebSocket</li>
+                    <li>Compiled payload saved to shared volume (local) or streamed back (remote)</li>
+                    <li>Operator downloads via WebSocket or REST API</li>
                 </ol>
             </div>
         </div>

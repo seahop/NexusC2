@@ -1,0 +1,43 @@
+# Standalone compose for deploying the remote builder on a separate machine.
+# See docs/REMOTE-BUILDER.md for setup instructions.
+#
+# Usage:
+#   docker compose -f docker-compose.remote-builder.yml up -d
+#
+# Required files (place in ./certs/ next to this file):
+#   ca.crt          — the same CA that signed the C2 server's client cert
+#   server.crt      — remote builder server certificate (signed by the CA)
+#   server.key      — remote builder server private key
+
+services:
+  remote-builder:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.remote-builder
+    container_name: nexus-remote-builder
+    environment:
+      HOST_PAYLOADS_PATH: ${COMPOSE_DIR:-/opt/nexus}/payloads
+      HOST_SHARED_PATH: ${COMPOSE_DIR:-/opt/nexus}/shared
+    group_add:
+      - ${DOCKER_GID:-984}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./shared:/shared
+      - ./payloads:/app/payloads:ro
+      - ${COMPOSE_DIR:-/opt/nexus}/payloads:${COMPOSE_DIR:-/opt/nexus}/payloads:ro
+      - ./certs/ca.crt:/app/certs/ca.crt:ro
+      - ./certs/server.crt:/app/certs/server.crt:ro
+      - ./certs/server.key:/app/certs/server.key:ro
+    ports:
+      - "9443:9443"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:9443/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
