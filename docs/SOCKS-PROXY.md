@@ -53,7 +53,7 @@ Both implementations enable operators to route traffic through compromised hosts
 
 ### Architecture
 
-```
+```mermaid
 flowchart LR
     subgraph Operator["Operator Workstation"]
         TOOL[Operator Tool<br/>nmap, curl, etc.]
@@ -177,7 +177,7 @@ socks-ws stop 1080
 
 ### Architecture
 
-```
+```mermaid
 flowchart LR
     subgraph Operator["Operator Workstation"]
         TOOL[Operator Tool<br/>nmap, curl, etc.]
@@ -334,7 +334,7 @@ socks-http stop 1080
 |-----------|---------|-------------|
 | Session Timeout | 5 minutes | Inactive session cleanup |
 | Max Sessions | Unlimited | No hard limit on concurrent sessions |
-| Buffer Size | 64 KB | Data chunk size for transfer |
+| Buffer Size | 32 KB | Data chunk size for transfer |
 | Cleanup Interval | 60 seconds | How often stale sessions are cleaned |
 
 ### Supported SOCKS5 Commands

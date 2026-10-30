@@ -1,12 +1,12 @@
-# Linked Agents - SMB Pivoting & Multi-Hop Chains
+# Linked Agents - SMB/TCP Pivoting & Multi-Hop Chains
 
 ## Overview
 
-NexusC2 supports linking agents together via SMB named pipes, enabling command and control through internal networks where direct internet access is not available. An "edge" agent (HTTP/HTTPS) can connect to SMB agents on internal systems, creating a parent-child relationship where commands and results flow through the chain.
+NexusC2 supports linking agents together via SMB named pipes or TCP sockets, enabling command and control through internal networks where direct internet access is not available. An "edge" agent (HTTP/HTTPS) can connect to SMB or TCP agents on internal systems, creating a parent-child relationship where commands and results flow through the chain.
 
 **Key Features:**
-- Named pipe connections between agents
-- Multi-hop chain support (HTTPS → SMB → SMB → ...)
+- SMB named pipe and TCP socket connections between agents
+- Multi-hop chain support (HTTPS → SMB/TCP → SMB/TCP → ...)
 - Automatic routing and secret management
 - Transparent command distribution
 - Parent-child relationship tracking
@@ -519,7 +519,7 @@ S6|\\192.168.1.50\pipe\spoolss|1|Q
 | Linux/macOS SMB | Requires explicit NTLM credentials for SMB linking |
 | Latency | Multi-hop adds round-trip latency |
 | Single Path | No redundant routes |
-| Queue Size | 100 item outbound buffer |
+| Queue Size | 1000 item outbound buffer |
 | Message Size | 10MB maximum per message |
 
 ---

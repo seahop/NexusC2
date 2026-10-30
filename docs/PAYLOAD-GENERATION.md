@@ -54,10 +54,9 @@ flowchart TB
 
 | Property | Value |
 |----------|-------|
-| Base Image | golang:1.25-alpine |
-| Obfuscator | Garble (mvdan.cc/garble v0.15.0) |
+| Base Image | golang:1.27-alpine |
+| Obfuscator | Garble (mvdan.cc/garble v0.17.0) |
 | Container Name | builder |
-| Privileged | Yes (required for some build operations) |
 
 ### Build Modes
 
@@ -73,14 +72,15 @@ flowchart TB
 
 Contents of exported project:
 ```
-project/
+app/
 ├── init_variables.go    # Generated configuration
 ├── go.mod              # Dependencies
 ├── go.sum              # Dependency checksums
 ├── build.sh            # Linux/macOS build script
-├── build.bat           # Windows build script
-├── Makefile            # Make-based build
-└── src/                # All source files
+├── build.bat           # Windows build script (Windows only)
+├── Makefile            # Make-based build (if generated)
+├── *.go                # All agent source files
+└── <subdirs>/          # Platform-specific packages
 ```
 
 ---
@@ -143,11 +143,24 @@ These are automatically generated during payload creation and stored in the `ini
 
 ---
 
-## Safety Checks (Anti-Sandbox)
+## Safety Checks
 
-Payloads can perform environment checks before executing. Each check can be individually enabled:
+Payloads support two categories of safety checks: environment-targeting checks (restrict execution to specific hosts) and anti-sandbox toggles (detect analysis environments).
 
-### Available Checks
+### Environment-Targeting Checks
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `SAFETY_HOSTNAME` | Required hostname match | `WORKSTATION-01` |
+| `SAFETY_USERNAME` | Required username match | `jdoe` |
+| `SAFETY_DOMAIN` | Required domain match | `CORP.LOCAL` |
+| `SAFETY_FILE_PATH` | File path to check | `C:\Users\jdoe\marker.txt` |
+| `SAFETY_FILE_MUST_EXIST` | Whether file must exist (`true`/`false`) | `true` |
+| `SAFETY_PROCESS` | Required running process | `outlook.exe` |
+
+If any configured check fails, the payload exits silently without contacting the C2.
+
+### Anti-Sandbox Toggles
 
 | Variable | Check | Description |
 |----------|-------|-------------|
@@ -158,8 +171,6 @@ Payloads can perform environment checks before executing. Each check can be indi
 | `TOGGLE_CHECK_LOADED_LIBRARIES` | Library Integrity | Checks for hooking DLLs |
 | `TOGGLE_CHECK_DOCKER_CONTAINER` | Docker Detection | Detects container environment |
 | `TOGGLE_CHECK_PROCESS_LIST` | Process List | Looks for analysis tools |
-
-### Configuration
 
 Set to `true` to enable, `false` to disable:
 ```yaml
@@ -211,6 +222,22 @@ Payload only active 8 AM - 6 PM local time.
 
 ---
 
+## PE Version Info (Windows)
+
+Windows payloads can embed custom PE VERSIONINFO resource data to impersonate legitimate software:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PE_FILE_DESCRIPTION` | File description | `Windows Update Service` |
+| `PE_COMPANY_NAME` | Company name | `Microsoft Corporation` |
+| `PE_PRODUCT_NAME` | Product name | `Microsoft Windows` |
+| `PE_FILE_VERSION` | File version string | `10.0.19041.1` |
+| `PE_PRODUCT_VERSION` | Product version string | `10.0.19041.1` |
+
+If any PE field is specified, the builder generates a resource section using `go-winres`. If no fields are specified, the binary has no resource section (default).
+
+---
+
 ## Garble Obfuscation
 
 Payloads are compiled using [Garble](https://github.com/burrowers/garble) for binary obfuscation.
@@ -225,7 +252,9 @@ Payloads are compiled using [Garble](https://github.com/burrowers/garble) for bi
 ### Build Command
 
 ```bash
-garble -tiny -literals -seed=random build -o output ./...
+garble -seed=random -literals -tiny -debugdir=none build \
+    -ldflags "-w -s -buildid= <config flags>" \
+    -trimpath -o output
 ```
 
 ### Additional Source-Level Obfuscation
@@ -284,9 +313,13 @@ TCP socket-based payload for lateral movement.
 
 ## Build Process
 
+### 0. Module Randomization
+
+Each build generates a random 15-character Go module name. All internal package imports are rewritten to use this random module name, preventing static fingerprinting of the module path.
+
 ### 1. Configuration Injection
 
-Environment variables are converted to Go source:
+Environment variables are injected via `-ldflags -X` at compile time. Additionally, an `init_variables.go` file is generated:
 
 ```go
 // init_variables.go (generated)
@@ -313,15 +346,32 @@ var (
 GOOS=windows GOARCH=amd64
 
 # Build with Garble
-garble -tiny -literals build -ldflags="-s -w" -o payload.exe ./...
+garble -seed=random -literals -tiny -debugdir=none build \
+    -ldflags "-H windowsgui -w -s -buildid= -X 'main.cfgKey=...' ..." \
+    -trimpath -o payload.exe
 ```
 
 Flags:
-- `-s`: Strip symbol table
 - `-w`: Strip DWARF debug info
-- `-tiny`: Garble's minimal output mode
+- `-s`: Strip symbol table
+- `-buildid=`: Remove build ID
+- `-trimpath`: Remove local file paths from binary
+- `-tiny`: Garble's minimal output mode (removes debug info)
+- `-debugdir=none`: Suppress Garble debug output
+- `-H windowsgui`: Hide console window (Windows only)
 
-### 3. Output
+### 3. Post-Build Processing
+
+After compilation, the builder runs binary marker patching to remove Go IOC signatures:
+
+| Platform | Patches Applied |
+|----------|----------------|
+| All | Zero `Go buildinf:` magic marker, zero `go:fipsinfo` marker |
+| Windows | Patch PE linker version from Go 3.0 to MSVC 14.16 |
+| Linux | Rename Go-specific ELF sections (`.gopclntab` → `.rodata1`, `.go.buildinfo` → `.bldmeta`, etc.) |
+| Darwin | Rename Go-specific Mach-O sections (`__gopclntab` → `__rodata1`, `__go_buildinfo` → `__bldmeta`, etc.) |
+
+### 4. Output
 
 Binary saved to `/shared/{OUTPUT_FILENAME}`:
 - Windows: `.exe` extension
@@ -361,7 +411,7 @@ Stores payload initialization data for server-side validation:
 | `RSAkey` | Private key for decryption |
 | `os` | Expected operating system |
 | `arch` | Expected architecture |
-| `protocol` | HTTP/HTTPS/SMB |
+| `protocol` | HTTP/HTTPS/SMB/TCP |
 
 This data is used during agent registration to validate legitimate payloads.
 

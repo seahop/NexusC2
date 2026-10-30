@@ -35,7 +35,7 @@ If Go is not installed locally, build using Docker:
 
 ```bash
 cd /path/to/NexusC2
-docker run --rm -v $(pwd)/server:/src -w /src golang:1.25-alpine \
+docker run --rm -v $(pwd)/server:/src -w /src golang:1.27-alpine \
     go build -o /src/logviewer ./cmd/logviewer
 ```
 
@@ -43,7 +43,7 @@ The binary will be created at `server/logviewer`.
 
 ### Building Locally
 
-If Go 1.25+ is installed:
+If Go 1.27+ is installed:
 
 ```bash
 cd server

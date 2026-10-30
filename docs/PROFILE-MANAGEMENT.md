@@ -7,7 +7,7 @@ Profiles can be added to a running NexusC2 server without restarting. This enabl
 - Deploying new traffic patterns without downtime
 - Automation and scripting of profile management
 
-For profile structure and transform reference, see [Malleable Profiles](/docs/malleable-profiles/).
+For profile structure and transform reference, see [Malleable Profiles](MALLEABLE-PROFILES.md).
 
 ---
 
@@ -99,7 +99,7 @@ output = "body"
 type = "base64"
 ```
 
-For complete examples, see [Profile Examples](/docs/profile-examples/).
+For complete examples, see [Profile Examples](PROFILE-EXAMPLES.md).
 
 ### SMB Profiles
 
@@ -121,7 +121,28 @@ type = "prepend"
 value = "\u0005\u0000\u0000\u0003"    # DCE/RPC header mimicry
 ```
 
-For SMB profile examples mimicking Windows services, see [SMB Transforms](/docs/smb-transforms/).
+For SMB profile examples mimicking Windows services, see [SMB Transforms](SMB-TRANSFORMS.md).
+
+### TCP Profiles
+
+TCP profiles define traffic obfuscation for TCP-based agent linking:
+
+```toml
+# TCP Profile - TCP link traffic transforms
+[[tcp_link.profiles]]
+name = "custom-tcp"
+[tcp_link.profiles.data]
+output = "body"
+[[tcp_link.profiles.data.transforms]]
+type = "gzip"
+[[tcp_link.profiles.data.transforms]]
+type = "xor"
+value = "my_tcp_key"    # Auto-replaced with per-build unique key
+[[tcp_link.profiles.data.transforms]]
+type = "base64"
+```
+
+Like SMB profiles, TCP profiles use per-build unique XOR keys. See [Malleable Profiles](MALLEABLE-PROFILES.md) for TCP link configuration details.
 
 ---
 
@@ -326,7 +347,7 @@ For complete API documentation, see the script help:
 
 ## Related Documentation
 
-- [Malleable Profiles](/docs/malleable-profiles/) - HTTP profile structure and transforms
-- [SMB Transforms](/docs/smb-transforms/) - SMB profile structure and Windows pipe mimicry
-- [Profile Examples](/docs/profile-examples/) - Complete HTTP profile examples
-- [API Documentation](/docs/api/) - REST API reference
+- [Malleable Profiles](MALLEABLE-PROFILES.md) - HTTP profile structure and transforms
+- [SMB Transforms](SMB-TRANSFORMS.md) - SMB profile structure and Windows pipe mimicry
+- [Profile Examples](PROFILE-EXAMPLES.md) - Complete HTTP profile examples
+- [API Documentation](API.md) - REST API reference

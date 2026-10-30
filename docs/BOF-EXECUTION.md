@@ -393,11 +393,11 @@ var bofOutputMutex sync.Mutex
 
 | Code | Description |
 |------|-------------|
-| E2 | Invalid COFF data (too small) |
-| E18 | Base64 decode failure |
-| E25 | BOF execution error |
-| E47 | Job not found |
-| E51 | BOF crashed/panic |
+| E2 | Invalid arguments (bad COFF data, invalid section, unsupported format) |
+| E18 | Decode/parse error (base64 or JSON decode failure) |
+| E25 | Execution failed |
+| E47 | Async job not found (invalid job ID) |
+| E51 | BOF execution failed (COFF loader error or panic during execution) |
 
 ### Recovery
 

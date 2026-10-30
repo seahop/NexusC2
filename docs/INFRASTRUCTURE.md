@@ -180,9 +180,8 @@ REST API → wss://172.28.0.3:3131/ws → WebSocket Hub → All Clients
 |----------|-------|
 | IP Address | 172.28.0.5 |
 | Container Name | builder |
-| Base Image | golang:1.25-alpine |
+| Base Image | golang:1.27-alpine |
 | Restart Policy | never (manual execution) |
-| Privileged | Yes |
 
 **Capabilities:**
 - Go compilation with Garble obfuscation
@@ -192,10 +191,17 @@ REST API → wss://172.28.0.3:3131/ws → WebSocket Hub → All Clients
 
 **Volumes (Read-Only Templates):**
 ```yaml
+# docker-compose.yml (base volumes)
 - ./payloads/Darwin:/build/Darwin:ro
 - ./payloads/Linux:/build/Linux:ro
 - ./payloads/Windows:/build/Windows:ro
 - ./payloads/shared:/build/shared:ro
+
+# Dynamically mounted by builder at runtime for SMB/TCP payloads:
+# - ./payloads/SMB_Windows:/build/SMB_Windows:ro
+# - ./payloads/TCP_Linux:/build/TCP_Linux:ro
+# - ./payloads/TCP_Darwin:/build/TCP_Darwin:ro
+# - ./payloads/TCP_Windows:/build/TCP_Windows:ro
 ```
 
 ---
@@ -243,7 +249,7 @@ All services connect to PostgreSQL via bridge network:
 
 NexusC2 uses PostgreSQL with tables for agent tracking, command history, listener configuration, authentication, and link routing.
 
-For complete table definitions and column details, see [Database Schema Reference](/docs/database-schema/).
+For complete table definitions and column details, see [Database Schema Reference](DATABASE-SCHEMA.md).
 
 ---
 
@@ -330,8 +336,9 @@ The `config.toml` file controls traffic customization, including:
 - **Payload defaults** - Sleep intervals, jitter, HTTP headers, user agent
 - **Malleable commands** - Rename protocol keywords to avoid detection
 - **SMB link settings** - Named pipe names and encrypted field names
+- **TCP link settings** - TCP socket configuration and transforms
 
-See [Malleable Profiles]({{< ref "malleable-profiles.md" >}}) for complete documentation.
+See [Malleable Profiles](MALLEABLE-PROFILES.md) for complete documentation.
 
 ---
 

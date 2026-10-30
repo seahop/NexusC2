@@ -71,7 +71,7 @@ Transforms allow you to modify how data is encoded, compressed, and placed in HT
 >
 > **Note:** The transform XOR key is separate from the communication encryption. Agent traffic is encrypted with a rotating per-connection secret derived from the agent's unique ID and session keys. The transform XOR is an additional obfuscation layer applied on top of the encrypted data.
 >
-> **SMB is different:** SMB profiles use per-build unique XOR keys for enhanced isolation. See [SMB Transforms](/docs/smb-transforms/) for details.
+> **SMB is different:** SMB profiles use per-build unique XOR keys for enhanced isolation. See [SMB Transforms](SMB-TRANSFORMS.md) for details.
 
 ### Charsets for Random Transforms
 
@@ -214,7 +214,7 @@ value = ";(function(){})();"
 
 ## Complete Profile Examples
 
-For complete, ready-to-use profile examples including CDN/Analytics style, Header-Only auth, NetBIOS encoding, and XOR masking, see [Profile Examples](/docs/profile-examples/).
+For complete, ready-to-use profile examples including CDN/Analytics style, Header-Only auth, NetBIOS encoding, and XOR masking, see [Profile Examples](PROFILE-EXAMPLES.md).
 
 ---
 
@@ -382,13 +382,166 @@ rekey_id_field = "id"
 
 ## SMB Link Configuration
 
-For SMB named pipe configuration including connection settings, pipe presets, malleable fields, and pipe traffic transforms (with per-build unique XOR keys), see [SMB Transforms](/docs/smb-transforms/).
+For SMB named pipe configuration including connection settings, pipe presets, malleable fields, and pipe traffic transforms (with per-build unique XOR keys), see [SMB Transforms](SMB-TRANSFORMS.md).
+
+---
+
+## Profile Inheritance
+
+Profiles support a `base` field that lets child profiles inherit settings from a parent. Only the fields you specify in the child are overridden; everything else comes from the parent.
+
+### Inherited Fields
+
+| Profile Type | Inheritable Fields |
+|--------------|-------------------|
+| GET | `path`, `method`, `headers`, `params`, `client_id` |
+| POST | `path`, `method`, `content_type`, `headers`, `params`, `client_id`, `data`, `pad_pre_header`, `pad_app_header` |
+| Server Response | `content_type`, `status_field`, `data_field`, `command_id_field`, `rekey_value`, `headers`, `data`, `pad_pre_header`, `pad_app_header` |
+
+### Example
+
+```toml
+# Base profile with common settings
+[[http_profiles.get]]
+name = "base-api-get"
+path = "/api/v2/status"
+method = "GET"
+[[http_profiles.get.headers]]
+name = "Accept"
+value = "application/json"
+[http_profiles.get.client_id]
+output = "header:X-Request-ID"
+[[http_profiles.get.client_id.transforms]]
+type = "base64url"
+
+# Child profile - inherits everything, overrides only the path
+[[http_profiles.get]]
+name = "custom-api-get"
+base = "base-api-get"
+path = "/api/v2/check"
+```
+
+The child `custom-api-get` inherits `method`, `headers`, and `client_id` from `base-api-get`, but uses its own `path`.
+
+> **Note:** The base profile must be defined before any child profiles that reference it. If the base profile is not found, validation will fail.
+
+---
+
+## Profile Variants
+
+Variants group a GET, POST, and server response profile into a named set. Operators select a variant at build time to control the agent's traffic shape without having to specify each profile individually.
+
+### Defining Variants
+
+```toml
+[[http_profiles.variants]]
+name = "cdn-style"
+get_profile = "cdn-jquery-get"
+post_profile = "cdn-analytics-post"
+server_response_profile = "cdn-analytics-response"
+
+[[http_profiles.variants]]
+name = "api-style"
+get_profile = "header-auth-get"
+post_profile = "header-auth-post"
+server_response_profile = "header-auth-response"
+```
+
+### Using Variants at Build Time
+
+When building a payload via the REST API, specify `profile_variant` instead of individual profiles:
+
+```bash
+curl -sk -X POST https://localhost:8443/api/payloads/build \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "listener": "my-https-listener",
+    "os": "windows",
+    "arch": "amd64",
+    "profile_variant": "cdn-style"
+  }'
+```
+
+The server resolves the variant to its component GET, POST, and server response profiles automatically.
+
+### Listing Variants
+
+```bash
+# Via REST API
+curl -sk https://localhost:8443/api/profiles/variants \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## TCP Link Configuration
+
+TCP profiles define how data is obfuscated for TCP-based agent linking, similar to how SMB profiles work for named pipe communication.
+
+### Connection Settings
+
+```toml
+[tcp_link]
+default_port = 4444
+connection_timeout = 30        # Seconds
+max_message_size = 10485760    # 10MB
+heartbeat_interval = 60        # Seconds
+```
+
+### Malleable TCP Fields
+
+```toml
+[tcp_link.malleable]
+link_data_field = "ld"
+link_commands_field = "lc"
+link_handshake_field = "lh"
+link_handshake_response_field = "lr"
+link_unlink_field = "lu"
+routing_id_field = "r"
+payload_field = "p"
+```
+
+### TCP Profiles
+
+TCP profiles use the same DataBlock transform system as SMB profiles:
+
+```toml
+[[tcp_link.profiles]]
+name = "default-tcp"
+
+[[tcp_link.profiles]]
+name = "obfuscated-tcp"
+[tcp_link.profiles.data]
+output = "body"
+[[tcp_link.profiles.data.transforms]]
+type = "gzip"
+[[tcp_link.profiles.data.transforms]]
+type = "xor"
+value = "tcp_transform_key"    # Replaced with per-build unique key
+[[tcp_link.profiles.data.transforms]]
+type = "base64"
+```
+
+Like SMB profiles, TCP profiles use **per-build unique XOR keys** when using the `xor` transform. The key defined in the profile serves as a fallback.
+
+**Supported transforms for TCP profiles:** `base64`, `base64url`, `hex`, `gzip`, `netbios`, `xor`, `prepend`, `append`, `random_prepend`, `random_append`
+
+### Creating a TCP Listener
+
+```bash
+./scripts/nexus-api.py listeners create \
+  -n tcp-listener \
+  -P TCP \
+  -p 4444 \
+  --tcp-profile obfuscated-tcp
+```
 
 ---
 
 ## Dynamic Profile Loading
 
-Profiles can be added to a running NexusC2 server without restarting. For complete documentation on profile management including the nexus-api.py CLI tool, uploading, validation, and best practices, see [Profile Management](/docs/profile-management/).
+Profiles can be added to a running NexusC2 server without restarting. For complete documentation on profile management including the nexus-api.py CLI tool, uploading, validation, and best practices, see [Profile Management](PROFILE-MANAGEMENT.md).
 
 ---
 
@@ -411,11 +564,11 @@ After modifying `config.toml`:
 ## Related Documentation
 
 **Profile Sub-Pages:**
-- [Profile Examples](/docs/profile-examples/) - Complete, ready-to-use profile examples
-- [SMB Transforms](/docs/smb-transforms/) - Named pipe traffic obfuscation
-- [Profile Management](/docs/profile-management/) - Upload and manage profiles via CLI
+- [Profile Examples](PROFILE-EXAMPLES.md) - Complete, ready-to-use profile examples
+- [SMB Transforms](SMB-TRANSFORMS.md) - Named pipe traffic obfuscation
+- [Profile Management](PROFILE-MANAGEMENT.md) - Upload and manage profiles via CLI
 
 **Other Documentation:**
-- [Infrastructure](/docs/infrastructure/) - Server architecture overview
-- [Payload Generation](/docs/payload-generation/) - Building agents with profile settings
-- [API Documentation](/docs/api/) - REST API reference
+- [Infrastructure](INFRASTRUCTURE.md) - Server architecture overview
+- [Payload Generation](PAYLOAD-GENERATION.md) - Building agents with profile settings
+- [API Documentation](API.md) - REST API reference

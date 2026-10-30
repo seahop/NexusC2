@@ -133,7 +133,7 @@ graph TB
 - Anti-forensics and evasion techniques
 
 ### Operational Features
-- Dynamic listener management (HTTP/HTTPS)
+- Dynamic listener management (HTTP/HTTPS/SMB/TCP)
 - Encrypted agent communications
 - Asynchronous task processing
 - Real-time agent status updates
@@ -145,7 +145,7 @@ graph TB
 - Per-agent encryption keys
 - Certificate-based authentication
 - Secure secret generation and rotation
-- Code signing for payloads
+- Binary marker patching (IOC removal)
 
 ## Installation
 
@@ -187,7 +187,7 @@ If you prefer manual installation or need to customize specific steps:
 ### Prerequisites
 - Docker and Docker Compose
 - PostgreSQL
-- Go 1.19+
+- Go 1.27+
 - Python 3.8+
 - Valid TLS certificates
 
@@ -233,8 +233,10 @@ python main.py
 │   ├── setup.sh           # Modular setup script
 │   └── gen_default_certs.sh
 ├── docs/
+│   ├── API.md             # REST API reference with curl examples
 │   ├── SETUP.md           # Detailed installation guide
 │   ├── LOGVIEWER.md       # Details for logviewer executable
+│   ├── MALLEABLE-PROFILES.md  # Traffic customization guide
 │   └── c2-architecture.html
 ├── server/
 │   ├── cmd/               # Service entry points

@@ -6,11 +6,11 @@ NexusC2 uses PostgreSQL for persistent storage. The database contains tables for
 
 **Connection Details:**
 - Database: `ops`
-- User: `postgres`
+- User: `operator`
 - Port: 5432 (internal only)
 - Authentication: SCRAM-SHA-256
 
-For service architecture and how components connect to the database, see [Infrastructure](/docs/infrastructure/).
+For service architecture and how components connect to the database, see [Infrastructure](INFRASTRUCTURE.md).
 
 ---
 
@@ -24,7 +24,7 @@ Primary agent tracking table.
 |--------|------|-------------|
 | newclientid | UUID | Unique agent identifier (PK) |
 | clientid | VARCHAR | Original client ID from build |
-| protocol | VARCHAR | Connection protocol (HTTP/HTTPS/SMB) |
+| protocol | VARCHAR | Connection protocol (HTTP/HTTPS/SMB/TCP) |
 | proto | VARCHAR | Protocol variant |
 | extip | VARCHAR | External IP address |
 | intip | VARCHAR | Internal IP address |
@@ -43,6 +43,7 @@ Primary agent tracking table.
 | parent_clientid | UUID | Parent agent (for linked agents) |
 | link_type | VARCHAR(20) | Link type (e.g., "smb") |
 | hop_count | INTEGER | Distance from initial agent (default: 0) |
+| field_mapping | TEXT | Per-agent JSON field name mapping |
 
 ---
 
@@ -81,14 +82,15 @@ Active listener configuration.
 |--------|------|-------------|
 | id | UUID | Primary key |
 | name | VARCHAR | Listener name |
-| protocol | VARCHAR | HTTP/HTTPS/SMB |
-| port | VARCHAR | Listen port |
-| ip | VARCHAR | Bind address |
+| protocol | VARCHAR | HTTP/HTTPS/SMB/TCP |
+| port | INTEGER | Listen port |
+| ip | VARCHAR | Bind address (nullable for SMB/TCP) |
 | pipe_name | VARCHAR | Named pipe (SMB only) |
 | get_profile | VARCHAR(100) | GET request profile (default: "default-get") |
 | post_profile | VARCHAR(100) | POST request profile (default: "default-post") |
 | server_response_profile | VARCHAR(100) | Server response profile (default: "default-response") |
 | smb_profile | VARCHAR(100) | SMB transform profile |
+| tcp_profile | VARCHAR(100) | TCP transform profile |
 
 ---
 
@@ -105,8 +107,12 @@ Payload initialization data. Stores RSA keys and secrets for new agents before t
 | os | VARCHAR | Target OS |
 | arch | VARCHAR | Target architecture |
 | rsakey | VARCHAR | RSA private key |
+| protocol | VARCHAR(10) | Payload protocol (SMB/TCP for link payloads) |
 | smb_profile | VARCHAR(100) | SMB profile name (for SMB agents) |
 | smb_xor_key | VARCHAR(32) | Per-build unique XOR key (for SMB agents) |
+| tcp_profile | VARCHAR(100) | TCP profile name (for TCP agents) |
+| tcp_xor_key | VARCHAR(32) | Per-build unique XOR key (for TCP agents) |
+| http_xor_key | VARCHAR(32) | Per-build unique HTTP transform XOR key |
 
 ---
 
@@ -139,9 +145,11 @@ SMB routing table. Maps local routing IDs to linked agent UUIDs.
 | edge_clientid | UUID | Edge agent |
 | routing_id | VARCHAR(16) | Local routing ID |
 | linked_clientid | UUID | Linked agent |
-| link_type | VARCHAR(20) | Link type (default: "smb") |
+| link_type | VARCHAR(20) | Link type: "smb" or "tcp" (default: "smb") |
 | smb_profile | VARCHAR(100) | SMB profile name |
-| smb_xor_key | VARCHAR(32) | Per-build unique XOR key |
+| smb_xor_key | VARCHAR(32) | Per-build unique XOR key (SMB) |
+| tcp_profile | VARCHAR(100) | TCP profile name |
+| tcp_xor_key | VARCHAR(32) | Per-build unique XOR key (TCP) |
 | status | VARCHAR(20) | "active" or "disconnected" |
 | created_at | TIMESTAMP | When link was established |
 | last_seen | TIMESTAMP | Last activity |
@@ -213,7 +221,7 @@ GUI client session tracking.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| sesion_id | UUID | Session ID (PK) |
+| session_id | UUID | Session ID (PK) |
 | username | VARCHAR | Username |
 | login_time | TIMESTAMP | When session started |
 | logout_time | TIMESTAMP | When session ended |
@@ -239,6 +247,6 @@ SELECT * FROM listeners;         # List all listeners
 
 ## Related Documentation
 
-- [Infrastructure](/docs/infrastructure/) - Service architecture and deployment
-- [Linked Agents](/docs/linked-agents/) - SMB link routing details
-- [Encryption](/docs/encryption/) - Secret key management
+- [Infrastructure](INFRASTRUCTURE.md) - Service architecture and deployment
+- [Linked Agents](LINKED-AGENTS.md) - SMB link routing details
+- [Encryption](ENCRYPTION.md) - Secret key management
