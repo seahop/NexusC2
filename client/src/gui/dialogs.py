@@ -173,65 +173,66 @@ class WebSocketThread(QThread):
             initial_connection = False  # Mark that we've successfully connected once
             reconnect_attempts = 0  # Reset reconnect counter on successful connection
             
-            # Main message processing loop
-            while self.running and self.ws_client and self.ws_client.connected:
+            # Main message processing loop — use a single long-lived
+            # receive task instead of creating two tasks per message.
+            # The old pattern accumulated thousands of task objects over
+            # hours and left dangling selector registrations.
+            receive_task = asyncio.create_task(self._receive_loop())
+            shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+
+            done, pending = await asyncio.wait(
+                {receive_task, shutdown_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
                 try:
-                    # Use select with timeout to make it interruptible
-                    receive_task = asyncio.create_task(self.ws_client.receive_messages())
-                    shutdown_task = asyncio.create_task(self.shutdown_event.wait())
-                    
-                    done, pending = await asyncio.wait(
-                        {receive_task, shutdown_task},
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    
-                    # Cancel pending tasks
-                    for task in pending:
-                        task.cancel()
-                        try:
-                            await task
-                        except asyncio.CancelledError:
-                            pass
-                    
-                    # Check what completed
-                    if shutdown_task in done:
-                        print("WebSocketThread: Shutdown requested during message processing")
-                        # Properly disconnect before returning
-                        if self.ws_client:
-                            try:
-                                await self.ws_client.disconnect()
-                            except Exception as e:
-                                print(f"WebSocketThread: Error during shutdown disconnect: {e}")
-                        return
-                        
-                    if receive_task in done:
-                        message_data = receive_task.result()
-                        if message_data:
-                            self._process_message(message_data)
-                            
-                except Exception as e:
-                    print(f"WebSocketThread: Error processing message: {e}")
-                    self.log_message.emit(f"Error processing message: {str(e)}")
-                    
-                    # Set connected to False to exit the inner loop
-                    if self.ws_client:
-                        self.ws_client.connected = False
-                    break  # Break the loop to attempt reconnection
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            if shutdown_task in done:
+                print("WebSocketThread: Shutdown requested during message processing")
+                if self.ws_client:
+                    try:
+                        await self.ws_client.disconnect()
+                    except Exception as e:
+                        print(f"WebSocketThread: Error during shutdown disconnect: {e}")
+                return
+
+            # receive_task finished — connection dropped or error
+            if receive_task in done:
+                try:
+                    exc = receive_task.exception()
+                except (asyncio.CancelledError, asyncio.InvalidStateError):
+                    exc = None
+                if exc:
+                    print(f"WebSocketThread: Receive loop error: {exc}")
+                    self.log_message.emit(f"Error processing message: {exc}")
 
             # Connection lost or error occurred
             if self.running:
                 print("WebSocketThread: Connection lost, cleaning up...")
-                
+
                 # Properly disconnect and clean up
                 if self.ws_client:
                     try:
                         await self.ws_client.disconnect()
                     except Exception as e:
                         print(f"WebSocketThread: Error during disconnect: {e}")
-                    
+
                     # Set ws_client to None so next iteration creates a fresh one
                     self.ws_client = None
-                
+
+                # Let the event loop fully process all deferred socket/transport
+                # cleanup before reconnecting.  Without this, the OS can reuse
+                # the old fd number for the new connection while stale selector
+                # registrations still reference it, producing the
+                # "QSocketNotifier: Invalid socket" flood and eventual heap
+                # corruption.
+                await asyncio.sleep(0.1)
+
                 # If we're still running, we'll loop back to try reconnecting
             else:
                 # We're shutting down, make sure to disconnect
@@ -241,6 +242,20 @@ class WebSocketThread(QThread):
                     except Exception as e:
                         print(f"WebSocketThread: Error during final disconnect: {e}")
                 break  # Exit if we're supposed to stop
+
+    async def _receive_loop(self):
+        """Long-lived coroutine that receives messages until the connection drops."""
+        while self.running and self.ws_client and self.ws_client.connected:
+            try:
+                message_data = await self.ws_client.receive_messages()
+                if message_data:
+                    self._process_message(message_data)
+            except Exception as e:
+                print(f"WebSocketThread: Error in receive loop: {e}")
+                self.log_message.emit(f"Error processing message: {str(e)}")
+                if self.ws_client:
+                    self.ws_client.connected = False
+                break
 
     def cleanup(self):
         """Clean up resources"""

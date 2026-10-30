@@ -124,6 +124,7 @@ class WebSocketClient:
                 pass
             except Exception as e:
                 logger.error(f"Error cancelling queue task: {e}")
+        self.queue_task = None
 
         # Cancel the cleanup task if it exists
         if self.cleanup_task and not self.cleanup_task.done():
@@ -135,21 +136,35 @@ class WebSocketClient:
                 pass
             except Exception as e:
                 logger.error(f"Error cancelling cleanup task: {e}")
-        
+        self.cleanup_task = None
+
         # Close the websocket connection
         if self.websocket:
             try:
-                # Use wait_for to prevent hanging
                 await asyncio.wait_for(self.websocket.close(), timeout=WEBSOCKET_DISCONNECT_TIMEOUT)
                 logger.info("WebSocket closed successfully")
             except asyncio.TimeoutError:
-                logger.warning("WebSocket close timed out")
-                # Force close the transport if it's still open
-                if self.websocket.transport:
-                    self.websocket.transport.close()
+                logger.warning("WebSocket close timed out, aborting transport")
+                try:
+                    if self.websocket.transport:
+                        self.websocket.transport.abort()
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"Error closing websocket: {e}")
-        
+                try:
+                    if self.websocket and self.websocket.transport:
+                        self.websocket.transport.abort()
+                except Exception:
+                    pass
+
+            self.websocket = None
+
+            # Yield to the event loop so deferred transport/selector cleanup
+            # completes before any reconnection reuses the same fd number.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
         # Clear all data (thread-safe)
         async with self.chunks_lock:
             self.active_chunks.clear()
@@ -159,8 +174,6 @@ class WebSocketClient:
         # Clear message metadata cache (thread-safe)
         with self._metadata_lock:
             self.message_metadata.clear()
-
-        self.websocket = None
 
         logger.info("Disconnected from server")
 
