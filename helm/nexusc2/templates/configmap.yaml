@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-hba
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nexusc2.labels" . | nindent 4 }}
+data:
+  custom-pg_hba.conf: |
+    # TYPE  DATABASE  USER  ADDRESS       METHOD
+    host    all       all   10.0.0.0/8    scram-sha-256
+    host    all       all   172.16.0.0/12 scram-sha-256
+    local   all       all                 scram-sha-256
+    host    all       all   127.0.0.1/32  scram-sha-256
+    host    all       all   ::1/128       scram-sha-256

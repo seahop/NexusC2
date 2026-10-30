@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: websocket
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: websocket
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.websocket.serviceType }}
+  selector:
+    app: websocket
+  ports:
+    - port: {{ .Values.websocket.port }}
+      targetPort: {{ .Values.websocket.port }}
+      name: wss
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: websocket
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: websocket
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: websocket
+  template:
+    metadata:
+      labels:
+        app: websocket
+    spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nslookup database.{{ .Release.Namespace }}.svc.cluster.local; do echo waiting for database; sleep 2; done']
+      containers:
+        - name: websocket
+          image: {{ .Values.global.registry }}/{{ .Values.websocket.image.repository }}:{{ .Values.websocket.image.tag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.websocket.port }}
+          env:
+            - name: CONFIG_FILE
+              value: "/app/config.toml"
+            - name: HOST_PAYLOADS_PATH
+              value: "/app/payloads"
+            - name: HOST_SHARED_PATH
+              value: "/shared"
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export GRPC_ADDRESS="${NODE_IP}:{{ .Values.agentHandler.grpcPort }}"
+              exec /app/websocket-service
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.websocket.port }}
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.websocket.port }}
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.websocket.resources | nindent 12 }}
+      volumes:
+        - name: shared
+          emptyDir: {}

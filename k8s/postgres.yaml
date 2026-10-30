@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: database
+  namespace: nexusc2
+spec:
+  selector:
+    app: database
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: nexusc2
+spec:
+  serviceName: database
+  replicas: 1
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+        - name: postgres
+          image: us-central1-docker.pkg.dev/ebpf-509618/nexusc2/database:0.1.0
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "ops"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          args:
+            - "postgres"
+            - "-c"
+            - "max_connections=100"
+            - "-c"
+            - "shared_buffers=64MB"
+            - "-c"
+            - "effective_cache_size=256MB"
+            - "-c"
+            - "work_mem=4MB"
+            - "-c"
+            - "listen_addresses=*"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: pg-hba
+              mountPath: /docker-entrypoint-initdb.d/99-custom-pg_hba.conf
+              subPath: custom-pg_hba.conf
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      volumes:
+        - name: pg-hba
+          configMap:
+            name: pg-hba
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

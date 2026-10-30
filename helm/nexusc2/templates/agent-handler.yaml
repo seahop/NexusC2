@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-handler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: agent-handler
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-handler
+  template:
+    metadata:
+      labels:
+        app: agent-handler
+    spec:
+      {{- if .Values.agentHandler.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nslookup database.{{ .Release.Namespace }}.svc.cluster.local; do echo waiting for database; sleep 2; done']
+      containers:
+        - name: agent-handler
+          image: {{ .Values.global.registry }}/{{ .Values.agentHandler.image.repository }}:{{ .Values.agentHandler.image.tag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: CONFIG_FILE
+              value: "/app/config.toml"
+            - name: DB_HOST
+              value: "database.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: GRPC_BIND_ADDRESS
+              value: "0.0.0.0:{{ .Values.agentHandler.grpcPort }}"
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.agentHandler.grpcPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.agentHandler.grpcPort }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.agentHandler.resources | nindent 12 }}
+      volumes:
+        - name: shared
+          emptyDir: {}

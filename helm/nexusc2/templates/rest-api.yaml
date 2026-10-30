@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rest-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rest-api
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.restApi.serviceType }}
+  selector:
+    app: rest-api
+  ports:
+    - port: {{ .Values.restApi.port }}
+      targetPort: {{ .Values.restApi.port }}
+      name: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rest-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rest-api
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rest-api
+  template:
+    metadata:
+      labels:
+        app: rest-api
+    spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nslookup database.{{ .Release.Namespace }}.svc.cluster.local; do echo waiting for database; sleep 2; done']
+      containers:
+        - name: rest-api
+          image: {{ .Values.global.registry }}/{{ .Values.restApi.image.repository }}:{{ .Values.restApi.image.tag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.restApi.port }}
+          env:
+            - name: CONFIG_FILE
+              value: "/app/config.toml"
+            - name: HOST_PAYLOADS_PATH
+              value: "/app/payloads"
+            - name: HOST_SHARED_PATH
+              value: "/shared"
+            - name: WS_PROXY_URL
+              value: "wss://websocket.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.websocket.port }}/ws"
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export GRPC_ADDRESS="${NODE_IP}:{{ .Values.agentHandler.grpcPort }}"
+              exec /app/rest-api-service
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.restApi.port }}
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.restApi.port }}
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.restApi.resources | nindent 12 }}
+      volumes:
+        - name: shared
+          emptyDir: {}

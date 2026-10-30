@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-handler
+  namespace: nexusc2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-handler
+  template:
+    metadata:
+      labels:
+        app: agent-handler
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: agent-handler
+          image: us-central1-docker.pkg.dev/ebpf-509618/nexusc2/agent-handler:0.1.0
+          imagePullPolicy: Never
+          env:
+            - name: CONFIG_FILE
+              value: "/app/config.toml"
+            - name: DB_HOST
+              value: "database.nexusc2.svc.cluster.local"
+            - name: GRPC_BIND_ADDRESS
+              value: "0.0.0.0:50051"
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+            - name: downloads
+              mountPath: /app/downloads
+            - name: uploads
+              mountPath: /app/uploads
+            - name: temp
+              mountPath: /app/temp
+            - name: logs
+              mountPath: /app/logs
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      volumes:
+        - name: shared
+          hostPath:
+            path: /opt/nexusc2/shared
+            type: DirectoryOrCreate
+        - name: downloads
+          emptyDir: {}
+        - name: uploads
+          emptyDir: {}
+        - name: temp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}

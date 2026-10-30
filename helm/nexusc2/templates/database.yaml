@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: database
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: database
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: database
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: database
+    {{- include "nexusc2.labels" . | nindent 4 }}
+spec:
+  serviceName: database
+  replicas: 1
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.global.registry }}/{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "ops"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          envFrom:
+            - secretRef:
+                name: db-secrets
+          args:
+            - "postgres"
+            - "-c"
+            - "max_connections={{ .Values.database.postgres.maxConnections }}"
+            - "-c"
+            - "shared_buffers={{ .Values.database.postgres.sharedBuffers }}"
+            - "-c"
+            - "effective_cache_size={{ .Values.database.postgres.effectiveCacheSize }}"
+            - "-c"
+            - "work_mem={{ .Values.database.postgres.workMem }}"
+            - "-c"
+            - "listen_addresses=*"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: pg-hba
+              mountPath: /docker-entrypoint-initdb.d/99-custom-pg_hba.conf
+              subPath: custom-pg_hba.conf
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+      volumes:
+        - name: pg-hba
+          configMap:
+            name: pg-hba
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.database.storage.storageClass }}
+        storageClassName: {{ .Values.database.storage.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.database.storage.size }}

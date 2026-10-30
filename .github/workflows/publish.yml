@@ -1,0 +1,89 @@
+name: Publish Container Images
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GHCR_REGISTRY: ghcr.io/${{ github.repository_owner }}/nexusc2
+
+jobs:
+  publish:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: database
+            dockerfile: server/docker/Dockerfile.db
+            context: server
+          - service: agent-handler
+            dockerfile: server/docker/Dockerfile.agent
+            context: server
+          - service: websocket
+            dockerfile: server/docker/Dockerfile.websocket
+            context: server
+          - service: rest-api
+            dockerfile: server/docker/Dockerfile.rest
+            context: server
+          - service: builder
+            dockerfile: server/docker/Dockerfile.builder
+            context: server
+          - service: remote-builder
+            dockerfile: server/docker/Dockerfile.remote-builder
+            context: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ matrix.service }}:${{ steps.version.outputs.tag }}
+            ${{ env.GHCR_REGISTRY }}/${{ matrix.service }}:latest
+
+  helm:
+    name: Package Helm Chart
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update chart version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.tag }}/" helm/nexusc2/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.tag }}\"/" helm/nexusc2/Chart.yaml
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Package and push Helm chart
+        run: |
+          helm package helm/nexusc2/
+          helm push nexusc2-${{ steps.version.outputs.tag }}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts

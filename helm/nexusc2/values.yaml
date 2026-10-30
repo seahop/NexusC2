@@ -1,0 +1,84 @@
+# Default values for NexusC2 Helm chart.
+# Each service can be upgraded independently by changing its image.tag.
+
+global:
+  registry: us-central1-docker.pkg.dev/ebpf-509618/nexusc2
+  imagePullPolicy: IfNotPresent
+
+database:
+  image:
+    repository: database
+    tag: "0.1.0"
+  storage:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  postgres:
+    maxConnections: 200
+    sharedBuffers: "128MB"
+    effectiveCacheSize: "512MB"
+    workMem: "8MB"
+
+agentHandler:
+  image:
+    repository: agent-handler
+    tag: "0.1.0"
+  hostNetwork: true
+  grpcPort: 50051
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "1000m"
+
+websocket:
+  image:
+    repository: websocket
+    tag: "0.1.0"
+  port: 3131
+  serviceType: ClusterIP
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "1000m"
+
+restApi:
+  image:
+    repository: rest-api
+    tag: "0.1.0"
+  port: 8443
+  serviceType: ClusterIP
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "1000m"
+
+builder:
+  mode: "local"
+  image:
+    repository: builder
+    tag: "0.1.0"
+  remote:
+    enabled: false
+    image:
+      repository: remote-builder
+      tag: "0.1.0"
+
+# Shared volume for build outputs
+shared:
+  size: 5Gi
+  storageClass: ""
