@@ -69,6 +69,9 @@ type BuildPayloadRequest struct {
 	Language       string       `json:"language"`
 	PayloadType    string       `json:"payload_type"`
 	PipeName       string       `json:"pipe_name"`
+	SMBProfile     string       `json:"smb_profile"`
+	TCPProfile     string       `json:"tcp_profile"`
+	TCPPort        string       `json:"tcp_port"`
 	ProfileVariant    string       `json:"profile_variant"`
 	PEFileDescription string       `json:"pe_file_description,omitempty"`
 	PECompanyName     string       `json:"pe_company_name,omitempty"`
@@ -265,24 +268,59 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	log.Printf("[REST Builder] Building payload - protocol=%s, payload_type=%s, connection_type=%s",
 		listenerProtocol, payloadType, connectionType)
 
-	// Store in database - use connectionType (edge/link) as type, and PRIVATE key for RSA
-	// SMB profile is empty for REST API builds (SMB payloads are built via WebSocket)
-	err = h.storeInit(ctx, initID, clientID, connectionType, secret, osLower, req.Arch, keyPair.PrivateKeyPEM, "")
+	// Generate per-build XOR keys for SMB/TCP/HTTP transforms (matches WS builder)
+	smbXorKey := generateRandomString(12)
+	tcpXorKey := generateRandomString(12)
+	httpXorKey := xorKey
+
+	// Resolve SMB profile from request or listener fallback
+	smbProfile := req.SMBProfile
+	if smbProfile == "" && listener.SMBProfile != "" {
+		smbProfile = listener.SMBProfile
+		log.Printf("[REST Builder] Using listener's SMB profile: %s", smbProfile)
+	}
+
+	// Resolve TCP profile from request or listener fallback
+	tcpProfile := req.TCPProfile
+	if tcpProfile == "" && listener.TCPProfile != "" {
+		tcpProfile = listener.TCPProfile
+		log.Printf("[REST Builder] Using listener's TCP profile: %s", tcpProfile)
+	}
+
+	// Resolve TCP port from request, listener, or default
+	tcpPort := req.TCPPort
+	if tcpPort == "" && payloadType == "tcp" {
+		tcpPort = strconv.Itoa(listener.Port)
+		if tcpPort == "0" {
+			tcpPort = "4444"
+		}
+	}
+
+	// Store in database with full column set (matches WS builder)
+	err = h.storeInit(ctx, initID, clientID, connectionType, secret, osLower, req.Arch,
+		keyPair.PrivateKeyPEM, smbProfile, smbXorKey, httpXorKey, tcpProfile, tcpXorKey,
+		strings.ToUpper(payloadType))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to store init: %v", err)
 	}
 
-	// Register with agent service - use connectionType (edge/link) and PRIVATE key
+	// Register with agent service (matches WS builder fields)
 	if h.agentClient != nil {
 		initData := map[string]string{
-			"id":       initID.String(),
-			"clientID": clientID.String(),
-			"type":     connectionType,
-			"secret":   secret,
-			"os":       osLower,
-			"arch":     req.Arch,
-			"rsaKey":   keyPair.PrivateKeyPEM,
-			"protocol": listener.Protocol,
+			"id":         initID.String(),
+			"clientID":   clientID.String(),
+			"type":       connectionType,
+			"secret":     secret,
+			"os":         osLower,
+			"arch":       req.Arch,
+			"rsaKey":     keyPair.PrivateKeyPEM,
+			"protocol":   listener.Protocol,
+			"smbProfile": smbProfile,
+			"smbXorKey":  smbXorKey,
+			"httpXorKey": httpXorKey,
+			"tcpProfile": tcpProfile,
+			"tcpXorKey":  tcpXorKey,
+			"tcpPort":    tcpPort,
 		}
 		h.agentClient.RegisterInit(ctx, initData)
 	}
@@ -305,11 +343,11 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	return binaryPath, binaryName, nil
 }
 
-func (h *PayloadHandler) storeInit(ctx context.Context, initID, clientID uuid.UUID, payloadType, secret, os, arch, rsaKey, smbProfile string) error {
+func (h *PayloadHandler) storeInit(ctx context.Context, initID, clientID uuid.UUID, payloadType, secret, os, arch, rsaKey, smbProfile, smbXorKey, httpXorKey, tcpProfile, tcpXorKey, protocol string) error {
 	_, err := h.db.ExecContext(ctx, `
-		INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, initID, clientID, payloadType, secret, os, arch, rsaKey, smbProfile)
+		INSERT INTO inits (id, clientID, type, secret, os, arch, RSAkey, smb_profile, smb_xor_key, http_xor_key, tcp_profile, tcp_xor_key, protocol)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`, initID, clientID, payloadType, secret, os, arch, rsaKey, smbProfile, smbXorKey, httpXorKey, tcpProfile, tcpXorKey, protocol)
 	return err
 }
 
@@ -553,10 +591,12 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 
 	// Add TCP-specific config (similar to SMB)
 	if req.PayloadType == "tcp" {
-		// Get TCP port from listener or use default
-		tcpPort := strconv.Itoa(listener.Port)
-		if tcpPort == "0" {
-			tcpPort = "4444" // Default TCP port
+		tcpPort := req.TCPPort
+		if tcpPort == "" {
+			tcpPort = strconv.Itoa(listener.Port)
+			if tcpPort == "0" {
+				tcpPort = "4444"
+			}
 		}
 		envVars = append(envVars, fmt.Sprintf("TCP_PORT=%s", tcpPort))
 

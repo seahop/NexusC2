@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"sort"
@@ -101,7 +100,7 @@ func (c *ProcListMsg) getFullCommandLine(pid int32) string {
 	if runtime.GOOS == osLinux {
 		cmdlineFmt := c.getTpl(idxPsProcCmdline)
 		cmdlineFile := fmt.Sprintf(cmdlineFmt, pid)
-		data, err := ioutil.ReadFile(cmdlineFile)
+		data, err := os.ReadFile(cmdlineFile)
 		if err == nil && len(data) > 0 {
 			cmdline := string(bytes.ReplaceAll(data, []byte{0}, []byte{' '}))
 			cmdline = strings.TrimSpace(cmdline)
