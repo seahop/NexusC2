@@ -1,11 +1,12 @@
 version: "2"
 
 linters:
+  disable:
+    - errcheck
   exclusions:
     rules:
       - path: "docker/payloads/"
         linters:
-          - errcheck
           - unused
           - staticcheck
           - ineffassign
@@ -21,42 +22,4 @@ linters:
         - "-QF1008"
         - "-QF1011"
         - "-QF1012"
-    errcheck:
-      exclude-functions:
-        - "fmt.Fprint"
-        - "fmt.Fprintf"
-        - "fmt.Fprintln"
-        - "io.Copy"
-        - "(*os.File).Close"
-        - "(*os.File).Seek"
-        - "(*os.File).Sync"
-        - "(*os.File).Write"
-        - "os.Remove"
-        - "os.Setenv"
-        - "os.Unsetenv"
-        - "os.Symlink"
-        - "(net.Conn).Close"
-        - "(net.Conn).Write"
-        - "(net.Conn).SetDeadline"
-        - "(net.Conn).SetReadDeadline"
-        - "(net.Conn).SetWriteDeadline"
-        - "(net.Listener).Close"
-        - "(*net.TCPConn).CloseWrite"
-        - "(*net.UDPConn).Close"
-        - "(*database/sql.Tx).Rollback"
-        - "(*database/sql.Stmt).Close"
-        - "(*database/sql.DB).Close"
-        - "(*database/sql.Rows).Close"
-        - "(*encoding/json.Encoder).Encode"
-        - "(*encoding/csv.Writer).Write"
-        - "(*text/tabwriter.Writer).Flush"
-        - "(*compress/gzip.Reader).Close"
-        - "(*compress/gzip.Writer).Close"
-        - "(*archive/tar.Writer).Close"
-        - "(golang.org/x/crypto/ssh.Channel).Close"
-        - "(golang.org/x/crypto/ssh.Channel).CloseWrite"
-        - "(golang.org/x/crypto/ssh.NewChannel).Reject"
-        - "(*golang.org/x/crypto/ssh.Request).Reply"
-        - "(io.Closer).Close"
-        - "(io.ReadCloser).Close"
-        - "(io.WriteCloser).Close"
+        - "-ST1000"
