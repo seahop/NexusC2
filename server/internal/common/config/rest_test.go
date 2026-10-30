@@ -73,9 +73,9 @@ func TestLoadDatabaseConfig(t *testing.T) {
 		origDBPass := os.Getenv("DB_PASSWORD")
 		origDBHost := os.Getenv("DB_HOST")
 		defer func() {
-			os.Setenv("POSTGRES_PASSWORD", origPassword)
-			os.Setenv("DB_PASSWORD", origDBPass)
-			os.Setenv("DB_HOST", origDBHost)
+			_ = os.Setenv("POSTGRES_PASSWORD", origPassword)
+			_ = os.Setenv("DB_PASSWORD", origDBPass)
+			_ = os.Setenv("DB_HOST", origDBHost)
 		}()
 
 		os.Setenv("POSTGRES_PASSWORD", "testpass")

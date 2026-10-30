@@ -70,7 +70,7 @@ func (l *Logger) openLogFile() error {
 	// Get current file size
 	stat, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("failed to stat log file: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func (l *Logger) Write(p []byte) (n int, err error) {
 func (l *Logger) rotate() error {
 	// Close current file
 	if l.file != nil {
-		l.file.Close()
+		_ = l.file.Close()
 	}
 
 	// Rename current log to timestamped backup
@@ -134,7 +134,7 @@ func (l *Logger) cleanupOldLogs() {
 	if len(matches) > 5 {
 		// Sort by modification time (oldest first due to timestamp format)
 		for i := 0; i < len(matches)-5; i++ {
-			os.Remove(matches[i])
+			_ = os.Remove(matches[i])
 		}
 	}
 }

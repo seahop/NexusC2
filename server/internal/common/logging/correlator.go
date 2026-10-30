@@ -52,7 +52,7 @@ func (lc *LogCorrelator) ProcessLogFile(filepath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

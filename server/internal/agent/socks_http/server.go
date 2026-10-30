@@ -169,7 +169,7 @@ func (s *Server) Stop() {
 	close(s.stopCh)
 
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 	}
 
 	// Close all TCP sessions
@@ -181,7 +181,7 @@ func (s *Server) Stop() {
 			close(session.ResponseChan)
 		}
 		if session.ClientConn != nil {
-			session.ClientConn.Close()
+			_ = session.ClientConn.Close()
 		}
 		session.mu.Unlock()
 	}
@@ -195,10 +195,10 @@ func (s *Server) Stop() {
 			close(session.ResponseChan)
 		}
 		if session.UDPRelay != nil {
-			session.UDPRelay.Close()
+			_ = session.UDPRelay.Close()
 		}
 		if session.ControlConn != nil {
-			session.ControlConn.Close()
+			_ = session.ControlConn.Close()
 		}
 		session.mu.Unlock()
 	}
@@ -226,10 +226,10 @@ func (s *Server) acceptLoop() {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Set initial deadline for handshake
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// SOCKS5 handshake
 	// Read version and methods
@@ -271,7 +271,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 	if cmd != 0x01 { // Only CONNECT and UDP ASSOCIATE are supported
 		// Send command not supported error
-		conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		_, _ = conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		log.Printf("[SOCKS-HTTP] Unsupported command: %d", cmd)
 		return
 	}
@@ -314,7 +314,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		portIdx = 20
 	default:
 		// Send address type not supported
-		conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		_, _ = conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		log.Printf("[SOCKS-HTTP] Unsupported address type: %d", addrType)
 		return
 	}
@@ -353,7 +353,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	cmdJSON, _ := json.Marshal(connectCmd)
 	if err := s.queueCommand(s.agentID, 19, string(cmdJSON)); err != nil {
 		log.Printf("[SOCKS-HTTP] Failed to queue connect command: %v", err)
-		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
+		_, _ = conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
 		s.cleanupSession(sessionID)
 		return
 	}
@@ -367,13 +367,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				errMsg = resp.Error.Error()
 			}
 			log.Printf("[SOCKS-HTTP] Session %s: connect failed: %s", sessionID, errMsg)
-			conn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // Connection refused
+			_, _ = conn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // Connection refused
 			s.cleanupSession(sessionID)
 			return
 		}
 	case <-time.After(60 * time.Second):
 		log.Printf("[SOCKS-HTTP] Session %s: connect timeout", sessionID)
-		conn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // Host unreachable
+		_, _ = conn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // Host unreachable
 		s.cleanupSession(sessionID)
 		return
 	case <-s.stopCh:
@@ -398,7 +398,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	log.Printf("[SOCKS-HTTP] Session %s: connected to %s", sessionID, dest)
 
 	// Clear deadline for data relay
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 
 	// Start relay loops
 	done := make(chan struct{})
@@ -497,7 +497,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		SessionID: sessionID,
 	}
 	cmdJSON, _ = json.Marshal(closeCmd)
-	s.queueCommand(s.agentID, 19, string(cmdJSON))
+	_ = s.queueCommand(s.agentID, 19, string(cmdJSON))
 
 	s.cleanupSession(sessionID)
 }
@@ -513,14 +513,14 @@ func (s *Server) handleUDPAssociate(conn net.Conn, buf []byte, n int) {
 	udpAddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:0")
 	if err != nil {
 		log.Printf("[SOCKS-HTTP UDP] Failed to resolve UDP address: %v", err)
-		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
+		_, _ = conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
 		return
 	}
 
 	udpRelay, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		log.Printf("[SOCKS-HTTP UDP] Failed to create UDP relay: %v", err)
-		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
+		_, _ = conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // General failure
 		return
 	}
 
@@ -613,7 +613,7 @@ func (s *Server) udpClientToAgent(session *UDPSession) {
 
 	buf := make([]byte, 65535)
 	for {
-		session.UDPRelay.SetReadDeadline(time.Now().Add(30 * time.Second))
+		_ = session.UDPRelay.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, clientAddr, err := session.UDPRelay.ReadFromUDP(buf)
 		if err != nil {
 			if s.running {
@@ -815,7 +815,7 @@ func (s *Server) monitorControlConnection(session *UDPSession) {
 	// When it closes, we clean up the UDP session
 	buf := make([]byte, 1)
 	for {
-		session.ControlConn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = session.ControlConn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		_, err := session.ControlConn.Read(buf)
 		if err != nil {
 			log.Printf("[SOCKS-HTTP UDP] Session %s: control connection closed", session.ID)
@@ -828,7 +828,7 @@ func (s *Server) monitorControlConnection(session *UDPSession) {
 				SessionID: session.ID,
 			}
 			cmdJSON, _ := json.Marshal(closeCmd)
-			s.queueCommand(s.agentID, 19, string(cmdJSON))
+			_ = s.queueCommand(s.agentID, 19, string(cmdJSON))
 			s.cleanupUDPSession(session.ID)
 			return
 		}
@@ -851,10 +851,10 @@ func (s *Server) cleanupUDPSession(sessionID string) {
 			session.ResponseChan = nil
 		}
 		if session.UDPRelay != nil {
-			session.UDPRelay.Close()
+			_ = session.UDPRelay.Close()
 		}
 		if session.ControlConn != nil {
-			session.ControlConn.Close()
+			_ = session.ControlConn.Close()
 		}
 		session.mu.Unlock()
 		delete(s.udpSessions, sessionID)
@@ -1026,7 +1026,7 @@ func (s *Server) cleanupStaleSessions() {
 					SessionID: id,
 				}
 				cmdJSON, _ := json.Marshal(closeCmd)
-				s.queueCommand(s.agentID, 19, string(cmdJSON))
+				_ = s.queueCommand(s.agentID, 19, string(cmdJSON))
 				s.cleanupSession(id)
 			}
 
@@ -1041,7 +1041,7 @@ func (s *Server) cleanupStaleSessions() {
 					SessionID: id,
 				}
 				cmdJSON, _ := json.Marshal(closeCmd)
-				s.queueCommand(s.agentID, 19, string(cmdJSON))
+				_ = s.queueCommand(s.agentID, 19, string(cmdJSON))
 				s.cleanupUDPSession(id)
 			}
 

@@ -9,10 +9,12 @@ import (
 func TestLoadBuilderConfig_Local(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgFile, []byte(`
+	if err := os.WriteFile(cfgFile, []byte(`
 [builder]
 mode = "local"
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("CONFIG_FILE", cfgFile)
 
@@ -28,7 +30,7 @@ mode = "local"
 func TestLoadBuilderConfig_Remote(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgFile, []byte(`
+	if err := os.WriteFile(cfgFile, []byte(`
 [builder]
 mode = "remote"
 
@@ -38,7 +40,9 @@ ca_cert = "/certs/ca.crt"
 client_cert = "/certs/client.crt"
 client_key = "/certs/client.key"
 timeout = "5m"
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("CONFIG_FILE", cfgFile)
 
@@ -60,9 +64,11 @@ timeout = "5m"
 func TestLoadBuilderConfig_DefaultsToLocal(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgFile, []byte(`
+	if err := os.WriteFile(cfgFile, []byte(`
 [builder]
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("CONFIG_FILE", cfgFile)
 
@@ -78,10 +84,12 @@ func TestLoadBuilderConfig_DefaultsToLocal(t *testing.T) {
 func TestLoadBuilderConfig_MissingSectionDefaultsToLocal(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := filepath.Join(dir, "config.toml")
-	os.WriteFile(cfgFile, []byte(`
+	if err := os.WriteFile(cfgFile, []byte(`
 [some_other_section]
 key = "value"
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("CONFIG_FILE", cfgFile)
 

@@ -31,7 +31,7 @@ func (cs *ChunkStream) Stream(done chan struct{}) (<-chan []byte, <-chan error) 
 	errChan := make(chan error, 1)
 
 	go func() {
-		defer cs.file.Close()
+		defer func() { _ = cs.file.Close() }()
 		defer close(chunks)
 		defer close(errChan)
 

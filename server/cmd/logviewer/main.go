@@ -197,7 +197,7 @@ func loadLogFile(logPath string) ([]logging.LogEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var entries []logging.LogEntry
 	scanner := bufio.NewScanner(file)
@@ -405,14 +405,14 @@ func outputCSVFormat(entries []logging.LogEntry) {
 	w := csv.NewWriter(os.Stdout)
 
 	// Write header
-	w.Write([]string{
+	_ = w.Write([]string{
 		"Timestamp", "Type", "AgentID", "Hostname", "ExternalIP", "InternalIP",
 		"Username", "OS", "Command", "CommandType", "CommandID", "SessionID",
 		"Output", "Error",
 	})
 
 	for _, entry := range entries {
-		w.Write([]string{
+		_ = w.Write([]string{
 			entry.Timestamp.Format(time.RFC3339),
 			entry.Type,
 			entry.AgentID,
@@ -437,9 +437,9 @@ func outputTableFormat(entries []logging.LogEntry, verbose bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
 	if verbose {
-		fmt.Fprintln(w, "Time\tType\tAgent\tHost\tExtIP\tIntIP\tUser\tCommand\tSession")
+		_, _ = fmt.Fprintln(w, "Time\tType\tAgent\tHost\tExtIP\tIntIP\tUser\tCommand\tSession")
 		for _, entry := range entries {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				entry.Timestamp.Format("15:04:05"),
 				entry.Type,
 				truncateString(entry.AgentID, 8),
@@ -452,10 +452,10 @@ func outputTableFormat(entries []logging.LogEntry, verbose bool) {
 			)
 		}
 	} else {
-		fmt.Fprintln(w, "Time\tAgent\tHost\tUser\tCommand")
+		_, _ = fmt.Fprintln(w, "Time\tAgent\tHost\tUser\tCommand")
 		for _, entry := range entries {
 			if entry.Type == "command" || entry.Type == "output" {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 					entry.Timestamp.Format("15:04:05"),
 					truncateString(entry.AgentID, 8),
 					entry.Hostname,
@@ -466,7 +466,7 @@ func outputTableFormat(entries []logging.LogEntry, verbose bool) {
 		}
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func formatExecutionVerbose(exec *logging.CommandExecution) string {
@@ -544,10 +544,10 @@ func showAgentSummary(agentMap map[string]*AgentInfo) {
 	fmt.Println("=== Agent Summary ===")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Agent\tHostname\tExternal IP\tInternal IP\tOS\tUser\tCommands\tSessions\tLast Seen")
+	_, _ = fmt.Fprintln(w, "Agent\tHostname\tExternal IP\tInternal IP\tOS\tUser\tCommands\tSessions\tLast Seen")
 
 	for _, agent := range agentMap {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
 			truncateString(agent.AgentID, 8),
 			agent.Hostname,
 			agent.ExternalIP,
@@ -560,7 +560,7 @@ func showAgentSummary(agentMap map[string]*AgentInfo) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func followLog(logPath, agentFilter, hostFilter, ipFilter string) {

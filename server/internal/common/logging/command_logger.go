@@ -139,7 +139,7 @@ func (sl *SimpleLogger) initLogFile() error {
 
 	// Close previous file if exists
 	if sl.file != nil {
-		sl.file.Close()
+		_ = sl.file.Close()
 	}
 
 	sl.file = file
@@ -201,7 +201,7 @@ func (sl *SimpleLogger) checkRotation() error {
 				}
 
 				// Close old file and switch to new one
-				sl.file.Close()
+				_ = sl.file.Close()
 				sl.file = newFile
 				sl.filename = newFilename
 
@@ -267,15 +267,15 @@ func (sl *SimpleLogger) createTarGzArchive(archivePath string, files []string) e
 	if err != nil {
 		return fmt.Errorf("failed to create archive file: %v", err)
 	}
-	defer archiveFile.Close()
+	defer func() { _ = archiveFile.Close() }()
 
 	// Create gzip writer
 	gzipWriter := gzip.NewWriter(archiveFile)
-	defer gzipWriter.Close()
+	defer func() { _ = gzipWriter.Close() }()
 
 	// Create tar writer
 	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
+	defer func() { _ = tarWriter.Close() }()
 
 	// Add each file to the archive
 	for _, filePath := range files {
@@ -293,7 +293,7 @@ func (sl *SimpleLogger) addFileToTar(tw *tar.Writer, filePath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get file info
 	info, err := file.Stat()
@@ -341,9 +341,9 @@ func (sl *SimpleLogger) Log(entry LogEntry) {
 
 	// Write as JSON line
 	if data, err := json.Marshal(entry); err == nil {
-		sl.file.Write(data)
-		sl.file.Write([]byte("\n"))
-		sl.file.Sync() // Ensure it's written to disk
+		_, _ = sl.file.Write(data)
+		_, _ = sl.file.Write([]byte("\n"))
+		_ = sl.file.Sync()
 	}
 
 	// Also log to stdout if in debug mode
@@ -441,9 +441,9 @@ func (sl *SimpleLogger) UpdateAgentInfo(info *AgentInfo) {
 
 	// Write directly without going through Log() to avoid double-lock
 	if data, err := json.Marshal(entry); err == nil {
-		sl.file.Write(data)
-		sl.file.Write([]byte("\n"))
-		sl.file.Sync()
+		_, _ = sl.file.Write(data)
+		_, _ = sl.file.Write([]byte("\n"))
+		_ = sl.file.Sync()
 	}
 }
 
