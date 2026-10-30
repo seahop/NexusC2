@@ -1,0 +1,54 @@
+version: "2"
+
+issues:
+  exclude-rules:
+    - path: "docker/payloads/"
+      linters:
+        - unused
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # stdout/stderr writes - not actionable
+        - "fmt.Fprint"
+        - "fmt.Fprintf"
+        - "fmt.Fprintln"
+        - "io.Copy"
+        # file cleanup
+        - "(*os.File).Close"
+        - "(*os.File).Seek"
+        - "(*os.File).Sync"
+        - "(*os.File).Write"
+        # filesystem best-effort ops
+        - "os.Remove"
+        - "os.Setenv"
+        - "os.Unsetenv"
+        - "os.Symlink"
+        # network cleanup and fire-and-forget writes
+        - "(net.Conn).Close"
+        - "(net.Conn).Write"
+        - "(net.Conn).SetDeadline"
+        - "(net.Conn).SetReadDeadline"
+        - "(net.Conn).SetWriteDeadline"
+        - "(net.Listener).Close"
+        - "(*net.TCPConn).CloseWrite"
+        - "(*net.UDPConn).Close"
+        # database deferred cleanup
+        - "(*database/sql.Tx).Rollback"
+        - "(*database/sql.Stmt).Close"
+        - "(*database/sql.DB).Close"
+        - "(*database/sql.Rows).Close"
+        # encoding fire-and-forget
+        - "(*encoding/json.Encoder).Encode"
+        - "(*encoding/csv.Writer).Write"
+        - "(*text/tabwriter.Writer).Flush"
+        # compression cleanup
+        - "(*compress/gzip.Reader).Close"
+        - "(*compress/gzip.Writer).Close"
+        - "(*archive/tar.Writer).Close"
+        # SSH cleanup
+        - "(golang.org/x/crypto/ssh.Channel).Close"
+        - "(golang.org/x/crypto/ssh.Channel).CloseWrite"
+        - "(golang.org/x/crypto/ssh.NewChannel).Reject"
+        - "(*golang.org/x/crypto/ssh.Request).Reply"
