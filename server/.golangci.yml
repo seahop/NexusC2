@@ -1,12 +1,11 @@
 version: "2"
 
-issues:
-  exclude-rules:
-    - path: "docker/payloads/"
-      linters:
-        - unused
-
 linters:
+  exclusions:
+    rules:
+      - path: "docker/payloads/"
+        linters:
+          - unused
   settings:
     errcheck:
       exclude-functions:
