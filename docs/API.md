@@ -64,19 +64,6 @@ Complete endpoint reference for the NexusC2 REST API. All endpoints communicate 
 
 ---
 
-## Endpoint Categories
-
-| Category | Description | Details |
-|----------|-------------|---------|
-| [Agents](API-AGENTS.md) | List, manage, and interact with connected agents | Tags, aliases, pagination |
-| [Commands](API-COMMANDS.md) | Send commands and retrieve results | History, queue, outputs |
-| [Listeners](API-LISTENERS.md) | Create and manage network listeners | HTTP/HTTPS/SMB/TCP protocols |
-| [Profiles](API-PROFILES.md) | Malleable profile management | GET/POST/Response/SMB/TCP/Variants |
-| [Payloads](API-PAYLOADS.md) | Build agent payloads | Multi-OS, safety checks, variants |
-| [Events](API-EVENTS.md) | Real-time SSE stream, health checks | Live agent/command updates |
-
----
-
 ## Authentication
 
 All protected endpoints require a Bearer token in the `Authorization` header:
