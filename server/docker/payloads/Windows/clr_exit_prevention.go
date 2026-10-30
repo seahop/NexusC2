@@ -152,7 +152,7 @@ func (c *RuntimeGuard) patchEnvironmentExit() error {
 		clrDll, _ := syscall.UTF16PtrFromString(clrDllClr())
 		hModule, _, _ = getModuleHandle.Call(uintptr(unsafe.Pointer(clrDll)))
 		if hModule == 0 {
-			return fmt.Errorf(Err(E4))
+			return fmt.Errorf("%s", Err(E4))
 		}
 	}
 
@@ -184,7 +184,7 @@ func (c *RuntimeGuard) patchEnvironmentExit() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(addr, 5, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	// Patch with RET instruction (0xC3)
@@ -217,7 +217,7 @@ func (c *RuntimeGuard) patchApplicationExit() error {
 	winforms, _ := syscall.UTF16PtrFromString(clrDllWinForms())
 	hModule, _, _ := getModuleHandle.Call(uintptr(unsafe.Pointer(winforms)))
 	if hModule == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Similar patching approach
@@ -240,7 +240,7 @@ func (c *RuntimeGuard) patchExitProcess() error {
 	virtualProtect := kernel32.NewProc(clrApiVirtualProtect())
 
 	if exitProcess.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Save original bytes
@@ -254,7 +254,7 @@ func (c *RuntimeGuard) patchExitProcess() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(exitProcess.Addr(), 5, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	// Instead of just RET, we'll add a small stub that sets exit code to 0 and returns
@@ -278,7 +278,7 @@ func (c *RuntimeGuard) patchTerminateProcess() error {
 	getCurrentProcess := kernel32.NewProc(clrApiGetCurrentProc())
 
 	if terminateProcess.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Get current process handle for comparison
@@ -299,7 +299,7 @@ func (c *RuntimeGuard) patchTerminateProcess() error {
 	var oldProtect uint32
 	ret, _, _ := virtualProtect.Call(terminateProcess.Addr(), 12, PAGE_EXECUTE_READWRITE, uintptr(unsafe.Pointer(&oldProtect)))
 	if ret == 0 {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	// For now, just return success (don't terminate)
@@ -332,7 +332,7 @@ func (c *RuntimeGuard) patchTerminateProcess() error {
 func (c *RuntimeGuard) restoreMethod(methodName string) error {
 	_, ok := c.originalBytes[methodName]
 	if !ok {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Implementation would restore the original bytes
@@ -380,7 +380,7 @@ func (c *RuntimeGuard) restoreAll() error {
 		}
 
 		if addr == 0 {
-			lastError = fmt.Errorf(Err(E4))
+			lastError = fmt.Errorf("%s", Err(E4))
 			continue
 		}
 
@@ -394,7 +394,7 @@ func (c *RuntimeGuard) restoreAll() error {
 		)
 
 		if ret == 0 {
-			lastError = fmt.Errorf(Err(E3))
+			lastError = fmt.Errorf("%s", Err(E3))
 			continue
 		}
 

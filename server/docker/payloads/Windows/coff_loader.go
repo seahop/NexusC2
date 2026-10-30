@@ -574,32 +574,32 @@ func initCOFFDLLs() error {
 	var err error
 	coffKernel32, err = syscall.LoadDLL(coffDllKernel32)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffDllKernel32))
+		return fmt.Errorf("%s", ErrCtx(E45, coffDllKernel32))
 	}
 
 	coffNtdll, err = syscall.LoadDLL(coffDllNtdll)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffDllNtdll))
+		return fmt.Errorf("%s", ErrCtx(E45, coffDllNtdll))
 	}
 
 	procVirtualAlloc, err = coffKernel32.FindProc(coffApiVirtualAlloc)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffApiVirtualAlloc))
+		return fmt.Errorf("%s", ErrCtx(E45, coffApiVirtualAlloc))
 	}
 
 	procVirtualProtect, err = coffKernel32.FindProc(coffApiVirtualProtect)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffApiVirtualProtect))
+		return fmt.Errorf("%s", ErrCtx(E45, coffApiVirtualProtect))
 	}
 
 	procVirtualFree, err = coffKernel32.FindProc(coffApiVirtualFree)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffApiVirtualFree))
+		return fmt.Errorf("%s", ErrCtx(E45, coffApiVirtualFree))
 	}
 
 	procRtlCopyMemory, err = coffNtdll.FindProc(coffApiRtlCopyMemory)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E45, coffApiRtlCopyMemory))
+		return fmt.Errorf("%s", ErrCtx(E45, coffApiRtlCopyMemory))
 	}
 
 	coffDLLsInitialized = true
@@ -1441,7 +1441,7 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 // Load with default 30-second timeout for backward compatibility
 func Load(coffBytes []byte, argBytes []byte) (string, error) {
 	if len(coffBytes) < 20 {
-		return "", fmt.Errorf(ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
+		return "", fmt.Errorf("%s", ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
 	}
 	return LoadWithTimeout(coffBytes, argBytes, 30*time.Second)
 }
@@ -1449,7 +1449,7 @@ func Load(coffBytes []byte, argBytes []byte) (string, error) {
 // LoadWithTimeout allows specifying a custom timeout
 func LoadWithTimeout(coffBytes []byte, argBytes []byte, timeout time.Duration) (string, error) {
 	if len(coffBytes) < 20 {
-		return "", fmt.Errorf(ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
+		return "", fmt.Errorf("%s", ErrCtx(E2, fmt.Sprintf("%d", len(coffBytes))))
 	}
 	return LoadWithMethodAndTimeout(coffBytes, argBytes, "go", timeout)
 }
@@ -1470,7 +1470,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 	// Ensure DLLs are initialized (requires SetCOFFTemplate to be called first)
 	if err := initCOFFDLLs(); err != nil {
-		return "", fmt.Errorf(Err(E51))
+		return "", fmt.Errorf("%s", Err(E51))
 	}
 
 	output := make(chan interface{}, 100)
@@ -1487,7 +1487,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	parsedCoff.Seal()
 
 	if parsedCoff.Sections.Len() == 0 {
-		return "", fmt.Errorf(Err(E2))
+		return "", fmt.Errorf("%s", Err(E2))
 	}
 
 	// Calculate sizes for special sections
@@ -1547,13 +1547,13 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 		// Add upper bound check
 		if allocationSize > 0x10000000 { // 256MB limit
-			return "", fmt.Errorf(ErrCtx(E2, sectionName))
+			return "", fmt.Errorf("%s", ErrCtx(E2, sectionName))
 		}
 
 		// Allocate memory
 		addr, _, err := procVirtualAlloc.Call(0, allocationSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 		if addr == 0 {
-			return "", fmt.Errorf(ErrCtx(E44, sectionName))
+			return "", fmt.Errorf("%s", ErrCtx(E44, sectionName))
 			_ = err
 		}
 
@@ -1569,7 +1569,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				uintptr(copySize),
 			)
 			if !errors.Is(err, syscall.Errno(0)) {
-				return "", fmt.Errorf(Err(E44))
+				return "", fmt.Errorf("%s", Err(E44))
 			}
 		}
 
@@ -1584,7 +1584,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	if gotSize > 0 {
 		addr, _, err := procVirtualAlloc.Call(0, uintptr(gotSize), MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
 		if addr == 0 {
-			return "", fmt.Errorf(Err(E44))
+			return "", fmt.Errorf("%s", Err(E44))
 			_ = err
 		}
 		gotBaseAddress = addr
@@ -1632,7 +1632,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 
 						// Allocate GOT entry
 						if gotBaseAddress == 0 {
-							return "", fmt.Errorf(Err(E44))
+							return "", fmt.Errorf("%s", Err(E44))
 						}
 
 						symbolDefAddress = gotBaseAddress + uintptr(gotOffset*8)
@@ -1873,7 +1873,7 @@ func applyRelocation(sectionAddress uintptr, reloc windef.Relocation, symbolAddr
 		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
 
 	default:
-		return fmt.Errorf(Err(E2))
+		return fmt.Errorf("%s", Err(E2))
 	}
 
 	return nil

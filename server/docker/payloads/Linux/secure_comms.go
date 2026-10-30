@@ -62,7 +62,7 @@ func (sc *SecChan) decryptMessage(encrypted string) (string, error) {
 	// Attempt decryption with current secret
 	decrypted, err := DecryptAES(encrypted, secretHash[:])
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 	//print(decrypted)
 	return decrypted, nil

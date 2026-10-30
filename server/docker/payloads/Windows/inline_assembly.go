@@ -220,7 +220,7 @@ func (c *NativeAsyncMsg) execute(ctx *OpCtx, args []string) OpResult {
 				statusFail := iaStatusFail()
 
 				job.Status = statusFail
-				job.Error = fmt.Errorf(ErrCtx(E52, fmt.Sprintf("%v", r)))
+				job.Error = fmt.Errorf("%s", ErrCtx(E52, fmt.Sprintf("%v", r)))
 				endTime := time.Now()
 				job.EndTime = &endTime
 				job.Output.WriteString("\n" + ErrCtx(E52, fmt.Sprintf("%v", r)) + "\n")
@@ -285,7 +285,7 @@ func (c *NativeAsyncMsg) execute(ctx *OpCtx, args []string) OpResult {
 			tokenContext := captureCurrentAssemblyTokenContext()
 			exitCode, err = c.executeWindowsAssemblyAsync(assemblyBytes, config, job, tokenContext)
 		} else {
-			err = fmt.Errorf(Err(E2))
+			err = fmt.Errorf("%s", Err(E2))
 			exitCode = -1
 			job.OutputMutex.Lock()
 			job.Output.WriteString(Err(E2) + "\n")

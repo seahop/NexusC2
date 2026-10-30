@@ -43,7 +43,7 @@ type StreamConn struct {
 func NewTCPListener(address string) (*StreamListener, error) {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 
 	return &StreamListener{
@@ -57,14 +57,14 @@ func (tl *StreamListener) Accept() (*StreamConn, error) {
 	tl.mu.Lock()
 	if tl.closed {
 		tl.mu.Unlock()
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 	listener := tl.listener
 	tl.mu.Unlock()
 
 	conn, err := listener.Accept()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E12, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Enable TCP keepalive
@@ -103,7 +103,7 @@ func (tc *StreamConn) ReadMessage() ([]byte, error) {
 	defer tc.mu.Unlock()
 
 	if tc.closed {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Set read deadline
@@ -112,20 +112,20 @@ func (tc *StreamConn) ReadMessage() ([]byte, error) {
 	// Read 4-byte length header (little-endian)
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(tc.conn, header); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	length := binary.LittleEndian.Uint32(header)
 
 	// Sanity check
 	if length > maxMessageSize {
-		return nil, fmt.Errorf(Err(E2))
+		return nil, fmt.Errorf("%s", Err(E2))
 	}
 
 	// Read message body
 	data := make([]byte, length)
 	if _, err := io.ReadFull(tc.conn, data); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	return data, nil
@@ -138,7 +138,7 @@ func (tc *StreamConn) WriteMessage(data []byte) error {
 	defer tc.mu.Unlock()
 
 	if tc.closed {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Set write deadline
@@ -150,12 +150,12 @@ func (tc *StreamConn) WriteMessage(data []byte) error {
 
 	// Write header
 	if _, err := tc.conn.Write(header); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Write data
 	if _, err := tc.conn.Write(data); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	return nil

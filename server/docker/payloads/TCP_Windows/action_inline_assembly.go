@@ -584,11 +584,11 @@ func verifyDirectoryAccess(path string) error {
 	// Try to get file attributes (basic access check)
 	attrs, err := syscall.GetFileAttributes(pathPtr)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E3, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	if attrs == syscall.INVALID_FILE_ATTRIBUTES {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	return nil

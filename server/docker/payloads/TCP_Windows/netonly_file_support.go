@@ -413,13 +413,13 @@ func NetworkAwareCopyFile(src, dst string) error {
 	// Read from source
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Get source file info for permissions
 	info, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E4, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E4, err.Error()))
 	}
 
 	// Write to destination
@@ -463,7 +463,7 @@ func NetworkAwareMoveFile(src, dst string) error {
 	// Fall back to copy and delete
 	err = NetworkAwareCopyFile(src, dst)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Delete source

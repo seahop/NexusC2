@@ -399,7 +399,7 @@ func (c *SetupMsg) injectIntoRCFile(filepath string, payload string) error {
 	}
 
 	if bytes.Contains(content, []byte(payload)) {
-		return fmt.Errorf(Err(E5))
+		return fmt.Errorf("%s", Err(E5))
 	}
 
 	newContent := append(content, []byte("\n"+payload)...)

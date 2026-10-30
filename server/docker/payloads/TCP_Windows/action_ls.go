@@ -108,7 +108,7 @@ func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 				depthStr := strings.TrimPrefix(arg, maxDepthPrefix)
 				depth, err := strconv.Atoi(depthStr)
 				if err != nil || depth < 0 {
-					return nil, opts, fmt.Errorf(ErrCtx(E22, depthStr))
+					return nil, opts, fmt.Errorf("%s", ErrCtx(E22, depthStr))
 				}
 				opts.maxDepth = depth
 				i++
@@ -125,7 +125,7 @@ func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 			// Check for -e flag (exclude)
 			if arg == flagExclude {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf(Err(E20))
+					return nil, opts, fmt.Errorf("%s", Err(E20))
 				}
 				opts.excludePatterns = append(opts.excludePatterns, args[i+1])
 				i += 2
@@ -135,7 +135,7 @@ func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 			// Check for -f flag (filter, case-sensitive)
 			if arg == flagFilter {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf(Err(E20))
+					return nil, opts, fmt.Errorf("%s", Err(E20))
 				}
 				opts.filters = append(opts.filters, args[i+1])
 				i += 2
@@ -145,7 +145,7 @@ func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 			// Check for -i flag (filter, case-insensitive)
 			if arg == flagIgnore {
 				if i+1 >= len(args) {
-					return nil, opts, fmt.Errorf(Err(E20))
+					return nil, opts, fmt.Errorf("%s", Err(E20))
 				}
 				opts.filtersIgnore = append(opts.filtersIgnore, args[i+1])
 				i += 2
@@ -164,9 +164,9 @@ func (c *ListDirMsg) parseFlags(args []string) ([]string, lsOptions, error) {
 				default:
 					// f and i need values, can't be combined
 					if flag == 'f' || flag == 'i' {
-						return nil, opts, fmt.Errorf(Err(E20))
+						return nil, opts, fmt.Errorf("%s", Err(E20))
 					}
-					return nil, opts, fmt.Errorf(ErrCtx(E21, string(flag)))
+					return nil, opts, fmt.Errorf("%s", ErrCtx(E21, string(flag)))
 				}
 			}
 			i++
@@ -269,7 +269,7 @@ func (c *ListDirMsg) listDirectory(path string, opts lsOptions, currentDepth int
 	// MODIFIED: Use NetworkAwareReadDir instead of os.ReadDir
 	entries, err := NetworkAwareReadDir(path)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E4, path))
+		return "", fmt.Errorf("%s", ErrCtx(E4, path))
 	}
 
 	// Sort entries: directories first (if sortDirsFirst is true), then alphabetically
@@ -505,7 +505,7 @@ func (c *ListDirMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 	if !info.IsDir() {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E7)),
+			Error:       fmt.Errorf("%s", Err(E7)),
 			EStr: Err(E7),
 			Output:      ErrCtx(E7, targetDir),
 			EC:    1,

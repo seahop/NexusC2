@@ -16,7 +16,7 @@ func (c *WorkStopMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Note: args is already split for us, we receive just the filename
 	if len(args) == 0 {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E1)),
+			Error:       fmt.Errorf("%s", Err(E1)),
 			EStr: Err(E1),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -56,7 +56,7 @@ func (c *WorkStopMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 	if !foundJob {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E26)),
+			Error:       fmt.Errorf("%s", Err(E26)),
 			EStr: ErrCtx(E26, filename),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

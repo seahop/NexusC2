@@ -255,9 +255,9 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 	dir, err := NetworkAwareOpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf(Err(E3))
+			return 0, fmt.Errorf("%s", Err(E3))
 		}
-		return 0, fmt.Errorf(Err(E10))
+		return 0, fmt.Errorf("%s", Err(E10))
 	}
 
 	// Read all directory entries
@@ -266,9 +266,9 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf(Err(E3))
+			return 0, fmt.Errorf("%s", Err(E3))
 		}
-		return 0, fmt.Errorf(Err(E10))
+		return 0, fmt.Errorf("%s", Err(E10))
 	}
 
 	// Track errors during recursive deletion
@@ -286,7 +286,7 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 			if err != nil {
 				lastError = err
 				if !force {
-					return removedCount, fmt.Errorf(Err(E11))
+					return removedCount, fmt.Errorf("%s", Err(E11))
 				}
 			} else {
 				removedCount++ // Count the subdirectory itself
@@ -296,13 +296,13 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 			err := NetworkAwareRemove(entryPath)
 			if err != nil {
 				if os.IsPermission(err) {
-					lastError = fmt.Errorf(Err(E3))
+					lastError = fmt.Errorf("%s", Err(E3))
 				} else {
-					lastError = fmt.Errorf(Err(E11))
+					lastError = fmt.Errorf("%s", Err(E11))
 				}
 
 				if !force {
-					return removedCount, fmt.Errorf(Err(E11))
+					return removedCount, fmt.Errorf("%s", Err(E11))
 				}
 			} else {
 				removedCount++
@@ -314,9 +314,9 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 	err = NetworkAwareRemove(path)
 	if err != nil {
 		if os.IsPermission(err) {
-			return removedCount, fmt.Errorf(Err(E3))
+			return removedCount, fmt.Errorf("%s", Err(E3))
 		}
-		return removedCount, fmt.Errorf(Err(E11))
+		return removedCount, fmt.Errorf("%s", Err(E11))
 	}
 
 	// In force mode, consider it success if directory is gone

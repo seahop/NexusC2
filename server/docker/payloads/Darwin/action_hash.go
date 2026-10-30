@@ -372,7 +372,7 @@ func (h *DigestDirMsg) execute(ctx *OpCtx, args []string) OpResult {
 			hash, hashErr = calculateSHA256(path)
 		default:
 			hash = Err(E2)
-			hashErr = fmt.Errorf(Err(E2))
+			hashErr = fmt.Errorf("%s", Err(E2))
 		}
 
 		if hashErr != nil {

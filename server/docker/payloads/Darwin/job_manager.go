@@ -53,7 +53,7 @@ func (cq *WorkQueue) killJob(jobID string) error {
 
 	job, exists := cq.activeJobs[jobID]
 	if !exists {
-		return fmt.Errorf(ErrCtx(E26, jobID))
+		return fmt.Errorf("%s", ErrCtx(E26, jobID))
 	}
 
 	// Remove from active downloads if it's a download job

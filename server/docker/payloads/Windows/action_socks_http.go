@@ -130,7 +130,7 @@ func (c *PxCmd) execute(ctx *OpCtx, args []string) OpResult {
 
 	if rawData == "" {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E1)),
+			Error:       fmt.Errorf("%s", Err(E1)),
 			EStr: Err(E1),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -192,7 +192,7 @@ func (c *PxCmd) execute(ctx *OpCtx, args []string) OpResult {
 		return c.handleUDPClose(cmdData.SI)
 	default:
 		return OpResult{
-			Error:       fmt.Errorf(ErrCtx(E21, cmdData.Action)),
+			Error:       fmt.Errorf("%s", ErrCtx(E21, cmdData.Action)),
 			EStr: ErrCtx(E21, cmdData.Action),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

@@ -78,7 +78,7 @@ func (c *ProxyMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 	if rawData == "" {
 		return OpResult{
-			Error:       fmt.Errorf(E32),
+			Error:       fmt.Errorf("%s", E32),
 			EStr: Err(E32),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -258,7 +258,7 @@ func (c *ProxyMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 	default:
 		return OpResult{
-			Error:       fmt.Errorf(ErrCtx(E36, socksData.Action)),
+			Error:       fmt.Errorf("%s", ErrCtx(E36, socksData.Action)),
 			EStr: ErrCtx(E36, socksData.Action),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

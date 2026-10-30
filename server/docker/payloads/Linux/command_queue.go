@@ -220,7 +220,7 @@ func (cq *WorkQueue) addCommands(jsonData string) error {
 
 	var commands []Msg
 	if err := json.Unmarshal([]byte(jsonData), &commands); err != nil {
-		return fmt.Errorf(Err(E18))
+		return fmt.Errorf("%s", Err(E18))
 	}
 
 	cq.mu.Lock()
@@ -259,7 +259,7 @@ func (cq *WorkQueue) executeExternalCommand(cmd Msg, cmdType string, args []stri
 	if err != nil {
 		return &OpResult{
 			Cmd:     cmd,
-			Error:       fmt.Errorf(ErrCtx(E4, cmdType)),
+			Error:       fmt.Errorf("%s", ErrCtx(E4, cmdType)),
 			EStr: ErrCtx(E4, cmdType),
 			EC:    127,
 		}, nil

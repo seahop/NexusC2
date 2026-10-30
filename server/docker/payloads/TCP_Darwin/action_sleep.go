@@ -19,7 +19,7 @@ type IntervalMsg struct{}
 func parseDuration(input string) (int, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return 0, fmt.Errorf(E22)
+		return 0, fmt.Errorf("%s", E22)
 	}
 
 	var totalSeconds int
@@ -34,12 +34,12 @@ func parseDuration(input string) (int, error) {
 		}
 
 		if currentNumber == "" {
-			return 0, fmt.Errorf(E22)
+			return 0, fmt.Errorf("%s", E22)
 		}
 
 		value, err := strconv.Atoi(currentNumber)
 		if err != nil {
-			return 0, fmt.Errorf(E22)
+			return 0, fmt.Errorf("%s", E22)
 		}
 
 		switch char {
@@ -50,7 +50,7 @@ func parseDuration(input string) (int, error) {
 		case 's':
 			totalSeconds += value
 		default:
-			return 0, fmt.Errorf(E22)
+			return 0, fmt.Errorf("%s", E22)
 		}
 
 		currentNumber = ""
@@ -60,7 +60,7 @@ func parseDuration(input string) (int, error) {
 	if currentNumber != "" {
 		value, err := strconv.Atoi(currentNumber)
 		if err != nil {
-			return 0, fmt.Errorf(E22)
+			return 0, fmt.Errorf("%s", E22)
 		}
 		// Assume seconds if no unit specified
 		totalSeconds += value
@@ -73,7 +73,7 @@ func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Validate arguments
 	if len(args) == 0 || len(args) > 2 {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E2)),
+			Error:       fmt.Errorf("%s", Err(E2)),
 			EStr: Err(E2),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -84,7 +84,7 @@ func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 	seconds, err := parseDuration(args[0])
 	if err != nil {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E28)),
+			Error:       fmt.Errorf("%s", Err(E28)),
 			EStr: Err(E28),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -94,7 +94,7 @@ func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 	// Validate the sleep value
 	if seconds < 1 {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E28)),
+			Error:       fmt.Errorf("%s", Err(E28)),
 			EStr: Err(E28),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -107,7 +107,7 @@ func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 		jitterValue, err := strconv.ParseFloat(args[1], 64)
 		if err != nil {
 			return OpResult{
-				Error:       fmt.Errorf(Err(E29)),
+				Error:       fmt.Errorf("%s", Err(E29)),
 				EStr: Err(E29),
 				EC:    1,
 				Done: time.Now().Format(time.RFC3339),
@@ -115,7 +115,7 @@ func (c *IntervalMsg) execute(ctx *OpCtx, args []string) OpResult {
 		}
 		if jitterValue < 0 || jitterValue > 100 {
 			return OpResult{
-				Error:       fmt.Errorf(Err(E29)),
+				Error:       fmt.Errorf("%s", Err(E29)),
 				EStr: Err(E29),
 				EC:    1,
 				Done: time.Now().Format(time.RFC3339),

@@ -907,7 +907,7 @@ func (s *Server) HandleAgentResponse(responses []SocksResponse) {
 
 			case "error":
 				select {
-				case tcpSession.ResponseChan <- &SessionResponse{Error: fmt.Errorf(resp.Error)}:
+				case tcpSession.ResponseChan <- &SessionResponse{Error: fmt.Errorf("%s", resp.Error)}:
 				default:
 				}
 				s.cleanupSession(resp.SessionID)
@@ -955,7 +955,7 @@ func (s *Server) HandleAgentResponse(responses []SocksResponse) {
 
 			case "error":
 				select {
-				case udpSession.ResponseChan <- &UDPResponse{Error: fmt.Errorf(resp.Error)}:
+				case udpSession.ResponseChan <- &UDPResponse{Error: fmt.Errorf("%s", resp.Error)}:
 				default:
 				}
 				s.cleanupUDPSession(resp.SessionID)

@@ -41,23 +41,23 @@ func performLinkAuthTCP(conn net.Conn) error {
 	// Step 1: Read 32-byte challenge from TCP agent
 	challenge, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Step 2: Send "AUTH:" + challenge
 	response := append([]byte(lmAuthPrefix()), challenge...)
 	if err := writeMessage(conn, response); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Step 3: Read "OK" confirmation
 	confirm, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	if string(confirm) != lmAuthOK() {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	return nil

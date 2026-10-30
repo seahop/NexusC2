@@ -56,7 +56,7 @@ func dialPipe(pipePath string, creds *RA) (net.Conn, error) {
 	// Connect to SMB port (445)
 	tcpConn, err := net.DialTimeout("tcp", server+lmTpl(idxLinkSmbPort), 30*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E12, server))
+		return nil, fmt.Errorf("%s", ErrCtx(E12, server))
 	}
 
 	// Set up credentials - use provided or fall back to anonymous
@@ -82,7 +82,7 @@ func dialPipe(pipePath string, creds *RA) (net.Conn, error) {
 	session, err := d.Dial(tcpConn)
 	if err != nil {
 		tcpConn.Close()
-		return nil, fmt.Errorf(ErrCtx(E31, server))
+		return nil, fmt.Errorf("%s", ErrCtx(E31, server))
 	}
 
 	// Mount IPC$ share (required for named pipes)
@@ -90,7 +90,7 @@ func dialPipe(pipePath string, creds *RA) (net.Conn, error) {
 	if err != nil {
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf(ErrCtx(E12, server))
+		return nil, fmt.Errorf("%s", ErrCtx(E12, server))
 	}
 
 	// Open the named pipe
@@ -99,7 +99,7 @@ func dialPipe(pipePath string, creds *RA) (net.Conn, error) {
 		share.Umount()
 		session.Logoff()
 		tcpConn.Close()
-		return nil, fmt.Errorf(ErrCtx(E33, pipeName))
+		return nil, fmt.Errorf("%s", ErrCtx(E33, pipeName))
 	}
 
 	return &smbPipeConn{
@@ -121,12 +121,12 @@ func parsePipePath(pipePath string) (string, string, error) {
 	// Split by backslash
 	parts := strings.SplitN(path, "\\", 3)
 	if len(parts) < 3 {
-		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
+		return "", "", fmt.Errorf("%s", ErrCtx(E17, pipePath))
 	}
 
 	server := parts[0]
 	if strings.ToLower(parts[1]) != lmTpl(idxLinkPipeWord) {
-		return "", "", fmt.Errorf(ErrCtx(E17, pipePath))
+		return "", "", fmt.Errorf("%s", ErrCtx(E17, pipePath))
 	}
 
 	pipeName := parts[2]
@@ -244,24 +244,24 @@ func performLinkAuth(conn net.Conn) error {
 	// Read challenge
 	challenge, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Simple challenge-response (matches Windows implementation)
 	response := append([]byte(lmAuthPrefix()), challenge...)
 
 	if err := writeMessage(conn, response); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Read confirmation
 	confirm, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	if string(confirm) != lmAuthOK() {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	return nil
@@ -286,5 +286,5 @@ func connectToPipe(pipePath string, creds *RA) (net.Conn, error) {
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf(Err(E9))
+	return nil, fmt.Errorf("%s", Err(E9))
 }

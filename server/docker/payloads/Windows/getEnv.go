@@ -63,7 +63,7 @@ func secVal(enc string) string {
 func cfgDec(encoded, key string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	var result []byte

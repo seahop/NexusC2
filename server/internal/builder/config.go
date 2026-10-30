@@ -19,6 +19,7 @@ type RemoteConfig struct {
 	ClientCert string `toml:"client_cert"`
 	ClientKey  string `toml:"client_key"`
 	Timeout    string `toml:"timeout"`
+	SharedDir  string `toml:"shared_dir"`
 }
 
 func (c *RemoteConfig) ParseTimeout() time.Duration {

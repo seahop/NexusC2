@@ -177,7 +177,7 @@ func tryDecryptResponse(rawResponse map[string]interface{}, cfgKey []byte) (map[
 		}
 	}
 
-	return nil, fmt.Errorf(Err(E18))
+	return nil, fmt.Errorf("%s", Err(E18))
 }
 
 // checkAsyncBOFResults checks for pending async BOF results (Windows only)
@@ -217,7 +217,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		// Apply transforms to the encrypted data
 		transformed, err := applyTransforms([]byte(encryptedData), postDataDataBlock.Transforms)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 		transformedData = transformed.Data
 		prependLen = transformed.PrependLength
@@ -241,7 +241,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 		}
 		jsonData, err := json.Marshal(postData)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 		bodyData = jsonData
 		dataOutputLocation = "body"
@@ -249,7 +249,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 	req, err := http.NewRequest(method, postURL, bytes.NewBuffer(bodyData))
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Set content type based on transform mode
@@ -277,7 +277,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	if postClientIDDataBlock != nil && len(postClientIDDataBlock.Transforms) > 0 {
 		transformed, err := applyTransforms([]byte(getClientID()), postClientIDDataBlock.Transforms)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 		placeInLocation(req, postClientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
 	}
@@ -305,7 +305,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body) // drain body
@@ -313,7 +313,7 @@ func sendResults(encryptedData string, customHeaders map[string]string) error {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf(ErrCtx(E12, fmt.Sprintf("%d", resp.StatusCode)))
+		return fmt.Errorf("%s", ErrCtx(E12, fmt.Sprintf("%d", resp.StatusCode)))
 	}
 
 	return nil
@@ -332,7 +332,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 
 	req, err := http.NewRequest(method, getURL, nil)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Apply clientID transforms if configured
@@ -340,7 +340,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 		if len(getClientIDDataBlock.Transforms) > 0 {
 			transformed, err := applyTransforms([]byte(getClientID()), getClientIDDataBlock.Transforms)
 			if err != nil {
-				return fmt.Errorf(ErrCtx(E18, err.Error()))
+				return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 			}
 			placeInLocation(req, getClientIDDataBlock.Output, transformed.Data, transformed.PrependLength, transformed.AppendLength)
 		} else {
@@ -358,7 +358,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 	// Send request
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body)
@@ -368,7 +368,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Use a generic response map instead of struct to support malleable field names
@@ -385,24 +385,24 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 		case "header":
 			headerValue := resp.Header.Get(locName)
 			if headerValue == "" {
-				return fmt.Errorf(ErrCtx(E18, ""))
+				return fmt.Errorf("%s", ErrCtx(E18, ""))
 			}
 			responseData, err = base64.StdEncoding.DecodeString(headerValue)
 			if err != nil {
-				return fmt.Errorf(ErrCtx(E18, err.Error()))
+				return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 			}
 		case "cookie":
 			for _, cookie := range resp.Cookies() {
 				if cookie.Name == locName {
 					responseData, err = base64.StdEncoding.DecodeString(cookie.Value)
 					if err != nil {
-						return fmt.Errorf(ErrCtx(E18, err.Error()))
+						return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 					}
 					break
 				}
 			}
 			if responseData == nil {
-				return fmt.Errorf(ErrCtx(E18, ""))
+				return fmt.Errorf("%s", ErrCtx(E18, ""))
 			}
 		default:
 			responseData = body
@@ -410,7 +410,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 
 		body, err = reverseTransforms(responseData, responseDataDataBlock.Transforms, prependLen, appendLen)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		currentSecret := secureComms.getDecryptionSecret()
@@ -418,14 +418,14 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 		decrypted := decBytes(body, cfgKey)
 
 		if err := json.Unmarshal(decrypted, &responseMap); err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 	} else {
 		// Legacy: no transforms - body is JSON with encrypted field inside
 		// First try to parse as raw JSON
 		var rawResponse map[string]interface{}
 		if err := json.Unmarshal(body, &rawResponse); err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		// Check if this is an XOR encrypted response
@@ -517,7 +517,7 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 
 		// Return immediately - the new goroutine will handle the rekey
 		// This allows the current polling goroutine to exit cleanly
-		return fmt.Errorf(Err(E19))
+		return fmt.Errorf("%s", Err(E19))
 	}
 
 	// IMPORTANT: Process handshake responses BEFORE commands!
@@ -763,7 +763,7 @@ func startPolling(config SyncConfig, sysInfo *NR) error {
 
 	customHeaders, err := parseCustomHeaders(handshakeManager.decryptedValues.CustomHeaders)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	currentPolling.Add(1)

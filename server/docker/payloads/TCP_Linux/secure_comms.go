@@ -45,18 +45,18 @@ func (sc *SecChan) encryptMessage(plaintext string) (string, error) {
 	// Create cipher
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Generate nonce
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt
@@ -75,7 +75,7 @@ func (sc *SecChan) decryptMessage(encrypted string) (string, error) {
 	// Decode base64
 	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Try current secret first
@@ -88,7 +88,7 @@ func (sc *SecChan) decryptMessage(encrypted string) (string, error) {
 		return plaintext, nil
 	}
 
-	return "", fmt.Errorf(Err(E18))
+	return "", fmt.Errorf("%s", Err(E18))
 }
 
 func (sc *SecChan) decryptWithSecret(ciphertext []byte, secret string) (string, error) {
@@ -108,7 +108,7 @@ func (sc *SecChan) decryptWithSecret(ciphertext []byte, secret string) (string, 
 
 	nonceSize := gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
-		return "", fmt.Errorf(Err(E2))
+		return "", fmt.Errorf("%s", Err(E2))
 	}
 
 	nonce := ciphertext[:nonceSize]

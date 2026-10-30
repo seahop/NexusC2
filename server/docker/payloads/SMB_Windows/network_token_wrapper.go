@@ -56,7 +56,7 @@ func ExecuteWithNetworkToken(cmdPath string, args []string) (*exec.Cmd, error) {
 
 	// Apply the network token to the command
 	if err := ApplyNetworkTokenToCommand(cmd, netContext.TokenHandle); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 
 	return cmd, nil

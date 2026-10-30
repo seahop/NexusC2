@@ -110,14 +110,14 @@ func (c *ReadFileMsg) parseArgs(args []string) (string, catOptions, error) {
 		switch arg {
 		case "-f":
 			if i+1 >= len(args) {
-				return "", opts, fmt.Errorf(Err(E20))
+				return "", opts, fmt.Errorf("%s", Err(E20))
 			}
 			opts.grepPattern = args[i+1]
 			i += 2
 
 		case "-i":
 			if i+1 >= len(args) {
-				return "", opts, fmt.Errorf(Err(E20))
+				return "", opts, fmt.Errorf("%s", Err(E20))
 			}
 			opts.grepPattern = args[i+1]
 			opts.caseInsensitive = true
@@ -129,7 +129,7 @@ func (c *ReadFileMsg) parseArgs(args []string) (string, catOptions, error) {
 				fileName = arg
 				i++
 			} else {
-				return "", opts, fmt.Errorf(ErrCtx(E21, arg))
+				return "", opts, fmt.Errorf("%s", ErrCtx(E21, arg))
 			}
 		}
 	}
@@ -143,11 +143,11 @@ func (c *ReadFileMsg) readFile(filePath string, opts catOptions) (string, error)
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf(Err(E4))
+			return "", fmt.Errorf("%s", Err(E4))
 		} else if os.IsPermission(err) {
-			return "", fmt.Errorf(Err(E3))
+			return "", fmt.Errorf("%s", Err(E3))
 		}
-		return "", fmt.Errorf(Err(E10))
+		return "", fmt.Errorf("%s", Err(E10))
 	}
 	defer file.Close()
 
@@ -156,7 +156,7 @@ func (c *ReadFileMsg) readFile(filePath string, opts catOptions) (string, error)
 	peekBytes, _ := reader.Peek(512)
 	if len(peekBytes) > 0 {
 		if isBinary(peekBytes) {
-			return "", fmt.Errorf(Err(E8))
+			return "", fmt.Errorf("%s", Err(E8))
 		}
 	}
 
@@ -195,7 +195,7 @@ func (c *ReadFileMsg) readFile(filePath string, opts catOptions) (string, error)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return output.String(), fmt.Errorf(Err(E10))
+		return output.String(), fmt.Errorf("%s", Err(E10))
 	}
 
 	// If grep was used and nothing matched
@@ -256,7 +256,7 @@ func (c *ReadFileMsg) grepFile(file *os.File, opts catOptions) (string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf(Err(E10))
+		return "", fmt.Errorf("%s", Err(E10))
 	}
 
 	if len(matchedLines) == 0 {

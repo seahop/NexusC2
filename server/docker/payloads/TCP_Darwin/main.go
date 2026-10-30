@@ -522,18 +522,18 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 	// Decrypt the secret first
 	decryptedSecret, err := cfgDec(secret, cfgKey)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Now decrypt the config with the decrypted secret
 	configJSON, err := cfgDec(encrypted, decryptedSecret)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	var config map[string]string
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return config, nil

@@ -54,7 +54,7 @@ func getProcessInfo() (int, string, error) {
 func getCurrentUser() (string, error) {
 	currentUser, err := user.Current()
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 	return currentUser.Username, nil
 }
@@ -63,7 +63,7 @@ func getCurrentUser() (string, error) {
 func getHostname() (string, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 	return hostname, nil
 }
@@ -106,7 +106,7 @@ func isValidIP(ip string) bool {
 func getInternalIP() (string, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	for _, iface := range interfaces {
@@ -134,7 +134,7 @@ func getInternalIP() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf(Err(E12))
+	return "", fmt.Errorf("%s", Err(E12))
 }
 
 // generateSeed creates a random 24-character alphanumeric string
@@ -148,7 +148,7 @@ func generateSeed() (string, error) {
 	for i := 0; i < length; i++ {
 		randomIndex, err := rand.Int(rand.Reader, charsetLength)
 		if err != nil {
-			return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+			return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 		}
 		result[i] = charset[randomIndex.Int64()]
 	}
@@ -169,31 +169,31 @@ func collectSystemInfo(clientID string) (*NR, error) {
 	// Generate seed
 	info.SD, err = generateSeed()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Get process information
 	info.PID, info.PN, err = getProcessInfo()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Get username
 	info.UN, err = getCurrentUser()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Get hostname
 	info.HN, err = getHostname()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E19, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Get IP address
 	info.IP, err = getInternalIP()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E12, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Get architecture
@@ -224,7 +224,7 @@ func collectSystemInfo(clientID string) (*NR, error) {
 func (r *NR) toJSON() (string, error) {
 	jsonBytes, err := json.MarshalIndent(r, "", "    ")
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 	return string(jsonBytes), nil
 }

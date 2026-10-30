@@ -516,13 +516,13 @@ func (c *NativeAsyncMsg) executeWithAsyncPipeCapture(assemblyBytes []byte, argum
 		job.OutputMutex.Lock()
 		job.Output.WriteString("\n" + Err(E52) + "\n")
 		job.OutputMutex.Unlock()
-		return -1, fmt.Errorf(Err(E52))
+		return -1, fmt.Errorf("%s", Err(E52))
 
 	case <-time.After(executionTimeout + 30*time.Second): // Add extra buffer
 		job.OutputMutex.Lock()
 		job.Output.WriteString("\n" + Err(E9) + "\n")
 		job.OutputMutex.Unlock()
-		return -1, fmt.Errorf(Err(E9))
+		return -1, fmt.Errorf("%s", Err(E9))
 	}
 }
 
@@ -572,7 +572,7 @@ func (c *NativeAsyncMsg) executeProtectedDirect(assemblyBytes []byte, arguments 
 		if hasRunfor {
 			return 0, nil
 		}
-		return -1, fmt.Errorf(Err(E9))
+		return -1, fmt.Errorf("%s", Err(E9))
 	}
 
 	return int(retCode), execErr

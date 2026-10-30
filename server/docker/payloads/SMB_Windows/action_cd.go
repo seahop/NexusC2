@@ -57,7 +57,7 @@ func (c *ChDirMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if !info.IsDir() {
 		return OpResult{
 			Output:      ErrCtx(E7, newDir),
-			Error:       fmt.Errorf(Err(E7)),
+			Error:       fmt.Errorf("%s", Err(E7)),
 			EStr: Err(E7),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

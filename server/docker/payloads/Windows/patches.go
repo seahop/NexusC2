@@ -61,7 +61,7 @@ func patchAMSI() error {
 	dllName := patchDllAmsi()
 	procName := patchApiAmsiScanBuffer()
 	if dllName == "" || procName == "" {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	amsi := windows.NewLazySystemDLL(dllName)
@@ -71,7 +71,7 @@ func patchAMSI() error {
 		return err
 	}
 	if amsiScanBuffer.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	var patch []byte
@@ -88,7 +88,7 @@ func patchETW() error {
 	dllName := patchDllNtdll()
 	procName := patchApiEtwEventWrite()
 	if dllName == "" || procName == "" {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	ntdll := windows.NewLazySystemDLL(dllName)
@@ -98,7 +98,7 @@ func patchETW() error {
 		return err
 	}
 	if etwEventWrite.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	var patch []byte

@@ -507,19 +507,19 @@ func PackArgs(data []string) ([]byte, error) {
 		case 'b':
 			data, err := PackBinary(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
+				return nil, fmt.Errorf("%s", ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 'i':
 			data, err := PackIntString(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
+				return nil, fmt.Errorf("%s", ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 's':
 			data, err := PackShortString(arg[1:])
 			if err != nil {
-				return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
+				return nil, fmt.Errorf("%s", ErrCtx(E18, arg[1:]))
 			}
 			buff = append(buff, data...)
 		case 'z':
@@ -531,7 +531,7 @@ func PackArgs(data []string) ([]byte, error) {
 			} else {
 				packedData, err = PackString(arg[1:])
 				if err != nil {
-					return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
+					return nil, fmt.Errorf("%s", ErrCtx(E18, arg[1:]))
 				}
 			}
 			buff = append(buff, packedData...)
@@ -543,12 +543,12 @@ func PackArgs(data []string) ([]byte, error) {
 			} else {
 				packedData, err = PackWideString(arg[1:])
 				if err != nil {
-					return nil, fmt.Errorf(ErrCtx(E18, arg[1:]))
+					return nil, fmt.Errorf("%s", ErrCtx(E18, arg[1:]))
 				}
 			}
 			buff = append(buff, packedData...)
 		default:
-			return nil, fmt.Errorf(Err(E2))
+			return nil, fmt.Errorf("%s", Err(E2))
 		}
 	}
 

@@ -13,8 +13,9 @@ import (
 )
 
 type RemoteBuilder struct {
-	client  *http.Client
-	address string
+	client    *http.Client
+	address   string
+	sharedDir string
 }
 
 type remoteBuildRequest struct {
@@ -28,12 +29,18 @@ func NewRemoteBuilder(cfg *RemoteConfig) (*RemoteBuilder, error) {
 		return nil, fmt.Errorf("remote builder TLS setup failed: %v", err)
 	}
 
+	sharedDir := cfg.SharedDir
+	if sharedDir == "" {
+		sharedDir = "/shared"
+	}
+
 	return &RemoteBuilder{
 		client: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: tlsCfg},
 			Timeout:   cfg.ParseTimeout(),
 		},
-		address: cfg.Address,
+		address:   cfg.Address,
+		sharedDir: sharedDir,
 	}, nil
 }
 
@@ -68,8 +75,8 @@ func (b *RemoteBuilder) Build(ctx context.Context, req *BuildRequest) (*BuildRes
 		return nil, fmt.Errorf("remote build failed (HTTP %d): %s", resp.StatusCode, string(errBody))
 	}
 
-	outPath := filepath.Join("/shared", req.BinaryName)
-	tmpFile, err := os.CreateTemp("/shared", req.BinaryName+"-*.tmp")
+	outPath := filepath.Join(b.sharedDir, req.BinaryName)
+	tmpFile, err := os.CreateTemp(b.sharedDir, req.BinaryName+"-*.tmp")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %v", err)
 	}

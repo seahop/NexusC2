@@ -39,15 +39,15 @@ func CreateHMAC(data, key string) string {
 func EncryptAES(data []byte, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 	ciphertext := aesGCM.Seal(nonce, nonce, data, nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
@@ -58,23 +58,23 @@ func DecryptAES(combined string, key []byte) (string, error) {
 	// Step 1: Base64 Decode
 	allBytes, err := base64.StdEncoding.DecodeString(combined)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Step 2: Extract Nonce and Ciphertext
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	nonceSize := aesGCM.NonceSize()
 	if len(allBytes) < nonceSize {
-		return "", fmt.Errorf(Err(E2))
+		return "", fmt.Errorf("%s", Err(E2))
 	}
 
 	nonce := allBytes[:nonceSize]
@@ -83,7 +83,7 @@ func DecryptAES(combined string, key []byte) (string, error) {
 	// Step 3: Decrypt
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return string(plaintext), nil
@@ -109,12 +109,12 @@ func secVal(enc string) string {
 
 func cfgDec(encoded, key string) (string, error) {
 	if encoded == "" || key == "" {
-		return "", fmt.Errorf(Err(E1))
+		return "", fmt.Errorf("%s", Err(E1))
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	result := make([]byte, len(decoded))
@@ -131,46 +131,46 @@ func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (stri
 	// Marshal system info to JSON
 	sysInfoJSON, err := json.Marshal(sysInfo)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Parse RSA public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
-		return "", fmt.Errorf(Err(E18))
+		return "", fmt.Errorf("%s", Err(E18))
 	}
 
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Generate random AES key
 	aesKey := make([]byte, 32)
 	if _, err := rand.Read(aesKey); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt AES key with RSA
 	encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt system info with AES-GCM
 	block2, err := aes.NewCipher(aesKey)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(block2)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	encryptedData := gcm.Seal(nonce, nonce, sysInfoJSON, nil)
@@ -186,7 +186,7 @@ func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (stri
 
 	envelopeJSON, err := json.Marshal(envelope)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return base64.StdEncoding.EncodeToString(envelopeJSON), nil
@@ -197,12 +197,12 @@ func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Parse public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
-		return fmt.Errorf(Err(E18))
+		return fmt.Errorf("%s", Err(E18))
 	}
 
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Recreate verification data
@@ -212,12 +212,12 @@ func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Decode signature
 	signature, err := base64.StdEncoding.DecodeString(resp.Signature)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Verify signature
 	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hashed[:], signature); err != nil {
-		return fmt.Errorf(ErrCtx(E3, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	return nil
@@ -242,23 +242,23 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Generate a random AES key for this session
 	aesKey := make([]byte, 32) // 256-bit key
 	if _, err := rand.Read(aesKey); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt the actual data with the random AES key
 	aesBlock, err := aes.NewCipher(aesKey)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(aesBlock)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt the data
@@ -268,13 +268,13 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Parse the public key
 	pemBlock, _ := pem.Decode([]byte(pubKeyStr))
 	if pemBlock == nil {
-		return "", fmt.Errorf(Err(E18))
+		return "", fmt.Errorf("%s", Err(E18))
 	}
 
 	// Parse PKCS1 format
 	pub, err := x509.ParsePKCS1PublicKey(pemBlock.Bytes)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Encrypt the AES key with RSA
@@ -286,7 +286,7 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 		nil,
 	)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Create the hybrid structure
@@ -298,7 +298,7 @@ func EncryptInitialHandshake(jsonData string, secret string, pubKeyStr string) (
 	// Convert to JSON
 	hybridJson, err := json.Marshal(hybrid)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return string(hybridJson), nil

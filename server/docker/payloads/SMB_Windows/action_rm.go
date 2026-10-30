@@ -274,7 +274,7 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 	dir, err := NetworkAwareOpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf(Err(E3))
+			return 0, fmt.Errorf("%s", Err(E3))
 		}
 		return 0, err
 	}
@@ -284,7 +284,7 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 
 	if err != nil {
 		if os.IsPermission(err) {
-			return 0, fmt.Errorf(Err(E3))
+			return 0, fmt.Errorf("%s", Err(E3))
 		}
 		return 0, err
 	}
@@ -301,7 +301,7 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 			if err != nil {
 				lastError = err
 				if !force {
-					return removedCount, fmt.Errorf(ErrCtx(E11, entry.Name()))
+					return removedCount, fmt.Errorf("%s", ErrCtx(E11, entry.Name()))
 				}
 			} else {
 				removedCount++
@@ -310,13 +310,13 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 			err := NetworkAwareRemove(entryPath)
 			if err != nil {
 				if os.IsPermission(err) {
-					lastError = fmt.Errorf(ErrCtx(E3, entry.Name()))
+					lastError = fmt.Errorf("%s", ErrCtx(E3, entry.Name()))
 				} else {
 					lastError = err
 				}
 
 				if !force {
-					return removedCount, fmt.Errorf(ErrCtx(E11, entry.Name()))
+					return removedCount, fmt.Errorf("%s", ErrCtx(E11, entry.Name()))
 				}
 			} else {
 				removedCount++
@@ -327,10 +327,10 @@ func (c *RemoveMsg) removeAllWithDetails(path string, force bool) (int, error) {
 	err = NetworkAwareRemove(path)
 	if err != nil {
 		if os.IsPermission(err) {
-			return removedCount, fmt.Errorf(Err(E3))
+			return removedCount, fmt.Errorf("%s", Err(E3))
 		}
 		if removedCount > 0 {
-			return removedCount, fmt.Errorf(ErrCtx(E16, fmt.Sprintf("%d", removedCount)))
+			return removedCount, fmt.Errorf("%s", ErrCtx(E16, fmt.Sprintf("%d", removedCount)))
 		}
 		return removedCount, err
 	}

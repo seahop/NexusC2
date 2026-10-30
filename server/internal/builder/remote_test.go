@@ -82,7 +82,7 @@ func TestRemoteBuilder_Build(t *testing.T) {
 	writeKeyFile(t, filepath.Join(dir, "client.crt"), clientCert)
 	writeECKeyFile(t, filepath.Join(dir, "client.key"), clientKey)
 
-	os.MkdirAll("/shared", 0755)
+	sharedDir := t.TempDir()
 
 	cfg := &RemoteConfig{
 		Address:    server.URL,
@@ -90,16 +90,13 @@ func TestRemoteBuilder_Build(t *testing.T) {
 		ClientCert: filepath.Join(dir, "client.crt"),
 		ClientKey:  filepath.Join(dir, "client.key"),
 		Timeout:    "30s",
+		SharedDir:  sharedDir,
 	}
 
 	rb, err := NewRemoteBuilder(cfg)
 	if err != nil {
 		t.Fatalf("NewRemoteBuilder failed: %v", err)
 	}
-
-	// Override output path to use temp dir
-	origBuild := rb.Build
-	_ = origBuild
 
 	result, err := rb.Build(context.Background(), &BuildRequest{
 		EnvVars:    []string{"OS=linux", "ARCH=amd64"},
@@ -109,8 +106,9 @@ func TestRemoteBuilder_Build(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 
-	if result.BinaryPath != "/shared/test_payload" {
-		t.Errorf("unexpected binary path: %s", result.BinaryPath)
+	expectedPath := filepath.Join(sharedDir, "test_payload")
+	if result.BinaryPath != expectedPath {
+		t.Errorf("unexpected binary path: got %s, want %s", result.BinaryPath, expectedPath)
 	}
 
 	data, err := os.ReadFile(result.BinaryPath)
@@ -120,8 +118,6 @@ func TestRemoteBuilder_Build(t *testing.T) {
 	if string(data) != string(binaryContent) {
 		t.Errorf("binary content mismatch: got %d bytes, want %d", len(data), len(binaryContent))
 	}
-
-	os.Remove(result.BinaryPath)
 }
 
 func TestRemoteBuilder_ServerError(t *testing.T) {

@@ -58,7 +58,7 @@ func placeInLocation(req *http.Request, output string, data []byte, prependLen, 
 func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataBlock, clientIDVal string, decrypted *ResolvedConfig) (*http.Request, []byte, error) {
 	req, err := http.NewRequest(method, baseURL, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf(ErrCtx(E12, err.Error()))
+		return nil, nil, fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	var bodyData []byte
@@ -67,7 +67,7 @@ func buildRequestWithTransforms(method, baseURL string, clientIDDataBlock *DataB
 		// Apply transforms to clientID
 		transformed, err := applyTransforms([]byte(clientIDVal), clientIDDataBlock.Transforms)
 		if err != nil {
-			return nil, nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+			return nil, nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 		}
 
 		locType, _ := parseOutput(clientIDDataBlock.Output)
@@ -118,7 +118,7 @@ func parseCustomHeaders(headerJSON string) (map[string]string, error) {
 	headers := make(map[string]string)
 	err := json.Unmarshal([]byte(headerJSON), &headers)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 	return headers, nil
 }
@@ -140,17 +140,17 @@ func sendInitialPost(url string, encryptedData string, decrypted *ResolvedConfig
 
 	jsonData, err := json.Marshal(postData)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	customHeaders, err := parseCustomHeaders(decrypted.CustomHeaders)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	req.Header.Set(secVal(httpHeaderUserAgent), decrypted.UserAgent)
@@ -164,18 +164,18 @@ func sendInitialPost(url string, encryptedData string, decrypted *ResolvedConfig
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E12, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E10, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	var signedResponse VResp
 	if err := json.Unmarshal(bodyBytes, &signedResponse); err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	verificationData := fmt.Sprintf("%s:%s", signedResponse.NNID, signedResponse.Seed)
@@ -184,25 +184,25 @@ func sendInitialPost(url string, encryptedData string, decrypted *ResolvedConfig
 	// Parse server's public key
 	block, _ := pem.Decode([]byte(decrypted.PublicKey))
 	if block == nil {
-		return "", fmt.Errorf(Err(E18))
+		return "", fmt.Errorf("%s", Err(E18))
 	}
 
 	publicKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	signature, err := base64.StdEncoding.DecodeString(signedResponse.Signature)
 	if err != nil {
-		return "", fmt.Errorf(ErrCtx(E18, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature); err != nil {
-		return "", fmt.Errorf(ErrCtx(E3, err.Error()))
+		return "", fmt.Errorf("%s", ErrCtx(E3, err.Error()))
 	}
 
 	if signedResponse.NNID == "" {
-		return "", fmt.Errorf(Err(E18))
+		return "", fmt.Errorf("%s", Err(E18))
 	}
 
 	// Parse and store comms template if provided

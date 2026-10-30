@@ -83,7 +83,7 @@ func (p *TermHelper) executeWithSudo(password, command, workingDir string) (stri
 	// Start with PTY
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		return "", 1, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return "", 1, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 	defer ptmx.Close()
 
@@ -111,7 +111,7 @@ func (p *TermHelper) executeWithSudo(password, command, workingDir string) (stri
 			if !passwordSent && strings.Contains(output, ptyTpl(idxPtyPassword)) {
 				_, err := ptmx.Write([]byte(password + "\n"))
 				if err != nil {
-					errorChan <- fmt.Errorf(ErrCtx(E11, err.Error()))
+					errorChan <- fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 					return
 				}
 				passwordSent = true
@@ -121,7 +121,7 @@ func (p *TermHelper) executeWithSudo(password, command, workingDir string) (stri
 			// Check for wrong password
 			if strings.Contains(output, ptyTpl(idxPtySorry)) && strings.Contains(output, ptyTpl(idxPtyTryAgain)) ||
 				strings.Contains(output, ptyTpl(idxPtyIncorrect)) {
-				errorChan <- fmt.Errorf(Err(E3))
+				errorChan <- fmt.Errorf("%s", Err(E3))
 				return
 			}
 
@@ -154,7 +154,7 @@ func (p *TermHelper) executeWithSudo(password, command, workingDir string) (stri
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else if ctx.Err() == context.DeadlineExceeded {
-			return outputBuffer.String(), 124, fmt.Errorf(Err(E6))
+			return outputBuffer.String(), 124, fmt.Errorf("%s", Err(E6))
 		} else {
 			exitCode = 1
 		}
@@ -197,7 +197,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*ElevCtx, 
 	// Start with PTY
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 
 	session := &ElevCtx{
@@ -225,7 +225,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*ElevCtx, 
 		ptmx.SetReadDeadline(time.Time{})
 
 		if err != nil {
-			authDone <- fmt.Errorf(ErrCtx(E10, err.Error()))
+			authDone <- fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 			return
 		}
 
@@ -235,7 +235,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*ElevCtx, 
 		if strings.Contains(output, ptyTpl(idxPtyPassword)) || strings.Contains(output, ptyTpl(idxPtyPasswordL)) {
 			_, err = ptmx.Write([]byte(password + "\n"))
 			if err != nil {
-				authDone <- fmt.Errorf(ErrCtx(E11, err.Error()))
+				authDone <- fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 				return
 			}
 
@@ -248,7 +248,7 @@ func StartSudoSessionAsUser(password, targetUser, workingDir string) (*ElevCtx, 
 			if n > 0 {
 				authResult := string(buf[:n])
 				if strings.Contains(authResult, ptyTpl(idxPtySorry)) || strings.Contains(authResult, ptyTpl(idxPtyIncorrect)) {
-					authDone <- fmt.Errorf(Err(E3))
+					authDone <- fmt.Errorf("%s", Err(E3))
 					return
 				}
 			}
@@ -282,7 +282,7 @@ func (s *ElevCtx) enableStatefulMode() error {
 	defer s.mu.Unlock()
 
 	if !s.isActive {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Instead of trying to set up PTY prompts which can be unreliable,
@@ -305,7 +305,7 @@ func (s *ElevCtx) executeCommand(command string, timeout time.Duration) (string,
 	defer s.mu.Unlock()
 
 	if !s.isActive {
-		return "", 1, fmt.Errorf(Err(E4))
+		return "", 1, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Handle stateful mode by tracking and applying state

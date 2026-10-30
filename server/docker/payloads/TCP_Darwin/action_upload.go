@@ -20,7 +20,7 @@ type SendMsg struct{}
 func (c *SendMsg) execute(ctx *OpCtx, args []string) OpResult {
 	if len(args) == 0 {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E1)),
+			Error:       fmt.Errorf("%s", Err(E1)),
 			EStr: Err(E1),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),
@@ -83,13 +83,13 @@ func (c *SendMsg) execute(ctx *OpCtx, args []string) OpResult {
 // HandleUploadChunk function from action_upload.go
 func HandleUploadChunk(cmd Msg, ctx *OpCtx) (*OpResult, error) {
 	if cmd.Data == "" {
-		return nil, fmt.Errorf(Err(E24))
+		return nil, fmt.Errorf("%s", Err(E24))
 	}
 
 	// Decode chunk data
 	chunkData, err := base64.StdEncoding.DecodeString(cmd.Data)
 	if err != nil {
-		return nil, fmt.Errorf(Err(E18))
+		return nil, fmt.Errorf("%s", Err(E18))
 	}
 
 	// Get or create upload info
@@ -122,7 +122,7 @@ func HandleUploadChunk(cmd Msg, ctx *OpCtx) (*OpResult, error) {
 		uploadInfo.Chunks = nil
 		delete(commandQueue.activeUploads, cmd.Filename)
 		commandQueue.mu.Unlock()
-		return nil, fmt.Errorf(Err(E24))
+		return nil, fmt.Errorf("%s", Err(E24))
 	}
 
 	commandQueue.mu.Unlock()
@@ -148,12 +148,12 @@ func HandleUploadChunk(cmd Msg, ctx *OpCtx) (*OpResult, error) {
 		// Create parent directories if needed
 		// Use NetworkAwareMkdirAll instead of os.MkdirAll
 		if err := NetworkAwareMkdirAll(filepath.Dir(finalPath), 0755); err != nil {
-			return nil, fmt.Errorf(Err(E11))
+			return nil, fmt.Errorf("%s", Err(E11))
 		}
 
 		// Assemble and write file
 		if err := assembleAndWriteFile(uploadInfo, finalPath); err != nil {
-			return nil, fmt.Errorf(Err(E11))
+			return nil, fmt.Errorf("%s", Err(E11))
 		}
 
 		// Clean up memory
@@ -185,7 +185,7 @@ func assembleAndWriteFile(info *SI, finalPath string) error {
 	// Use NetworkAwareOpenFile instead of os.Create
 	finalFile, err := NetworkAwareOpenFile(finalPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf(Err(E11))
+		return fmt.Errorf("%s", Err(E11))
 	}
 	defer finalFile.Close()
 
@@ -193,10 +193,10 @@ func assembleAndWriteFile(info *SI, finalPath string) error {
 	for i := 0; i < info.TotalChunks; i++ {
 		chunk, exists := info.Chunks[i]
 		if !exists {
-			return fmt.Errorf(Err(E24))
+			return fmt.Errorf("%s", Err(E24))
 		}
 		if _, err := finalFile.Write(chunk); err != nil {
-			return fmt.Errorf(Err(E11))
+			return fmt.Errorf("%s", Err(E11))
 		}
 
 		// Clear chunk from memory as we write

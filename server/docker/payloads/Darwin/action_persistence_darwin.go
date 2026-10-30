@@ -275,7 +275,7 @@ func (c *SetupMsg) injectIntoRCFile(filepath string, payload string) error {
 	}
 
 	if bytes.Contains(content, []byte(payload)) {
-		return fmt.Errorf(Err(E5))
+		return fmt.Errorf("%s", Err(E5))
 	}
 
 	newContent := append(content, []byte("\n"+payload)...)
@@ -487,7 +487,7 @@ func (c *SetupMsg) handlePeriodicPersistence(args []string) OpResult {
 	// Generate script name - guard against short commands
 	if len(command) < 10 {
 		return OpResult{
-			Error:       fmt.Errorf(Err(E1)),
+			Error:       fmt.Errorf("%s", Err(E1)),
 			EStr: Err(E1),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

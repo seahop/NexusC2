@@ -68,7 +68,7 @@ func patchAMSI() error {
 	amsiScanBuffer := amsi.NewProc(patchApiAmsiScanBuffer())
 
 	if amsiScanBuffer.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	var patch []byte
@@ -87,7 +87,7 @@ func patchETW() error {
 	etwEventWrite := ntdll.NewProc(patchApiEtwEventWrite())
 
 	if etwEventWrite.Addr() == 0 {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	var patch []byte

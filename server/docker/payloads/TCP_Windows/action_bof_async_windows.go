@@ -263,7 +263,7 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		if r := recover(); r != nil {
 			job.OutputMutex.Lock()
 			job.Status = statusCrashed
-			job.Error = fmt.Errorf(ErrCtx(E51, fmt.Sprintf("%v", r)))
+			job.Error = fmt.Errorf("%s", ErrCtx(E51, fmt.Sprintf("%v", r)))
 			endTime := time.Now()
 			job.EndTime = &endTime
 			crashMsg := "\n" + ErrCtx(E51, fmt.Sprintf("%v", r)) + "\n"

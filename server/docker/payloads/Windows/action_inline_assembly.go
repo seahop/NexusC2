@@ -217,7 +217,7 @@ func processCLRWork(req clrWorkRequest) (result clrWorkResult) {
 		if r := recover(); r != nil {
 			cachedRuntimeHost = nil
 			cachedAppDomain = nil
-			result = clrWorkResult{"", -1, fmt.Errorf(Err(E52))}
+			result = clrWorkResult{"", -1, fmt.Errorf("%s", Err(E52))}
 		}
 	}()
 
@@ -229,14 +229,14 @@ func processCLRWork(req clrWorkRequest) (result clrWorkResult) {
 	if cachedRuntimeHost == nil {
 		host, err := clr.LoadCLR(req.targetRuntime)
 		if err != nil {
-			return clrWorkResult{"", -1, fmt.Errorf(Err(E52))}
+			return clrWorkResult{"", -1, fmt.Errorf("%s", Err(E52))}
 		}
 		cachedRuntimeHost = unsafe.Pointer(host)
 
 		ad, domErr := clr.GetAppDomain(host)
 		if domErr != nil {
 			cachedRuntimeHost = nil
-			return clrWorkResult{"", -1, fmt.Errorf(Err(E52))}
+			return clrWorkResult{"", -1, fmt.Errorf("%s", Err(E52))}
 		}
 		cachedAppDomain = unsafe.Pointer(ad)
 		appDomain = ad
@@ -246,7 +246,7 @@ func processCLRWork(req clrWorkRequest) (result clrWorkResult) {
 
 	safeArray, saErr := clr.CreateSafeArray(req.assemblyBytes)
 	if saErr != nil {
-		return clrWorkResult{"", -1, fmt.Errorf(Err(E52))}
+		return clrWorkResult{"", -1, fmt.Errorf("%s", Err(E52))}
 	}
 
 	assembly, loadErr := appDomain.Load_3(safeArray)
@@ -312,7 +312,7 @@ func executeCLRWithCapture(assemblyBytes []byte, arguments []string) (string, in
 		}
 		return res.output, exitCode, res.err
 	case <-time.After(120 * time.Second):
-		return "", -1, fmt.Errorf(Err(E9))
+		return "", -1, fmt.Errorf("%s", Err(E9))
 	}
 }
 

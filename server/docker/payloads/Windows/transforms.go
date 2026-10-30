@@ -113,7 +113,7 @@ func applyTransforms(data []byte, transforms []Transform) (*TransformResult, err
 			result.Data = appendBytes(result.Data, padding)
 			result.AppendLength = t.Length
 		default:
-			return nil, fmt.Errorf(Err(E18))
+			return nil, fmt.Errorf("%s", Err(E18))
 		}
 		if err != nil {
 			return nil, err
@@ -165,7 +165,7 @@ func reverseTransforms(data []byte, transforms []Transform, prependLen, appendLe
 			}
 			result = stripAppend(result, length)
 		default:
-			return nil, fmt.Errorf(Err(E18))
+			return nil, fmt.Errorf("%s", Err(E18))
 		}
 
 		if err != nil {
@@ -240,14 +240,14 @@ func encodeNetBIOS(data []byte) []byte {
 
 func decodeNetBIOS(data []byte) ([]byte, error) {
 	if len(data)%2 != 0 {
-		return nil, fmt.Errorf(Err(E18))
+		return nil, fmt.Errorf("%s", Err(E18))
 	}
 	result := make([]byte, len(data)/2)
 	for i := 0; i < len(data); i += 2 {
 		high := data[i] - 'a'
 		low := data[i+1] - 'a'
 		if high > 15 || low > 15 {
-			return nil, fmt.Errorf(Err(E18))
+			return nil, fmt.Errorf("%s", Err(E18))
 		}
 		result[i/2] = (high << 4) | low
 	}

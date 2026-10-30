@@ -66,7 +66,7 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		if !exists {
 			return &OpResult{
 				Cmd:     cmd,
-				Error:       fmt.Errorf(Err(E4)),
+				Error:       fmt.Errorf("%s", Err(E4)),
 				EStr: Err(E4),
 				EC:    1,
 				Done: time.Now().Format(time.RFC3339),
@@ -76,7 +76,7 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		if !downloadInfo.InProgress {
 			return &OpResult{
 				Cmd:     cmd,
-				Error:       fmt.Errorf(Err(E4)),
+				Error:       fmt.Errorf("%s", Err(E4)),
 				EStr: Err(E4),
 				EC:    1,
 				Done: time.Now().Format(time.RFC3339),
@@ -120,7 +120,7 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 	if len(args) == 0 {
 		return &OpResult{
 			Cmd:     cmd,
-			Error:       fmt.Errorf(Err(E1)),
+			Error:       fmt.Errorf("%s", Err(E1)),
 			EStr: Err(E1),
 			EC:    1,
 			Done: time.Now().Format(time.RFC3339),

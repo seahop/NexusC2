@@ -80,14 +80,14 @@ func NewPipeListener(pipeName string) (*NamedListener, error) {
 	// Convert to UTF16
 	pipePathPtr, err := windows.UTF16PtrFromString(pipePath)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Create restricted security descriptor for the pipe
 	// Only SYSTEM and current user can access the pipe
 	sa, err := createPipeSecurityAttributes()
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E18, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E18, err.Error()))
 	}
 
 	// Create the named pipe
@@ -104,7 +104,7 @@ func NewPipeListener(pipeName string) (*NamedListener, error) {
 		sa, // Restricted to SYSTEM and current user
 	)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 
 	return &NamedListener{
@@ -118,7 +118,7 @@ func (pl *NamedListener) Accept() (*NamedConn, error) {
 	pl.mu.Lock()
 	if pl.closed {
 		pl.mu.Unlock()
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 	handle := pl.handle
 	pl.mu.Unlock()
@@ -127,7 +127,7 @@ func (pl *NamedListener) Accept() (*NamedConn, error) {
 	overlapped := &windows.Overlapped{}
 	event, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
-		return nil, fmt.Errorf(ErrCtx(E37, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E37, err.Error()))
 	}
 	defer windows.CloseHandle(event)
 	overlapped.HEvent = event
@@ -138,7 +138,7 @@ func (pl *NamedListener) Accept() (*NamedConn, error) {
 		// Wait for connection
 		windows.WaitForSingleObject(event, windows.INFINITE)
 	} else if err != nil && err != windows.ERROR_PIPE_CONNECTED {
-		return nil, fmt.Errorf(ErrCtx(E12, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E12, err.Error()))
 	}
 
 	// Create connection wrapper
@@ -195,26 +195,26 @@ func (pc *NamedConn) ReadMessage() ([]byte, error) {
 	defer pc.mu.Unlock()
 
 	if pc.closed {
-		return nil, fmt.Errorf(Err(E4))
+		return nil, fmt.Errorf("%s", Err(E4))
 	}
 
 	// Read 4-byte length header
 	header := make([]byte, 4)
 	if err := pc.readFull(header); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	length := uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16 | uint32(header[3])<<24
 
 	// Sanity check
 	if length > 10*1024*1024 { // 10MB max
-		return nil, fmt.Errorf(Err(E2))
+		return nil, fmt.Errorf("%s", Err(E2))
 	}
 
 	// Read message body
 	data := make([]byte, length)
 	if err := pc.readFull(data); err != nil {
-		return nil, fmt.Errorf(ErrCtx(E10, err.Error()))
+		return nil, fmt.Errorf("%s", ErrCtx(E10, err.Error()))
 	}
 
 	return data, nil
@@ -226,7 +226,7 @@ func (pc *NamedConn) WriteMessage(data []byte) error {
 	defer pc.mu.Unlock()
 
 	if pc.closed {
-		return fmt.Errorf(Err(E4))
+		return fmt.Errorf("%s", Err(E4))
 	}
 
 	// Create length header
@@ -240,12 +240,12 @@ func (pc *NamedConn) WriteMessage(data []byte) error {
 
 	// Write header
 	if err := pc.writeFull(header); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	// Write data
 	if err := pc.writeFull(data); err != nil {
-		return fmt.Errorf(ErrCtx(E11, err.Error()))
+		return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
 	}
 
 	return nil

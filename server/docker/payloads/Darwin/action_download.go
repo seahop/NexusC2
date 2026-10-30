@@ -214,14 +214,14 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Msg) (*OpRes
 	file, err := NetworkAwareOpenFile(filePath, os.O_RDONLY, 0)
 
 	if err != nil {
-		return nil, fmt.Errorf(Err(E10))
+		return nil, fmt.Errorf("%s", Err(E10))
 	}
 	defer file.Close()
 
 	// Get file information
 	_, err = file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf(Err(E10))
+		return nil, fmt.Errorf("%s", Err(E10))
 	}
 
 	const chunkSize = 512 * 1024 // 512KB chunks
@@ -230,7 +230,7 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Msg) (*OpRes
 	offset := int64(chunkNumber-1) * chunkSize
 	_, err = file.Seek(offset, 0)
 	if err != nil {
-		return nil, fmt.Errorf(Err(E10))
+		return nil, fmt.Errorf("%s", Err(E10))
 	}
 
 	// Read the chunk using buffer pool
@@ -239,11 +239,11 @@ func GetNextFileChunk(filePath string, chunkNumber int, originalCmd Msg) (*OpRes
 	chunk := *bufPtr
 	n, err := file.Read(chunk)
 	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf(Err(E10))
+		return nil, fmt.Errorf("%s", Err(E10))
 	}
 
 	if n == 0 {
-		return nil, fmt.Errorf(ErrCtx(E24, fmt.Sprintf("%d", chunkNumber)))
+		return nil, fmt.Errorf("%s", ErrCtx(E24, fmt.Sprintf("%d", chunkNumber)))
 	}
 
 	// Encode the chunk
