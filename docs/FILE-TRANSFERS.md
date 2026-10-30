@@ -144,7 +144,7 @@ Chunks arrive in GET poll responses as commands:
 
 ```json
 {
-  "command_type": 16,
+  "command_type": 5,
   "command": "upload",
   "filename": "payload_20250115_103000.exe",
   "remote_path": "C:\\Windows\\Temp\\payload.exe",
@@ -159,8 +159,8 @@ Chunks arrive in GET poll responses as commands:
 The agent maintains active uploads in memory:
 
 ```go
-type UploadInfo struct {
-    Chunks      map[int][]byte  // Chunk index → data
+type SI struct {
+    Chunks      map[int][]byte
     TotalChunks int
     RemotePath  string
     Filename    string
@@ -173,7 +173,7 @@ type UploadInfo struct {
 1. Base64 decode chunk data
 2. Store in `Chunks` map by index
 3. Update `LastUpdate` timestamp
-4. If last chunk received:
+4. If `CurrentChunk == TotalChunks - 1` (last chunk index received):
    - Create parent directories (with network share support)
    - Write chunks in order to destination file
    - Clear chunks from memory as written

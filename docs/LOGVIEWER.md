@@ -243,7 +243,7 @@ Output:
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-dir` | Log directory path | `/app/logs/commands` |
-| `-file` | Specific log file | Today's log |
+| `-file` | Specific log file | Last 7 days of logs |
 | `-agent` | Filter by agent ID (partial match) | None |
 | `-host` | Filter by hostname (partial match) | None |
 | `-ip` | Filter by IP (partial match) | None |
@@ -258,7 +258,7 @@ Output:
 | `-agents` | Show agent summary | `false` |
 | `-pending` | Show pending commands only | `false` |
 | `-errors` | Show errors only | `false` |
-| `-follow` | Follow log file in real-time | `false` |
+| `-follow` | Follow log file in real-time (only `-agent`, `-host`, `-ip` filters apply) | `false` |
 | `-from` | Start date (YYYY-MM-DD) | 7 days ago |
 | `-to` | End date (YYYY-MM-DD) | Today |
 | `-sort` | Sort by: time, agent, host, ip, user, command | `time` |

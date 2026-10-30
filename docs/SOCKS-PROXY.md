@@ -85,7 +85,7 @@ flowchart LR
 **Key Features:**
 - SSH-over-WebSocket tunnel for reliability
 - SOCKS5 protocol compliance
-- Two-layer authentication (SOCKS5 + SSH)
+- SSH-based authentication (no SOCKS5 user auth)
 - Connection pooling and limits
 - Stale connection cleanup
 - Dynamic keepalive based on agent callback rate
@@ -168,7 +168,7 @@ socks-ws stop 1080
 |------------|-------------|
 | UDP | UDP ASSOCIATE not supported (use socks-http for UDP) |
 | Concurrent | Max 50 concurrent tunnels per agent |
-| Linked Agents | Does NOT work through SMB/TCP linked agents |
+| Linked Agents | Works through SMB/TCP linked agents |
 | Authentication | No SOCKS5 user auth (SSH handles auth) |
 
 ---
@@ -380,8 +380,10 @@ socks-http stop 1080
 | Linux | `payloads/Linux/action_socks.go` | `payloads/Linux/action_socks_http.go` |
 | Windows | `payloads/Windows/action_socks.go` | `payloads/Windows/action_socks_http.go` |
 | macOS | `payloads/Darwin/action_socks.go` | `payloads/Darwin/action_socks_http.go` |
-| TCP Link | N/A | `payloads/TCP_*/action_socks_http.go` |
-| SMB Link | N/A | `payloads/SMB_Windows/action_socks_http.go` |
+| TCP Link (Windows) | `payloads/TCP_Windows/action_socks.go` | `payloads/TCP_*/action_socks_http.go` |
+| TCP Link (Linux) | `payloads/TCP_Linux/action_socks.go` | `payloads/TCP_*/action_socks_http.go` |
+| TCP Link (macOS) | `payloads/TCP_Darwin/action_socks.go` | `payloads/TCP_*/action_socks_http.go` |
+| SMB Link | `payloads/SMB_Windows/action_socks.go` | `payloads/SMB_Windows/action_socks_http.go` |
 
 ---
 

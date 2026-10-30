@@ -23,9 +23,6 @@ Shows all available options and examples.
 
 ### System Components
 ```bash
-sudo ./setup.sh --packages    # Install system packages only
-sudo ./setup.sh --go          # Install Go only
-sudo ./setup.sh --protoc      # Install Protocol Buffers compiler only
 sudo ./setup.sh --docker      # Install Docker only
 ```
 
@@ -33,9 +30,10 @@ sudo ./setup.sh --docker      # Install Docker only
 ```bash
 sudo ./setup.sh --certs       # Generate certificates only
 sudo ./setup.sh --secrets     # Generate database secrets only
-sudo ./setup.sh --build       # Build server binaries only
 sudo ./setup.sh --client      # Setup Python client venv only
 ```
+
+**Note:** All building happens inside Docker containers — no Go, protoc, or build tools are needed on the host.
 
 ## Combining Flags
 
@@ -46,10 +44,7 @@ You can combine multiple flags to run specific steps together:
 sudo ./setup.sh --certs --secrets
 
 # Regenerate everything project-specific
-sudo ./setup.sh --certs --secrets --build --client
-
-# Install just Go and protoc
-sudo ./setup.sh --go --protoc
+sudo ./setup.sh --certs --secrets --client
 ```
 
 ## Common Scenarios
@@ -60,18 +55,14 @@ If certificate generation failed during initial setup:
 sudo ./setup.sh --certs
 ```
 
-### Scenario 2: Build Failed
-If server binary build failed:
+### Scenario 2: Need to Rebuild Server Binaries
+Building happens automatically inside Docker containers. Rebuild with:
 ```bash
-sudo ./setup.sh --build
+cd server/docker
+docker compose build
 ```
 
-### Scenario 3: Need to Rebuild Everything After Code Changes
-```bash
-sudo ./setup.sh --build
-```
-
-### Scenario 4: Need Fresh Python Virtual Environment
+### Scenario 3: Need Fresh Python Virtual Environment
 ```bash
 sudo ./setup.sh --client
 ```
@@ -82,10 +73,10 @@ This will remove the old venv and create a fresh one.
 sudo ./setup.sh --docker
 ```
 
-### Scenario 6: Complete Project Setup (Skip System Packages)
-If you already have Go, Docker, etc. installed:
+### Scenario 6: Complete Project Setup (Docker Already Installed)
+If Docker is already installed:
 ```bash
-sudo ./setup.sh --certs --secrets --build --client
+sudo ./setup.sh --certs --secrets --client
 ```
 
 ## Features

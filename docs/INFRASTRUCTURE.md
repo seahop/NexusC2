@@ -55,7 +55,7 @@ graph TB
 | Port | 5432 (internal only) |
 | Image | Alpine 3.20 + PostgreSQL |
 | Database | `ops` |
-| User | `postgres` |
+| User | `operator` (app), `postgres` (superuser) |
 
 **Configuration:**
 - Authentication: SCRAM-SHA-256
@@ -122,14 +122,14 @@ retries: 5
 | User | nexus (UID 1001) |
 
 **Responsibilities:**
-- Accept incoming agent connections via gRPC
+- Accept incoming agent connections via HTTP/HTTPS listeners
 - Track active agents and their state
 - Distribute commands to agents
 - Process agent results
-- Manage HTTP/HTTPS/SMB listeners
+- Manage HTTP/HTTPS/SMB/TCP listeners
 
 **Key Components:**
-- **gRPC Server**: Bidirectional streaming with agents
+- **gRPC Server**: Bidirectional streaming with WebSocket and REST API services
 - **Command Queue**: Per-agent command buffers
 - **Listener Manager**: HTTP/HTTPS/TCP listeners
 - **Result Cache**: 1000 items, 5-minute TTL

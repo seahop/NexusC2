@@ -80,7 +80,7 @@ These IDs are local to the edge agent and map to the full clientID on the server
 The operator issues a `link` command on the edge agent:
 
 ```
-link smb <target_host> [pipe_name]
+link smb <target_host> <pipe_name>
 ```
 
 Example:
@@ -400,8 +400,19 @@ func readMessage(conn net.Conn) ([]byte, error) {
 | Type | Description |
 |------|-------------|
 | `data` | Regular command/result payload |
-| `handshake` | Initial registration from SMB agent |
+| `handshake` | Initial registration from linked agent |
 | `disconnect` | Graceful unlink notification |
+| `ping` | Heartbeat probe from edge agent |
+| `pong` | Heartbeat response from linked agent |
+
+### Heartbeat
+
+The edge agent sends periodic heartbeat pings to detect disconnected links:
+
+| Setting | Value |
+|---------|-------|
+| Heartbeat Interval | 60 seconds |
+| Mechanism | Edge sends `ping`, linked agent replies with `pong` |
 
 ---
 
@@ -492,8 +503,8 @@ Linked agents rotate secrets after each exchange, just like direct agents.
 
 | Command | Description |
 |---------|-------------|
-| `link smb <host> [pipe]` | Connect to SMB agent (Windows edge) |
-| `link smb <host> [pipe] <DOMAIN\user> <password>` | Connect to SMB agent (Linux/macOS edge - requires credentials) |
+| `link smb <host> <pipe>` | Connect to SMB agent (Windows edge) |
+| `link smb <host> <pipe> [DOMAIN\user] [password]` | Connect to SMB agent (Linux/macOS edge - credentials optional, falls back to anonymous) |
 | `link tcp <host> [port]` | Connect to TCP agent |
 | `unlink <routing_id>` | Disconnect from linked agent |
 | `links` | List active links |
