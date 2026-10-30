@@ -1,6 +1,6 @@
 # API: Profiles
 
-[← Back to API Overview](/docs/api/)
+[← Back to API Overview](API.md)
 
 ---
 
