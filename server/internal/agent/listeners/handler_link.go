@@ -1025,22 +1025,6 @@ func (m *Manager) storeLinkHandshakeResponse(edgeClientID string, response *Link
 	m.linkRouting.StorePendingHandshakeResponse(edgeClientID, response)
 }
 
-// getPendingLinkResponses retrieves all pending link responses for an edge agent
-// This includes handshake responses and commands for linked agents
-// DEPRECATED: Use getPendingLinkResponsesSeparate instead for proper separation
-// Returns maps with configurable field names
-func (m *Manager) getPendingLinkResponses(edgeClientID string) ([]map[string]interface{}, error) {
-	handshakes, commands, err := m.getPendingLinkResponsesSeparate(edgeClientID)
-	if err != nil {
-		return nil, err
-	}
-	// Combine for backwards compatibility
-	var all []map[string]interface{}
-	all = append(all, handshakes...)
-	all = append(all, commands...)
-	return all, nil
-}
-
 // linkCommandToMap converts a LinkCommandItem to a map using configurable field names
 func (m *Manager) linkCommandToMap(item LinkCommandItem) map[string]interface{} {
 	cfg := m.linkRouting.malleable

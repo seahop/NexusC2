@@ -278,10 +278,7 @@ func (h *ListenerHandler) DeleteListener(c *gin.Context) {
 
 	// Stop via gRPC if not a link protocol (link protocols don't bind ports on server)
 	if !isLinkProtocol && h.agentClient != nil {
-		if err := h.agentClient.StopListener(ctx, name); err != nil {
-			// Log but continue with deletion
-			// The listener might already be stopped
-		}
+		_ = h.agentClient.StopListener(ctx, name)
 	}
 
 	// Delete from database

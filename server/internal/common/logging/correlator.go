@@ -313,7 +313,7 @@ func (lc *LogCorrelator) GetStats() map[string]interface{} {
 func FormatExecution(exec *CommandExecution) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("=== Command Execution ===\n"))
+	sb.WriteString("=== Command Execution ===\n")
 	sb.WriteString(fmt.Sprintf("Command ID: %v\n", exec.CommandID))
 	sb.WriteString(fmt.Sprintf("Agent ID: %s\n", exec.AgentID))
 

@@ -226,10 +226,9 @@ func (h *WSHandler) processNewConnection(content string) {
 		json.Unmarshal(connJSON, &connMap)
 		connMap["alias"] = alias.String
 
-		// Re-marshal with alias and update content
-		if newContent, err := json.Marshal(connMap); err == nil {
-			content = string(newContent)
-		}
+		// Re-marshal with alias for notification enrichment
+		newContent, _ := json.Marshal(connMap)
+		_ = newContent
 	}
 
 	connNotification := &pb.ConnectionNotification{

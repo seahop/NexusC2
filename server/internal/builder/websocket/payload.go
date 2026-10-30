@@ -1691,44 +1691,6 @@ var charsetMap = map[string]string{
 	"hex":          "4",
 }
 
-// profileUsesXorTransform checks if any HTTP profile DataBlock contains XOR transforms
-func (b *Builder) profileUsesXorTransform() bool {
-	if b.agentConfig == nil || b.listener == nil {
-		return false
-	}
-
-	checkDataBlock := func(db *config.DataBlock) bool {
-		if db == nil {
-			return false
-		}
-		for _, t := range db.Transforms {
-			if t.Type == "xor" {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Only check Data blocks (not ClientID) - unique keys are only applied to Data transforms
-	// This is because clientID must use static profile key for server to identify the agent
-
-	// Check POST profile Data
-	if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
-		if checkDataBlock(postProfile.Data) {
-			return true
-		}
-	}
-
-	// Check Server Response profile Data
-	if respProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile); respProfile != nil {
-		if checkDataBlock(respProfile.Data) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // modifyXorTransformValue creates a copy of DataBlock with XOR transform values replaced
 // This is used to embed per-build unique XOR keys instead of the static key from config.toml
 func modifyXorTransformValue(db *config.DataBlock, newXorKey string) *config.DataBlock {

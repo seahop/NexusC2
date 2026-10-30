@@ -22,7 +22,7 @@ type ActiveConnection struct {
 // TranslateResult takes a result map with randomized field names and returns
 // a new map with standard field names. If no field mapping is set, returns the original.
 func (c *ActiveConnection) TranslateResult(result map[string]interface{}) map[string]interface{} {
-	if c.FieldMapping == nil || len(c.FieldMapping) == 0 {
+	if len(c.FieldMapping) == 0 {
 		return result
 	}
 

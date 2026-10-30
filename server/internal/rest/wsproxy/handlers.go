@@ -324,13 +324,6 @@ func (p *ProxyHandlers) CreatePayload(c *gin.Context) {
 		return
 	}
 
-	// Get username from auth context
-	username, _ := c.Get("username")
-	usernameStr, _ := username.(string)
-	if usernameStr == "" {
-		usernameStr = "api-user"
-	}
-
 	// Set defaults
 	if req.Language == "" {
 		req.Language = "go"

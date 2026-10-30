@@ -51,7 +51,6 @@ type CircuitBreaker struct {
 	successCount    atomic.Int32
 	lastFailureTime atomic.Value
 
-	mu      sync.RWMutex
 	metrics *CircuitMetrics
 	done    chan struct{} // signals monitorCircuit to stop
 }

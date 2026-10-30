@@ -472,7 +472,7 @@ func outputTableFormat(entries []logging.LogEntry, verbose bool) {
 func formatExecutionVerbose(exec *logging.CommandExecution) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("=== Command Execution ===\n"))
+	sb.WriteString("=== Command Execution ===\n")
 	sb.WriteString(fmt.Sprintf("Command ID: %v\n", exec.CommandID))
 	sb.WriteString(fmt.Sprintf("Agent ID: %s\n", exec.AgentID))
 

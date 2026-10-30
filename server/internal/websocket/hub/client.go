@@ -268,38 +268,6 @@ func (c *Client) WritePump() {
 	}
 }
 
-// sendBatch sends a batch of messages efficiently
-func (c *Client) sendBatch(messages [][]byte) {
-	if len(messages) == 0 {
-		return
-	}
-
-	c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-
-	// For a single message, send directly
-	if len(messages) == 1 {
-		if err := c.Conn.WriteMessage(websocket.TextMessage, messages[0]); err != nil {
-			log.Printf("Error writing message for client %s: %v", c.Username, err)
-			c.Hub.UnregisterClient(c)
-			return
-		}
-		log.Printf("Sent message to client %s", c.Username)
-		return
-	}
-
-	// For multiple messages, consider combining if they're small
-	// or send individually if they're large
-	for _, msg := range messages {
-		if err := c.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			log.Printf("Error writing batch message for client %s: %v", c.Username, err)
-			c.Hub.UnregisterClient(c)
-			return
-		}
-	}
-
-	log.Printf("Sent batch of %d messages to client %s", len(messages), c.Username)
-}
-
 func (h *Hub) Run() {
 	for {
 		select {

@@ -5,7 +5,6 @@ import (
 	"c2/internal/common/config"
 	"c2/internal/common/transforms"
 	pb "c2/proto"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -43,31 +42,6 @@ func (m *Manager) validateClientID(clientID string) (*InitData, error) {
 		return nil, err
 	}
 	return initData, nil
-}
-
-// getHTTPXorKeyForAgent retrieves the per-build unique HTTP XOR key for an agent
-func (m *Manager) getHTTPXorKeyForAgent(clientID string) string {
-	// Try to get from InitData cache first
-	if initData, err := m.GetInitData(clientID); err == nil && initData.HTTPXorKey != "" {
-		log.Printf("[HTTPTransform] Using per-agent HTTP XOR key for %s (from init cache)", clientID)
-		return initData.HTTPXorKey
-	}
-
-	// Fall back to database lookup via connections table
-	var xorKey sql.NullString
-	err := m.db.QueryRow(`
-        SELECT i.http_xor_key FROM inits i
-        INNER JOIN connections c ON c.clientID = i.clientID::text
-        WHERE c.newclientID = $1 OR c.clientID = $1`,
-		clientID).Scan(&xorKey)
-
-	if err == nil && xorKey.Valid && xorKey.String != "" {
-		log.Printf("[HTTPTransform] Using per-agent HTTP XOR key for %s (from database)", clientID)
-		return xorKey.String
-	}
-
-	// No per-agent key found - will use profile's static key
-	return ""
 }
 
 // getRemoteIP extracts the real IP address from the request

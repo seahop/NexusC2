@@ -376,63 +376,6 @@ func (m *Manager) processInlineAssemblyResultOptimized(ctx context.Context, tx *
 	return nil, nil
 }
 
-// processInlineAssemblyResult handles inline-assembly command results
-// DEPRECATED: Use processInlineAssemblyResultOptimized for better performance
-func (m *Manager) processInlineAssemblyResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
-	log.Printf("[Inline-Assembly] Processing inline-assembly result from agent %s", agentID)
-
-	command := getResultString(result, "co")
-	commandDBID, _ := getResultFloat(result, "cb")
-	output := getResultString(result, "ou")
-	exitCode, _ := getResultFloat(result, "ec")
-
-	// Check if this is an async result
-	isAsync := strings.Contains(command, "async")
-
-	// Format the output based on what we received
-	var formattedOutput string
-	if output != "" {
-		formattedOutput = output
-	} else if exitCode == 1 {
-		formattedOutput = "[!] Inline-assembly execution failed - no output received"
-	} else {
-		formattedOutput = "[!] Inline-assembly execution completed with no output"
-	}
-
-	// Store in database
-	if commandDBID > 0 {
-		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO command_outputs (command_id, output, timestamp)
-            VALUES ($1, $2, CURRENT_TIMESTAMP)`,
-			int(commandDBID),
-			formattedOutput,
-		); err != nil {
-			return fmt.Errorf("failed to insert output: %v", err)
-		}
-		log.Printf("[Inline-Assembly] Stored output for command ID %d (async: %v, exit code: %.0f)",
-			int(commandDBID), isAsync, exitCode)
-	}
-
-	// Broadcast to WebSocket clients with special type
-	commandResult := map[string]interface{}{
-		"agent_id":   agentID,
-		"command_id": fmt.Sprintf("%d", int(commandDBID)),
-		"output":     output,
-		"timestamp":  time.Now().Format(time.RFC3339),
-		"status":     "completed",
-		"type":       "inline_assembly_result",
-		"exit_code":  exitCode,
-	}
-
-	if err := m.commandBuffer.BroadcastResult(commandResult); err != nil {
-		log.Printf("[Inline-Assembly] Failed to broadcast result: %v", err)
-	} else {
-		log.Printf("[Inline-Assembly] Successfully broadcast result for agent %s", agentID)
-	}
-
-	return nil
-}
-
 // processFileOperationResult handles upload/download chunk results
 func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}, processedChunks map[string]bool) error {
 	filename := getResultString(result, "fn")
@@ -524,14 +467,12 @@ func (m *Manager) processFileOperationResult(ctx context.Context, tx *sql.Tx, ag
 
 		// Store progress in database if we have a command_db_id
 		if commandDBID > 0 {
-			if _, err := tx.ExecContext(ctx, `
+			_, _ = tx.ExecContext(ctx, `
                 INSERT INTO command_outputs (command_id, output, timestamp)
                 VALUES ($1, $2, CURRENT_TIMESTAMP)`,
 				int(commandDBID),
 				fmt.Sprintf("Downloaded chunk %d/%d of %s", int(currentChunk), int(totalChunks), filename),
-			); err != nil {
-				// Silently ignore progress insert failures
-			}
+			)
 		}
 
 		// Queue next chunk if not the last one
@@ -608,68 +549,6 @@ func (m *Manager) processRegularCommandResultOptimized(ctx context.Context, tx *
 		CommandID: int(commandDBID),
 		Output:    output,
 	}, nil
-}
-
-// processRegularCommandResult - Original version (DEPRECATED, use processRegularCommandResultOptimized)
-func (m *Manager) processRegularCommandResult(ctx context.Context, tx *sql.Tx, agentID string, result map[string]interface{}) error {
-	commandDBID, okID := getResultFloat(result, "cb")
-	output := getResultString(result, "ou")
-
-	if !okID {
-		// Try parsing as json.Number in case it's coming as a string
-		if strID, ok := result["cb"].(string); ok {
-			if id, err := strconv.ParseFloat(strID, 64); err == nil {
-				commandDBID = id
-				okID = true
-			}
-		}
-		// Also try long name
-		if !okID {
-			if strID, ok := result["command_db_id"].(string); ok {
-				if id, err := strconv.ParseFloat(strID, 64); err == nil {
-					commandDBID = id
-					okID = true
-				}
-			}
-		}
-	}
-
-	if !okID {
-		return fmt.Errorf("missing or invalid command_db_id in result")
-	}
-
-	// Special handling for BOF_ASYNC messages
-	// Detect both legacy format (BOF_ASYNC_*) and new numeric format (1|, 2|, etc.)
-	if isBOFAsyncOutput(output) {
-		return m.processBOFAsyncResult(ctx, tx, agentID, int(commandDBID), output)
-	}
-
-	// Store regular command output in database
-	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO command_outputs (command_id, output, timestamp)
-        VALUES ($1, $2, CURRENT_TIMESTAMP)`,
-		int(commandDBID),
-		output,
-	); err != nil {
-		return fmt.Errorf("failed to insert command output: %v", err)
-	}
-
-	// Broadcast the result
-	commandResult := map[string]interface{}{
-		"agent_id":   agentID,
-		"command_id": fmt.Sprintf("%d", int(commandDBID)),
-		"output":     output,
-		"timestamp":  time.Now().Format(time.RFC3339),
-		"status":     "completed",
-	}
-
-	if err := m.commandBuffer.BroadcastResult(commandResult); err != nil {
-		log.Printf("[Regular Command] Failed to send command result: %v", err)
-	} else {
-		log.Printf("[Regular Command] Successfully sent command result for command ID %d", int(commandDBID))
-	}
-
-	return nil
 }
 
 // BOF async status codes (numeric format to avoid fingerprintable strings)

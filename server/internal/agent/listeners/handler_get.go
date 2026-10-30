@@ -229,10 +229,8 @@ func (m *Manager) handleGetRequest(w http.ResponseWriter, clientID string, cmdBu
 	}
 
 	// Send XOR encrypted response for all cases
-	if responseToEncrypt != nil {
-		m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn, responseProfile)
-		return
-	}
+	m.sendXOREncryptedResponse(w, responseToEncrypt, clientID, activeConn, responseProfile)
+	return
 
 normalCommand:
 	// Normal command processing - encrypt the command

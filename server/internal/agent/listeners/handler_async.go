@@ -107,8 +107,7 @@ type AsyncHandler struct {
 	workers        sync.WaitGroup
 	shutdownChan   chan struct{}
 	config         *config.ProcessorConfig
-	pendingBatches sync.Map
-	activeWorkers  atomic.Int32
+	activeWorkers atomic.Int32
 	priorityQueue  *PriorityQueue
 	metrics        *ProcessingMetrics
 }

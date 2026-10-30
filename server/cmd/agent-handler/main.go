@@ -294,7 +294,7 @@ func main() {
 				}
 			}
 
-			hasErrors := errorMetrics != nil && len(errorMetrics) > 0
+			hasErrors := len(errorMetrics) > 0
 
 			// Skip logging if idle (no active agents and no errors)
 			if activeAgents == 0 && !hasErrors {

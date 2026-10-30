@@ -142,9 +142,9 @@ func (h *Histogram) GetDistribution() map[string]interface{} {
 	}
 
 	distribution := make(map[string]float64)
-	for i, count := range h.counts[:len(h.counts)-1] {
+	for i := range h.counts[:len(h.counts)-1] {
 		label := fmt.Sprintf("≤%.0fms", h.buckets[i])
-		distribution[label] = float64(count.Load()) / float64(total) * 100
+		distribution[label] = float64(h.counts[i].Load()) / float64(total) * 100
 	}
 
 	if len(h.buckets) > 0 {

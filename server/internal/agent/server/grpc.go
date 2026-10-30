@@ -1775,7 +1775,7 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 			if len(activeJobs) == 0 {
 				output = "No active file transfer jobs"
 			} else {
-				output = fmt.Sprintf("Active file transfer jobs:\n")
+				output = "Active file transfer jobs:\n"
 				for _, job := range activeJobs {
 					output += fmt.Sprintf("[%d] %s: %s (%d%% - %d/%d bytes)\n",
 						job.JobID, job.Type, job.Filename, job.Progress, job.CurrentSize, job.TotalSize)
