@@ -377,8 +377,6 @@ func stripFilePathFromCommand(command string) string {
 	return parts[0] + " " + parts[2]
 }
 
-}
-
 // Update the GetCommand function in server/internal/agent/server/grpc.go
 // OPTIMIZED: Narrow critical section to minimize lock hold time
 func (s *GRPCServer) GetCommand(clientID string) ([]string, bool) {
