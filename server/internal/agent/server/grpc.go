@@ -377,46 +377,6 @@ func stripFilePathFromCommand(command string) string {
 	return parts[0] + " " + parts[2]
 }
 
-// truncateData truncates the data field for logging purposes
-func truncateData(data string, maxLen int) string {
-	if len(data) <= maxLen {
-		return data
-	}
-	return fmt.Sprintf("%s... [%d bytes total]", data[:maxLen], len(data))
-}
-
-// formatCommandForLog creates a log-friendly version of a command
-func formatCommandForLog(cmd Command) string {
-	// Create a copy with truncated data
-	logCmd := cmd
-	if len(cmd.Data) > 100 {
-		logCmd.Data = truncateData(cmd.Data, 100)
-	}
-
-	// Marshal the modified command
-	jsonBytes, err := json.Marshal(logCmd)
-	if err != nil {
-		return fmt.Sprintf("Command{ID: %s, Type: %s, DataLen: %d}",
-			cmd.CommandID, cmd.Command, len(cmd.Data))
-	}
-	return string(jsonBytes)
-}
-
-// formatCommandsForLog formats multiple commands for logging
-func formatCommandsForLog(cmds []Command) string {
-	logCmds := make([]Command, len(cmds))
-	for i, cmd := range cmds {
-		logCmds[i] = cmd
-		if len(cmd.Data) > 100 {
-			logCmds[i].Data = truncateData(cmd.Data, 100)
-		}
-	}
-
-	jsonBytes, err := json.Marshal(logCmds)
-	if err != nil {
-		return fmt.Sprintf("[%d commands]", len(cmds))
-	}
-	return string(jsonBytes)
 }
 
 // Update the GetCommand function in server/internal/agent/server/grpc.go

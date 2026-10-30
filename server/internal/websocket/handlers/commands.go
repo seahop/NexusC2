@@ -56,7 +56,6 @@ var (
 )
 
 type grpcQueuedMessage struct {
-	payload     map[string]interface{}
 	retryCount  int
 	enqueuedAt  time.Time
 	description string
@@ -860,54 +859,6 @@ func (h *WSHandler) sendSuccessMessage(client *hub.Client, message string, data 
 				log.Printf("Failed to broadcast command queue update: %v", err)
 			} else {
 				log.Printf("Successfully broadcast command queue update for agent %s", data.AgentID)
-			}
-		}()
-	}
-}
-
-// You may also want to add a similar broadcast when chunks are being processed
-func (h *WSHandler) broadcastCommandProgress(data struct {
-	Command      string `json:"command"`
-	AgentID      string `json:"agent_id"`
-	CommandID    string `json:"command_id"`
-	FileName     string `json:"filename"`
-	CurrentChunk int    `json:"currentChunk"`
-	TotalChunks  int    `json:"totalChunks"`
-	Data         string `json:"data"`
-	Timestamp    string `json:"timestamp"`
-}) {
-	progressMsg := struct {
-		Type string `json:"type"`
-		Data struct {
-			AgentID      string  `json:"agent_id"`
-			CommandID    string  `json:"command_id"`
-			Command      string  `json:"command"`
-			FileName     string  `json:"filename"`
-			CurrentChunk int     `json:"current_chunk"`
-			TotalChunks  int     `json:"total_chunks"`
-			Progress     float64 `json:"progress"`
-			Status       string  `json:"status"`
-		} `json:"data"`
-	}{
-		Type: "command_progress",
-	}
-
-	progressMsg.Data.AgentID = data.AgentID
-	progressMsg.Data.CommandID = data.CommandID
-	progressMsg.Data.Command = data.Command
-	progressMsg.Data.FileName = data.FileName
-	progressMsg.Data.CurrentChunk = data.CurrentChunk
-	progressMsg.Data.TotalChunks = data.TotalChunks
-	progressMsg.Data.Progress = float64(data.CurrentChunk) / float64(data.TotalChunks) * 100
-	progressMsg.Data.Status = "processing"
-
-	if msgJSON, err := json.Marshal(progressMsg); err == nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			if err := h.hub.BroadcastToAll(ctx, msgJSON); err != nil {
-				log.Printf("Failed to broadcast command progress: %v", err)
 			}
 		}()
 	}

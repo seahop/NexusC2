@@ -4,7 +4,6 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -333,14 +332,3 @@ func (h *CommandHandler) ClearQueue(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "queue cleared"})
 }
 
-// Helper to parse command payload
-func parsePayload(data interface{}) string {
-	if data == nil {
-		return ""
-	}
-	if s, ok := data.(string); ok {
-		return s
-	}
-	b, _ := json.Marshal(data)
-	return string(b)
-}
