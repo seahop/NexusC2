@@ -269,7 +269,7 @@ python main.py
 - Real-time events via Server-Sent Events (SSE)
 - Rate limiting and CORS support
 
-**See [REST API Reference](docs/REST_API.md) for complete endpoint documentation with curl examples.**
+**See [REST API Reference](docs/API.md) for complete endpoint documentation with curl examples.**
 
 A Python CLI tool is included at `server/scripts/nexus-api.py` for testing and automation:
 ```bash
@@ -337,7 +337,7 @@ This software is provided for authorized security testing purposes only. Users a
 
 - **[Full Documentation](https://nexusc2.io)** - Comprehensive guides, command reference, and architecture docs
 - **[Setup Guide](docs/SETUP.md)** - Installation and configuration guide
-- **[REST API Reference](docs/REST_API.md)** - Complete API endpoint reference with curl examples
+- **[REST API Reference](docs/API.md)** - Complete API endpoint reference with curl examples
 - **[Log Viewer](docs/LOGVIEWER.md)** - Command log analysis tool documentation
 - **[Docker Documentation](server/docker/README.md)** - Container deployment details
 
