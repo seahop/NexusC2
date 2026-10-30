@@ -17,7 +17,7 @@ NexusC2 supports execution of Beacon Object Files (BOFs), which are position-ind
 
 ## Architecture
 
-{{< mermaid >}}
+```mermaid
 flowchart TB
     subgraph Client["GUI Client"]
         SELECT[Select BOF + Arguments]
@@ -42,7 +42,7 @@ flowchart TB
     GET --> PARSE --> ALLOC --> RESOLVE --> EXEC --> CAPTURE
     CAPTURE -->|POST results| RECV
     RECV -->|Display| Client
-{{< /mermaid >}}
+```
 
 ---
 

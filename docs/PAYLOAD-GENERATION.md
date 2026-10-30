@@ -18,7 +18,7 @@ NexusC2 generates agent payloads using a Docker-based build system. Payloads are
 
 ## Architecture
 
-{{< mermaid >}}
+```mermaid
 flowchart TB
     subgraph Client["GUI Client"]
         REQ[Build Request]
@@ -44,7 +44,7 @@ flowchart TB
     OUT -->|3. Chunk Transfer<br/>256KB chunks| WS2
     WS2 --> SAVE
     SAVE --> BINARY[Payload Binary]
-{{< /mermaid >}}
+```
 
 ---
 

@@ -17,7 +17,7 @@ NexusC2 supports linking agents together via SMB named pipes, enabling command a
 
 ## Architecture
 
-{{< mermaid >}}
+```mermaid
 flowchart LR
     subgraph Internet["Internet"]
         SRV[NexusC2 Server]
@@ -36,7 +36,7 @@ flowchart LR
 
     SRV <-->|HTTP/HTTPS| EDGE
     EDGE <-->|Named Pipe| SMB1
-{{< /mermaid >}}
+```
 
 ---
 
@@ -162,7 +162,7 @@ go lm.handleIncomingData(link)
 
 ### Commands (Server → SMB Agent)
 
-{{< mermaid >}}
+```mermaid
 flowchart LR
     subgraph Server
         SRV[NexusC2]
@@ -176,7 +176,7 @@ flowchart LR
 
     SRV -->|GET Response| EDGE
     EDGE -->|Named Pipe| SMB
-{{< /mermaid >}}
+```
 
 **Flow:**
 1. Server receives GET from edge agent
@@ -195,7 +195,7 @@ flowchart LR
 
 ### Results (SMB Agent → Server)
 
-{{< mermaid >}}
+```mermaid
 flowchart RL
     subgraph Internal["Internal Host"]
         SMB[SMB Agent]
@@ -209,7 +209,7 @@ flowchart RL
 
     SMB -->|Named Pipe| EDGE
     EDGE -->|POST Request| SRV
-{{< /mermaid >}}
+```
 
 **Flow:**
 1. SMB agent sends encrypted results via named pipe

@@ -8,7 +8,7 @@ NexusC2 runs as a containerized microservices architecture using Docker Compose.
 
 ## Network Topology
 
-{{< mermaid >}}
+```mermaid
 graph TB
     subgraph Host["Host Network"]
         AH[Agent Handler Service<br/>gRPC :50051]
@@ -39,7 +39,7 @@ graph TB
     REST --> DB
     AH --> DB
     WS -.->|Docker API| BUILD
-{{< /mermaid >}}
+```
 
 ---
 

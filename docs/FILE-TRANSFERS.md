@@ -21,7 +21,7 @@ NexusC2 implements bidirectional file transfer between the server and agents usi
 
 ### Upload Flow (Server → Agent)
 
-{{< mermaid >}}
+```mermaid
 flowchart TB
     subgraph Client["GUI Client"]
         USELECT[Select File + Destination]
@@ -43,11 +43,11 @@ flowchart TB
     UAH -->|Queue chunks| URECV
     URECV --> UMEM --> UWRITE
     UWRITE --> DEST[Destination File]
-{{< /mermaid >}}
+```
 
 ### Download Flow (Agent → Server)
 
-{{< mermaid >}}
+```mermaid
 flowchart TB
     subgraph Client["GUI Client"]
         DCMD[Issue download command]
@@ -71,7 +71,7 @@ flowchart TB
     DCONT -->|POST chunk| DAH
     DAH --> DTRACK
     DTRACK --> DNOTIFY
-{{< /mermaid >}}
+```
 
 ---
 

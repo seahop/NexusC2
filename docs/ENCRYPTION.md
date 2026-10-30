@@ -16,7 +16,7 @@ NexusC2 implements a multi-layer encryption scheme for secure communication betw
 
 ### Initial Handshake
 
-{{< mermaid >}}
+```mermaid
 sequenceDiagram
     participant P as Payload
     participant S as Server
@@ -24,11 +24,11 @@ sequenceDiagram
     P->>S: RSA+AES Encrypted Registration<br/>(clientID, system info, seed)
     S->>P: RSA Signed Response<br/>(newGUID, signature)
     Note over P,S: Both derive secrets from seed:<br/>secret2 = HMAC(seed, initial_secret)<br/>secret1 = HMAC(seed, secret2)
-{{< /mermaid >}}
+```
 
 ### Ongoing Communication
 
-{{< mermaid >}}
+```mermaid
 sequenceDiagram
     participant P as Payload
     participant S as Server
@@ -38,7 +38,7 @@ sequenceDiagram
     P->>S: POST (AES-256-GCM Results)
     S->>P: Acknowledgment
     Note over P,S: KEY ROTATION after each exchange
-{{< /mermaid >}}
+```
 
 ---
 

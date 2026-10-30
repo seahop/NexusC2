@@ -18,7 +18,7 @@ NexusC2 supports in-memory execution of .NET assemblies (EXE and DLL) directly w
 
 ## Architecture
 
-{{< mermaid >}}
+```mermaid
 flowchart TB
     subgraph Client["GUI Client"]
         SELECT[Select Assembly + Arguments]
@@ -44,7 +44,7 @@ flowchart TB
     EXIT --> TOKEN --> COM --> CAPTURE --> CLR --> EXEC --> OUTPUT
     OUTPUT -->|POST results| RECV
     RECV -->|Display| Client
-{{< /mermaid >}}
+```
 
 ---
 
