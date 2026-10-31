@@ -363,6 +363,20 @@ class WebSocketThread(QObject):
         import faulthandler, sys as _sys
         faulthandler.enable(file=_sys.stderr)
         print(f"WebSocketThread: Starting _thread_main (thread={threading.current_thread().name})")
+
+        _qt_traced = [False]
+        def _qt_tracer(frame, event, arg):
+            if event == 'call':
+                fn = frame.f_code.co_filename
+                if 'PyQt6' in fn or 'sip' in fn:
+                    if not _qt_traced[0]:
+                        _qt_traced[0] = True
+                        import traceback as _tb
+                        stk = ''.join(_tb.format_stack(frame))
+                        print(f"BUG: PyQt6 called from asyncio thread!\n{stk}", flush=True)
+            return _qt_tracer
+        _sys.settrace(_qt_tracer)
+
         try:
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
