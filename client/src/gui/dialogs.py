@@ -23,7 +23,6 @@ def _ws_thread_entry(ctx):
     (a plain ``queue.Queue``).  This prevents SIP/PyQt6 from adopting the
     thread and installing QSocketNotifiers on asyncio-owned file descriptors.
     """
-    print(f"_ws_thread_entry: starting (thread={threading.current_thread().name})")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     ctx.loop = loop
@@ -32,10 +31,8 @@ def _ws_thread_entry(ctx):
     try:
         loop.run_until_complete(_ws_run_async(ctx))
     except Exception as e:
-        print(f"_ws_thread_entry: error: {e}")
         ctx.msg_queue.put(('__signal__', 'connected', (False, f"Error: {str(e)}")))
     finally:
-        print("_ws_thread_entry: cleaning up")
         if ctx.ws_client and ctx.ws_client.connected:
             try:
                 loop.run_until_complete(ctx.ws_client.disconnect())
@@ -52,13 +49,11 @@ async def _ws_run_async(ctx):
     initial_connection = True
 
     while ctx.running:
-        print("_ws_run_async: Creating fresh WebSocketClient")
         ws = WebSocketClient()
         ctx.ws_client = ws
         if ctx.db is not None:
             ws.db = ctx.db
 
-        print(f"_ws_run_async: Connecting (initial={initial_connection}, attempt={reconnect_attempts + 1})")
         try:
             connect_task = asyncio.create_task(
                 ws.connect(ctx.username, ctx.host, ctx.port)
@@ -75,28 +70,23 @@ async def _ws_run_async(ctx):
                 except asyncio.CancelledError:
                     pass
             if shutdown_task in done:
-                print("_ws_run_async: Shutdown requested during connect")
                 return
         except Exception as e:
-            print(f"_ws_run_async: Connection attempt failed: {e}")
             ws.connected = False
 
         if not ws.connected:
             if initial_connection:
-                print("_ws_run_async: Initial connection failed")
                 ctx.msg_queue.put(('__signal__', 'connected', (False, "Failed to connect to server. Please ensure the server is running and try again.")))
                 ctx.ws_client = None
                 return
             else:
                 reconnect_attempts += 1
-                print(f"_ws_run_async: Reconnect attempt {reconnect_attempts}/{max_reconnect_attempts} failed")
                 if reconnect_attempts >= max_reconnect_attempts:
                     ctx.msg_queue.put(('__signal__', 'connected', (False, f"Failed to reconnect after {max_reconnect_attempts} attempts. Please reconnect manually.")))
                     ctx.ws_client = None
                     return
                 ctx.ws_client = None
                 wait_time = min(5 * reconnect_attempts, 15)
-                print(f"_ws_run_async: Waiting {wait_time}s before retry")
                 ctx.msg_queue.put(('__signal__', 'connected', (False, f"Connection lost. Retrying in {wait_time} seconds... (Attempt {reconnect_attempts}/{max_reconnect_attempts})")))
                 try:
                     await asyncio.wait_for(ctx.shutdown_event.wait(), timeout=wait_time)
@@ -105,7 +95,6 @@ async def _ws_run_async(ctx):
                     pass
                 continue
 
-        print("_ws_run_async: Connected")
         ctx.msg_queue.put(('__signal__', 'connected', (True, "Connected successfully.")))
         initial_connection = False
         reconnect_attempts = 0
@@ -124,12 +113,11 @@ async def _ws_run_async(ctx):
                 pass
 
         if shutdown_task in done:
-            print("_ws_run_async: Shutdown requested during receive")
             if ctx.ws_client:
                 try:
                     await ctx.ws_client.disconnect()
-                except Exception as e:
-                    print(f"_ws_run_async: Disconnect error: {e}")
+                except Exception:
+                    pass
             return
 
         if receive_task in done:
@@ -138,24 +126,22 @@ async def _ws_run_async(ctx):
             except (asyncio.CancelledError, asyncio.InvalidStateError):
                 exc = None
             if exc:
-                print(f"_ws_run_async: Receive loop error: {exc}")
                 ctx.msg_queue.put(('__signal__', 'log_message', (f"Error processing message: {exc}",)))
 
         if ctx.running:
-            print("_ws_run_async: Connection lost, cleaning up")
             if ctx.ws_client:
                 try:
                     await ctx.ws_client.disconnect()
-                except Exception as e:
-                    print(f"_ws_run_async: Disconnect error: {e}")
+                except Exception:
+                    pass
                 ctx.ws_client = None
             await asyncio.sleep(0.1)
         else:
             if ctx.ws_client:
                 try:
                     await ctx.ws_client.disconnect()
-                except Exception as e:
-                    print(f"_ws_run_async: Final disconnect error: {e}")
+                except Exception:
+                    pass
             break
 
 
@@ -167,7 +153,6 @@ async def _ws_receive_loop(ctx):
             if message_data:
                 ctx.msg_queue.put(message_data)
         except Exception as e:
-            print(f"_ws_receive_loop: Error: {e}")
             ctx.msg_queue.put(('__signal__', 'log_message', (f"Error processing message: {str(e)}",)))
             if ctx.ws_client:
                 ctx.ws_client.connected = False
@@ -189,14 +174,14 @@ def _ws_cleanup_loop(ctx):
             ctx.loop.run_until_complete(
                 asyncio.gather(*pending, return_exceptions=True)
             )
-    except Exception as e:
-        print(f"_ws_cleanup_loop: task cleanup error: {e}")
+    except Exception:
+        pass
     try:
         if ctx.loop.is_running():
             ctx.loop.stop()
         ctx.loop.close()
-    except Exception as e:
-        print(f"_ws_cleanup_loop: loop close error: {e}")
+    except Exception:
+        pass
     ctx.loop = None
 
 class _ThreadContext:
@@ -372,8 +357,6 @@ class WebSocketThread(QObject):
     # thread never touches this QObject.
 
     def stop(self):
-        """Stop the thread cleanly"""
-        print("WebSocketThread: Stop requested")
         self.running = False
         
         # Signal shutdown event if it exists
