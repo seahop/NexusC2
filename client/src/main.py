@@ -1,6 +1,8 @@
 import sys
 import os
 import signal
+import traceback
+import threading
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QPalette, QColor, QIcon
@@ -73,6 +75,16 @@ def qt_message_handler(msg_type, context, message):
         logger.info(f"Qt: {message}")
     elif msg_type == QtMsgType.QtWarningMsg:
         logger.warning(f"Qt: {message} (file: {context.file}, line: {context.line})")
+        if 'QSocketNotifier' in message:
+            tb = ''.join(traceback.format_stack())
+            tid = threading.current_thread().name
+            logger.warning(f"QSocketNotifier trace (thread={tid}):\n{tb}")
+            all_frames = sys._current_frames()
+            for t_id, frame in all_frames.items():
+                t_name = next((t.name for t in threading.enumerate() if t.ident == t_id), str(t_id))
+                stk = ''.join(traceback.format_stack(frame))
+                logger.warning(f"Thread {t_name} ({t_id}):\n{stk}")
+            flush_logs()
     elif msg_type == QtMsgType.QtCriticalMsg:
         logger.error(f"Qt Critical: {message} (file: {context.file}, line: {context.line})")
     elif msg_type == QtMsgType.QtFatalMsg:

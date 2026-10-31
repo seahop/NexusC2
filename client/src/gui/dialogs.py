@@ -360,7 +360,9 @@ class WebSocketThread(QObject):
     def _thread_main(self):
         """Thread target — runs asyncio in a plain thread so Qt's event
         dispatcher never touches the event loop's file descriptors."""
-        print("WebSocketThread: Starting _thread_main")
+        import faulthandler, sys as _sys
+        faulthandler.enable(file=_sys.stderr)
+        print(f"WebSocketThread: Starting _thread_main (thread={threading.current_thread().name})")
         try:
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
