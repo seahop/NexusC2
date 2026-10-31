@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QDialog, QSpinBox, QFormLayout,
                             QLineEdit, QPushButton, QComboBox, QHBoxLayout,
                             QVBoxLayout, QMessageBox, QFileDialog, QProgressDialog, QTabWidget, QWidget,
                             QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit, QTextEdit)
-from PyQt6.QtCore import QThread, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
+from PyQt6.QtCore import QObject, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
 from PyQt6.QtGui import QPixmap, QIcon
 from version import get_version_info, APP_NAME, APP_DESCRIPTION
 from utils.websocket_client import WebSocketClient
@@ -27,7 +27,7 @@ class LoadingProgressDialog(QProgressDialog):
         self.setLabelText(message)
         self.setValue(progress)
 
-class WebSocketThread(QThread):
+class WebSocketThread(QObject):
     connected = pyqtSignal(bool, str)
     disconnected = pyqtSignal()
     message_received = pyqtSignal(str)
@@ -37,13 +37,13 @@ class WebSocketThread(QThread):
     connection_update = pyqtSignal(dict)
     command_response = pyqtSignal(dict)
     command_result = pyqtSignal(dict)
-    command_queued_data = pyqtSignal(dict)  # Signal to update command_history cache when command is queued
+    command_queued_data = pyqtSignal(dict)
     downloads_update = pyqtSignal(list)
     download_chunk = pyqtSignal(dict)
     upload_response = pyqtSignal(dict)
     link_update = pyqtSignal(dict)
-    profiles_updated = pyqtSignal(dict)  # Signal for profile uploads/updates
-    agent_checkin_received = pyqtSignal(dict)  # Thread-safe agent checkin signal
+    profiles_updated = pyqtSignal(dict)
+    agent_checkin_received = pyqtSignal(dict)
     agent_renamed_received = pyqtSignal(dict)
     agent_tags_updated_received = pyqtSignal(dict)
 
@@ -57,10 +57,10 @@ class WebSocketThread(QThread):
         self.running = True
         self.loop = None
         self.current_dialog = None
-        self.shutdown_event = None  # Add shutdown event for clean stopping
-        # Track command_ids sent from THIS client to skip duplicate command_queued displays
+        self.shutdown_event = None
         self.locally_sent_commands = set()
-        self._commands_lock = threading.Lock()  # Thread safety for locally_sent_commands
+        self._commands_lock = threading.Lock()
+        self._thread = None
 
     def add_local_command(self, command_id):
         """Thread-safe add to locally_sent_commands"""
@@ -308,16 +308,42 @@ class WebSocketThread(QThread):
         else:
             print("WebSocketThread: No event loop to clean up")
 
-    def run(self):
-        """Main thread run method"""
-        print("WebSocketThread: Starting run method")
+    def start(self):
+        """Start the background thread (QThread-compatible API)."""
+        self.running = True
+        self._thread = threading.Thread(target=self._thread_main, daemon=True)
+        self._thread.start()
+
+    def isRunning(self):
+        """Check if the background thread is alive (QThread-compatible API)."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def wait(self, timeout_ms=None):
+        """Wait for the background thread to finish (QThread-compatible API).
+        Returns True if the thread finished within the timeout."""
+        if self._thread is None:
+            return True
+        timeout_s = timeout_ms / 1000.0 if timeout_ms else None
+        self._thread.join(timeout=timeout_s)
+        return not self._thread.is_alive()
+
+    def terminate(self):
+        """Best-effort force-stop (QThread-compatible API)."""
+        self.running = False
+        if self.shutdown_event and self.loop and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self.shutdown_event.set)
+        if self.loop and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+
+    def _thread_main(self):
+        """Thread target — runs asyncio in a plain thread so Qt's event
+        dispatcher never touches the event loop's file descriptors."""
+        print("WebSocketThread: Starting _thread_main")
         try:
             self.loop = asyncio.new_event_loop()
-            self.shutdown_event = asyncio.Event()  # Create shutdown event
-            
-            # Run the async implementation
+            asyncio.set_event_loop(self.loop)
+            self.shutdown_event = asyncio.Event()
             self.loop.run_until_complete(self._run_async())
-            
         except Exception as e:
             print(f"WebSocketThread: Run method error: {e}")
             self.connected.emit(False, f"Error: {str(e)}")
