@@ -114,14 +114,6 @@ class WebSocketThread(QObject):
             if hasattr(self, 'db'):
                 self.ws_client.db = self.db
 
-            # Link terminal_widget and agent_tree_widget to ws_client
-            if hasattr(self.parent(), 'terminal_widget'):
-                terminal_widget = self.parent().terminal_widget
-                self.ws_client.terminal_widget = terminal_widget
-                if hasattr(terminal_widget, 'agent_tree'):
-                    self.ws_client.agent_tree_widget = terminal_widget.agent_tree
-                    print("WebSocketThread: Linked terminal_widget and agent_tree_widget to ws_client")
-
             print(f"WebSocketThread: Attempting connection (initial={initial_connection}, attempt={reconnect_attempts+1})")
             
             # Try to connect with interruption support

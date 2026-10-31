@@ -10,7 +10,6 @@ import json
 from datetime import datetime
 from collections import deque, OrderedDict
 from .database import StateDatabase
-from gui.widgets import AgentTreeWidget
 from .logger import get_logger
 from .constants import (
     WEBSOCKET_MAX_SIZE, WEBSOCKET_SEND_TIMEOUT, WEBSOCKET_DISCONNECT_TIMEOUT,
@@ -30,9 +29,7 @@ class WebSocketClient:
         self.message_queue = deque()
         self.send_lock = asyncio.Lock()
         self.running = True
-        self.terminal_widget = None
         self.loop = None
-        self.agent_tree_widget = None
 
         # Use constants for configuration
         self.MAX_QUEUE_SIZE = MESSAGE_QUEUE_MAX_SIZE
@@ -179,42 +176,34 @@ class WebSocketClient:
 
     async def _handle_message_sent(self, message):
         """Handle successful message sending"""
-        if self.terminal_widget:
-            # Only log non-chunk messages to avoid spam
-            try:
-                msg_data = json.loads(message)
-                if msg_data.get('type') == 'agent_command':
-                    data = msg_data.get('data', {})
-                    if data.get('totalChunks', 1) > 1:
-                        chunk_num = data.get('currentChunk', 0)
-                        total = data.get('totalChunks', 1)
-                        filename = data.get('filename', 'unknown')
-                        self.terminal_widget.log_message(
-                            f"Chunk {chunk_num + 1}/{total} sent for {filename}"
-                        )
-                    # Don't log individual command sends - too noisy
-            except Exception:
-                pass
-        self.retry_delay = 1  # Reset retry delay after successful send
+        try:
+            msg_data = json.loads(message)
+            if msg_data.get('type') == 'agent_command':
+                data = msg_data.get('data', {})
+                if data.get('totalChunks', 1) > 1:
+                    chunk_num = data.get('currentChunk', 0)
+                    total = data.get('totalChunks', 1)
+                    filename = data.get('filename', 'unknown')
+                    logger.info(f"Chunk {chunk_num + 1}/{total} sent for {filename}")
+        except Exception:
+            pass
+        self.retry_delay = 1
         
     async def _handle_send_timeout(self):
         """Handle timeout when sending message"""
-        if self.terminal_widget:
-            self.terminal_widget.log_message("Message send timeout, will retry")
+        logger.info("Message send timeout, will retry")
         self.retry_delay = min(self.retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
         await asyncio.sleep(self.retry_delay)
         
     async def _handle_send_error(self, error):
         """Handle general send errors"""
-        if self.terminal_widget:
-            self.terminal_widget.log_message(f"Error sending message: {str(error)}")
+        logger.info(f"Error sending message: {str(error)}")
         self.retry_delay = min(self.retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
         await asyncio.sleep(self.retry_delay)
         
     async def _handle_queue_error(self, error):
         """Handle queue processing errors"""
-        if self.terminal_widget:
-            self.terminal_widget.log_message(f"Queue processing error: {str(error)}")
+        logger.info(f"Queue processing error: {str(error)}")
         logger.debug(f"Queue processing error: {error}")
         await asyncio.sleep(self.retry_delay)
         
@@ -264,10 +253,9 @@ class WebSocketClient:
 
             # Only log chunk queuing for large transfers (not every message)
             if is_chunked and chunk_info:
-                if self.terminal_widget:
-                    self.terminal_widget.log_message(
-                        f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued for transfer"
-                    )
+                logger.info(
+                    f"Chunk {chunk_info['current'] + 1}/{chunk_info['total']} queued for transfer"
+                )
             # Don't log regular message queuing - too noisy
         except Exception:
             # If parsing fails, cache minimal metadata
@@ -310,8 +298,8 @@ class WebSocketClient:
                             except Exception:
                                 dropped_count += 1
 
-                    if dropped_count > 0 and self.terminal_widget:
-                        self.terminal_widget.log_message(
+                    if dropped_count > 0:
+                        logger.info(
                             f"Warning: Dropped {dropped_count} messages due to queue overflow"
                         )
                     if force_drop:
@@ -446,10 +434,6 @@ class WebSocketClient:
                     total_cleaned = len(stale_sessions) + len(stale_chunks)
                     if total_cleaned > 0:
                         logger.info(f"TTL cleanup: removed {len(stale_sessions)} output sessions and {len(stale_chunks)} active chunks")
-                        if self.terminal_widget:
-                            self.terminal_widget.log_message(
-                                f"Cleaned up {total_cleaned} stale chunk(s)"
-                            )
 
             except asyncio.CancelledError:
                 logger.debug("Chunk cleanup task cancelled")
@@ -514,8 +498,7 @@ class WebSocketClient:
                     
                 except json.JSONDecodeError as e:
                     logger.debug(f"Failed to decode message as JSON: {e}")
-                    if self.terminal_widget:
-                        self.terminal_widget.log_message(f"Failed to decode message as JSON: {message[:100]}...")
+                    logger.info(f"Failed to decode message as JSON: {message[:100]}...")
                         
         except Exception as e:
             self.connected = False
@@ -548,11 +531,9 @@ class WebSocketClient:
                 'last_update': datetime.now()
             }
 
-        # Log progress
-        if self.terminal_widget:
-            self.terminal_widget.log_message(
-                f"BOF Transfer: {filename} - {current_chunk}/{total_chunks} ({progress:.1f}%)"
-            )
+        logger.info(
+            f"BOF Transfer: {filename} - {current_chunk}/{total_chunks} ({progress:.1f}%)"
+        )
 
         logger.debug(f"Chunk progress - {filename}: {current_chunk}/{total_chunks} ({progress:.1f}%)")
 
@@ -562,11 +543,7 @@ class WebSocketClient:
         current_chunk = data.get('current_chunk')
         total_chunks = data.get('total_chunks')
         filename = data.get('filename')
-        
-        if self.terminal_widget:
-            self.terminal_widget.log_message(
-                f"Server acknowledged chunk {current_chunk}/{total_chunks} for {filename}"
-            )
+        logger.info(f"Server acknowledged chunk {current_chunk}/{total_chunks} for {filename}")
 
     async def _handle_command_assembled(self, message_data):
         """Handle command assembled notification from server (thread-safe)"""
@@ -583,10 +560,9 @@ class WebSocketClient:
             if track_id in self.active_chunks:
                 del self.active_chunks[track_id]
 
-        if self.terminal_widget:
-            self.terminal_widget.log_message(
-                f"✓ {filename} assembled ({total_chunks} chunks in {duration:.2f}s) and sent to agent"
-            )
+        logger.info(
+            f"{filename} assembled ({total_chunks} chunks in {duration:.2f}s) and sent to agent"
+        )
 
         logger.debug(f"Command assembled - {filename} ({total_chunks} chunks in {duration:.2f}s)")
 
@@ -615,10 +591,9 @@ class WebSocketClient:
                 'start_time': datetime.now()
             }
 
-        if self.terminal_widget:
-            self.terminal_widget.log_message(
-                f"Receiving large command output: {total_chunks} chunks, {total_size} bytes"
-            )
+        logger.info(
+            f"Receiving large command output: {total_chunks} chunks, {total_size} bytes"
+        )
 
         logger.debug(f"Started receiving chunked output session {session_id}")
 
@@ -644,10 +619,9 @@ class WebSocketClient:
 
         # Log progress every 10 chunks or at the end
         if chunk_number % 10 == 0 or chunk_number == total_chunks - 1:
-            if self.terminal_widget:
-                self.terminal_widget.log_message(
-                    f"Output progress: {received}/{total_chunks} chunks ({progress:.1f}%)"
-                )
+            logger.info(
+                f"Output progress: {received}/{total_chunks} chunks ({progress:.1f}%)"
+            )
 
         logger.debug(f"Chunk {chunk_number + 1}/{total_chunks} received for session {session_id}")
 
@@ -672,12 +646,7 @@ class WebSocketClient:
                     missing_chunks.append(i)
 
             if missing_chunks:
-                logger.debug(f"Missing {len(missing_chunks)} chunks for session {session_id}")
-                logger.debug(f"Missing chunk numbers: {missing_chunks[:10]}...")
-                if self.terminal_widget:
-                    self.terminal_widget.log_message(
-                        f"Warning: Missing {len(missing_chunks)} chunks in output"
-                    )
+                logger.warning(f"Missing {len(missing_chunks)} chunks for session {session_id}: {missing_chunks[:10]}")
 
             # Reassemble the output
             output_parts = []
@@ -692,10 +661,9 @@ class WebSocketClient:
             # Calculate duration
             duration = (datetime.now() - session['start_time']).total_seconds()
 
-            if self.terminal_widget:
-                self.terminal_widget.log_message(
-                    f"✓ Command output assembled: {total_chunks} chunks in {duration:.2f}s"
-                )
+            logger.info(
+                f"Command output assembled: {total_chunks} chunks in {duration:.2f}s"
+            )
 
             # Create the final command_result message
             final_message = {
@@ -716,17 +684,13 @@ class WebSocketClient:
 
         return final_message
 
-    def set_terminal_widget(self, widget):
-        self.terminal_widget = widget
-
     def disconnect_sync(self):
         if self.connected:
             try:
                 future = asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop)
                 future.result()
             except Exception as e:
-                if self.terminal_widget:
-                    self.terminal_widget.log_message(f"Error during synchronous disconnection: {e}")
+                logger.info(f"Error during synchronous disconnection: {e}")
                 logger.debug(f"Error during synchronous disconnection: {e}")
 
     def receive_messages_sync(self):
@@ -735,8 +699,7 @@ class WebSocketClient:
             future = asyncio.run_coroutine_threadsafe(self.receive_async(), self.loop)
             future.result()
         except Exception as e:
-            if self.terminal_widget:
-                self.terminal_widget.log_message(f"Error during synchronous message receiving: {e}")
+            logger.info(f"Error during synchronous message receiving: {e}")
             logger.debug(f"Error during synchronous message receiving: {e}")
 
     async def receive_async(self):
@@ -763,8 +726,7 @@ class WebSocketClient:
                     self.active_chunks.clear()
                     self.chunk_buffers.clear()
                     self.output_chunks.clear()
-                if self.terminal_widget:
-                    self.terminal_widget.log_message("Connection closed by server.")
+                logger.info("Connection closed by server.")
                 break
             except Exception as e:
                 self.connected = False
@@ -773,25 +735,8 @@ class WebSocketClient:
                     self.active_chunks.clear()
                     self.chunk_buffers.clear()
                     self.output_chunks.clear()
-                if self.terminal_widget:
-                    self.terminal_widget.log_message(f"Error receiving message: {e}")
+                logger.info(f"Error receiving message: {e}")
                 break
-    
-    def process_connection_update(self, connection_data, update=False):
-        """Process new or updated connection data."""
-        action = "Updating" if update else "Adding"
-        logger.debug(f"{action} connection data: {json.dumps(connection_data, indent=4)}")
-
-        # Check if AgentTreeWidget is linked
-        if not self.agent_tree_widget:
-            logger.debug("No agent_tree_widget linked!")
-            return
-
-        # Process the connection
-        if update:
-            self.agent_tree_widget.update_existing_connection(connection_data)
-        else:
-            self.agent_tree_widget.handle_new_connection(connection_data)
     
     def get_active_chunks(self):
         """Get information about active chunk transfers
