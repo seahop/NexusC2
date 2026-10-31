@@ -3,12 +3,13 @@ from PyQt6.QtWidgets import (QDialog, QSpinBox, QFormLayout,
                             QLineEdit, QPushButton, QComboBox, QHBoxLayout,
                             QVBoxLayout, QMessageBox, QFileDialog, QProgressDialog, QTabWidget, QWidget,
                             QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit, QTextEdit)
-from PyQt6.QtCore import QObject, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
 from PyQt6.QtGui import QPixmap, QIcon
 from version import get_version_info, APP_NAME, APP_DESCRIPTION
 from utils.websocket_client import WebSocketClient
 import asyncio
 import json
+import queue
 import threading
 from utils.database import StateDatabase
 from pathlib import Path
@@ -61,6 +62,10 @@ class WebSocketThread(QObject):
         self.locally_sent_commands = set()
         self._commands_lock = threading.Lock()
         self._thread = None
+        self._msg_queue = queue.Queue()
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(50)
+        self._poll_timer.timeout.connect(self._drain_queue)
 
     def add_local_command(self, command_id):
         """Thread-safe add to locally_sent_commands"""
@@ -74,6 +79,25 @@ class WebSocketThread(QObject):
                 self.locally_sent_commands.discard(command_id)
                 return True
             return False
+
+    def _queue_signal(self, signal_name, *args):
+        """Queue a signal for emission on the main thread."""
+        self._msg_queue.put(('__signal__', signal_name, args))
+
+    def _drain_queue(self):
+        """Process queued events on the main thread (QTimer callback)."""
+        batch = 0
+        while batch < 200:
+            try:
+                item = self._msg_queue.get_nowait()
+            except queue.Empty:
+                break
+            batch += 1
+            if isinstance(item, tuple) and len(item) >= 2 and item[0] == '__signal__':
+                _, signal_name, args = item
+                getattr(self, signal_name).emit(*args)
+            else:
+                self._process_message(item)
 
     async def _run_async(self):
         """Async implementation of the run logic"""
@@ -134,7 +158,7 @@ class WebSocketThread(QObject):
                 if initial_connection:
                     # First connection attempt failed - don't retry
                     print("WebSocketThread: Initial connection failed - no retry")
-                    self.connected.emit(False, "Failed to connect to server. Please ensure the server is running and try again.")
+                    self._queue_signal('connected', False, "Failed to connect to server. Please ensure the server is running and try again.")
                     self.ws_client = None
                     return  # Exit immediately without retrying
                 else:
@@ -144,7 +168,7 @@ class WebSocketThread(QObject):
                     
                     if reconnect_attempts >= max_reconnect_attempts:
                         print("WebSocketThread: Max reconnection attempts reached, giving up")
-                        self.connected.emit(False, f"Failed to reconnect after {max_reconnect_attempts} attempts. Please reconnect manually.")
+                        self._queue_signal('connected', False, f"Failed to reconnect after {max_reconnect_attempts} attempts. Please reconnect manually.")
                         self.ws_client = None
                         return  # Exit after max attempts
                     
@@ -154,7 +178,7 @@ class WebSocketThread(QObject):
                     # Wait before retrying (with interruptible sleep)
                     wait_time = min(5 * reconnect_attempts, 15)  # Exponential backoff, max 15 seconds
                     print(f"WebSocketThread: Waiting {wait_time} seconds before retry...")
-                    self.connected.emit(False, f"Connection lost. Retrying in {wait_time} seconds... (Attempt {reconnect_attempts}/{max_reconnect_attempts})")
+                    self._queue_signal('connected', False, f"Connection lost. Retrying in {wait_time} seconds... (Attempt {reconnect_attempts}/{max_reconnect_attempts})")
                     
                     try:
                         await asyncio.wait_for(self.shutdown_event.wait(), timeout=wait_time)
@@ -169,7 +193,7 @@ class WebSocketThread(QObject):
 
             # Connection successful
             print("WebSocketThread: Connection successful")
-            self.connected.emit(True, "Connected successfully.")
+            self._queue_signal('connected', True, "Connected successfully.")
             initial_connection = False  # Mark that we've successfully connected once
             reconnect_attempts = 0  # Reset reconnect counter on successful connection
             
@@ -209,7 +233,7 @@ class WebSocketThread(QObject):
                     exc = None
                 if exc:
                     print(f"WebSocketThread: Receive loop error: {exc}")
-                    self.log_message.emit(f"Error processing message: {exc}")
+                    self._queue_signal('log_message', f"Error processing message: {exc}")
 
             # Connection lost or error occurred
             if self.running:
@@ -249,10 +273,10 @@ class WebSocketThread(QObject):
             try:
                 message_data = await self.ws_client.receive_messages()
                 if message_data:
-                    self._process_message(message_data)
+                    self._msg_queue.put(message_data)
             except Exception as e:
                 print(f"WebSocketThread: Error in receive loop: {e}")
-                self.log_message.emit(f"Error processing message: {str(e)}")
+                self._queue_signal('log_message', f"Error processing message: {str(e)}")
                 if self.ws_client:
                     self.ws_client.connected = False
                 break
@@ -309,8 +333,9 @@ class WebSocketThread(QObject):
             print("WebSocketThread: No event loop to clean up")
 
     def start(self):
-        """Start the background thread (QThread-compatible API)."""
+        """Start the background thread and message poller."""
         self.running = True
+        self._poll_timer.start()
         self._thread = threading.Thread(target=self._thread_main, daemon=True)
         self._thread.start()
 
@@ -325,11 +350,16 @@ class WebSocketThread(QObject):
             return True
         timeout_s = timeout_ms / 1000.0 if timeout_ms else None
         self._thread.join(timeout=timeout_s)
-        return not self._thread.is_alive()
+        finished = not self._thread.is_alive()
+        if finished:
+            self._poll_timer.stop()
+            self._drain_queue()
+        return finished
 
     def terminate(self):
         """Best-effort force-stop (QThread-compatible API)."""
         self.running = False
+        self._poll_timer.stop()
         if self.shutdown_event and self.loop and not self.loop.is_closed():
             self.loop.call_soon_threadsafe(self.shutdown_event.set)
         if self.loop and not self.loop.is_closed():
@@ -346,7 +376,7 @@ class WebSocketThread(QObject):
             self.loop.run_until_complete(self._run_async())
         except Exception as e:
             print(f"WebSocketThread: Run method error: {e}")
-            self.connected.emit(False, f"Error: {str(e)}")
+            self._queue_signal('connected', False, f"Error: {str(e)}")
         finally:
             print("WebSocketThread: Cleaning up connection")
             if self.ws_client and self.ws_client.connected:
@@ -355,7 +385,7 @@ class WebSocketThread(QObject):
                 except Exception:
                     pass
             self.cleanup()
-            self.disconnected.emit()
+            self._queue_signal('disconnected')
 
     def stop(self):
         """Stop the thread cleanly"""
