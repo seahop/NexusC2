@@ -35,8 +35,6 @@ class C2ClientGUI(QMainWindow):
         self.ws_client = None
         self.processed_listener_ids = set()
         self.state_db = StateDatabase()
-        if self.ws_client:
-            self.ws_client.agent_tree_widget = self.agent_tree
 
         # Initialize notification manager
         self.notification_manager = NotificationManager(self)
