@@ -26,10 +26,12 @@ def setup_dark_theme_hints():
     """Set environment variables to hint dark theme to window managers"""
     # For GTK-based window managers (GNOME, XFCE, etc.)
     os.environ['GTK_THEME'] = 'Adwaita:dark'
-    # For Qt platform theme
-    os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk3'
     # KDE Plasma hint
     os.environ['KDE_SESSION_VERSION'] = '5'
+    # Prevent Qt from using the GLib event dispatcher — GLib defers
+    # QSocketNotifier disable operations, which causes an infinite re-fire
+    # loop when a notifier's FD becomes invalid (locks up the UI).
+    os.environ['QT_NO_GLIB'] = '1'
 
 def set_application_dark_palette(app):
     """Set dark palette for the entire application (affects window decorations on Linux)"""
