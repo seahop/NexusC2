@@ -33,6 +33,10 @@ def setup_dark_theme_hints():
     # QSocketNotifier disable operations, which causes an infinite re-fire
     # loop when a notifier's FD becomes invalid (locks up the UI).
     os.environ['QT_NO_GLIB'] = '1'
+    # Disable AT-SPI2 accessibility bridge — it opens D-Bus sockets and
+    # registers QSocketNotifiers that can be touched from the D-Bus
+    # worker thread, leading to cross-thread notifier crashes.
+    os.environ['QT_LINUX_ACCESSIBILITY_ALWAYS_ON'] = '0'
 
 def set_application_dark_palette(app):
     """Set dark palette for the entire application (affects window decorations on Linux)"""

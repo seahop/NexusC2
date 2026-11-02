@@ -300,19 +300,19 @@ class WebSocketThread(QThread):
         self._ctx.shutdown_event = value
 
     def _drain_queue(self):
-        """Process queued events on the main thread (QTimer callback)."""
-        batch = 0
-        while batch < 200:
-            try:
-                item = self._msg_queue.get_nowait()
-            except queue.Empty:
-                break
-            batch += 1
-            if isinstance(item, tuple) and len(item) >= 2 and item[0] == '__signal__':
-                _, signal_name, args = item
-                getattr(self, signal_name).emit(*args)
-            else:
-                self._process_message(item)
+        """Process ONE queued event per tick so the Qt event loop can service
+        QSocketNotifier / paint / accessibility events between messages."""
+        try:
+            item = self._msg_queue.get_nowait()
+        except queue.Empty:
+            return
+        if isinstance(item, tuple) and len(item) >= 2 and item[0] == '__signal__':
+            _, signal_name, args = item
+            getattr(self, signal_name).emit(*args)
+        else:
+            self._process_message(item)
+        if not self._msg_queue.empty():
+            QTimer.singleShot(0, self._drain_queue)
 
     def run(self):
         """QThread entry point — delegates to module-level function so the

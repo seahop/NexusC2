@@ -172,9 +172,11 @@ class NotificationManager(QObject):
         self.parent_window = parent
         self.settings = self._load_settings()
 
-        # Initialize sound effect
+        # Sound effect is created lazily on first play to avoid opening
+        # PulseAudio/PipeWire sockets (and their QSocketNotifiers) at
+        # startup — early PA sockets can go stale and crash the app.
         self.sound_effect = None
-        self._setup_sound()
+        self._sound_ready = False
 
         # Track active toast notifications
         self.active_toasts = []
@@ -359,8 +361,16 @@ class NotificationManager(QObject):
                 pass  # notify-send not available
         # On other platforms, we rely on the toast notification
 
+    def _ensure_sound(self):
+        """Create the QSoundEffect on first use (lazy init)."""
+        if self._sound_ready:
+            return
+        self._sound_ready = True
+        self._setup_sound()
+
     def _play_sound(self):
         """Play the notification sound."""
+        self._ensure_sound()
         if self.sound_effect and self.sound_effect.status() == QSoundEffect.Status.Ready:
             self.sound_effect.play()
 
