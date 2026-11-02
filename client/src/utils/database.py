@@ -193,10 +193,7 @@ class StateDatabase:
             """
             with self._db_lock:
                 with self._get_connection() as conn:
-                    # Start transaction
-                    conn.execute("BEGIN TRANSACTION")
                     try:
-                        # If this is initial state (e.g., after server wipe), clear existing cached data
                         if is_initial_state:
                             print("StateDatabase: Clearing stale cache data (initial_state received)")
                             conn.execute("DELETE FROM listeners")
@@ -593,12 +590,9 @@ class StateDatabase:
         """Update all tags for a specific agent (replaces existing)"""
         with self._db_lock:
             with self._get_connection() as conn:
-                conn.execute("BEGIN TRANSACTION")
                 try:
-                    # Clear existing tags for this agent
                     conn.execute("DELETE FROM agent_tags WHERE agent_guid = ?", (agent_guid,))
 
-                    # Insert new tags
                     if tags:
                         conn.executemany(
                             """INSERT INTO agent_tags (agent_guid, tag_name, tag_color)

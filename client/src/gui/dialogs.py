@@ -365,6 +365,18 @@ class WebSocketThread(QThread):
         result = bool(self.ws_client and self.ws_client.connected and self.ws_client.websocket)
         return result
 
+    def send_async(self, message):
+        """Non-blocking WebSocket send. Returns True if queued successfully."""
+        ws = self._ctx.ws_client
+        loop = self._ctx.loop
+        if not ws or not loop or loop.is_closed():
+            return False
+        future = asyncio.run_coroutine_threadsafe(ws.send_message(message), loop)
+        future.add_done_callback(
+            lambda f: print(f"WS send error: {f.exception()}") if f.exception() else None
+        )
+        return True
+
     def get_ws_client(self):
         return self.ws_client
 
@@ -1173,15 +1185,8 @@ class CreateListenerDialog(QDialog):
         message = json.dumps(listener_data)
         print(f"CreateListenerDialog: Sending listener creation message for {self.listener_name}")
 
-        # Run in the event loop to avoid blocking the GUI
-        future = asyncio.run_coroutine_threadsafe(
-            self.ws_thread.ws_client.send_message(message), 
-            self.ws_thread.loop
-        )
-        try:
-            future.result()  # This line ensures that if there's an exception, it will be raised here
-        except Exception as e:
-            print(f"CreateListenerDialog: Error while sending listener creation message: {e}")
+        if not self.ws_thread.send_async(message):
+            print(f"CreateListenerDialog: No WebSocket connection")
 
         # Don't close dialog yet - wait for server response
         self.ok_button.setEnabled(False)

@@ -1095,10 +1095,13 @@ class C2ClientGUI(QMainWindow):
 
     def onDisconnected(self):
         print("MainWindow: Connection disconnected")
-        
+
         # Update floating status indicator
         self.status_indicator.set_disconnected()
-        
+
+        if hasattr(self, '_payload_handler_connected'):
+            del self._payload_handler_connected
+
         if self.ws_thread:
             self.ws_thread.wait()
             self.ws_thread = None
@@ -1139,7 +1142,7 @@ class C2ClientGUI(QMainWindow):
                 'chunks': set(),
                 'expected_chunks': 0,
                 'file_name': None,
-                'temp_file': None
+                'chunk_buffer': {},
             }
             
             # Connect handler if not already connected
@@ -1220,56 +1223,48 @@ class C2ClientGUI(QMainWindow):
         """Handle binary chunks in the background after dialog closes"""
         if not hasattr(self, 'pending_payload'):
             return
-        
+
         try:
             message = json.loads(message_json)
             message_type = message.get("type")
-            
+
             if message_type == "binary_chunk":
                 chunk_num = message.get('chunk_num')
                 total_chunks = message.get('total_chunks')
                 file_name = message.get('file_name')
                 chunk_data = message.get('data')
-                
-                # Initialize on first chunk
+
                 if not self.pending_payload['file_name']:
                     self.pending_payload['file_name'] = file_name
                     self.pending_payload['expected_chunks'] = total_chunks
+                    self.pending_payload['chunk_buffer'] = {}
                     os.makedirs(self.pending_payload['output_path'], exist_ok=True)
-                    temp_path = os.path.join(self.pending_payload['output_path'], f"{file_name}.temp")
-                    self.pending_payload['temp_file'] = temp_path
-                    open(temp_path, 'wb').close()  # Create empty file
-                
-                # Write chunk to temp file
-                with open(self.pending_payload['temp_file'], 'ab') as f:
-                    f.write(base64.b64decode(chunk_data))
-                
+
+                self.pending_payload['chunk_buffer'][chunk_num] = base64.b64decode(chunk_data)
                 self.pending_payload['chunks'].add(chunk_num)
-                
+
             elif message_type == "binary_transfer_complete":
                 data = message.get('data', {})
                 status = data.get('status')
-                
+
                 if status == "success":
-                    # Rename temp to final
                     final_path = os.path.join(
                         self.pending_payload['output_path'],
                         self.pending_payload['file_name']
                     )
-                    if os.path.exists(self.pending_payload['temp_file']):
-                        os.rename(self.pending_payload['temp_file'], final_path)
+                    chunk_buffer = self.pending_payload.get('chunk_buffer', {})
+                    if chunk_buffer:
+                        with open(final_path, 'wb') as f:
+                            for i in sorted(chunk_buffer.keys()):
+                                f.write(chunk_buffer[i])
                         QMessageBox.information(self, "Success", "Payload generated successfully!")
                     else:
-                        QMessageBox.warning(self, "Error", "Payload file not found")
+                        QMessageBox.warning(self, "Error", "No payload data received")
                 else:
                     QMessageBox.warning(self, "Error", f"Payload generation failed: {status}")
-                    # Clean up temp file if it exists
-                    if self.pending_payload.get('temp_file') and os.path.exists(self.pending_payload['temp_file']):
-                        os.remove(self.pending_payload['temp_file'])
-                
-                # Clean up
+
                 del self.pending_payload
-                
+
         except Exception as e:
             print(f"MainWindow: Error handling payload message: {e}")
 

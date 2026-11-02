@@ -14,7 +14,8 @@ class FileUploader:
         self.current_upload = None
         self.total_chunks = 0
         self.current_chunk = 0
-        self.original_command = None  # Store the original command
+        self.original_command = None
+        self._upload_handler = None
 
     def handle_upload_command(self, command):
         """Handle upload command with multiple formats
@@ -68,42 +69,41 @@ class FileUploader:
             "All Files (*);;Text Files (*.txt);;Binary Files (*.bin);;Executables (*.exe *.dll);;No Extension Files (*[!.]*)",
             options=QFileDialog.Option.DontUseNativeDialog
         )
-        
+
         if file_path:
-            # Ask for remote path after file selection
             self.agent_terminal.command_input.clear()
             self.agent_terminal.command_input.setPlaceholderText("Enter remote path for upload (or press Enter for default)...")
-            self.agent_terminal.command_input.returnPressed.disconnect()
-            self.agent_terminal.command_input.returnPressed.connect(
-                lambda: self._handle_remote_path_input(file_path)
-            )
+            self._upload_handler = lambda: self._handle_remote_path_input(file_path)
+            try:
+                self.agent_terminal.command_input.returnPressed.disconnect(self.agent_terminal.send_command)
+            except TypeError:
+                pass
+            self.agent_terminal.command_input.returnPressed.connect(self._upload_handler)
+
+    def _restore_input_handler(self):
+        """Restore the terminal's normal returnPressed handler"""
+        self.agent_terminal.command_input.setPlaceholderText("")
+        if self._upload_handler:
+            try:
+                self.agent_terminal.command_input.returnPressed.disconnect(self._upload_handler)
+            except TypeError:
+                pass
+            self._upload_handler = None
+        self.agent_terminal.command_input.returnPressed.connect(self.agent_terminal.send_command)
 
     def _handle_remote_path_input(self, local_path):
         """Handle remote path input after file selection"""
+        self._restore_input_handler()
+
         remote_path = self.agent_terminal.command_input.text().strip()
-        
-        # If remote path is empty, use original filename
         if not remote_path:
             remote_path = os.path.basename(local_path)
-        else:
-            # Check if remote path ends with directory separator
-            if remote_path.endswith('\\') or remote_path.endswith('/'):
-                # It's a directory path, append the filename from local path
-                remote_path = remote_path + os.path.basename(local_path)
+        elif remote_path.endswith('\\') or remote_path.endswith('/'):
+            remote_path = remote_path + os.path.basename(local_path)
 
-        # Construct the full command
         full_command = f"upload {local_path} {remote_path}"
-        
-        # Reset input handling first
-        self.agent_terminal.command_input.setPlaceholderText("")
-        self.agent_terminal.command_input.returnPressed.disconnect()
-        self.agent_terminal.command_input.returnPressed.connect(
-            self.agent_terminal.send_command
-        )
-
-        # Set the full command in the input and send it
         self.agent_terminal.command_input.setText(full_command)
-        self.agent_terminal.send_command()  # This will trigger the normal command flow
+        self.agent_terminal.send_command()
 
     def _start_upload(self, local_path, remote_path):
         """Start the upload process"""
@@ -183,31 +183,12 @@ class FileUploader:
                 print(f"DEBUG FileUploader: Sending chunk {self.current_chunk}/{self.total_chunks} "
                     f"for file {self.current_upload['file_name']}")
 
-                # Send via WebSocket
-                if not self.agent_terminal.ws_thread:
-                    raise Exception("No WebSocket thread available")
-                    
-                if not self.agent_terminal.ws_thread.ws_client:
-                    raise Exception("No WebSocket client available")
-                    
-                if not self.agent_terminal.ws_thread.loop:
-                    raise Exception("No event loop available")
+                ws_thread = self.agent_terminal.ws_thread
+                if not ws_thread:
+                    raise Exception("No WebSocket connection")
 
-                future = asyncio.run_coroutine_threadsafe(
-                    self.agent_terminal.ws_thread.ws_client.send_message(
-                        json.dumps(upload_msg)
-                    ),
-                    self.agent_terminal.ws_thread.loop
-                )
-                
-                try:
-                    print("DEBUG FileUploader: Waiting for send to complete")
-                    future.result(timeout=10)
-                    print("DEBUG FileUploader: Send completed successfully")
-                except asyncio.TimeoutError:
-                    raise Exception(f"Timeout sending chunk {self.current_chunk}")
-                except Exception as e:
-                    raise Exception(f"Error sending chunk {self.current_chunk}: {str(e)}")
+                if not ws_thread.send_async(json.dumps(upload_msg)):
+                    raise Exception(f"Failed to queue chunk {self.current_chunk}")
 
         except Exception as e:
             print(f"DEBUG FileUploader: Error in _send_next_chunk: {e}")

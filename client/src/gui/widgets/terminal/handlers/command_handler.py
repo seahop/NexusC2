@@ -476,49 +476,23 @@ BOF Path: {cmd_info.get('bof_path', 'Not resolved')}"""
             }
         }
 
-        print(f"DEBUG: Command message: {json.dumps(command_msg, indent=2)}")
+        if hasattr(self.ws_thread, 'add_local_command'):
+            self.ws_thread.add_local_command(command_id)
 
-        try:
-            print(f"DEBUG: Sending command via WebSocket")
-            future = asyncio.run_coroutine_threadsafe(
-                self.ws_thread.ws_client.send_message(json.dumps(command_msg)),
-                self.ws_thread.loop
-            )
-            result = future.result(timeout=5)
-            print(f"DEBUG: WebSocket send result: {result}")
-
-            # Track this command_id so we skip the server's command_queued broadcast
-            # (we're echoing the command locally instead to avoid duplication)
-            if hasattr(self.ws_thread, 'add_local_command'):
-                self.ws_thread.add_local_command(command_id)
-                print(f"DEBUG: Tracked locally sent command: {command_id[:8]}")
-
-            # Echo the command locally in the terminal
-            # Add blank line after command for consistent spacing
-            username = self.terminal.command_buffer.username or "user"
-            self.terminal.command_buffer.add_output({
-                "timestamp": timestamp,
-                "output": f"[{timestamp}] {username} > {command}\n\n",
-                "type": "command"
-            })
-            self.terminal.update_display(incremental=True)
-
-            # Handle upload commands specially
-            if command.startswith('upload'):
-                print(f"DEBUG: Handling upload command")
-                self.file_uploader.original_command = command
-                self.file_uploader.handle_upload_command(command)
-
-            print(f"DEBUG: Command sent successfully")
-            return True
-            
-        except asyncio.TimeoutError:
-            print(f"DEBUG: WebSocket send timeout")
-            self.terminal.terminal_output.append(f"\nError sending command: Timeout")
+        if not self.ws_thread.send_async(json.dumps(command_msg)):
+            self.terminal.terminal_output.append(f"\nError sending command: no connection")
             return False
-        except Exception as e:
-            print(f"DEBUG: WebSocket send exception: {e}")
-            import traceback
-            traceback.print_exc()
-            self.terminal.terminal_output.append(f"\nError sending command: {str(e)}")
-            return False
+
+        username = self.terminal.command_buffer.username or "user"
+        self.terminal.command_buffer.add_output({
+            "timestamp": timestamp,
+            "output": f"[{timestamp}] {username} > {command}\n\n",
+            "type": "command"
+        })
+        self.terminal.update_display(incremental=True)
+
+        if command.startswith('upload'):
+            self.file_uploader.original_command = command
+            self.file_uploader.handle_upload_command(command)
+
+        return True

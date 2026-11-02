@@ -105,15 +105,12 @@ class InlineAssemblyHandler:
         }
         
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=5)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
         except Exception as e:
             self._print_error(f"Failed to send clean command: {e}")
-        
+
         return True
 
     def _handle_inline_assembly_jobs_stats(self) -> bool:
@@ -127,14 +124,11 @@ class InlineAssemblyHandler:
                 "timestamp": datetime.now().isoformat()
             }
         }
-        
+
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=5)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
                 self._print_info("Requesting job statistics...")
         except Exception as e:
             self._print_error(f"Failed to request statistics: {e}")
@@ -304,15 +298,11 @@ class InlineAssemblyHandler:
         #self._print_info(f"Sending assembly '{assembly_file.name}' ({assembly_file.type}, {assembly_file.size} bytes)...")
         
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=30)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
             else:
                 raise RuntimeError("Cannot find appropriate send method")
-                
         except Exception as e:
             self._print_error(f"Failed to send assembly: {e}")
             return
@@ -333,13 +323,9 @@ class InlineAssemblyHandler:
         }
         
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=5)
-                #self._print_info("Requesting async job list...")
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
         except Exception as e:
             self._print_error(f"Failed to request job list: {e}")
         
@@ -365,12 +351,9 @@ class InlineAssemblyHandler:
         }
         
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=5)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
                 self._print_info(f"Requesting output for job {job_id}...")
         except Exception as e:
             self._print_error(f"Failed to request job output: {e}")
@@ -397,12 +380,9 @@ class InlineAssemblyHandler:
         }
         
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.ws_client.send_message(json.dumps(command_msg)),
-                    self.ws_client.loop
-                )
-                future.result(timeout=5)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(command_msg)):
+                    raise RuntimeError("No WebSocket connection")
                 self._print_info(f"Sending kill signal for job {job_id}...")
         except Exception as e:
             self._print_error(f"Failed to kill job: {e}")

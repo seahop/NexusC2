@@ -890,25 +890,10 @@ class AgentTreeWidget(QWidget):
             #print("DEBUG: Preparing to send delete message")
             
             try:
-                if not self.ws_thread.loop:
-                    #print("DEBUG: No event loop available")
-                    QMessageBox.warning(self, "Error", "Connection error: No event loop")
+                if not self.ws_thread.send_async(json.dumps(delete_msg)):
+                    QMessageBox.warning(self, "Error", "Connection error: not connected")
                     return
-                    
-                #print("DEBUG: Sending delete message via WebSocket")
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_thread.ws_client.send_message(json.dumps(delete_msg)),
-                    self.ws_thread.loop
-                )
-                
-                # Wait for the result with a timeout
-                future.result(timeout=5)
                 print(f"AgentTreeWidget: Delete message sent for listener '{name}'")
-                # Don't remove the listener here - wait for server confirmation
-                
-            except asyncio.TimeoutError:
-                print("ERROR: Delete message timed out")
-                QMessageBox.warning(self, "Error", "Failed to delete listener: Operation timed out")
             except Exception as e:
                 print(f"ERROR: Failed to send delete message: {e}")
                 QMessageBox.warning(self, "Error", f"Failed to delete listener: {str(e)}")

@@ -295,32 +295,12 @@ class BOFHandler:
             
             
             try:
-                # Send via websocket
-                # The ws_client is actually the WebSocketThread object
-                if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                    # Access the actual WebSocket client through the thread
-                    import asyncio
-                    
-                    # Check if we have access to the event loop
-                    if hasattr(self.ws_client, 'loop') and self.ws_client.loop:
-                        future = asyncio.run_coroutine_threadsafe(
-                            self.ws_client.ws_client.send_message(json.dumps(chunk_command)),
-                            self.ws_client.loop
-                        )
-                        future.result(timeout=5)
-                    else:
-                        raise RuntimeError("No event loop available for async operation")
-                elif hasattr(self.ws_client, 'send_message'):
-                    # Direct WebSocket client (shouldn't happen with current setup)
-                    self.ws_client.send_message(json.dumps(chunk_command))
+                if hasattr(self.ws_client, 'send_async'):
+                    if not self.ws_client.send_async(json.dumps(chunk_command)):
+                        raise RuntimeError("No WebSocket connection")
                 else:
-                    raise RuntimeError("Cannot find appropriate send method")
-                    
-                #print(f"DEBUG BOF: Chunk {chunk_num + 1} sent successfully")
-                    
+                    raise RuntimeError("WebSocket thread has no send_async method")
             except Exception as e:
-                import traceback
-                traceback.print_exc()
                 self._print_error(f"Failed to send chunk {chunk_num + 1}: {e}")
                 return
         
@@ -435,14 +415,11 @@ class BOFHandler:
         }
 
         try:
-            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
-                import asyncio
-                if hasattr(self.ws_client, 'loop') and self.ws_client.loop:
-                    future = asyncio.run_coroutine_threadsafe(
-                        self.ws_client.ws_client.send_message(json.dumps(kill_command)),
-                        self.ws_client.loop
-                    )
-                    future.result(timeout=5)
+            if hasattr(self.ws_client, 'send_async'):
+                if not self.ws_client.send_async(json.dumps(kill_command)):
+                    raise RuntimeError("No WebSocket connection")
+            else:
+                raise RuntimeError("WebSocket thread has no send_async method")
             if job_id in self.async_jobs:
                 del self.async_jobs[job_id]
             self._print_success(f"Kill signal sent for job {job_id}")
