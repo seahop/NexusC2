@@ -130,30 +130,18 @@ class BOFHandler:
     
     def __init__(self, websocket_client, agent_terminal):
         """Initialize BOF handler with websocket and terminal references"""
-        print(f"DEBUG BOF: Initializing BOFHandler")
-        print(f"DEBUG BOF: websocket_client: {websocket_client}")
-        print(f"DEBUG BOF: agent_terminal: {agent_terminal}")
         
         self.ws_client = websocket_client
         self.agent_terminal = agent_terminal
         self.loaded_bofs: Dict[str, BOFFile] = {}
         self.async_jobs: Dict[str, Dict] = {}
         self.upload_lock = threading.Lock()
-        
-        print(f"DEBUG BOF: BOFHandler initialized")
-        print(f"DEBUG BOF: ws_client set to: {self.ws_client}")
-        print(f"DEBUG BOF: agent_terminal set to: {self.agent_terminal}")
-        if self.agent_terminal:
-            print(f"DEBUG BOF: agent_terminal.agent_guid: {self.agent_terminal.agent_guid}")
-        
+
     def handle_bof_command(self, command: str, args: List[str]) -> bool:
         """
         Main entry point for BOF command handling
         Returns True if command was handled, False otherwise
         """
-        print(f"DEBUG BOF: handle_bof_command called")
-        print(f"DEBUG BOF: command: {command}")
-        print(f"DEBUG BOF: args: {args}")
         
         # First, add the full command to history
         self._add_to_history(command, args)
@@ -177,7 +165,6 @@ class BOFHandler:
         elif command == "bof-unload":
             return self._handle_bof_unload(args)
         
-        print(f"DEBUG BOF: Command not recognized: {command}")
         return False
     
     def _add_to_history(self, command: str, args: List[str]):
@@ -201,9 +188,6 @@ class BOFHandler:
     
     def _handle_bof_execute(self, args: List[str], async_mode: bool = False) -> bool:
         """Execute a BOF file"""
-        print(f"DEBUG BOF: _handle_bof_execute called")
-        print(f"DEBUG BOF: args: {args}")
-        print(f"DEBUG BOF: async_mode: {async_mode}")
         
         if len(args) < 1:
             self._print_error("Usage: bof[-async] <path_to_bof.o> [arguments...]")
@@ -212,24 +196,17 @@ class BOFHandler:
         bof_path = args[0]
         bof_args = args[1:] if len(args) > 1 else []
         
-        print(f"DEBUG BOF: BOF path: {bof_path}")
-        print(f"DEBUG BOF: BOF args: {bof_args}")
         
         # Validate BOF file exists
         if not os.path.exists(bof_path):
-            print(f"DEBUG BOF: File does not exist: {bof_path}")
             self._print_error(f"BOF file not found: {bof_path}")
             return True
         
-        print(f"DEBUG BOF: File exists, loading...")
         
         # Load BOF file
         try:
             bof_file = self._load_bof_file(bof_path)
-            print(f"DEBUG BOF: BOF file loaded successfully")
-            print(f"DEBUG BOF: File details - name: {bof_file.name}, size: {bof_file.size}, arch: {bof_file.arch}")
         except Exception as e:
-            print(f"DEBUG BOF: Failed to load BOF: {e}")
             import traceback
             traceback.print_exc()
             self._print_error(f"Failed to load BOF: {e}")
@@ -240,22 +217,17 @@ class BOFHandler:
         
         try:
             packed_args = BOFArgumentParser.parse_arguments(bof_args)
-            print(f"DEBUG BOF: Arguments parsed, packed size: {len(packed_args)} bytes")
         except Exception as e:
-            print(f"DEBUG BOF: Failed to parse arguments: {e}")
             import traceback
             traceback.print_exc()
             self._print_error(f"Failed to parse arguments: {e}")
             return True
         
-        print(f"DEBUG BOF: Calling _send_bof_command...")
         
         # Send BOF to agent with the FULL original command string
         try:
             self._send_bof_command(bof_file, packed_args, async_mode, full_args_string)
-            print(f"DEBUG BOF: _send_bof_command completed")
         except Exception as e:
-            print(f"DEBUG BOF: Exception in _send_bof_command: {e}")
             import traceback
             traceback.print_exc()
             self._print_error(f"Failed to send BOF: {e}")
@@ -264,39 +236,24 @@ class BOFHandler:
 
     def _send_bof_command(self, bof_file: BOFFile, args: bytes, async_mode: bool, full_args_string: str = ""):
         """Send BOF command to agent via websocket"""
-        print(f"DEBUG BOF: Starting to send BOF command")
-        print(f"DEBUG BOF: File: {bof_file.name}, Size: {bof_file.size}, Arch: {bof_file.arch}")
-        print(f"DEBUG BOF: Async mode: {async_mode}")
-        print(f"DEBUG BOF: Arguments length: {len(args)} bytes")
-        print(f"DEBUG BOF: Full args string: {full_args_string}")
         
         # Calculate total chunks
         total_chunks = (len(bof_file.data) + self.CHUNK_SIZE - 1) // self.CHUNK_SIZE
-        print(f"DEBUG BOF: Total chunks: {total_chunks}")
         
         # Generate command ID
         import uuid
         command_id = str(uuid.uuid4())
-        print(f"DEBUG BOF: Command ID: {command_id}")
         
-        # Check if we have agent_terminal and agent_guid
-        print(f"DEBUG BOF: Agent terminal exists: {self.agent_terminal is not None}")
-        if self.agent_terminal:
-            print(f"DEBUG BOF: Agent GUID: {self.agent_terminal.agent_guid}")
-        else:
-            print(f"DEBUG BOF: ERROR - No agent terminal!")
+        if not self.agent_terminal:
             self._print_error("No agent terminal available")
             return
         
         if not self.agent_terminal.agent_guid:
-            print(f"DEBUG BOF: ERROR - No agent GUID!")
             self._print_error("No agent selected")
             return
         
         # Check WebSocket client
-        print(f"DEBUG BOF: WebSocket client exists: {self.ws_client is not None}")
         if not self.ws_client:
-            print(f"DEBUG BOF: ERROR - No WebSocket client!")
             self._print_error("Not connected to server")
             return
         
@@ -322,7 +279,6 @@ class BOFHandler:
             }
         }
         
-        print(f"DEBUG BOF: Base command structure created with full command: {full_command}")
         
         # Send chunks
         #self._print_info(f"Sending BOF '{bof_file.name}' ({bof_file.arch}) in {total_chunks} chunks...")
@@ -337,14 +293,12 @@ class BOFHandler:
             chunk_command["data"]["currentChunk"] = chunk_num
             chunk_command["data"]["data"] = base64.b64encode(chunk_data).decode('utf-8')
             
-            print(f"DEBUG BOF: Sending chunk {chunk_num + 1}/{total_chunks}, size: {len(chunk_data)} bytes")
             
             try:
                 # Send via websocket
                 # The ws_client is actually the WebSocketThread object
                 if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
                     # Access the actual WebSocket client through the thread
-                    print(f"DEBUG BOF: Using WebSocketThread's ws_client.send_message()")
                     import asyncio
                     
                     # Check if we have access to the event loop
@@ -355,22 +309,16 @@ class BOFHandler:
                         )
                         future.result(timeout=5)
                     else:
-                        print(f"DEBUG BOF: ERROR - No event loop available")
                         raise RuntimeError("No event loop available for async operation")
                 elif hasattr(self.ws_client, 'send_message'):
                     # Direct WebSocket client (shouldn't happen with current setup)
-                    print(f"DEBUG BOF: Using direct ws_client.send_message()")
                     self.ws_client.send_message(json.dumps(chunk_command))
                 else:
-                    print(f"DEBUG BOF: ERROR - Cannot find send method")
-                    print(f"DEBUG BOF: ws_client type: {type(self.ws_client)}")
-                    print(f"DEBUG BOF: ws_client attributes: {dir(self.ws_client)}")
                     raise RuntimeError("Cannot find appropriate send method")
                     
                 #print(f"DEBUG BOF: Chunk {chunk_num + 1} sent successfully")
                     
             except Exception as e:
-                print(f"DEBUG BOF: Failed to send chunk {chunk_num + 1}: {e}")
                 import traceback
                 traceback.print_exc()
                 self._print_error(f"Failed to send chunk {chunk_num + 1}: {e}")
@@ -465,15 +413,42 @@ class BOFHandler:
         if len(args) < 1:
             self._print_error("Usage: bof-kill <job_id>")
             return True
-            
+
         job_id = args[0]
-        if job_id not in self.async_jobs:
-            self._print_error(f"Job not found: {job_id}")
-        else:
-            # Send kill command to agent
-            # TODO: Implement actual kill command
-            del self.async_jobs[job_id]
-            self._print_success(f"Job {job_id} terminated")
+
+        if not self.agent_terminal or not self.agent_terminal.agent_guid:
+            self._print_error("No agent selected")
+            return True
+
+        if not self.ws_client:
+            self._print_error("Not connected to server")
+            return True
+
+        kill_command = {
+            "type": "agent_command",
+            "data": {
+                "command": f"bof-kill {job_id}",
+                "agent_id": self.agent_terminal.agent_guid,
+                "command_id": str(__import__('uuid').uuid4()),
+                "timestamp": __import__('datetime').datetime.now().isoformat()
+            }
+        }
+
+        try:
+            if hasattr(self.ws_client, 'ws_client') and self.ws_client.ws_client:
+                import asyncio
+                if hasattr(self.ws_client, 'loop') and self.ws_client.loop:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.ws_client.ws_client.send_message(json.dumps(kill_command)),
+                        self.ws_client.loop
+                    )
+                    future.result(timeout=5)
+            if job_id in self.async_jobs:
+                del self.async_jobs[job_id]
+            self._print_success(f"Kill signal sent for job {job_id}")
+        except Exception as e:
+            self._print_error(f"Failed to send kill command: {e}")
+
         return True
     
     def _handle_bof_load(self, args: List[str]) -> bool:

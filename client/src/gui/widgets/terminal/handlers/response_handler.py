@@ -140,8 +140,11 @@ class ResponseHandler:
             self.terminal.update_display(incremental=True)
             return
         
-        # Parse BOF async status messages
+        # Parse BOF async status messages (legacy BOF_ASYNC_* and numeric 1| through 6| format)
         if output.startswith("BOF_ASYNC_"):
+            self._handle_bof_async_status(output, timestamp)
+            return
+        if len(output) >= 2 and output[1] == '|' and output[0] in '123456':
             self._handle_bof_async_status(output, timestamp)
             return
         
@@ -419,86 +422,95 @@ class ResponseHandler:
         print(f"BOF: Waiting for more chunks: {received_chunks}/{total_chunks}")
         return None
 
+    # Map numeric BOF async codes to legacy status names
+    _BOF_ASYNC_CODE_MAP = {
+        "1": "BOF_ASYNC_STARTED",
+        "2": "BOF_ASYNC_COMPLETED",
+        "3": "BOF_ASYNC_CRASHED",
+        "4": "BOF_ASYNC_KILLED",
+        "5": "BOF_ASYNC_TIMEOUT",
+        "6": "BOF_ASYNC_OUTPUT",
+    }
+
+    @staticmethod
+    def _strip_chunk_prefix(message):
+        """Strip chunk metadata prefix (e.g. 'C_1|') from async output."""
+        import re
+        m = re.match(r'^C_\d+\|', message)
+        if m:
+            return message[m.end():]
+        m = re.match(r'^CHUNK_\d+\|', message)
+        if m:
+            return message[m.end():]
+        return message
+
     def _handle_bof_async_status(self, output, timestamp):
-        """Handle BOF async status messages"""
+        """Handle BOF async status messages (both legacy BOF_ASYNC_* and numeric 1-6 format)"""
         parts = output.split("|", 2)
-        if len(parts) >= 3:
-            status_type = parts[0]
-            job_id = parts[1]
-            message = parts[2] if len(parts) > 2 else ""
-            
-            # For BOF_ASYNC_OUTPUT chunks, check if it's chunked
-            if status_type == "BOF_ASYNC_OUTPUT" and message.startswith("CHUNK_"):
-                # This is a chunked async output
-                chunk_parts = message.split("|", 1)
-                if len(chunk_parts) > 1:
-                    chunk_info = chunk_parts[0]  # e.g., "CHUNK_1"
-                    chunk_content = chunk_parts[1] if len(chunk_parts) > 1 else ""
-                    
-                    # Check if this is also in the [BOF Chunk X/Y] format
-                    if self._is_bof_chunk(chunk_content):
-                        complete_output = self._handle_bof_chunk(chunk_content, f"async_{job_id}", timestamp)
-                        if complete_output:
-                            # All chunks received for this async job
-                            formatted_output = {
-                                "timestamp": timestamp,
-                                "output": f"\n[BOF Async Output - Job {job_id}]\n{complete_output}"
-                            }
-                        else:
-                            # Still collecting chunks
-                            return
-                    else:
-                        # Single chunk of async output
-                        formatted_output = {
-                            "timestamp": timestamp,
-                            "output": f"\n[BOF Async Output - Job {job_id}]\n{chunk_content}"
-                        }
-                else:
-                    formatted_output = {
-                        "timestamp": timestamp,
-                        "output": f"\n{output}"
-                    }
-            elif status_type == "BOF_ASYNC_STARTED":
-                if self.bof_handler:
-                    self.bof_handler.async_jobs[job_id] = {
-                        "status": "running",
-                        "bof_name": message,
-                        "start_time": timestamp,
-                        "output": ""
-                    }
-                
-                formatted_output = {
-                    "timestamp": timestamp,
-                    "output": f"\n[+] Async BOF '{message}' started with job ID: {job_id}"
+        if len(parts) < 2:
+            self.command_buffer.add_output({"timestamp": timestamp, "output": f"\n{output}"})
+            self.terminal.update_display(incremental=True)
+            return
+
+        status_type = parts[0]
+        job_id = parts[1]
+        message = parts[2] if len(parts) > 2 else ""
+
+        # Normalize numeric codes to legacy names
+        status_type = self._BOF_ASYNC_CODE_MAP.get(status_type, status_type)
+
+        # Strip chunk metadata from message content
+        if message:
+            message = self._strip_chunk_prefix(message)
+
+        if status_type in ("BOF_ASYNC_OUTPUT", "BOF_ASYNC_COMPLETED"):
+            if self.bof_handler and job_id in self.bof_handler.async_jobs:
+                self.bof_handler.async_jobs[job_id]["status"] = "completed"
+                self.bof_handler.async_jobs[job_id]["output"] = message
+
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": f"\n{message}" if message else f"\n[+] BOF job {job_id} completed"
+            }
+        elif status_type == "BOF_ASYNC_STARTED":
+            if self.bof_handler:
+                self.bof_handler.async_jobs[job_id] = {
+                    "status": "running",
+                    "bof_name": message,
+                    "start_time": timestamp,
+                    "output": ""
                 }
-            elif status_type == "BOF_ASYNC_COMPLETED":
-                if self.bof_handler and job_id in self.bof_handler.async_jobs:
-                    self.bof_handler.async_jobs[job_id]["status"] = "completed"
-                    self.bof_handler.async_jobs[job_id]["output"] = message
-                
-                formatted_output = {
-                    "timestamp": timestamp,
-                    "output": f"\n[+] BOF job {job_id} completed:\n{message}"
-                }
-            elif status_type == "BOF_ASYNC_CRASHED":
-                if self.bof_handler and job_id in self.bof_handler.async_jobs:
-                    self.bof_handler.async_jobs[job_id]["status"] = "crashed"
-                    self.bof_handler.async_jobs[job_id]["output"] = message
-                
-                formatted_output = {
-                    "timestamp": timestamp,
-                    "output": f"\n[-] BOF job {job_id} crashed:\n{message}"
-                }
-            else:
-                formatted_output = {
-                    "timestamp": timestamp,
-                    "output": f"\n{output}"
-                }
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": f"\n[+] Async BOF '{message}' started with job ID: {job_id}"
+            }
+        elif status_type == "BOF_ASYNC_CRASHED":
+            if self.bof_handler and job_id in self.bof_handler.async_jobs:
+                self.bof_handler.async_jobs[job_id]["status"] = "crashed"
+                self.bof_handler.async_jobs[job_id]["output"] = message
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": f"\n[-] BOF job {job_id} crashed:\n{message}"
+            }
+        elif status_type == "BOF_ASYNC_KILLED":
+            if self.bof_handler and job_id in self.bof_handler.async_jobs:
+                self.bof_handler.async_jobs[job_id]["status"] = "killed"
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": f"\n[!] BOF job {job_id} killed"
+            }
+        elif status_type == "BOF_ASYNC_TIMEOUT":
+            if self.bof_handler and job_id in self.bof_handler.async_jobs:
+                self.bof_handler.async_jobs[job_id]["status"] = "timeout"
+            formatted_output = {
+                "timestamp": timestamp,
+                "output": f"\n[!] BOF job {job_id} timed out"
+            }
         else:
             formatted_output = {
                 "timestamp": timestamp,
                 "output": f"\n{output}"
             }
-        
+
         self.command_buffer.add_output(formatted_output)
         self.terminal.update_display(incremental=True)

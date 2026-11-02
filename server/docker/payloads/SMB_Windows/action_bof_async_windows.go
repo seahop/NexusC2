@@ -485,13 +485,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 
 		job.OutputMutex.Lock()
 
-		// Add any final output
-		if result.output != "" {
-			existingOutput := job.Output.String()
-			if !strings.Contains(existingOutput, result.output) {
-				if job.TotalBytesSent+job.Output.Len()+len(result.output) <= MAX_TOTAL_OUTPUT {
-					job.Output.WriteString(result.output)
-				}
+		if result.output != "" && job.Output.Len() == 0 {
+			if job.TotalBytesSent+len(result.output) <= MAX_TOTAL_OUTPUT {
+				job.Output.WriteString(result.output)
 			}
 		}
 

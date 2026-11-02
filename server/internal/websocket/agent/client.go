@@ -368,6 +368,7 @@ func (c *Client) GetListenerType(listenerType string) pb.ListenerType {
 func (c *Client) registerMessageHandlers() {
 	c.messageHandlers["new_connection"] = c.handleNewConnection
 	c.messageHandlers["command_result"] = c.handleCommandResult
+	c.messageHandlers["bof_async_result"] = c.handleCommandResult
 	c.messageHandlers["agent_checkin"] = c.handleAgentCheckin
 	c.messageHandlers["upload_complete"] = c.handleUploadComplete
 	c.messageHandlers["link_update"] = c.handleLinkUpdate

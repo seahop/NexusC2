@@ -166,8 +166,35 @@ func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
 		}
 	}
 
-	// Decode BOF and parse arguments (reuse existing logic)
-	bofBytes, err := base64.StdEncoding.DecodeString(cmd.Data)
+	var bofData string
+	var bofArgsFromJSON string
+	var bofWrapper struct {
+		Templates []string `json:"tpl"`
+		Version   int      `json:"v"`
+		Type      int      `json:"t"`
+		BOFData   string   `json:"bd"`
+		ChunkData string   `json:"cd"`
+		Arguments string   `json:"ar"`
+	}
+
+	if err := json.Unmarshal([]byte(cmd.Data), &bofWrapper); err == nil {
+		if bofWrapper.Templates != nil {
+			SetBOFTemplate(bofWrapper.Templates)
+			SetCOFFTemplate(bofWrapper.Templates)
+		}
+		if bofWrapper.BOFData != "" {
+			bofData = bofWrapper.BOFData
+		} else if bofWrapper.ChunkData != "" {
+			bofData = bofWrapper.ChunkData
+		} else {
+			bofData = cmd.Data
+		}
+		bofArgsFromJSON = bofWrapper.Arguments
+	} else {
+		bofData = cmd.Data
+	}
+
+	bofBytes, err := base64.StdEncoding.DecodeString(bofData)
 	if err != nil {
 		return OpResult{
 			Cmd:     cmd,
@@ -179,8 +206,14 @@ func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
 	}
 
 	var bofArgs []byte
+	if bofArgsFromJSON != "" {
+		decoded, err := base64.StdEncoding.DecodeString(bofArgsFromJSON)
+		if err == nil {
+			bofArgs = decoded
+		}
+	}
 	asyncPrefix := bofAsyncCmdPrefix()
-	if cmd.Cmd != "" && strings.HasPrefix(cmd.Cmd, asyncPrefix) {
+	if bofArgs == nil && cmd.Cmd != "" && strings.HasPrefix(cmd.Cmd, asyncPrefix) {
 		argString := strings.TrimPrefix(cmd.Cmd, asyncPrefix)
 		if argString != "" {
 			parsedArgs, err := parseBOFArguments(argString)
