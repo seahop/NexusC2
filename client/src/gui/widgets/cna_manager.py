@@ -218,19 +218,22 @@ class CNAManager:
 
     def apply_to_terminal(self, terminal):
         """Apply all loaded CNA scripts to a terminal"""
-        if not hasattr(terminal.command_validator, 'cna_commands'):
-            terminal.command_validator.cna_commands = {}
-        if not hasattr(terminal.command_validator, 'cna_bof_commands'):
-            terminal.command_validator.cna_bof_commands = {}
+        try:
+            if not hasattr(terminal, 'command_validator') or not hasattr(terminal, 'command_handler'):
+                return
+            if not hasattr(terminal.command_validator, 'cna_commands'):
+                terminal.command_validator.cna_commands = {}
+            if not hasattr(terminal.command_validator, 'cna_bof_commands'):
+                terminal.command_validator.cna_bof_commands = {}
 
-        # Copy commands
-        terminal.command_validator.cna_commands = self.commands.copy()
-        terminal.command_validator.cna_bof_commands = self.bof_commands.copy()
+            terminal.command_validator.cna_commands = self.commands.copy()
+            terminal.command_validator.cna_bof_commands = self.bof_commands.copy()
 
-        # Update interpreter
-        terminal.command_handler.cna_interpreter.commands = self.commands.copy()
-        terminal.command_handler.cna_interpreter.aliases = self.aliases.copy()
-        terminal.command_handler.cna_interpreter.loaded_scripts = self.loaded_scripts.copy()
+            terminal.command_handler.cna_interpreter.commands = self.commands.copy()
+            terminal.command_handler.cna_interpreter.aliases = self.aliases.copy()
+            terminal.command_handler.cna_interpreter.loaded_scripts = self.loaded_scripts.copy()
+        except RuntimeError:
+            pass
 
     def get_persisted_scripts(self, include_disabled: bool = False) -> list:
         """Get list of all persisted scripts from database

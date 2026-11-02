@@ -1293,7 +1293,8 @@ class ProfileUploadDialog(QDialog):
             self,
             "Select Profile TOML File",
             "",
-            "TOML Files (*.toml);;All Files (*)"
+            "TOML Files (*.toml);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
@@ -1746,7 +1747,8 @@ class CreatePayloadDialog(QDialog):
             print(f"CreatePayloadDialog: Failed to load profile variants: {e}")
 
     def browse_output_path(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory",
+                                                        options=QFileDialog.Option.DontUseNativeDialog)
         if directory:
             self.output_path.setText(directory)
 

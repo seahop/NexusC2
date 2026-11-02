@@ -137,8 +137,9 @@ class DownloadsWidget(QWidget):
         
         # Prompt the user to select a download folder
         self.download_folder = QFileDialog.getExistingDirectory(
-            self, 
-            "Select Download Folder"
+            self,
+            "Select Download Folder",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if not self.download_folder:

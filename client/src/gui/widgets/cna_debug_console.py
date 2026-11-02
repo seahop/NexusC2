@@ -344,7 +344,8 @@ class CNADebugConsole(QDialog):
             self,
             "Export Debug Logs",
             f"cna_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-            "Log Files (*.log);;Text Files (*.txt);;All Files (*)"
+            "Log Files (*.log);;Text Files (*.txt);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:

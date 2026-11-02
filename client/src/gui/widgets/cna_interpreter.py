@@ -71,22 +71,21 @@ class CNAInterpreter:
     def load_cna_script(self, script_path: str) -> bool:
         """Load and parse a CNA script file"""
         try:
+            script_dir = os.path.dirname(script_path)
+            if script_dir in self.loaded_scripts or script_path in self.loaded_scripts:
+                return True
+
             if self.debug_console:
                 self.debug_console.log("INFO", "LOADER", f"Loading CNA script: {script_path}")
-            
+
             with open(script_path, 'r') as f:
                 content = f.read()
-            
+
             # Store the script path for BOF resolution
-            self.loaded_scripts.append(os.path.dirname(script_path))
+            self.loaded_scripts.append(script_dir)
             
-            # Parse the script
             self._parse_script(content, script_path)
-            
-            # Resolve BOF paths for all commands
             self._resolve_bof_paths()
-            
-            # Register commands with the terminal based on mode
             self._register_with_terminal()
             
             print(f"CNA: Successfully loaded script from {script_path}")
@@ -624,11 +623,13 @@ class CNAInterpreter:
     
     def unload_script(self, script_path: str) -> bool:
         """Unload a specific CNA script and clean up its registrations"""
-        if script_path not in self.loaded_scripts:
-            return False
-        
-        # Find all commands and aliases associated with this script path
         script_dir = os.path.dirname(script_path)
+        if script_path in self.loaded_scripts:
+            entry = script_path
+        elif script_dir in self.loaded_scripts:
+            entry = script_dir
+        else:
+            return False
         
         # Track what we're removing
         commands_to_remove = []
@@ -655,7 +656,7 @@ class CNAInterpreter:
             del self.aliases[alias_name]
         
         # Remove from loaded scripts
-        self.loaded_scripts.remove(script_path)
+        self.loaded_scripts.remove(entry)
         
         # Clean up from command validator if terminal is available
         if self.agent_terminal and hasattr(self.agent_terminal, 'command_validator'):

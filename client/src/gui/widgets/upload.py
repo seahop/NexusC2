@@ -65,7 +65,8 @@ class FileUploader:
             self.agent_terminal,
             "Select File to Upload",
             "",
-            "All Files (*);;Text Files (*.txt);;Binary Files (*.bin);;Executables (*.exe *.dll);;No Extension Files (*[!.]*)"
+            "All Files (*);;Text Files (*.txt);;Binary Files (*.bin);;Executables (*.exe *.dll);;No Extension Files (*[!.]*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:

@@ -403,30 +403,39 @@ class C2ClientGUI(QMainWindow):
         self.cna_debug_console.raise_()
         self.cna_debug_console.activateWindow()
     
+    def _unload_cna_everywhere(self, script_path):
+        """Unload a CNA script from the manager and all terminal interpreters"""
+        for agent_guid, terminal in list(self.terminal.agent_terminals.items()):
+            try:
+                if hasattr(terminal, 'command_handler') and hasattr(terminal.command_handler, 'cna_interpreter'):
+                    terminal.command_handler.cna_interpreter.unload_script(script_path)
+            except (RuntimeError, Exception):
+                pass
+        self.cna_manager.commands.clear()
+        self.cna_manager.aliases.clear()
+        self.cna_manager.bof_commands.clear()
+        self.cna_manager.unload_script(script_path, remove_from_db=False)
+
     def loadCNAScript(self):
         """Load a CNA script file globally with persistence"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select CNA Script",
             "",
-            "CNA Scripts (*.cna);;All Files (*)"
+            "CNA Scripts (*.cna);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
-            # Use the shared CNA manager instance (initialized in __init__)
-            if self.cna_manager.load_script(file_path, persist=True):
-                # Apply to all existing terminals
-                for agent_guid, terminal in self.terminal.agent_terminals.items():
-                    self.cna_manager.apply_to_terminal(terminal)
+            if file_path in self.cna_manager.loaded_scripts:
+                self._unload_cna_everywhere(file_path)
 
-                QMessageBox.information(self, "Success",
-                    f"CNA script loaded and will be remembered for future sessions:\n{file_path}")
-            else:
-                # Get the last error for more helpful message
-                errors = self.cna_manager.get_startup_errors()
-                error_msg = errors[-1]['error'] if errors else "Unknown error"
-                QMessageBox.warning(self, "Error",
-                    f"Failed to load CNA script:\n{file_path}\n\nError: {error_msg}")
+            if self.cna_manager.load_script(file_path, persist=True):
+                for agent_guid, terminal in list(self.terminal.agent_terminals.items()):
+                    try:
+                        self.cna_manager.apply_to_terminal(terminal)
+                    except RuntimeError:
+                        pass
             
     def manageCNAScripts(self):
         """Manage loaded CNA scripts with persistence info"""
@@ -581,29 +590,22 @@ class C2ClientGUI(QMainWindow):
             self,
             "Select CNA Script to Add",
             "",
-            "CNA Scripts (*.cna);;All Files (*)"
+            "CNA Scripts (*.cna);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
-            # Use the shared CNA manager for persistence
-            if self.cna_manager.load_script(file_path, persist=True):
-                # Also load into the current terminal's interpreter
-                current_widget = self.terminal.tabs.currentWidget()
-                if hasattr(current_widget, 'command_handler'):
-                    current_widget.command_handler.load_cna_script(file_path)
+            if file_path in self.cna_manager.loaded_scripts:
+                self._unload_cna_everywhere(file_path)
 
-                # Apply to all terminals
-                for agent_guid, terminal in self.terminal.agent_terminals.items():
-                    self.cna_manager.apply_to_terminal(terminal)
+            if self.cna_manager.load_script(file_path, persist=True):
+                for agent_guid, terminal in list(self.terminal.agent_terminals.items()):
+                    try:
+                        self.cna_manager.apply_to_terminal(terminal)
+                    except RuntimeError:
+                        pass
 
                 script_list.addItem(file_path)
-                QMessageBox.information(self, "Success",
-                    "Script added and will load automatically on startup")
-            else:
-                errors = self.cna_manager.get_startup_errors()
-                error_msg = errors[-1]['error'] if errors else "Unknown error"
-                QMessageBox.warning(self, "Error",
-                    f"Failed to add script:\n{error_msg}")
     
     def _remove_cna_script(self, script_list):
         """Remove selected CNA script and clean up its registrations"""
@@ -749,7 +751,7 @@ class C2ClientGUI(QMainWindow):
             
             # IMPORTANT: Connect to thread-safe handler for status updates
             self.ws_thread.connected.connect(self.handle_connection_status)
-            
+
             self.ws_thread.disconnected.connect(self.onDisconnected)
             self.ws_thread.message_received.connect(self.onMessageReceived)
             self.ws_thread.log_message.connect(self.onLogMessage)
@@ -757,18 +759,10 @@ class C2ClientGUI(QMainWindow):
             self.ws_thread.state_received.connect(self.loadInitialState)
             
             # Connect signals - use agent_display for proper delegation to all views
-            # Force QueuedConnection to guarantee cross-thread safety
-            self.ws_thread.connection_update.connect(
-                self.agent_display.handle_new_connection,
-                Qt.ConnectionType.QueuedConnection
-            )
-            self.ws_thread.connection_update.connect(
-                self.onConnectionUpdate,
-                Qt.ConnectionType.QueuedConnection
-            )
+            self.ws_thread.connection_update.connect(self.agent_display.handle_new_connection)
+            self.ws_thread.connection_update.connect(self.onConnectionUpdate)
             self.ws_thread.link_update.connect(self.agent_display.handle_link_update)
 
-            # Connect agent checkin signal for thread-safe timestamp updates
             if hasattr(self.ws_thread, 'agent_checkin_received'):
                 self.ws_thread.agent_checkin_received.connect(self.agent_display.handle_agent_checkin)
             if hasattr(self.ws_thread, 'agent_renamed_received'):
