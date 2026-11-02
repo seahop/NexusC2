@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QDialog, QSpinBox, QFormLayout,
                             QLineEdit, QPushButton, QComboBox, QHBoxLayout,
                             QVBoxLayout, QMessageBox, QFileDialog, QProgressDialog, QTabWidget, QWidget,
                             QLabel, QFrame, QCheckBox, QGroupBox, QDateTimeEdit, QTimeEdit, QTextEdit)
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal, QDateTime, QTime, pyqtSlot, Qt
 from PyQt6.QtGui import QPixmap, QIcon
 from version import get_version_info, APP_NAME, APP_DESCRIPTION
 from utils.websocket_client import WebSocketClient
@@ -219,7 +219,7 @@ class LoadingProgressDialog(QProgressDialog):
         self.setLabelText(message)
         self.setValue(progress)
 
-class WebSocketThread(QObject):
+class WebSocketThread(QThread):
     connected = pyqtSignal(bool, str)
     disconnected = pyqtSignal()
     message_received = pyqtSignal(str)
@@ -248,10 +248,9 @@ class WebSocketThread(QObject):
         self.current_dialog = None
         self.locally_sent_commands = set()
         self._commands_lock = threading.Lock()
-        self._thread = None
         self._msg_queue = queue.Queue()
         self._ctx = _ThreadContext(username, host, port, self.db, self._msg_queue)
-        self._poll_timer = QTimer(self)
+        self._poll_timer = QTimer()
         self._poll_timer.setInterval(50)
         self._poll_timer.timeout.connect(self._drain_queue)
 
@@ -315,46 +314,25 @@ class WebSocketThread(QObject):
             else:
                 self._process_message(item)
 
-    # _run_async, _receive_loop, cleanup moved to module-level functions
+    def run(self):
+        """QThread entry point — delegates to module-level function so the
+        asyncio loop never touches this QObject's attributes directly."""
+        _ws_thread_entry(self._ctx)
 
     def start(self):
-        """Start the background thread and message poller."""
         self._ctx.running = True
         self._poll_timer.start()
-        self._thread = threading.Thread(
-            target=_ws_thread_entry, args=(self._ctx,), daemon=True
-        )
-        self._thread.start()
-
-    def isRunning(self):
-        """Check if the background thread is alive (QThread-compatible API)."""
-        return self._thread is not None and self._thread.is_alive()
+        super().start()
 
     def wait(self, timeout_ms=None):
-        """Wait for the background thread to finish (QThread-compatible API).
-        Returns True if the thread finished within the timeout."""
-        if self._thread is None:
-            return True
-        timeout_s = timeout_ms / 1000.0 if timeout_ms else None
-        self._thread.join(timeout=timeout_s)
-        finished = not self._thread.is_alive()
+        if timeout_ms is not None:
+            finished = super().wait(timeout_ms)
+        else:
+            finished = super().wait()
         if finished:
             self._poll_timer.stop()
             self._drain_queue()
         return finished
-
-    def terminate(self):
-        """Best-effort force-stop (QThread-compatible API)."""
-        self.running = False
-        self._poll_timer.stop()
-        if self.shutdown_event and self.loop and not self.loop.is_closed():
-            self.loop.call_soon_threadsafe(self.shutdown_event.set)
-        if self.loop and not self.loop.is_closed():
-            self.loop.call_soon_threadsafe(self.loop.stop)
-
-    # _thread_main, _run_async, _receive_loop are now module-level functions
-    # (_ws_thread_entry, _ws_run_async, _ws_receive_loop) so the asyncio
-    # thread never touches this QObject.
 
     def stop(self):
         self.running = False
