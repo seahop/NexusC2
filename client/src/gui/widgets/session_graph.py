@@ -800,27 +800,35 @@ class SessionGraphWidget(QWidget):
 
     def on_selection_changed(self):
         """Handle selection change in the graph"""
-        selected_guids = []
-        for item in self.scene.selectedItems():
-            if isinstance(item, AgentNode):
-                selected_guids.append(item.guid)
-
-        self.agents_selected.emit(selected_guids)
+        try:
+            selected_guids = []
+            for item in self.scene.selectedItems():
+                if isinstance(item, AgentNode):
+                    selected_guids.append(item.guid)
+            self.agents_selected.emit(selected_guids)
+        except RuntimeError:
+            pass
 
     def get_selected_agent_guids(self):
         """Get list of selected agent GUIDs"""
-        guids = []
-        for item in self.scene.selectedItems():
-            if isinstance(item, AgentNode):
-                guids.append(item.guid)
-        return guids
+        try:
+            guids = []
+            for item in self.scene.selectedItems():
+                if isinstance(item, AgentNode):
+                    guids.append(item.guid)
+            return guids
+        except RuntimeError:
+            return []
 
     def select_agents(self, guids):
         """Select agents by GUID list"""
-        self.scene.clearSelection()
-        for guid in guids:
-            if guid in self.nodes:
-                self.nodes[guid].setSelected(True)
+        try:
+            self.scene.clearSelection()
+            for guid in guids:
+                if guid in self.nodes:
+                    self.nodes[guid].setSelected(True)
+        except RuntimeError:
+            pass
 
     def open_agent_terminal(self, guid):
         """Open terminal for an agent (called from node click)"""

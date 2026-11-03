@@ -168,8 +168,14 @@ class AgentTableWidget(QWidget):
         if not self.agent_tree_widget:
             return
 
+        # Preserve selection across rebuild
+        saved_guids = set(self.get_selected_agent_guids())
+
         # Temporarily disable sorting to maintain hierarchy
         self.table.setSortingEnabled(False)
+
+        # Block signals during rebuild to avoid spurious selection-changed events
+        self.table.blockSignals(True)
 
         # Clear and rebuild
         self.table.setRowCount(0)
@@ -218,6 +224,15 @@ class AgentTableWidget(QWidget):
         # Keep sorting disabled to maintain hierarchy
         # User can still click headers to sort, but it will flatten the view
         self.table.setSortingEnabled(True)
+
+        # Restore selection
+        if saved_guids:
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, 0)
+                if item and item.data(Qt.ItemDataRole.UserRole) in saved_guids:
+                    self.table.selectRow(row)
+
+        self.table.blockSignals(False)
 
     def add_agent_row(self, agent, depth=0, is_last_sibling=True):
         """Add a single agent row to the table with optional indentation for hierarchy"""

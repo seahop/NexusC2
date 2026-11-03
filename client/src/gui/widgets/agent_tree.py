@@ -111,8 +111,11 @@ class AgentTreeWidget(QWidget):
         
     def __del__(self):
         """Destructor to ensure timer is stopped"""
-        if hasattr(self, 'update_timer'):
-            self.update_timer.stop()
+        try:
+            if hasattr(self, 'update_timer'):
+                self.update_timer.stop()
+        except RuntimeError:
+            pass
 
     def showEvent(self, event):
         """Handle widget becoming visible - resume timer"""
