@@ -290,8 +290,16 @@ func (m *Manager) processResults(ctx context.Context, tx *sql.Tx, agentID string
 				outputBatch = append(outputBatch, *record)
 			}
 		} else if hasCommand && (strings.HasPrefix(command, "upload") || strings.HasPrefix(command, "download")) {
-			// File operations don't produce command_outputs, skip
-			if err := m.processFileOperationResult(ctx, tx, agentID, result, processedChunks); err != nil {
+			// Check if agent returned an error (e.g. feature not compiled in)
+			exitCode, _ := getResultFloat(result, "ec")
+			if exitCode != 0 {
+				if record, err := m.processRegularCommandResultOptimized(ctx, tx, agentID, result); err != nil {
+					log.Printf("[Process Results] Failed to process file op error: %v", err)
+					continue
+				} else if record != nil {
+					outputBatch = append(outputBatch, *record)
+				}
+			} else if err := m.processFileOperationResult(ctx, tx, agentID, result, processedChunks); err != nil {
 				log.Printf("[Process Results] Failed to process file operation: %v", err)
 				continue
 			}

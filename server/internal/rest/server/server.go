@@ -238,6 +238,7 @@ func (s *Server) setupRouter() {
 			} else {
 				protected.POST("/payloads/build", s.payloadHandler.BuildPayload)
 			}
+			protected.GET("/payloads/features", s.payloadHandler.GetFeatures)
 
 			// Profiles - malleable profile discovery and management endpoints
 			if s.profileHandler != nil {

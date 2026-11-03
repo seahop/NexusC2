@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install required tools and Garble for obfuscation
 RUN apk add --no-cache git zip binutils python3 && \
-    go install mvdan.cc/garble@v0.17.0 && \
+    go install mvdan.cc/garble@v0.18.0 && \
     go install github.com/tc-hib/go-winres@latest
 
 # Dynamically preload Go dependencies

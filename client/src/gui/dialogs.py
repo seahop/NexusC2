@@ -371,10 +371,7 @@ class WebSocketThread(QThread):
         loop = self._ctx.loop
         if not ws or not loop or loop.is_closed():
             return False
-        future = asyncio.run_coroutine_threadsafe(ws.send_message(message), loop)
-        future.add_done_callback(
-            lambda f: print(f"WS send error: {f.exception()}") if f.exception() else None
-        )
+        asyncio.run_coroutine_threadsafe(ws.send_message(message), loop)
         return True
 
     def get_ws_client(self):
@@ -1452,6 +1449,11 @@ class CreatePayloadDialog(QDialog):
         self.setup_safety_tab()
         self.tab_widget.addTab(self.safety_tab, "Safety Checks")
 
+        # Features Tab (modular build)
+        self.features_tab = QWidget()
+        self.setup_features_tab()
+        self.tab_widget.addTab(self.features_tab, "Features")
+
         # PE Version Info Tab (Windows only)
         self.pe_tab = QWidget()
         self.setup_pe_tab()
@@ -1648,6 +1650,71 @@ class CreatePayloadDialog(QDialog):
         layout.addStretch()
         self.safety_tab.setLayout(layout)
 
+    # Feature definitions: (key, label, os_filter)
+    # os_filter: "all", "windows", "linux,darwin", "darwin"
+    FEATURE_DEFS = [
+        ("shell", "Shell command execution", "all"),
+        ("download", "File download from target", "all"),
+        ("upload", "File upload to target", "all"),
+        ("socks", "SOCKS proxy tunneling", "all"),
+        ("link", "Agent linking (SMB/TCP child agents)", "all"),
+        ("bof", "Beacon Object File execution", "windows"),
+        ("assembly", ".NET inline assembly execution", "windows"),
+        ("token", "Token manipulation (make/steal/rev2self)", "windows"),
+        ("sudo", "Sudo session management", "linux,darwin"),
+        ("persist", "Persistence (systemd, cron, launchd)", "linux,darwin"),
+        ("keychain", "Keychain access", "darwin"),
+    ]
+
+    def setup_features_tab(self):
+        layout = QVBoxLayout()
+
+        self.features_all = QCheckBox("Include all features (default)")
+        self.features_all.setChecked(True)
+        self.features_all.toggled.connect(self._toggle_feature_checkboxes)
+        layout.addWidget(self.features_all)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(line)
+
+        self.feature_checkboxes = {}
+        for key, label, _ in self.FEATURE_DEFS:
+            cb = QCheckBox(f"{key} - {label}")
+            cb.setChecked(True)
+            cb.setEnabled(False)
+            self.feature_checkboxes[key] = cb
+            layout.addWidget(cb)
+
+        layout.addStretch()
+        self.features_tab.setLayout(layout)
+        self._update_feature_visibility()
+
+    def _toggle_feature_checkboxes(self, all_checked):
+        for key, cb in self.feature_checkboxes.items():
+            if all_checked:
+                cb.setChecked(True)
+                cb.setEnabled(False)
+            else:
+                cb.setEnabled(cb.isVisible())
+
+    def _update_feature_visibility(self):
+        os_name = self.os.currentText().lower() if hasattr(self, 'os') else "linux"
+        all_checked = self.features_all.isChecked()
+        for key, _, os_filter in self.FEATURE_DEFS:
+            cb = self.feature_checkboxes[key]
+            visible = os_filter == "all" or os_name in os_filter
+            cb.setVisible(visible)
+            if not visible:
+                cb.setChecked(False)
+                cb.setEnabled(False)
+            elif all_checked:
+                cb.setChecked(True)
+                cb.setEnabled(False)
+            else:
+                cb.setEnabled(True)
+
     def setup_pe_tab(self):
         layout = QVBoxLayout()
 
@@ -1692,6 +1759,8 @@ class CreatePayloadDialog(QDialog):
             return
         is_windows = os_name.lower() == "windows"
         self.tab_widget.setTabVisible(self.pe_tab_index, is_windows)
+        if hasattr(self, 'feature_checkboxes'):
+            self._update_feature_visibility()
 
     def on_listener_changed(self, listener_name):
         """Handle listener selection changes.
@@ -1838,6 +1907,13 @@ class CreatePayloadDialog(QDialog):
             if self.listener_port:
                 payload_data["data"]["tcp_port"] = self.listener_port
         # HTTP/HTTPS listeners don't need connection_type (direct agent)
+
+        # Include selected features for modular builds
+        if not self.features_all.isChecked():
+            selected = [k for k, cb in self.feature_checkboxes.items()
+                        if cb.isVisible() and cb.isChecked()]
+            if selected:
+                payload_data["data"]["features"] = selected
 
         message = json.dumps(payload_data)
         print(f"CreatePayloadDialog: Sending payload creation message")
@@ -2067,10 +2143,6 @@ class SettingsDialog(QDialog):
             parent.notification_manager.settings['notification_native_enabled'] = self.native_enabled.isChecked()
             parent.notification_manager.settings['notification_sound_enabled'] = self.sound_enabled.isChecked()
             parent.notification_manager.settings['notification_sound_volume'] = self.volume_slider.value()
-
-            # Update volume immediately
-            if parent.notification_manager.sound_effect:
-                parent.notification_manager.sound_effect.setVolume(self.volume_slider.value() / 100.0)
 
             # Send test notification
             parent.notification_manager.test_notification()

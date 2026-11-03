@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -286,12 +287,13 @@ type PayloadRequest struct {
 
 // CreatePayloadRequest is the request body for payload creation
 type CreatePayloadRequest struct {
-	Listener       string `json:"listener" binding:"required"`
-	OS             string `json:"os" binding:"required"`
-	Arch           string `json:"arch" binding:"required"`
-	Language       string `json:"language"`
-	PayloadType    string `json:"payload_type"`
-	PipeName       string `json:"pipe_name,omitempty"`
+	Listener       string   `json:"listener" binding:"required"`
+	OS             string   `json:"os" binding:"required"`
+	Arch           string   `json:"arch" binding:"required"`
+	Language       string   `json:"language"`
+	PayloadType    string   `json:"payload_type"`
+	Features       []string `json:"features,omitempty"`
+	PipeName       string   `json:"pipe_name,omitempty"`
 	ProfileVariant    string `json:"profile_variant,omitempty"`
 	PEFileDescription string `json:"pe_file_description,omitempty"`
 	PECompanyName     string `json:"pe_company_name,omitempty"`
@@ -361,6 +363,17 @@ func (p *ProxyHandlers) CreatePayload(c *gin.Context) {
 	}
 	if req.PEProductVersion != "" {
 		payloadData["pe_product_version"] = req.PEProductVersion
+	}
+	if len(req.Features) > 0 {
+		osLower := strings.ToLower(req.OS)
+		validFeatures := getProxyValidFeatures(osLower)
+		for _, f := range req.Features {
+			if !validFeatures[f] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid feature '%s' for OS '%s'", f, osLower)})
+				return
+			}
+		}
+		payloadData["features"] = req.Features
 	}
 
 	if req.SafetyChecks != nil {
@@ -845,4 +858,31 @@ func (p *ProxyHandlers) UploadProfiles(c *gin.Context) {
 			return
 		}
 	}
+}
+
+var proxyFeatures = []struct {
+	name string
+	os   string
+}{
+	{"shell", "all"},
+	{"download", "all"},
+	{"upload", "all"},
+	{"socks", "all"},
+	{"link", "all"},
+	{"bof", "windows"},
+	{"assembly", "windows"},
+	{"token", "windows"},
+	{"sudo", "linux,darwin"},
+	{"persist", "linux,darwin"},
+	{"keychain", "darwin"},
+}
+
+func getProxyValidFeatures(osName string) map[string]bool {
+	valid := make(map[string]bool)
+	for _, f := range proxyFeatures {
+		if f.os == "all" || strings.Contains(f.os, osName) {
+			valid[f.name] = true
+		}
+	}
+	return valid
 }

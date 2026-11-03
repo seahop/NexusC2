@@ -58,6 +58,7 @@ func (b *LocalBuilder) Build(ctx context.Context, req *BuildRequest) (*BuildResu
 			fmt.Sprintf("%s/TCP_Darwin:/build/TCP_Darwin:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/TCP_Windows:/build/TCP_Windows:ro", hostPayloadsPath),
 			fmt.Sprintf("%s/shared:/build/shared:ro", hostPayloadsPath),
+			fmt.Sprintf("%s/entrypoint.sh:/entrypoint.sh:ro", hostPayloadsPath),
 		},
 	}
 

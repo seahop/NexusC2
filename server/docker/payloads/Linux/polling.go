@@ -114,10 +114,13 @@ var sharedHTTPClient = &http.Client{
 }
 
 func init() {
-	commandQueue = NewCommandQueue()
 	resultManager = NewResultManager()
 	currentPolling = &sync.WaitGroup{}
 	pollingShutdown = make(chan struct{})
+}
+
+func initCommandQueue() {
+	commandQueue = NewCommandQueue()
 }
 
 // deriveXORKey creates the same XOR key as the server
