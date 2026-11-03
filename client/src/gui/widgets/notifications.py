@@ -4,10 +4,10 @@
 from PyQt6.QtWidgets import (QWidget, QLabel, QHBoxLayout, QVBoxLayout,
                               QPushButton, QGraphicsOpacityEffect, QApplication)
 from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QUrl, Qt, QPropertyAnimation, QEasingCurve
-from PyQt6.QtMultimedia import QSoundEffect
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QPropertyAnimation, QEasingCurve
 from pathlib import Path
 import json
+import shutil
 import subprocess
 import sys
 
@@ -172,10 +172,8 @@ class NotificationManager(QObject):
         self.parent_window = parent
         self.settings = self._load_settings()
 
-        # Sound effect is created lazily on first play to avoid opening
-        # PulseAudio/PipeWire sockets (and their QSocketNotifiers) at
-        # startup — early PA sockets can go stale and crash the app.
-        self.sound_effect = None
+        self._sound_file = None
+        self._sound_player = None
         self._sound_ready = False
 
         # Track active toast notifications
@@ -211,15 +209,15 @@ class NotificationManager(QObject):
     def reload_settings(self):
         """Reload settings from disk (call after settings are saved)."""
         self.settings = self._load_settings()
-        # Update sound volume
-        if self.sound_effect:
-            self.sound_effect.setVolume(self.settings.get('notification_sound_volume', 70) / 100.0)
 
     def _setup_sound(self):
-        """Setup sound effect for notifications."""
-        self.sound_effect = QSoundEffect(self)
+        """Find (or generate) the WAV file and locate a CLI player.
 
-        # Look for notification sound file
+        Audio is played via an external process (paplay / aplay) so that
+        PulseAudio's internal threads never create QSocketNotifiers inside
+        this process — the PA thread + Qt notifier interaction was the
+        root cause of cross-thread crashes and heap corruption.
+        """
         sound_paths = [
             Path(__file__).parent / 'sounds' / 'notification.wav',
             Path(__file__).parent.parent / 'sounds' / 'notification.wav',
@@ -227,24 +225,23 @@ class NotificationManager(QObject):
             Path.home() / '.nexus' / 'sounds' / 'notification.wav',
         ]
 
-        sound_file = None
         for path in sound_paths:
             if path.exists():
-                sound_file = path
+                self._sound_file = str(path)
                 break
 
-        if sound_file:
-            self.sound_effect.setSource(QUrl.fromLocalFile(str(sound_file)))
-            self.sound_effect.setVolume(self.settings.get('notification_sound_volume', 70) / 100.0)
-            print(f"NotificationManager: Loaded sound from {sound_file}")
-        else:
-            # Create default sound directory and generate a simple beep
+        if self._sound_file is None:
             self._generate_default_sound()
+
+        self._sound_player = (
+            shutil.which('paplay') or
+            shutil.which('pw-play') or
+            shutil.which('aplay')
+        )
 
     def _generate_default_sound(self):
         """Generate a simple notification sound if none exists."""
-        import struct
-        import wave
+        import math, struct, wave
 
         sounds_dir = Path.home() / '.nexus' / 'sounds'
         sounds_dir.mkdir(parents=True, exist_ok=True)
@@ -252,38 +249,25 @@ class NotificationManager(QObject):
 
         if not sound_file.exists():
             try:
-                # Generate a simple two-tone notification beep
                 sample_rate = 44100
-                duration = 0.15  # seconds per tone
-
-                # Two tones: 880Hz (A5) and 1100Hz
+                duration = 0.15
                 frequencies = [880, 1100]
                 samples = []
-
-                import math
                 for freq in frequencies:
                     for i in range(int(sample_rate * duration)):
-                        # Sine wave with envelope
                         t = i / sample_rate
-                        envelope = min(1.0, min(t / 0.01, (duration - t) / 0.02))  # Attack/release
+                        envelope = min(1.0, min(t / 0.01, (duration - t) / 0.02))
                         value = int(envelope * 16000 * math.sin(2 * math.pi * freq * t))
                         samples.append(struct.pack('<h', value))
-
-                # Write WAV file
                 with wave.open(str(sound_file), 'w') as wav:
                     wav.setnchannels(1)
                     wav.setsampwidth(2)
                     wav.setframerate(sample_rate)
                     wav.writeframes(b''.join(samples))
-
-                print(f"NotificationManager: Generated default sound at {sound_file}")
-            except Exception as e:
-                print(f"NotificationManager: Failed to generate sound: {e}")
+            except Exception:
                 return
 
-        # Load the generated sound
-        self.sound_effect.setSource(QUrl.fromLocalFile(str(sound_file)))
-        self.sound_effect.setVolume(self.settings.get('notification_sound_volume', 70) / 100.0)
+        self._sound_file = str(sound_file)
 
     def notify_new_agent(self, agent_data):
         """Show notification for a new agent connection."""
@@ -362,17 +346,29 @@ class NotificationManager(QObject):
         # On other platforms, we rely on the toast notification
 
     def _ensure_sound(self):
-        """Create the QSoundEffect on first use (lazy init)."""
         if self._sound_ready:
             return
         self._sound_ready = True
         self._setup_sound()
 
     def _play_sound(self):
-        """Play the notification sound."""
+        """Play the notification sound via an external process."""
         self._ensure_sound()
-        if self.sound_effect and self.sound_effect.status() == QSoundEffect.Status.Ready:
-            self.sound_effect.play()
+        if not self._sound_file or not self._sound_player:
+            return
+        try:
+            vol = self.settings.get('notification_sound_volume', 70)
+            cmd = [self._sound_player, self._sound_file]
+            if 'paplay' in self._sound_player and vol != 100:
+                pa_vol = int(65536 * vol / 100)
+                cmd = [self._sound_player, f'--volume={pa_vol}', self._sound_file]
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
 
     def dismiss_pending(self):
         """Dismiss any pending notification without action."""
