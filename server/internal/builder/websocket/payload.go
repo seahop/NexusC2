@@ -115,6 +115,8 @@ type PayloadRequest struct {
 		PEProductVersion  string   `json:"pe_product_version,omitempty"`
 		// Modular build features (empty = all features)
 		Features []string `json:"features,omitempty"`
+		// Output format (e.g. "dylib" for Darwin c-shared)
+		Format string `json:"format,omitempty"`
 	} `json:"data"`
 }
 
@@ -167,6 +169,8 @@ type buildData struct {
 	peProductVersion  string
 	// Modular build features
 	features []string
+	// Output format (e.g. "dylib" for Darwin c-shared)
+	format string
 }
 
 func NewBuilder(manager *listeners.Manager, hubClient *hub.Hub, db *sql.DB, agentClient *agent.Client, agentCfg *config.AgentConfig, pb parentbuilder.Builder) (*Builder, error) {
@@ -1054,6 +1058,7 @@ func (b *Builder) initializeBuildData(ctx context.Context, req PayloadRequest) (
 		peFileVersion:     req.Data.PEFileVersion,
 		peProductVersion:  req.Data.PEProductVersion,
 		features:          req.Data.Features,
+		format:            req.Data.Format,
 	}
 
 	// Fall back to listener's SMB profile if not specified in the request
@@ -1087,6 +1092,8 @@ func (b *Builder) generateBinaryName(req PayloadRequest) string {
 	fileExtension := ".bin"
 	if strings.ToLower(req.Data.OS) == "windows" {
 		fileExtension = ".exe"
+	} else if strings.ToLower(req.Data.OS) == "darwin" && req.Data.Format == "dylib" {
+		fileExtension = ".dylib"
 	}
 	return fmt.Sprintf("%s_%s_%s_%s_%s_payload%s",
 		strings.ToLower(b.listener.Protocol),
@@ -1464,6 +1471,10 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 
 	if len(data.features) > 0 {
 		envVars = append(envVars, fmt.Sprintf("FEATURES=%s", strings.Join(data.features, ",")))
+	}
+
+	if data.format != "" {
+		envVars = append(envVars, fmt.Sprintf("FORMAT=%s", data.format))
 	}
 
 	// Pass PE version info to builder if operator specified any fields (Windows only)

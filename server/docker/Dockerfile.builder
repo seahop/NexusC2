@@ -8,6 +8,12 @@ RUN apk add --no-cache git zip binutils python3 && \
     go install mvdan.cc/garble@v0.18.0 && \
     go install github.com/tc-hib/go-winres@latest
 
+# Install zig for Darwin c-shared cross-compilation (dylib support)
+RUN wget -q https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -O /tmp/zig.tar.xz && \
+    tar xf /tmp/zig.tar.xz -C /usr/local && \
+    ln -s /usr/local/zig-linux-x86_64-0.14.0/zig /usr/local/bin/zig && \
+    rm /tmp/zig.tar.xz
+
 # Dynamically preload Go dependencies
 RUN mkdir -p /preload && cd /preload && \
     MODULE_NAME=github.com/preloaded/dependencies && \

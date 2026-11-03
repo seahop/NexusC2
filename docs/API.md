@@ -824,6 +824,8 @@ Build and download a compiled agent payload. The response is the raw binary (not
 | `pe_product_name` | string | No | — | Windows PE VERSIONINFO: ProductName |
 | `pe_file_version` | string | No | — | Windows PE VERSIONINFO: FileVersion |
 | `pe_product_version` | string | No | — | Windows PE VERSIONINFO: ProductVersion |
+| `features` | string[] | No | all | Modular build: only compile selected features (see below) |
+| `format` | string | No | `"bin"` | Output format. Darwin supports `"bin"` (standalone Mach-O) or `"dylib"` (shared library) |
 | `safety_checks` | object | No | — | Pre-execution safety checks (see below) |
 
 **Safety checks object** (all fields optional):
@@ -910,6 +912,48 @@ curl -sk -X POST https://localhost:8443/api/v1/payloads/build \
     }
   }' -o payload.exe
 ```
+
+```bash
+# Modular build — only include shell and download capabilities
+curl -sk -X POST https://localhost:8443/api/v1/payloads/build \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "listener": "https-main",
+    "os": "linux",
+    "arch": "amd64",
+    "features": ["shell", "download", "upload"]
+  }' -o payload && chmod +x payload
+```
+
+```bash
+# macOS dylib payload (for DYLD_INSERT_LIBRARIES injection)
+curl -sk -X POST https://localhost:8443/api/v1/payloads/build \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "listener": "https-main",
+    "os": "darwin",
+    "arch": "amd64",
+    "format": "dylib"
+  }' -o payload.dylib
+```
+
+**Modular build features** (when `features` is omitted, all features are compiled):
+
+| Feature | Description | Platforms |
+|---------|-------------|-----------|
+| `shell` | Interactive shell sessions | All |
+| `download` | File download from target | All |
+| `upload` | File upload to target | All |
+| `socks` | SOCKS5 proxy | All |
+| `link` | Agent-to-agent linking (SMB/TCP) | All |
+| `persist` | Persistence mechanisms | All |
+| `keychain` | Keychain access | Darwin |
+| `sudo` | Sudo session hijacking | Darwin |
+| `bof` | BOF execution (COFF loader) | Windows |
+| `assembly` | .NET assembly execution | Windows |
+| `clr` | CLR hosting | Windows |
 
 **Response (200):** Raw binary with headers:
 - `Content-Type: application/octet-stream`

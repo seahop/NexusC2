@@ -1509,6 +1509,14 @@ class CreatePayloadDialog(QDialog):
         self.arch.addItems(["amd64", "arm64"])
         form_layout.addRow("Architecture:", self.arch)
 
+        # Output format dropdown (Darwin only: bin or dylib)
+        self.format_label = QLabel("Format:")
+        self.format = QComboBox()
+        self.format.addItems(["bin", "dylib"])
+        form_layout.addRow(self.format_label, self.format)
+        self.format_label.setVisible(False)
+        self.format.setVisible(False)
+
         # Profile variant dropdown (optional)
         self.profile_variant = QComboBox()
         self.profile_variant.addItem("(default)")
@@ -1758,7 +1766,12 @@ class CreatePayloadDialog(QDialog):
         if not hasattr(self, "pe_tab_index"):
             return
         is_windows = os_name.lower() == "windows"
+        is_darwin = os_name.lower() == "darwin"
         self.tab_widget.setTabVisible(self.pe_tab_index, is_windows)
+        self.format_label.setVisible(is_darwin)
+        self.format.setVisible(is_darwin)
+        if not is_darwin:
+            self.format.setCurrentIndex(0)
         if hasattr(self, 'feature_checkboxes'):
             self._update_feature_visibility()
 
@@ -1907,6 +1920,10 @@ class CreatePayloadDialog(QDialog):
             if self.listener_port:
                 payload_data["data"]["tcp_port"] = self.listener_port
         # HTTP/HTTPS listeners don't need connection_type (direct agent)
+
+        # Include format for Darwin dylib builds
+        if self.os.currentText().lower() == "darwin" and self.format.currentText() != "bin":
+            payload_data["data"]["format"] = self.format.currentText()
 
         # Include selected features for modular builds
         if not self.features_all.isChecked():

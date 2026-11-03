@@ -72,6 +72,7 @@ type BuildPayloadRequest struct {
 	PEProductName     string       `json:"pe_product_name,omitempty"`
 	PEFileVersion     string       `json:"pe_file_version,omitempty"`
 	PEProductVersion  string       `json:"pe_product_version,omitempty"`
+	Format            string       `json:"format,omitempty"`
 	SafetyChecks      SafetyChecks `json:"safety_checks"`
 }
 
@@ -243,6 +244,8 @@ func (h *PayloadHandler) buildPayloadSync(ctx context.Context, req BuildPayloadR
 	binaryName := fmt.Sprintf("payload_%s_%s", osLower, req.Arch)
 	if osLower == "windows" {
 		binaryName += ".exe"
+	} else if osLower == "darwin" && req.Format == "dylib" {
+		binaryName += ".dylib"
 	}
 
 	// Determine payload type from listener protocol if not explicitly set
@@ -535,6 +538,10 @@ func (h *PayloadHandler) prepareEnvVars(req BuildPayloadRequest, listener *liste
 	if len(req.Features) > 0 {
 		envVars = append(envVars, fmt.Sprintf("FEATURES=%s", strings.Join(req.Features, ",")))
 		log.Printf("[REST Builder] Modular build with features: %v", req.Features)
+	}
+
+	if req.Format != "" {
+		envVars = append(envVars, fmt.Sprintf("FORMAT=%s", req.Format))
 	}
 
 	// Load unified link malleable config for payload injection (shared between SMB and TCP)
