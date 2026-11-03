@@ -610,9 +610,28 @@ func initCOFFDLLs() error {
 var bofOutputBuffer []byte
 var bofOutputMutex sync.Mutex
 
-// Memory management for BOFs
-var allocatedMemory = make(map[uintptr][]byte)
-var allocMutex sync.Mutex
+// Callback trampoline cache — avoids leaking a new trampoline per BOF load
+var (
+	callbackCache      = make(map[string]uintptr)
+	callbackCacheMutex sync.Mutex
+)
+
+func getCachedCallback(name string, create func() uintptr) uintptr {
+	callbackCacheMutex.Lock()
+	if addr, ok := callbackCache[name]; ok {
+		callbackCacheMutex.Unlock()
+		return addr
+	}
+	callbackCacheMutex.Unlock()
+
+	addr := create()
+	if addr != 0 {
+		callbackCacheMutex.Lock()
+		callbackCache[name] = addr
+		callbackCacheMutex.Unlock()
+	}
+	return addr
+}
 
 type CoffSection struct {
 	Section *pecoff.Section
@@ -664,74 +683,61 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			libName = coffDllKernel32
 
 		case coffApiFindFirstFileA:
-			hModule, err := syscall.LoadLibrary(coffDllKernel32)
-			if err != nil {
-				return 0
-			}
-
-			addr, err := syscall.GetProcAddress(hModule, coffApiFindFirstFileA)
-			if err != nil {
-				return 0
-			}
-
-			// Wrap the function to add debugging
-			return windows.NewCallback(func(lpFileName, lpFindFileData uintptr) uintptr {
-				_ = ReadCStringFromPtr(lpFileName)
-
-				// Call the real FindFirstFileA
-				ret, _, _ := syscall.SyscallN(addr, lpFileName, lpFindFileData)
-
-				if ret == 0xFFFFFFFFFFFFFFFF { // INVALID_HANDLE_VALUE
-					// Get last error
-					_ = syscall.GetLastError()
-				} else {
+			return getCachedCallback(procName, func() uintptr {
+				hModule, err := syscall.LoadLibrary(coffDllKernel32)
+				if err != nil {
+					return 0
 				}
-
-				return ret
+				addr, err := syscall.GetProcAddress(hModule, coffApiFindFirstFileA)
+				if err != nil {
+					return 0
+				}
+				return windows.NewCallback(func(lpFileName, lpFindFileData uintptr) uintptr {
+					ret, _, _ := syscall.SyscallN(addr, lpFileName, lpFindFileData)
+					return ret
+				})
 			})
 
 		case coffApiFindNextFileA:
-			hModule, err := syscall.LoadLibrary(coffDllKernel32)
-			if err != nil {
-				return 0
-			}
-
-			addr, err := syscall.GetProcAddress(hModule, coffApiFindNextFileA)
-			if err != nil {
-				return 0
-			}
-
-			return windows.NewCallback(func(hFindFile, lpFindFileData uintptr) uintptr {
-				ret, _, _ := syscall.SyscallN(addr, hFindFile, lpFindFileData)
-				if ret == 0 {
-					_ = syscall.GetLastError()
+			return getCachedCallback(procName, func() uintptr {
+				hModule, err := syscall.LoadLibrary(coffDllKernel32)
+				if err != nil {
+					return 0
 				}
-				return ret
+				addr, err := syscall.GetProcAddress(hModule, coffApiFindNextFileA)
+				if err != nil {
+					return 0
+				}
+				return windows.NewCallback(func(hFindFile, lpFindFileData uintptr) uintptr {
+					ret, _, _ := syscall.SyscallN(addr, hFindFile, lpFindFileData)
+					return ret
+				})
 			})
 
 		case coffApiFindClose:
-			hModule, err := syscall.LoadLibrary(coffDllKernel32)
-			if err != nil {
-				return 0
-			}
-
-			addr, err := syscall.GetProcAddress(hModule, coffApiFindClose)
-			if err != nil {
-				return 0
-			}
-
-			return windows.NewCallback(func(hFindFile uintptr) uintptr {
-				ret, _, _ := syscall.SyscallN(addr, hFindFile)
-				return ret
+			return getCachedCallback(procName, func() uintptr {
+				hModule, err := syscall.LoadLibrary(coffDllKernel32)
+				if err != nil {
+					return 0
+				}
+				addr, err := syscall.GetProcAddress(hModule, coffApiFindClose)
+				if err != nil {
+					return 0
+				}
+				return windows.NewCallback(func(hFindFile uintptr) uintptr {
+					ret, _, _ := syscall.SyscallN(addr, hFindFile)
+					return ret
+				})
 			})
 
 		case coffApiGetLastError:
-			k32 := syscall.MustLoadDLL(coffDllKernel32)
-			procGetLastError := k32.MustFindProc(coffApiGetLastError)
-
-			return windows.NewCallback(func() uintptr {
-				ret, _, _ := procGetLastError.Call()
-				return ret
+			return getCachedCallback(procName, func() uintptr {
+				k32 := syscall.MustLoadDLL(coffDllKernel32)
+				procGetLastError := k32.MustFindProc(coffApiGetLastError)
+				return windows.NewCallback(func() uintptr {
+					ret, _, _ := procGetLastError.Call()
+					return ret
+				})
 			})
 
 		// MSVCRT functions - Custom implementations
@@ -1070,31 +1076,27 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			})
 
 		case coffFnCalloc:
-			return windows.NewCallback(func(num, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(num, size uintptr) uintptr {
+				if num == 0 || size == 0 {
+					return 0
+				}
 				totalSize := num * size
-				if totalSize == 0 {
+				if totalSize/num != size {
 					return 0
 				}
 
-				// Allocate memory
 				mem := make([]byte, totalSize)
 				ptr := uintptr(unsafe.Pointer(&mem[0]))
 
-				// Store in allocatedMemory map
-				allocMutex.Lock()
-				allocatedMemory[ptr] = mem
-				allocMutex.Unlock()
-
-				// zero the memory (Go already does this, but be explicit)
-				for i := uintptr(0); i < totalSize; i++ {
-					*(*byte)(unsafe.Pointer(ptr + i)) = 0
-				}
+				bofAllocMutex.Lock()
+				bofAllocations[ptr] = mem
+				bofAllocMutex.Unlock()
 
 				return ptr
-			})
+			}) })
 
 		case coffFnMalloc:
-			return windows.NewCallback(func(size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(size uintptr) uintptr {
 				if size == 0 {
 					return 0
 				}
@@ -1102,85 +1104,89 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 				mem := make([]byte, size)
 				ptr := uintptr(unsafe.Pointer(&mem[0]))
 
-				allocMutex.Lock()
-				allocatedMemory[ptr] = mem
-				allocMutex.Unlock()
+				bofAllocMutex.Lock()
+				bofAllocations[ptr] = mem
+				bofAllocMutex.Unlock()
 
 				return ptr
-			})
+			}) })
 
 		case coffFnFree:
-			return windows.NewCallback(func(ptr uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(ptr uintptr) uintptr {
 				if ptr == 0 {
 					return 0
 				}
 
-				allocMutex.Lock()
-				if _, exists := allocatedMemory[ptr]; exists {
-					delete(allocatedMemory, ptr)
+				bofAllocMutex.Lock()
+				if mem, exists := bofAllocations[ptr]; exists {
+					if mem == nil {
+						procVirtualFree.Call(ptr, 0, 0x8000)
+					}
+					delete(bofAllocations, ptr)
 				}
-				allocMutex.Unlock()
+				bofAllocMutex.Unlock()
 
 				return 0
-			})
+			}) })
 
 		case coffFnRealloc:
-			return windows.NewCallback(func(ptr, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(ptr, size uintptr) uintptr {
 				if size == 0 {
-					// Free the memory
 					if ptr != 0 {
-						allocMutex.Lock()
-						delete(allocatedMemory, ptr)
-						allocMutex.Unlock()
+						bofAllocMutex.Lock()
+						if mem, exists := bofAllocations[ptr]; exists {
+							if mem == nil {
+								procVirtualFree.Call(ptr, 0, 0x8000)
+							}
+							delete(bofAllocations, ptr)
+						}
+						bofAllocMutex.Unlock()
 					}
 					return 0
 				}
 
 				if ptr == 0 {
-					// Act like malloc
 					mem := make([]byte, size)
 					newPtr := uintptr(unsafe.Pointer(&mem[0]))
-
-					allocMutex.Lock()
-					allocatedMemory[newPtr] = mem
-					allocMutex.Unlock()
-
+					bofAllocMutex.Lock()
+					bofAllocations[newPtr] = mem
+					bofAllocMutex.Unlock()
 					return newPtr
 				}
 
-				// Reallocate
-				allocMutex.Lock()
-				oldMem, exists := allocatedMemory[ptr]
+				bofAllocMutex.Lock()
+				oldMem, exists := bofAllocations[ptr]
 				if !exists {
-					allocMutex.Unlock()
-					// Pointer not found, just allocate new
+					bofAllocMutex.Unlock()
 					mem := make([]byte, size)
 					newPtr := uintptr(unsafe.Pointer(&mem[0]))
-
-					allocMutex.Lock()
-					allocatedMemory[newPtr] = mem
-					allocMutex.Unlock()
-
+					bofAllocMutex.Lock()
+					bofAllocations[newPtr] = mem
+					bofAllocMutex.Unlock()
 					return newPtr
 				}
 
 				newMem := make([]byte, size)
-				copySize := len(oldMem)
-				if int(size) < copySize {
-					copySize = int(size)
+				if oldMem != nil {
+					copySize := len(oldMem)
+					if int(size) < copySize {
+						copySize = int(size)
+					}
+					copy(newMem, oldMem[:copySize])
 				}
-				copy(newMem, oldMem[:copySize])
-
-				delete(allocatedMemory, ptr)
+				if oldMem == nil {
+					procVirtualFree.Call(ptr, 0, 0x8000)
+				}
+				delete(bofAllocations, ptr)
 				newPtr := uintptr(unsafe.Pointer(&newMem[0]))
-				allocatedMemory[newPtr] = newMem
-				allocMutex.Unlock()
+				bofAllocations[newPtr] = newMem
+				bofAllocMutex.Unlock()
 
 				return newPtr
-			})
+			}) })
 
 		case coffFnMemcpy:
-			return windows.NewCallback(func(dst, src, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(dst, src, size uintptr) uintptr {
 				if dst == 0 || src == 0 || size == 0 {
 					return dst
 				}
@@ -1188,10 +1194,10 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					*(*byte)(unsafe.Pointer(dst + i)) = *(*byte)(unsafe.Pointer(src + i))
 				}
 				return dst
-			})
+			}) })
 
 		case coffFnMemset:
-			return windows.NewCallback(func(ptr, value, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(ptr, value, size uintptr) uintptr {
 				if ptr == 0 || size == 0 {
 					return ptr
 				}
@@ -1200,10 +1206,10 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					*(*byte)(unsafe.Pointer(ptr + i)) = val
 				}
 				return ptr
-			})
+			}) })
 
 		case coffFnMemmove:
-			return windows.NewCallback(func(dst, src, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(dst, src, size uintptr) uintptr {
 				if dst == 0 || src == 0 || size == 0 {
 					return dst
 				}
@@ -1220,10 +1226,10 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					}
 				}
 				return dst
-			})
+			}) })
 
 		case coffFnMemcmp:
-			return windows.NewCallback(func(ptr1, ptr2, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(ptr1, ptr2, size uintptr) uintptr {
 				if ptr1 == 0 && ptr2 == 0 {
 					return 0
 				}
@@ -1245,19 +1251,17 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					}
 				}
 				return 0
-			})
+			}) })
 
 		case coffFnVsnprintf, coffFnVsnprintfU:
-			// Simplified vsnprintf - just return 0 for now
-			return windows.NewCallback(func(buffer, size, format, args uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(buffer, size, format, args uintptr) uintptr {
 				return 0
-			})
+			}) })
 
 		case coffFnSprintf:
-			// Simplified sprintf
-			return windows.NewCallback(func(buffer, format, arg0, arg1, arg2, arg3, arg4 uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(buffer, format, arg0, arg1, arg2, arg3, arg4 uintptr) uintptr {
 				return 0
-			})
+			}) })
 
 		// User32 functions
 		case coffApiMessageBoxA, coffApiMessageBoxW, coffApiGetDesktopWindow, coffApiGetForegroundWnd,
@@ -1282,61 +1286,45 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 			return windows.NewCallback(GetCoffOutputForChannel(outChannel))
 
 		case coffFnBeaconDataParse:
-			return windows.NewCallback(func(parser uintptr, buffer uintptr, size uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(parser uintptr, buffer uintptr, size uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				p.original = buffer
 				p.buffer = buffer
 				p.length = uint32(size)
 				p.size = uint32(size)
-
 				return 0
-			})
+			}) })
 
 		case coffFnBeaconDataInt:
-			return windows.NewCallback(func(parser uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				var size uint32
 				result := DataInt(p, &size)
 				return result
-			})
+			}) })
 
 		case coffFnBeaconDataShort:
-			return windows.NewCallback(func(parser uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
-
-				// Need 4 bytes for length prefix + 2 bytes for the short value
-				if p.length < 4 {
-					return 0
-				}
-
-				// Read 4-byte length prefix (standard BOF/Beacon format)
-				_ = *(*uint32)(unsafe.Pointer(p.buffer))
-				p.buffer += 4
-				p.length -= 4
-
 				if p.length < 2 {
 					return 0
 				}
-
-				// Read the actual short value
 				value := *(*uint16)(unsafe.Pointer(p.buffer))
 				p.buffer += 2
 				p.length -= 2
-
 				return uintptr(value)
-			})
+			}) })
 
 		case coffFnBeaconDataLength:
-			return windows.NewCallback(func(parser uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(parser uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 				return DataLength(p)
-			})
+			}) })
 
 		case coffFnBeaconDataExtract:
-			return windows.NewCallback(func(parser uintptr, sizePtr uintptr) uintptr {
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(func(parser uintptr, sizePtr uintptr) uintptr {
 				p := (*DataParser)(unsafe.Pointer(parser))
 
-				// Need at least 4 bytes for the length prefix
 				if p.length < 4 {
 					if sizePtr != 0 {
 						*(*uint32)(unsafe.Pointer(sizePtr)) = 0
@@ -1344,7 +1332,6 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					return 0
 				}
 
-				// Read 4-byte length prefix (standard BOF/Beacon format)
 				binLen := *(*uint32)(unsafe.Pointer(p.buffer))
 				p.buffer += 4
 				p.length -= 4
@@ -1356,19 +1343,16 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 					return 0
 				}
 
-				// Return the pointer directly from the original buffer
 				dataPtr := p.buffer
-
 				p.buffer += uintptr(binLen)
 				p.length -= binLen
 
-				// Set size if requested
 				if sizePtr != 0 {
 					*(*uint32)(unsafe.Pointer(sizePtr)) = binLen
 				}
 
 				return dataPtr
-			})
+			}) })
 
 		case coffFnBeaconPrintf:
 			return windows.NewCallback(GetCoffPrintfForChannel(outChannel))
@@ -1380,41 +1364,41 @@ func resolveExternalAddress(symbolName string, outChannel chan<- interface{}) ui
 
 		// Helper functions from base.c
 		case coffFnBofstart:
-			return windows.NewCallback(bofStart)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(bofStart) })
 		case coffFnInternalPrintf:
 			return windows.NewCallback(GetInternalPrintfForChannel(outChannel))
 		case coffFnPrintoutput:
-			return windows.NewCallback(printOutput)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(printOutput) })
 		case coffFnIntAlloc:
-			return windows.NewCallback(intAlloc)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intAlloc) })
 		case coffFnIntFree:
-			return windows.NewCallback(intFree)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intFree) })
 		case coffFnIntMemset:
-			return windows.NewCallback(intMemset)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intMemset) })
 		case coffFnIntMemcpy:
-			return windows.NewCallback(intMemcpy)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intMemcpy) })
 		case coffFnIntRealloc:
-			return windows.NewCallback(intRealloc)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intRealloc) })
 		case coffFnIntStrlen:
-			return windows.NewCallback(intStrlen)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrlen) })
 		case coffFnIntStrcmp:
-			return windows.NewCallback(intStrcmp)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrcmp) })
 		case coffFnIntStrncmp:
-			return windows.NewCallback(intStrncmp)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrncmp) })
 		case coffFnIntStrcpy:
-			return windows.NewCallback(intStrcpy)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrcpy) })
 		case coffFnIntStrncpy:
-			return windows.NewCallback(intStrncpy)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrncpy) })
 		case coffFnIntStrcat:
-			return windows.NewCallback(intStrcat)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrcat) })
 		case coffFnIntStrncat:
-			return windows.NewCallback(intStrncat)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(intStrncat) })
 		case coffFnToWideChar:
-			return windows.NewCallback(toWideChar)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(toWideChar) })
 		case coffFnUtf8ToUtf16:
-			return windows.NewCallback(Utf8ToUtf16)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(Utf8ToUtf16) })
 		case coffFnUtf16ToUtf8:
-			return windows.NewCallback(Utf16ToUtf8)
+			return getCachedCallback(procName, func() uintptr { return windows.NewCallback(Utf16ToUtf8) })
 
 		default:
 			return 0
@@ -1519,7 +1503,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 	// Allocate sections
 	sectionAddresses := make([]uintptr, parsedCoff.Sections.Len())
 	sections := make(map[string]CoffSection)
-	var allocatedMemory []uintptr
+	var sectionMemory []uintptr
 
 	for i, section := range parsedCoff.Sections.Array() {
 		sectionName := section.NameString()
@@ -1557,7 +1541,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 			_ = err
 		}
 
-		allocatedMemory = append(allocatedMemory, addr)
+		sectionMemory = append(sectionMemory, addr)
 		sectionAddresses[i] = addr
 
 		// Copy section data
@@ -1588,7 +1572,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 			_ = err
 		}
 		gotBaseAddress = addr
-		allocatedMemory = append(allocatedMemory, addr)
+		sectionMemory = append(sectionMemory, addr)
 	}
 
 	// Process relocations
@@ -1693,14 +1677,12 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 				output <- ErrCtx(E51, fmt.Sprintf("%v", r))
 			}
 
-			// Clean up BOF allocations
 			cleanupBOFAllocations()
+			ClearKeyStore()
 
-			// Clean up allocated memory after execution
-			for _, addr := range allocatedMemory {
+			for _, addr := range sectionMemory {
 				procVirtualFree.Call(addr, 0, 0x8000) // MEM_RELEASE
 			}
-			// Log execution time
 		}()
 
 		// Find entry point
@@ -1741,8 +1723,7 @@ func LoadWithMethodAndTimeout(coffBytes []byte, argBytes []byte, method string, 
 						}
 						argPtr = argAddr
 
-						// Track this allocation for cleanup
-						allocatedMemory = append(allocatedMemory, argAddr)
+						sectionMemory = append(sectionMemory, argAddr)
 
 					} else {
 						// Fallback: pin the Go slice
@@ -1844,28 +1825,24 @@ func applyRelocation(sectionAddress uintptr, reloc windef.Relocation, symbolAddr
 
 	case windef.IMAGE_REL_AMD64_REL32:
 		// 32-bit relative address from byte following relocation
-		relativeAddr := int32(symbolAddress) - int32(targetAddress+4) + existingValue
-		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
+		relativeAddr := int64(symbolAddress) - int64(targetAddress+4) + int64(existingValue)
+		*(*int32)(unsafe.Pointer(targetAddress)) = int32(relativeAddr)
 
 	case windef.IMAGE_REL_AMD64_REL32_1:
-		// REL32 with adjustment of 1
-		relativeAddr := int32(symbolAddress) - int32(targetAddress+4) - 1 + existingValue
-		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
+		relativeAddr := int64(symbolAddress) - int64(targetAddress+4) - 1 + int64(existingValue)
+		*(*int32)(unsafe.Pointer(targetAddress)) = int32(relativeAddr)
 
 	case windef.IMAGE_REL_AMD64_REL32_2:
-		// REL32 with adjustment of 2
-		relativeAddr := int32(symbolAddress) - int32(targetAddress+4) - 2 + existingValue
-		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
+		relativeAddr := int64(symbolAddress) - int64(targetAddress+4) - 2 + int64(existingValue)
+		*(*int32)(unsafe.Pointer(targetAddress)) = int32(relativeAddr)
 
 	case windef.IMAGE_REL_AMD64_REL32_3:
-		// REL32 with adjustment of 3
-		relativeAddr := int32(symbolAddress) - int32(targetAddress+4) - 3 + existingValue
-		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
+		relativeAddr := int64(symbolAddress) - int64(targetAddress+4) - 3 + int64(existingValue)
+		*(*int32)(unsafe.Pointer(targetAddress)) = int32(relativeAddr)
 
 	case windef.IMAGE_REL_AMD64_REL32_4:
-		// REL32 with adjustment of 4
-		relativeAddr := int32(symbolAddress) - int32(targetAddress+4) - 4 + existingValue
-		*(*int32)(unsafe.Pointer(targetAddress)) = relativeAddr
+		relativeAddr := int64(symbolAddress) - int64(targetAddress+4) - 4 + int64(existingValue)
+		*(*int32)(unsafe.Pointer(targetAddress)) = int32(relativeAddr)
 
 	case windef.IMAGE_REL_AMD64_REL32_5:
 		// REL32 with adjustment of 5
@@ -2068,12 +2045,6 @@ func intAlloc(size int) uintptr {
 		ptr := uintptr(unsafe.Pointer(&mem[0]))
 		bofAllocations[ptr] = mem
 
-		// Also track in allocatedMemory under its own mutex
-		// Lock order: bofAllocMutex (held) -> allocMutex (consistent with intFree)
-		allocMutex.Lock()
-		allocatedMemory[ptr] = mem
-		allocMutex.Unlock()
-
 		// zero the memory explicitly
 		for i := 0; i < alignedSize; i++ {
 			mem[i] = 0
@@ -2114,11 +2085,6 @@ func intFree(ptr uintptr) uintptr {
 		delete(bofAllocations, ptr)
 	}
 
-	// Also check the old allocatedMemory map
-	allocMutex.Lock()
-	delete(allocatedMemory, ptr)
-	allocMutex.Unlock()
-
 	return 0
 }
 
@@ -2129,30 +2095,30 @@ func intRealloc(ptr uintptr, size int) uintptr {
 		return 0
 	}
 
-	// Use explicit unlock in each path instead of defer to avoid
-	// double-unlock when the !exists path calls intAlloc (which
-	// acquires its own locks).
-	allocMutex.Lock()
+	bofAllocMutex.Lock()
 
-	oldMem, exists := allocatedMemory[ptr]
+	oldMem, exists := bofAllocations[ptr]
 	if !exists {
-		// Pointer not in allocatedMemory; release lock before calling
-		// intAlloc which manages its own locking.
-		allocMutex.Unlock()
+		bofAllocMutex.Unlock()
 		return intAlloc(size)
 	}
 
 	newMem := make([]byte, size)
-	copySize := len(oldMem)
-	if size < copySize {
-		copySize = size
+	if oldMem != nil {
+		copySize := len(oldMem)
+		if size < copySize {
+			copySize = size
+		}
+		copy(newMem, oldMem[:copySize])
 	}
-	copy(newMem, oldMem[:copySize])
 
-	delete(allocatedMemory, ptr)
+	if oldMem == nil {
+		procVirtualFree.Call(ptr, 0, 0x8000)
+	}
+	delete(bofAllocations, ptr)
 	newPtr := uintptr(unsafe.Pointer(&newMem[0]))
-	allocatedMemory[newPtr] = newMem
-	allocMutex.Unlock()
+	bofAllocations[newPtr] = newMem
+	bofAllocMutex.Unlock()
 
 	return newPtr
 }
@@ -2383,9 +2349,5 @@ func cleanupBOFAllocations() {
 		}
 	}
 	bofAllocations = make(map[uintptr][]byte)
-
-	allocMutex.Lock()
-	allocatedMemory = make(map[uintptr][]byte)
-	allocMutex.Unlock()
 }
 

@@ -33,6 +33,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"sync"
 	"unicode/utf16"
 	"unsafe"
 )
@@ -466,17 +467,25 @@ func DataShort(datap *DataParser) uintptr {
 }
 
 // Key-value store functions
-var keyStore = make(map[string]uintptr, 0)
+var (
+	keyStore      = make(map[string]uintptr)
+	keyStoreMutex sync.Mutex
+)
 
 func AddValue(key uintptr, ptr uintptr) uintptr {
 	sKey := ReadCStringFromPtr(key)
+	keyStoreMutex.Lock()
 	keyStore[sKey] = ptr
+	keyStoreMutex.Unlock()
 	return uintptr(1)
 }
 
 func GetValue(key uintptr) uintptr {
 	sKey := ReadCStringFromPtr(key)
-	if value, exists := keyStore[sKey]; exists {
+	keyStoreMutex.Lock()
+	value, exists := keyStore[sKey]
+	keyStoreMutex.Unlock()
+	if exists {
 		return value
 	}
 	return uintptr(0)
@@ -484,11 +493,22 @@ func GetValue(key uintptr) uintptr {
 
 func RemoveValue(key uintptr) uintptr {
 	sKey := ReadCStringFromPtr(key)
-	if _, exists := keyStore[sKey]; exists {
+	keyStoreMutex.Lock()
+	_, exists := keyStore[sKey]
+	if exists {
 		delete(keyStore, sKey)
+	}
+	keyStoreMutex.Unlock()
+	if exists {
 		return uintptr(1)
 	}
 	return uintptr(0)
+}
+
+func ClearKeyStore() {
+	keyStoreMutex.Lock()
+	keyStore = make(map[string]uintptr)
+	keyStoreMutex.Unlock()
 }
 
 // Argument packing functions

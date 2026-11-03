@@ -244,20 +244,6 @@ func executeBOFWithTokenContext(bofBytes []byte, args []byte) (string, error) {
 	return output, nil
 }
 
-// NOTE: executeBOFPlatformAsync is dead code. The real async execution path is
-// executeBOFAsyncPlatform in action_bof_async_windows.go, which manages its own
-// token context and does not hold bofExecutionMutex for the full 30-minute timeout.
-// Kept for reference; do not call this function.
-func executeBOFPlatformAsync(bofBytes []byte, args []byte) (string, error) {
-	// NOTE: bofExecutionMutex is now acquired inside LoadWithMethodAndTimeout.
-	output, err := LoadWithTimeout(bofBytes, args, 30*time.Minute)
-	if err != nil {
-		return "", err
-	}
-
-	return output, nil
-}
-
 // processBOF is the Windows-specific implementation
 func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 	// Handle multi-chunk BOF file uploads first
@@ -313,16 +299,6 @@ func (cq *WorkQueue) processBOF(cmd Msg) OpResult {
 	}
 
 	// Log BOF details and current token context
-
-	// Debug: Log current token state
-	if globalTokenStore != nil {
-		globalTokenStore.mu.RLock()
-		if globalTokenStore.NetOnlyHandle != 0 {
-		} else if globalTokenStore.IsImpersonating {
-		} else {
-		}
-		globalTokenStore.mu.RUnlock()
-	}
 
 	// Get BOF arguments - check multiple sources
 	var bofArgs []byte

