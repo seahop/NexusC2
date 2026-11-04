@@ -1427,8 +1427,8 @@ class CreatePayloadDialog(QDialog):
     def __init__(self, parent=None, ws_thread=None, agent_tree=None):
         super().__init__(parent)
         self.setWindowTitle("Create Payload")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(400)
+        self.setMinimumWidth(575)
+        self.setMinimumHeight(450)
         self.ws_thread = ws_thread
         self.agent_tree = agent_tree
         self.setup_ui()
