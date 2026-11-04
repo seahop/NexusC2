@@ -49,8 +49,8 @@ if [ "$EXPORT_PROJECT" = "TRUE" ]; then
     echo "Copying all ${source_dir} files..."
     cp -r /build/${source_dir}/* /app/ 2>/dev/null || true
     
-    # Copy the init_variables.go file (renamed from constants.go)
-    cp /shared/${PROJECT_ID}_init_variables.go /app/init_variables.go
+    # Copy the init_variables.go file (underscore prefix ensures init() runs before getEnv.go)
+    cp /shared/${PROJECT_ID}_init_variables.go /app/_init_variables.go
     
     # Copy go.mod from preload
     cp /preload/go.mod /app/go.mod
