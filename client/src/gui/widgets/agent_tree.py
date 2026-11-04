@@ -317,6 +317,7 @@ class AgentTreeWidget(QWidget):
             'parent_client_id': conn_data.get('parent_client_id', ''),  # Parent agent for linked agents
             'link_type': conn_data.get('link_type', ''),  # Link type (e.g., "smb")
             'protocol': conn_data.get('protocol', 'HTTPS'),  # Protocol type
+            'process': conn_data.get('process', ''),
         }
 
         print(f"AgentTreeWidget: Adding agent {agent_name} with details: {details}")
@@ -1089,6 +1090,7 @@ class AgentTreeWidget(QWidget):
                             'parent_client_id': row[14] if row[14] else '',  # For linked agents
                             'link_type': row[15] if row[15] else '',         # Link type (e.g., "smb")
                             'protocol': row[5],  # Protocol type
+                            'process': row[6] if row[6] else '',
                         }
 
                         # Add this to read the alias from column 13

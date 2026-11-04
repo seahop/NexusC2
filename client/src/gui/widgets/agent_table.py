@@ -44,16 +44,17 @@ class AgentTableWidget(QWidget):
     # Agent column definitions (no Parent column - hierarchy shown via indentation)
     # Widths are proportional (percentages) - they get scaled to fit the table width
     AGENT_COLUMNS = [
-        ('Name', 14),         # Agent name/GUID
-        ('Hostname', 10),     # Machine hostname
-        ('Username', 9),      # User account
+        ('Name', 13),         # Agent name/GUID
+        ('Hostname', 9),      # Machine hostname
+        ('Username', 8),      # User account
         ('IP', 8),            # IP address
-        ('OS', 9),            # Operating system
+        ('OS', 8),            # Operating system
         ('Arch', 5),          # Architecture (x64, etc)
-        ('Protocol', 7),      # HTTP/HTTPS/SMB
+        ('Protocol', 6),      # HTTP/HTTPS/SMB
         ('PID', 5),           # Process ID
+        ('Process', 8),       # Process name
         ('Last Seen', 7),     # Timestamp
-        ('Tags', 17),         # Tags column
+        ('Tags', 15),         # Tags column
     ]
 
     # Active columns
@@ -283,12 +284,13 @@ class AgentTableWidget(QWidget):
             self._extract_arch(agent),
             agent.get('protocol', 'N/A'),
             self._extract_pid(agent),
+            agent.get('process', 'N/A'),
             self._format_last_seen(agent),
             self._format_tags(agent),
         ]
 
         for col, data in enumerate(columns_data):
-            if col == 8:  # Last Seen - use sortable item for time-aware sort
+            if col == 9:  # Last Seen - use sortable item for time-aware sort
                 item = SortableTableWidgetItem(str(data))
             else:
                 item = QTableWidgetItem(str(data))
@@ -431,7 +433,7 @@ class AgentTableWidget(QWidget):
             guid = name_item.data(Qt.ItemDataRole.UserRole)
             agent = self.agent_tree_widget.agent_by_guid.get(guid)
             if agent:
-                last_seen_item = self.table.item(row, 8)  # Last Seen column
+                last_seen_item = self.table.item(row, 9)  # Last Seen column
                 if last_seen_item:
                     new_text = self._format_last_seen(agent)
                     if last_seen_item.text() != new_text:
@@ -441,7 +443,7 @@ class AgentTableWidget(QWidget):
         if changed and self.is_sorted_manually:
             header = self.table.horizontalHeader()
             sort_col = header.sortIndicatorSection()
-            if sort_col == 8:
+            if sort_col == 9:
                 self.table.sortItems(sort_col, header.sortIndicatorOrder())
 
     def on_selection_changed(self):
