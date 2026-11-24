@@ -193,19 +193,17 @@ func (h *WSHandler) handleDeleteListener(client *hub.Client, message []byte) err
 		}
 	}
 
-	// Delete listener from the agent service using gRPC
+	// Stop listener on agent-handler via gRPC (best-effort — listener may already be stopped)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err := h.agentClient.StopListener(ctx, listenerName)
-	if err != nil {
-		logMessage(LOG_NORMAL, "Failed to stop listener via gRPC: %v", err)
-		return err
+	if err := h.agentClient.StopListener(ctx, listenerName); err != nil {
+		logMessage(LOG_NORMAL, "gRPC StopListener failed for %s (may already be stopped): %v", listenerName, err)
+	} else {
+		logMessage(LOG_MINIMAL, "gRPC StopListener successfully stopped listener: %s", listenerName)
 	}
 
-	logMessage(LOG_MINIMAL, "gRPC StopListener successfully stopped listener: %s", listenerName)
-
-	// Continue with local deletion if gRPC request was successful
+	// Delete from database and memory
 	if err := h.hub.ListenerManager.DeleteByName(listenerName); err != nil {
 		logMessage(LOG_NORMAL, "Failed to delete listener: %v", err)
 		response := Response{

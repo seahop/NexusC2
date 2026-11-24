@@ -269,8 +269,8 @@ func (p *ProxyHandlers) DeleteListener(c *gin.Context) {
 				}
 			}
 		case <-ackTimeout:
-			// No error received within timeout, assume success
-			c.JSON(http.StatusOK, gin.H{"message": "listener deleted successfully"})
+			// No acknowledgment received — deletion may have failed
+			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "listener deletion timed out waiting for confirmation"})
 			return
 		case <-ctx.Done():
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "request cancelled"})
