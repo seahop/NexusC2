@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -15,6 +16,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,12 +102,33 @@ var (
 	rekeyInProgress atomic.Bool // Prevent concurrent rekey operations
 )
 
+// retryDialContext wraps net.Dialer to retry on transient network errors
+// (macOS WiFi power management can return EHOSTUNREACH after idle periods)
+func retryDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err := dialer.DialContext(ctx, network, addr)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "no route to host") &&
+			!strings.Contains(err.Error(), "network is unreachable") {
+			return nil, err
+		}
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
 // Package-level HTTP client for connection reuse
 var sharedHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 		},
+		DialContext:         retryDialContext,
 		MaxIdleConns:        10,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -562,7 +585,6 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 
 // startPolling initializes and starts the polling routine
 func startPolling(config SyncConfig, sysInfo *NR) error {
-
 	// Use the SecChan from ConnMgr instead of creating a new one
 	secureComms := handshakeManager.getSecureComms()
 	if secureComms == nil {
