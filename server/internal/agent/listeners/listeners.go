@@ -712,6 +712,16 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	return nil
 }
 
+// GetPortProtocol returns the protocol ("HTTP" or "HTTPS") for a given port.
+func (m *Manager) GetPortProtocol(port int) string {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if sps, ok := m.sharedPorts[port]; ok {
+		return sps.Protocol
+	}
+	return "HTTP"
+}
+
 // GetMetrics returns current processing metrics if async is enabled
 func (m *Manager) GetMetrics() map[string]interface{} {
 	metrics := make(map[string]interface{})

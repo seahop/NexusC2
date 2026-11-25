@@ -1876,7 +1876,14 @@ func (s *GRPCServer) processReceivedMessage(msg *pb.StreamMessage) {
 				},
 			}
 			if tpl := templates.GetSocksTemplate(); tpl != nil {
-				agentSocksData["tpl"] = tpl.Templates
+				tplCopy := make([]string, len(tpl.Templates))
+				copy(tplCopy, tpl.Templates)
+				if wssPort, ok := socksData["wss_port"].(int); ok {
+					if s.manager.GetPortProtocol(wssPort) == "HTTP" {
+						tplCopy[templates.IdxSocksWssFmt] = "ws://%s:%d%s"
+					}
+				}
+				agentSocksData["tpl"] = tplCopy
 				agentSocksData["v"] = tpl.Version
 				agentSocksData["t"] = tpl.Type
 			}

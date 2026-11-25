@@ -70,8 +70,9 @@ type PxCmd struct {
 type TgtSess struct {
 	mu           sync.RWMutex
 	ID           string
+	Dest         string
 	TargetConn   net.Conn
-	State        int // 0=connecting, 1=connected, 2=closed
+	State        int // 0=pending (lazy), 1=connected, 2=closed
 	LastActivity time.Time
 	readDone     chan struct{}
 }
@@ -211,26 +212,13 @@ func (c *PxCmd) getTpl(idx int) string {
 }
 
 func (c *PxCmd) handleConnect(sessionID, dest string) OpResult {
-	// Dial TCP to destination with timeout
-	conn, err := net.DialTimeout("tcp", dest, 30*time.Second)
-	if err != nil {
-		c.queueResponse(&PxResp{
-			SI: sessionID,
-			Status:    c.getTpl(idxSocksHTTPStatusError),
-			Error:     Err(E43),
-		})
-		return OpResult{
-			Output:      ErrCtx(E43, dest),
-			EC:    1,
-			Done: time.Now().Format(time.RFC3339),
-		}
-	}
-
-	// Create session
+	// Lazy connect: defer TCP dial until first data arrives so the target
+	// connection isn't idle for an entire poll interval (servers like
+	// google.com close idle TLS connections before the ClientHello arrives).
 	session := &TgtSess{
 		ID:           sessionID,
-		TargetConn:   conn,
-		State:        1, // connected
+		Dest:         dest,
+		State:        0, // pending — will dial on first data
 		LastActivity: time.Now(),
 		readDone:     make(chan struct{}),
 	}
@@ -239,19 +227,15 @@ func (c *PxCmd) handleConnect(sessionID, dest string) OpResult {
 	c.sessions[sessionID] = session
 	c.sessionsMu.Unlock()
 
-	// Queue success response
 	c.queueResponse(&PxResp{
-		SI: sessionID,
-		Status:    c.getTpl(idxSocksHTTPStatusConnected),
+		SI:     sessionID,
+		Status: c.getTpl(idxSocksHTTPStatusConnected),
 	})
 
-	// Start goroutine to read from target
-	go c.readFromTarget(session)
-
 	return OpResult{
-		Output:      SuccCtx(S4, dest),
-		EC:    0,
-		Done: time.Now().Format(time.RFC3339),
+		Output: SuccCtx(S4, dest),
+		EC:     0,
+		Done:   time.Now().Format(time.RFC3339),
 	}
 }
 
@@ -277,18 +261,43 @@ func (c *PxCmd) handleData(sessionID, data string) OpResult {
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		c.queueResponse(&PxResp{
-			SI: sessionID,
-			Status:    c.getTpl(idxSocksHTTPStatusError),
-			Error:     Err(E41),
+			SI:     sessionID,
+			Status: c.getTpl(idxSocksHTTPStatusError),
+			Error:  Err(E41),
 		})
 		return OpResult{
-			Output:      Err(E41),
-			EC:    1,
-			Done: time.Now().Format(time.RFC3339),
+			Output: Err(E41),
+			EC:     1,
+			Done:   time.Now().Format(time.RFC3339),
 		}
 	}
 
-	// Update activity
+	// Lazy connect: dial target on first data so connect + data happen together
+	session.mu.Lock()
+	if session.State == 0 {
+		conn, dialErr := net.DialTimeout("tcp", session.Dest, 30*time.Second)
+		if dialErr != nil {
+			session.mu.Unlock()
+			c.queueResponse(&PxResp{
+				SI:     sessionID,
+				Status: c.getTpl(idxSocksHTTPStatusError),
+				Error:  Err(E43),
+			})
+			c.closeSession(sessionID)
+			return OpResult{
+				Output: ErrCtx(E43, session.Dest),
+				EC:     1,
+				Done:   time.Now().Format(time.RFC3339),
+			}
+		}
+		session.TargetConn = conn
+		session.State = 1
+		session.mu.Unlock()
+		go c.readFromTarget(session)
+	} else {
+		session.mu.Unlock()
+	}
+
 	session.mu.Lock()
 	session.LastActivity = time.Now()
 	session.mu.Unlock()
@@ -682,6 +691,15 @@ func (c *PxCmd) cleanupStaleSessions() {
 			c.closeUDPSession(id)
 		}
 	}
+}
+
+// hasActiveSocksSessions reports whether any SOCKS session is open
+func hasActiveSocksSessions() bool {
+	handler := GetSocksHTTPHandler()
+	handler.sessionsMu.RLock()
+	n := len(handler.sessions)
+	handler.sessionsMu.RUnlock()
+	return n > 0
 }
 
 // hasPendingSocksResponses checks if there are pending SOCKS responses

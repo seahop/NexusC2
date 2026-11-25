@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 )
 
 func (h *WSHandler) handleSocksCommand(client *hub.Client, message []byte) error {
@@ -17,6 +18,7 @@ func (h *WSHandler) handleSocksCommand(client *hub.Client, message []byte) error
 			AgentID   string `json:"agent_id"`
 			SocksPort int    `json:"port"`
 			WSSPort   int    `json:"wss_port"`
+			WSSHost   string `json:"wss_host"`
 			BasePath  string `json:"base_path"`
 		} `json:"data"`
 	}
@@ -26,33 +28,52 @@ func (h *WSHandler) handleSocksCommand(client *hub.Client, message []byte) error
 	}
 
 	parts := strings.Fields(msg.Data.Command)
-	if len(parts) < 3 {
-		return fmt.Errorf("invalid SOCKS command format")
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid SOCKS command format: need 'socks <action>'")
 	}
 
-	// Format command for agent
+	action := parts[1]
+
+	var fullCommand string
+	switch action {
+	case "start":
+		if msg.Data.SocksPort == 0 || msg.Data.WSSPort == 0 || msg.Data.WSSHost == "" {
+			return fmt.Errorf("socks start requires port, wss_port, and wss_host")
+		}
+		basePath := msg.Data.BasePath
+		if basePath == "" {
+			basePath = "/"
+		}
+		if !strings.HasPrefix(basePath, "/") {
+			basePath = "/" + basePath
+		}
+		fullCommand = fmt.Sprintf("socks start %d %s%s %d",
+			msg.Data.SocksPort, msg.Data.WSSHost, basePath, msg.Data.WSSPort)
+	case "stop":
+		if msg.Data.SocksPort == 0 {
+			return fmt.Errorf("socks stop requires port")
+		}
+		fullCommand = fmt.Sprintf("socks stop %d", msg.Data.SocksPort)
+	default:
+		return fmt.Errorf("unknown SOCKS action: %s", action)
+	}
+
 	command := map[string]interface{}{
-		"command":  "socks",
-		"agent_id": msg.Data.AgentID,
-		"data": map[string]interface{}{
-			"action":     parts[1],
-			"socks_port": msg.Data.SocksPort,
-			"wss_port":   msg.Data.WSSPort,
-			"path":       msg.Data.BasePath,
-		},
+		"command":   fullCommand,
+		"agent_id":  msg.Data.AgentID,
+		"username":  client.Username,
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
-	// Queue via gRPC stream
 	if err := h.agentClient.SendToStream("agent_command", command); err != nil {
 		log.Printf("Failed to send SOCKS command: %v", err)
 		return err
 	}
 
-	// Send acknowledgment
 	response := Response{
 		Type:    "command_queued",
 		Status:  "success",
-		Message: fmt.Sprintf("SOCKS %s command queued", parts[1]),
+		Message: fmt.Sprintf("SOCKS %s command queued", action),
 	}
 
 	responseJSON, _ := json.Marshal(response)

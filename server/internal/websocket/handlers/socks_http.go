@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 )
 
 func (h *WSHandler) handleSocksHTTPCommand(client *hub.Client, message []byte) error {
@@ -42,12 +43,12 @@ func (h *WSHandler) handleSocksHTTPCommand(client *hub.Client, message []byte) e
 		port = 1080 // default
 	}
 
-	// Build command to forward to gRPC (which runs in agent-handler service)
-	// The agent-handler will start the SOCKS listener there
 	command := map[string]interface{}{
-		"command":  msg.Data.Command, // e.g., "socks-http start 9999" or "socks-http stop"
-		"agent_id": msg.Data.AgentID,
-		"port":     port,
+		"command":   msg.Data.Command,
+		"agent_id":  msg.Data.AgentID,
+		"port":      port,
+		"username":  client.Username,
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	// Queue via gRPC stream - agent-handler will process this
