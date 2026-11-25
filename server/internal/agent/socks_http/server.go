@@ -39,6 +39,8 @@ type SocksSession struct {
 	State        SessionState
 	Destination  string        // target host:port
 	ResponseChan chan *SessionResponse
+	WriteBuf     []byte        // accumulated data from agent, drained by relay
+	WriteSig     chan struct{} // signaled when WriteBuf has new data
 	LastActivity time.Time
 	mu           sync.Mutex
 }
@@ -329,7 +331,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 		ClientConn:   conn,
 		State:        StateConnecting,
 		Destination:  dest,
-		ResponseChan: make(chan *SessionResponse, 100),
+		ResponseChan: make(chan *SessionResponse, 16),
+		WriteSig:     make(chan struct{}, 1),
 		LastActivity: time.Now(),
 	}
 
@@ -446,7 +449,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	// Agent -> Client
+	// Agent -> Client: drain both the write buffer and the channel
 	go func() {
 		defer func() {
 			select {
@@ -456,29 +459,48 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 		}()
 
+		drainBuf := func() error {
+			for {
+				session.mu.Lock()
+				buf := session.WriteBuf
+				session.WriteBuf = nil
+				session.mu.Unlock()
+				if len(buf) == 0 {
+					return nil
+				}
+				session.mu.Lock()
+				session.LastActivity = time.Now()
+				session.mu.Unlock()
+				if _, err := conn.Write(buf); err != nil {
+					log.Printf("[SOCKS-HTTP] Session %s: write error: %v", sessionID, err)
+					return err
+				}
+			}
+		}
+
 		for {
+			if err := drainBuf(); err != nil {
+				return
+			}
 			select {
 			case resp, ok := <-session.ResponseChan:
 				if !ok || resp == nil {
 					return
 				}
-
 				if resp.Close || resp.Error != nil {
 					return
 				}
-
 				if len(resp.Data) > 0 {
 					session.mu.Lock()
 					session.LastActivity = time.Now()
 					session.mu.Unlock()
-
-					_, err := conn.Write(resp.Data)
-					if err != nil {
+					if _, err := conn.Write(resp.Data); err != nil {
 						log.Printf("[SOCKS-HTTP] Session %s: write error: %v", sessionID, err)
 						return
 					}
 				}
-
+			case <-session.WriteSig:
+				// New data in WriteBuf, loop back to drainBuf
 			case <-s.stopCh:
 				return
 			}
@@ -864,53 +886,49 @@ func (s *Server) cleanupUDPSession(sessionID string) {
 
 // HandleAgentResponse processes SOCKS responses from the agent
 func (s *Server) HandleAgentResponse(responses []SocksResponse) {
+	// Batch data responses per session to avoid channel overflow.
+	// A single poll can deliver thousands of data entries; sending each
+	// individually to a buffered channel drops most of them.
+	type sessionBatch struct {
+		session *SocksSession
+		data    []byte
+		close   bool
+		err     error
+		connect bool
+	}
+	batches := make(map[string]*sessionBatch)
+
 	for _, resp := range responses {
-		// Check if this is a TCP session
 		s.sessionsMu.RLock()
 		tcpSession, tcpExists := s.sessions[resp.SessionID]
 		udpSession, udpExists := s.udpSessions[resp.SessionID]
 		s.sessionsMu.RUnlock()
 
-		// Handle TCP session responses
 		if tcpExists {
 			tcpSession.mu.Lock()
 			tcpSession.LastActivity = time.Now()
 			tcpSession.mu.Unlock()
 
+			b, ok := batches[resp.SessionID]
+			if !ok {
+				b = &sessionBatch{session: tcpSession}
+				batches[resp.SessionID] = b
+			}
+
 			switch resp.Status {
 			case "connected":
-				// Signal successful connection
-				select {
-				case tcpSession.ResponseChan <- &SessionResponse{}:
-				default:
-				}
-
+				b.connect = true
 			case "data":
-				// Decode and forward data
-				data, err := base64.StdEncoding.DecodeString(resp.Data)
+				decoded, err := base64.StdEncoding.DecodeString(resp.Data)
 				if err != nil {
 					log.Printf("[SOCKS-HTTP] Session %s: failed to decode data: %v", resp.SessionID, err)
 					continue
 				}
-				select {
-				case tcpSession.ResponseChan <- &SessionResponse{Data: data}:
-				default:
-					log.Printf("[SOCKS-HTTP] Session %s: response channel full, dropping data", resp.SessionID)
-				}
-
+				b.data = append(b.data, decoded...)
 			case "closed":
-				select {
-				case tcpSession.ResponseChan <- &SessionResponse{Close: true}:
-				default:
-				}
-				s.cleanupSession(resp.SessionID)
-
+				b.close = true
 			case "error":
-				select {
-				case tcpSession.ResponseChan <- &SessionResponse{Error: fmt.Errorf("%s", resp.Error)}:
-				default:
-				}
-				s.cleanupSession(resp.SessionID)
+				b.err = fmt.Errorf("%s", resp.Error)
 			}
 			continue
 		}
@@ -960,6 +978,39 @@ func (s *Server) HandleAgentResponse(responses []SocksResponse) {
 				}
 				s.cleanupUDPSession(resp.SessionID)
 			}
+		}
+	}
+
+	// Flush batched TCP data into session write buffers (lock-protected,
+	// never drops) and signal the relay goroutine.
+	for sid, b := range batches {
+		if b.connect {
+			select {
+			case b.session.ResponseChan <- &SessionResponse{}:
+			default:
+			}
+		}
+		if len(b.data) > 0 {
+			b.session.mu.Lock()
+			b.session.WriteBuf = append(b.session.WriteBuf, b.data...)
+			b.session.mu.Unlock()
+			select {
+			case b.session.WriteSig <- struct{}{}:
+			default:
+			}
+		}
+		if b.err != nil {
+			select {
+			case b.session.ResponseChan <- &SessionResponse{Error: b.err}:
+			default:
+			}
+			s.cleanupSession(sid)
+		} else if b.close {
+			select {
+			case b.session.ResponseChan <- &SessionResponse{Close: true}:
+			default:
+			}
+			s.cleanupSession(sid)
 		}
 	}
 }
