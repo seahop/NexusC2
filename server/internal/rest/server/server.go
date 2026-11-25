@@ -208,6 +208,7 @@ func (s *Server) setupRouter() {
 			// Commands - read operations direct, send command via proxy if available
 			protected.GET("/agents/:id/commands", s.commandHandler.GetCommandHistory)
 			protected.GET("/agents/:id/commands/latest", s.commandHandler.GetLatestCommand)
+			protected.GET("/agents/:id/commands/available", s.commandHandler.GetAvailableCommands)
 			protected.GET("/commands/:id", s.commandHandler.GetCommand)
 			protected.DELETE("/agents/:id/commands/queue", s.commandHandler.ClearQueue)
 			if s.useWSProxy {

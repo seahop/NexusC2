@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"c2/internal/websocket/agent"
@@ -13,6 +14,61 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+type commandDef struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	OS          []string `json:"os_compatibility"`
+}
+
+var commandRegistry = []commandDef{
+	{"help", "Show general help or details for a specific command", []string{"all"}},
+	{"shell", "Execute a shell command on the target system (token-aware on Windows)", []string{"all"}},
+	{"sudo-session", "Manage persistent sudo sessions with optional state tracking for elevated command execution", []string{"linux", "darwin"}},
+	{"upload", "Upload a file to the target system", []string{"all"}},
+	{"download", "Download a file from the target system", []string{"all"}},
+	{"pwd", "Print working directory", []string{"all"}},
+	{"cd", "Change working directory", []string{"all"}},
+	{"ls", "List directory contents with optional filtering", []string{"all"}},
+	{"cat", "Display file contents with optional filtering", []string{"all"}},
+	{"rm", "Remove files and directories from the target system", []string{"all"}},
+	{"hash", "Calculate MD5 or SHA256 hash of files", []string{"all"}},
+	{"hashdir", "Recursively hash files in a directory", []string{"all"}},
+	{"ps", "List running processes with optional filtering and detailed information", []string{"all"}},
+	{"whoami", "Display current user information", []string{"all"}},
+	{"env", "Display, set, or remove environment variables", []string{"all"}},
+	{"socks-ws", "Start/stop WebSocket-based SOCKS proxy server (real-time, direct agents only)", []string{"all"}},
+	{"socks-http", "Start/stop HTTP-based SOCKS proxy (works through linked agents)", []string{"all"}},
+	{"sleep", "Change agent check-in interval and jitter", []string{"all"}},
+	{"rekey", "Re-initialize client encryption and get new client ID", []string{"all"}},
+	{"clear", "Clear pending commands for the agent", []string{"all"}},
+	{"exit", "Gracefully exit/kill the agent", []string{"all"}},
+	{"jobs", "List all active file transfer jobs", []string{"all"}},
+	{"jobkill", "Kill an active file transfer job", []string{"all"}},
+	{"link", "Link to a remote agent for lateral movement", []string{"all"}},
+	{"unlink", "Disconnect from a linked agent", []string{"all"}},
+	{"links", "List all active link connections from this agent", []string{"all"}},
+	{"cna-load", "Load a Cobalt Strike Aggressor (CNA) script", []string{"all"}},
+	{"cna-list", "List loaded CNA scripts and their commands", []string{"all"}},
+	{"persist", "Establish persistence through various OS-specific mechanisms", []string{"linux", "darwin"}},
+	{"keychain", "Access and manipulate macOS Keychain items", []string{"darwin"}},
+	{"token", "Comprehensive token management for impersonation and lateral movement", []string{"windows"}},
+	{"rev2self", "Revert token impersonation and return to original security context", []string{"windows"}},
+	{"bof", "Execute a Beacon Object File (BOF) with arguments", []string{"windows"}},
+	{"bof-async", "Execute a BOF asynchronously in a separate thread", []string{"windows"}},
+	{"bof-jobs", "List all running asynchronous BOF jobs", []string{"windows"}},
+	{"bof-output", "Retrieve output from an async BOF job", []string{"windows"}},
+	{"bof-kill", "Terminate an async BOF job", []string{"windows"}},
+	{"inline-assembly", "Execute a .NET assembly in memory without creating new processes", []string{"windows"}},
+	{"inline-assembly-async", "Execute a .NET assembly asynchronously in a separate thread", []string{"windows"}},
+	{"execute-assembly", "Alias for inline-assembly command", []string{"windows"}},
+	{"inline-execute", "Alias for inline-assembly command", []string{"windows"}},
+	{"inline-assembly-jobs", "List all running asynchronous assembly jobs", []string{"windows"}},
+	{"inline-assembly-output", "Retrieve output from an async assembly job", []string{"windows"}},
+	{"inline-assembly-kill", "Terminate an async assembly job", []string{"windows"}},
+	{"inline-assembly-jobs-clean", "Clean up completed, killed, or failed assembly jobs from memory", []string{"windows"}},
+	{"inline-assembly-jobs-stats", "Display statistics about assembly jobs", []string{"windows"}},
+}
 
 type CommandHandler struct {
 	db          *sql.DB
@@ -330,5 +386,51 @@ func (h *CommandHandler) ClearQueue(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "queue cleared"})
+}
+
+// GetAvailableCommands returns commands compatible with an agent's OS
+// GET /api/v1/agents/:id/commands/available
+func (h *CommandHandler) GetAvailableCommands(c *gin.Context) {
+	agentID := c.Param("id")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	var agentOS string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT os FROM connections WHERE newclientid = $1 AND deleted_at IS NULL`,
+		agentID).Scan(&agentOS)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+		return
+	}
+
+	osNorm := strings.ToLower(agentOS)
+	osMap := map[string]string{
+		"win": "windows", "win32": "windows", "win64": "windows",
+		"windows": "windows", "windows_amd64": "windows",
+		"linux": "linux", "ubuntu": "linux", "debian": "linux",
+		"centos": "linux", "rhel": "linux", "fedora": "linux",
+		"darwin": "darwin", "macos": "darwin", "osx": "darwin", "mac": "darwin",
+	}
+	if mapped, ok := osMap[osNorm]; ok {
+		osNorm = mapped
+	}
+
+	var available []commandDef
+	for _, cmd := range commandRegistry {
+		for _, compat := range cmd.OS {
+			if compat == "all" || strings.ToLower(compat) == osNorm {
+				available = append(available, cmd)
+				break
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"agent_id": agentID,
+		"os":       agentOS,
+		"commands": available,
+		"count":    len(available),
+	})
 }
 
