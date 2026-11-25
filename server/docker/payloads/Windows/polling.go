@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -15,6 +16,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,6 +101,28 @@ var (
 	pollingMutex    sync.Mutex
 	rekeyInProgress atomic.Bool // Prevent concurrent rekey operations
 )
+
+// retryDialContext wraps net.Dialer to retry on transient network errors
+// (WiFi power management, VPN reconnects, or brief routing gaps can cause
+// EHOSTUNREACH / "no route to host" that resolve within seconds)
+func retryDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		conn, err := dialer.DialContext(ctx, network, addr)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "no route to host") &&
+			!strings.Contains(err.Error(), "network is unreachable") &&
+			!strings.Contains(err.Error(), "host is down") {
+			return nil, err
+		}
+		time.Sleep(time.Duration(attempt+1) * time.Second)
+	}
+	return nil, lastErr
+}
 
 // Package-level HTTP client for connection reuse
 var sharedHTTPClient = &http.Client{

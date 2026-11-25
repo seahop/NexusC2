@@ -159,7 +159,10 @@ func sendInitialPost(url string, encryptedData string, decrypted *ResolvedConfig
 		req.Header.Set(key, value)
 	}
 
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext:     retryDialContext,
+	}
 	client := &http.Client{Transport: tr, Timeout: time.Second * 30}
 
 	resp, err := client.Do(req)

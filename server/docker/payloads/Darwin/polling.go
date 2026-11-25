@@ -103,21 +103,23 @@ var (
 )
 
 // retryDialContext wraps net.Dialer to retry on transient network errors
-// (macOS WiFi power management can return EHOSTUNREACH after idle periods)
+// (WiFi power management, VPN reconnects, or brief routing gaps can cause
+// EHOSTUNREACH / "no route to host" that resolve within seconds)
 func retryDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 5; attempt++ {
 		conn, err := dialer.DialContext(ctx, network, addr)
 		if err == nil {
 			return conn, nil
 		}
 		lastErr = err
 		if !strings.Contains(err.Error(), "no route to host") &&
-			!strings.Contains(err.Error(), "network is unreachable") {
+			!strings.Contains(err.Error(), "network is unreachable") &&
+			!strings.Contains(err.Error(), "host is down") {
 			return nil, err
 		}
-		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+		time.Sleep(time.Duration(attempt+1) * time.Second)
 	}
 	return nil, lastErr
 }
