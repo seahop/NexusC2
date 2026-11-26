@@ -619,13 +619,18 @@ func (c *PxCmd) closeSession(sessionID string) {
 }
 
 func (c *PxCmd) queueResponse(resp *PxResp) {
-	c.pendingMu.Lock()
-	c.pendingResponses = append(c.pendingResponses, resp)
-	c.pendingMu.Unlock()
+	for {
+		c.pendingMu.Lock()
+		if len(c.pendingResponses) < 2000 {
+			c.pendingResponses = append(c.pendingResponses, resp)
+			c.pendingMu.Unlock()
+			return
+		}
+		c.pendingMu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
-// getPendingResponses returns and clears all pending SOCKS responses
-// Called by the polling mechanism to include in POST payload
 func (c *PxCmd) getPendingResponses() []*PxResp {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
@@ -634,8 +639,15 @@ func (c *PxCmd) getPendingResponses() []*PxResp {
 		return nil
 	}
 
-	responses := c.pendingResponses
-	c.pendingResponses = make([]*PxResp, 0)
+	const maxPerPost = 500
+	if len(c.pendingResponses) <= maxPerPost {
+		responses := c.pendingResponses
+		c.pendingResponses = make([]*PxResp, 0)
+		return responses
+	}
+	responses := make([]*PxResp, maxPerPost)
+	copy(responses, c.pendingResponses[:maxPerPost])
+	c.pendingResponses = c.pendingResponses[maxPerPost:]
 	return responses
 }
 

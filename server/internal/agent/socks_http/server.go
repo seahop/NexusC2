@@ -1044,14 +1044,13 @@ func (s *Server) cleanupStaleSessions() {
 	for {
 		select {
 		case <-ticker.C:
-			now := time.Now()
-			staleTimeout := 5 * time.Minute
+			staleTimeout := 30 * time.Minute
 
 			s.sessionsMu.RLock()
 			var staleTCPIDs []string
 			for id, session := range s.sessions {
 				session.mu.Lock()
-				if now.Sub(session.LastActivity) > staleTimeout {
+				if time.Since(session.LastActivity) > staleTimeout {
 					staleTCPIDs = append(staleTCPIDs, id)
 				}
 				session.mu.Unlock()
@@ -1059,15 +1058,28 @@ func (s *Server) cleanupStaleSessions() {
 			var staleUDPIDs []string
 			for id, session := range s.udpSessions {
 				session.mu.Lock()
-				if now.Sub(session.LastActivity) > staleTimeout {
+				if time.Since(session.LastActivity) > staleTimeout {
 					staleUDPIDs = append(staleUDPIDs, id)
 				}
 				session.mu.Unlock()
 			}
 			s.sessionsMu.RUnlock()
 
-			// Clean up stale TCP sessions
+			// Clean up stale TCP sessions (re-check before killing
+			// in case data arrived between collection and cleanup)
 			for _, id := range staleTCPIDs {
+				s.sessionsMu.RLock()
+				session, exists := s.sessions[id]
+				s.sessionsMu.RUnlock()
+				if !exists {
+					continue
+				}
+				session.mu.Lock()
+				still := time.Since(session.LastActivity) > staleTimeout
+				session.mu.Unlock()
+				if !still {
+					continue
+				}
 				log.Printf("[SOCKS-HTTP] Cleaning up stale TCP session: %s", id)
 				tpl := getSocksHTTPTemplate()
 				closeCmd := SocksCommand{
@@ -1083,6 +1095,18 @@ func (s *Server) cleanupStaleSessions() {
 
 			// Clean up stale UDP sessions
 			for _, id := range staleUDPIDs {
+				s.sessionsMu.RLock()
+				session, exists := s.udpSessions[id]
+				s.sessionsMu.RUnlock()
+				if !exists {
+					continue
+				}
+				session.mu.Lock()
+				still := time.Since(session.LastActivity) > staleTimeout
+				session.mu.Unlock()
+				if !still {
+					continue
+				}
 				log.Printf("[SOCKS-HTTP UDP] Cleaning up stale UDP session: %s", id)
 				tpl := getSocksHTTPTemplate()
 				closeCmd := SocksCommand{

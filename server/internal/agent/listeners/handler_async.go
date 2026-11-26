@@ -433,7 +433,7 @@ func (ah *AsyncHandler) handleActiveConnectionAsync(w http.ResponseWriter, r *ht
 				}
 			}
 			if len(responses) > 0 {
-				socks_http.ProcessAgentResponses(agentID, responses)
+				go socks_http.ProcessAgentResponses(agentID, responses)
 			}
 		}
 	}
