@@ -38,6 +38,7 @@ func GetLinkTemplate() *CommandTemplate {
 	tpl[IdxLinkMsgHandshake] = "handshake"
 	tpl[IdxLinkMsgPing] = "ping"
 	tpl[IdxLinkMsgPong] = "pong"
+	tpl[IdxLinkMsgHsResp] = "handshake_response"
 
 	// Link manager display/auth strings
 	tpl[IdxLinkStatusActive] = "active"

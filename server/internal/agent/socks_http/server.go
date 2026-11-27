@@ -342,6 +342,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	log.Printf("[SOCKS-HTTP] Session %s: connecting to %s", sessionID, dest)
 
+	// Clear the handshake deadline; the connect wait has its own timeout
+	_ = conn.SetDeadline(time.Time{})
+
 	// Queue connect command to agent - include template on first connect
 	tpl := getSocksHTTPTemplate()
 	connectCmd := SocksCommand{

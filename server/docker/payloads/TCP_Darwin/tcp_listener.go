@@ -34,9 +34,10 @@ type StreamListener struct {
 
 // StreamConn represents a client connection
 type StreamConn struct {
-	conn   net.Conn
-	closed bool
-	mu     sync.Mutex
+	conn            net.Conn
+	closed          bool
+	mu              sync.Mutex
+	ReadTimeout     time.Duration // 0 means use default readTimeout
 }
 
 // NewTCPListener creates a new TCP listener on the specified address
@@ -107,7 +108,11 @@ func (tc *StreamConn) ReadMessage() ([]byte, error) {
 	}
 
 	// Set read deadline
-	tc.conn.SetReadDeadline(time.Now().Add(readTimeout))
+	rt := readTimeout
+	if tc.ReadTimeout > 0 {
+		rt = tc.ReadTimeout
+	}
+	tc.conn.SetReadDeadline(time.Now().Add(rt))
 
 	// Read 4-byte length header (little-endian)
 	header := make([]byte, 4)

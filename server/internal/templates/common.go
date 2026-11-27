@@ -106,8 +106,9 @@ const (
 	IdxLinkMsgHandshake = 137 // handshake
 	IdxLinkMsgPing      = 138 // ping
 	IdxLinkMsgPong      = 139 // pong
+	IdxLinkMsgHsResp    = 140 // handshake_response
 
-	// Extended link manager strings (140-149 - borrowed from SOCKS start)
+	// Extended link manager strings (141-149 reserved)
 	IdxLinkStatusActive = 340 // active
 	IdxLinkStatusInact  = 341 // inactive
 	IdxLinkAuthPrefix   = 342 // AUTH:
