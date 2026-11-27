@@ -1064,6 +1064,7 @@ server_response_profile = "cdn-analytics-response"
 [payload_config]
 sleep = 20
 jitter = 10
+max_post_bytes = 65536  # Maximum POST payload size in bytes (0 = unlimited)
 
 # Malleable command values - customize these to avoid detection signatures
 [payload_config.malleable_commands]

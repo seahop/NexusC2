@@ -631,7 +631,7 @@ func (c *PxCmd) queueResponse(resp *PxResp) {
 	}
 }
 
-func (c *PxCmd) getPendingResponses() []*PxResp {
+func (c *PxCmd) getPendingResponses(maxBytes int) []*PxResp {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
@@ -640,14 +640,40 @@ func (c *PxCmd) getPendingResponses() []*PxResp {
 	}
 
 	const maxPerPost = 500
-	if len(c.pendingResponses) <= maxPerPost {
+	if maxBytes <= 0 {
+		if len(c.pendingResponses) <= maxPerPost {
+			responses := c.pendingResponses
+			c.pendingResponses = make([]*PxResp, 0)
+			return responses
+		}
+		responses := make([]*PxResp, maxPerPost)
+		copy(responses, c.pendingResponses[:maxPerPost])
+		c.pendingResponses = c.pendingResponses[maxPerPost:]
+		return responses
+	}
+
+	usedBytes := 0
+	takeCount := 0
+	for _, resp := range c.pendingResponses {
+		if takeCount >= maxPerPost {
+			break
+		}
+		est := len(resp.Data) + 128
+		if takeCount > 0 && usedBytes+est > maxBytes {
+			break
+		}
+		usedBytes += est
+		takeCount++
+	}
+
+	if takeCount >= len(c.pendingResponses) {
 		responses := c.pendingResponses
 		c.pendingResponses = make([]*PxResp, 0)
 		return responses
 	}
-	responses := make([]*PxResp, maxPerPost)
-	copy(responses, c.pendingResponses[:maxPerPost])
-	c.pendingResponses = c.pendingResponses[maxPerPost:]
+	responses := make([]*PxResp, takeCount)
+	copy(responses, c.pendingResponses[:takeCount])
+	c.pendingResponses = c.pendingResponses[takeCount:]
 	return responses
 }
 
@@ -721,8 +747,13 @@ func hasPendingSocksResponses() bool {
 
 // GetSocksHTTPResponses returns pending SOCKS responses for inclusion in POST
 func GetSocksHTTPResponses() []map[string]interface{} {
+	return GetSocksHTTPResponsesBudgeted(0)
+}
+
+// GetSocksHTTPResponsesBudgeted returns pending SOCKS responses within a byte budget
+func GetSocksHTTPResponsesBudgeted(maxBytes int) []map[string]interface{} {
 	handler := GetSocksHTTPHandler()
-	responses := handler.getPendingResponses()
+	responses := handler.getPendingResponses(maxBytes)
 	if len(responses) == 0 {
 		return nil
 	}

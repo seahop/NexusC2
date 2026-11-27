@@ -76,6 +76,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./payloads:/app/payloads:ro
       - ${COMPOSE_DIR}/payloads:${COMPOSE_DIR}/payloads:ro
+      - ../config.toml:/app/config.toml:ro
     ports:
       - "3131:3131"  # Expose WebSocket for clients
     restart: unless-stopped

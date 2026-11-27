@@ -49,7 +49,15 @@ func (rm *OutputManager) hasResults() bool {
 	return len(rm.results) > 0
 }
 
-func (rm *OutputManager) getPendingResults() []OpResp {
+func estimateResultSize(r *OpResult) int {
+	s := len(r.Output) + len(r.Cmd.Data) + 256
+	if r.Error != nil {
+		s += len(r.Error.Error())
+	}
+	return s
+}
+
+func (rm *OutputManager) getPendingResults(maxBytes int) []OpResp {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
@@ -57,29 +65,47 @@ func (rm *OutputManager) getPendingResults() []OpResp {
 		return nil
 	}
 
-	responses := make([]OpResp, len(rm.results))
-	for i, result := range rm.results {
-
-		responses[i] = OpResp{
-			Cmd:      result.Cmd.Cmd,
-			CID:    result.Cmd.CID,
-			DID:  result.Cmd.DID,
-			AID:      result.Cmd.AID,
-			Filename:     result.Cmd.Filename,
-			CurrentChunk: result.Cmd.CurrentChunk,
-			TotalChunks:  result.Cmd.TotalChunks,
-			Data:         result.Cmd.Data,
-			Output:       result.Output,
-			EC:     result.EC,
-			Timestamp:    result.Done,
+	if maxBytes <= 0 {
+		responses := make([]OpResp, len(rm.results))
+		for i, result := range rm.results {
+			responses[i] = resultToResp(result)
 		}
-		if result.Error != nil {
-			responses[i].Error = result.Error.Error()
-		}
+		rm.results = make([]*OpResult, 0)
+		return responses
 	}
 
-	// Clear the results after retrieving them
-	rm.results = make([]*OpResult, 0)
+	var responses []OpResp
+	usedBytes := 0
+	for i, result := range rm.results {
+		est := estimateResultSize(result)
+		if len(responses) > 0 && usedBytes+est > maxBytes {
+			rm.results = rm.results[i:]
+			return responses
+		}
+		responses = append(responses, resultToResp(result))
+		usedBytes += est
+	}
 
+	rm.results = make([]*OpResult, 0)
 	return responses
+}
+
+func resultToResp(result *OpResult) OpResp {
+	resp := OpResp{
+		Cmd:          result.Cmd.Cmd,
+		CID:          result.Cmd.CID,
+		DID:          result.Cmd.DID,
+		AID:          result.Cmd.AID,
+		Filename:     result.Cmd.Filename,
+		CurrentChunk: result.Cmd.CurrentChunk,
+		TotalChunks:  result.Cmd.TotalChunks,
+		Data:         result.Cmd.Data,
+		Output:       result.Output,
+		EC:           result.EC,
+		Timestamp:    result.Done,
+	}
+	if result.Error != nil {
+		resp.Error = result.Error.Error()
+	}
+	return resp
 }

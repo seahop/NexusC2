@@ -352,6 +352,7 @@ PYEOF
             -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
             -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
             -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
+            -X 'main.MALLEABLE_MAX_POST_BYTES=${MAX_POST_BYTES}' \
             -X 'main.jfCT=${JF_CT}' \
             -X 'main.jfCO=${JF_CO}' \
             -X 'main.jfCI=${JF_CI}' \
@@ -419,6 +420,7 @@ PYEOF
             -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
             -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
             -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
+            -X 'main.MALLEABLE_MAX_POST_BYTES=${MAX_POST_BYTES}' \
             -X 'main.jfCT=${JF_CT}' \
             -X 'main.jfCO=${JF_CO}' \
             -X 'main.jfCI=${JF_CI}' \
@@ -507,6 +509,7 @@ PYEOF
             -X 'main.MALLEABLE_LINK_UNLINK_FIELD=${MALLEABLE_LINK_UNLINK_FIELD}' \
             -X 'main.MALLEABLE_ROUTING_ID_FIELD=${MALLEABLE_ROUTING_ID_FIELD}' \
             -X 'main.MALLEABLE_PAYLOAD_FIELD=${MALLEABLE_PAYLOAD_FIELD}' \
+            -X 'main.MALLEABLE_MAX_POST_BYTES=${MAX_POST_BYTES}' \
             -X 'main.getClientIDTransforms=${GET_CLIENTID_TRANSFORMS}' \
             -X 'main.postClientIDTransforms=${POST_CLIENTID_TRANSFORMS}' \
             -X 'main.postDataTransforms=${POST_DATA_TRANSFORMS}' \
